@@ -716,8 +716,39 @@ proc readJsxText(code: string, pos: var int): JsToken =
     return makeToken(ttJsxEmptyText, start, pos)
   makeToken(ttJsxText, start, pos)
 
+proc looksLikeGenericArrowStart(code: string, pos: int): bool =
+  var i = pos + 1
+  while i < code.len and code[i] in {' ', '\t'}:
+    inc i
+  if i >= code.len or not isIdentStart(code[i]):
+    return false
+  while i < code.len and (isIdentPart(code[i]) or code[i] in {' ', '\t', ',', '?'}) :
+    inc i
+  if i >= code.len or code[i] != '>':
+    return false
+  inc i
+  while i < code.len and code[i] in {' ', '\t', '\n', '\r'}:
+    inc i
+  if i >= code.len or code[i] != '(':
+    return false
+  var depth = 0
+  while i < code.len:
+    if code[i] == '(':
+      inc depth
+    elif code[i] == ')':
+      dec depth
+      if depth == 0:
+        inc i
+        break
+    inc i
+  while i < code.len and code[i] in {' ', '\t', '\n', '\r'}:
+    inc i
+  i + 1 < code.len and code[i] == '=' and code[i + 1] == '>'
+
 proc looksLikeJsxStart(code: string, pos: int, prev: TokenType): bool =
   if pos >= code.len or code[pos] != '<':
+    return false
+  if looksLikeGenericArrowStart(code, pos):
     return false
   if prev != ttEof and tokenCanEndExpression(prev):
     return false

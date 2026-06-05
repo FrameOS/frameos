@@ -13,6 +13,10 @@
 import std/[strutils, sequtils]
 from std/unicode import Rune, toUTF8
 
+import ./parser
+import ./token_processor
+import ./tokens
+
 type
   TransformResult* = object
     code*: string
@@ -1281,6 +1285,121 @@ proc transformConstructorParameterProperties(code: string): string =
     result.add(code[i])
     inc i
 
+proc tokenRaw(code: string, token: JsToken): string =
+  if token.start >= 0 and token.`end` <= code.len and token.start <= token.`end`:
+    code[token.start..<token.`end`]
+  else:
+    ""
+
+proc tokenStatementEnd(tokens: seq[JsToken], start: int): int =
+  var parenDepth = 0
+  var braceDepth = 0
+  var bracketDepth = 0
+  for index in start..<tokens.len:
+    case tokens[index].typ
+    of ttParenL:
+      inc parenDepth
+    of ttParenR:
+      if parenDepth > 0: dec parenDepth
+    of ttBraceL:
+      inc braceDepth
+    of ttBraceR:
+      if braceDepth == 0 and parenDepth == 0 and bracketDepth == 0:
+        return index
+      if braceDepth > 0: dec braceDepth
+    of ttBracketL:
+      inc bracketDepth
+    of ttBracketR:
+      if bracketDepth > 0: dec bracketDepth
+    of ttSemi:
+      if parenDepth == 0 and braceDepth == 0 and bracketDepth == 0:
+        return index
+    of ttEof:
+      return index
+    else:
+      discard
+  max(0, tokens.len - 1)
+
+proc tokenMatching(tokens: seq[JsToken], openIndex: int, openType, closeType: TokenType): int =
+  var depth = 0
+  for index in openIndex..<tokens.len:
+    if tokens[index].typ == openType:
+      inc depth
+    elif tokens[index].typ == closeType:
+      dec depth
+      if depth == 0:
+        return index
+  -1
+
+proc isTsModifierToken(token: JsToken): bool =
+  token.typ in {ttPublic, ttPrivate, ttProtected, ttReadonly, ttOverride, ttDeclare, ttAbstract}
+
+proc shouldRemoveDeclareStatement(tokens: seq[JsToken], index: int): bool =
+  if tokens[index].typ != ttDeclare:
+    return false
+  let next = index + 1
+  next < tokens.len and tokens[next].typ in {ttVar, ttLet, ttConst, ttFunction, ttClass, ttEnum, ttName}
+
+proc shouldRemoveAbstractMember(tokens: seq[JsToken], index: int): bool =
+  if tokens[index].typ != ttAbstract:
+    return false
+  let next = index + 1
+  if next < tokens.len and tokens[next].typ == ttClass:
+    return false
+  true
+
+proc tokenStripTypeScriptErasure(code: string): string =
+  let parsed = parseJs(code)
+  let tokens = parsed.tokens
+  var processor = initTokenProcessor(code, tokens)
+  var removeUntil = -1
+
+  while not processor.isAtEnd():
+    let index = processor.currentIndex()
+    let token = processor.currentToken()
+
+    if index <= removeUntil:
+      processor.removeToken()
+      continue
+
+    if token.typ == ttEof:
+      processor.copyToken()
+      continue
+
+    if shouldRemoveDeclareStatement(tokens, index):
+      removeUntil = tokenStatementEnd(tokens, index)
+      processor.removeToken()
+      continue
+
+    if shouldRemoveAbstractMember(tokens, index):
+      removeUntil = tokenStatementEnd(tokens, index)
+      processor.removeToken()
+      continue
+
+    if token.isType:
+      processor.removeToken()
+      continue
+
+    if isTsModifierToken(token):
+      processor.removeToken()
+      continue
+
+    if token.typ == ttBang:
+      let next = index + 1
+      if next >= tokens.len or tokens[next].typ in {ttDot, ttComma, ttParenR, ttBracketR, ttBraceR, ttSemi, ttEof, ttColon}:
+        processor.removeToken()
+        continue
+
+    if token.typ == ttQuestion:
+      let next = index + 1
+      if next < tokens.len and tokens[next].typ == ttColon:
+        processor.removeToken()
+        continue
+
+    processor.copyToken()
+
+  processor.finish().code
+
 proc stripAbstractMembers(code: string): string =
   var i = 0
   while i < code.len:
@@ -1317,10 +1436,10 @@ proc stripAbstractMembers(code: string): string =
 
 proc stripTypeScript(code: string): string =
   result = code.lowerEnums()
+  result = result.transformConstructorParameterProperties()
   result = result.stripTypeOnlyStatements()
   result = result.stripDeclareStatements()
   result = result.stripAbstractMembers()
-  result = result.transformConstructorParameterProperties()
   result = result.stripTypeScriptModifiers()
   result = result.stripTypeParametersAndArguments()
   result = result.stripFunctionAndArrowTypes()
@@ -1328,6 +1447,7 @@ proc stripTypeScript(code: string): string =
   result = result.stripVarTypes()
   result = result.stripAsAssertions()
   result = result.transformTemplateLiteralTypes()
+  result = result.tokenStripTypeScriptErasure()
 
 proc shouldStartJsx(code: string, i: int): bool =
   if i + 1 >= code.len or code[i] != '<':
@@ -1475,27 +1595,33 @@ proc parseJsxElement(p: var JsxParser): string =
   "__frameosJsx(" & args.join(", ") & ")"
 
 proc transformJSX(code: string): string =
-  var i = 0
-  while i < code.len:
-    if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+  let parsed = parseJs(code)
+  let tokens = parsed.tokens
+  var processor = initTokenProcessor(code, tokens)
+
+  while not processor.isAtEnd():
+    let token = processor.currentToken()
+    if token.typ == ttEof:
+      processor.copyToken()
       continue
-    if code[i] == '`':
-      result.add(copyTemplate(code, i))
+
+    if token.typ == ttJsxTagStart:
+      let next = processor.currentIndex() + 1
+      if next < tokens.len and tokens[next].typ == ttSlash:
+        processor.copyToken()
+        continue
+
+      var parser = JsxParser(code: code, pos: token.start)
+      let lowered = parseJsxElement(parser)
+      processor.replaceToken(lowered)
+      while not processor.isAtEnd() and processor.currentToken().typ != ttEof and
+          processor.currentToken().start < parser.pos:
+        inc processor.tokenIndex
       continue
-    if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
-      continue
-    if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
-      continue
-    if shouldStartJsx(code, i):
-      var parser = JsxParser(code: code, pos: i)
-      result.add(parseJsxElement(parser))
-      i = parser.pos
-      continue
-    result.add(code[i])
-    inc i
+
+    processor.copyToken()
+
+  processor.finish().code
 
 proc parseExportNames(spec: string): seq[(string, string)] =
   for rawPart in spec.split(','):
@@ -1701,141 +1827,128 @@ proc emitExportFromDeclaration(stmt: string, moduleCounter: var int): string =
     return
   stmt
 
-proc transformImports(code: string): string =
-  var i = 0
+proc tokenStatementSlice(code: string, tokens: seq[JsToken], startIndex, endIndex: int): string =
+  if startIndex < 0 or startIndex >= tokens.len:
+    return ""
+  let startPos = tokens[startIndex].start
+  let endPos =
+    if endIndex >= 0 and endIndex < tokens.len and tokens[endIndex].typ != ttEof:
+      tokens[endIndex].`end`
+    elif endIndex > startIndex and endIndex - 1 < tokens.len:
+      tokens[endIndex - 1].`end`
+    else:
+      tokens[startIndex].`end`
+  if startPos >= 0 and endPos >= startPos and endPos <= code.len:
+    code[startPos..<endPos]
+  else:
+    ""
+
+proc skipProcessorThrough(processor: var TokenProcessor, endIndex: int) =
+  while not processor.isAtEnd() and processor.currentIndex() <= endIndex and processor.currentToken().typ != ttEof:
+    processor.removeToken()
+
+proc exportDeclarationName(code: string, tokens: seq[JsToken], startIndex: int): string =
+  var i = startIndex
+  if i < tokens.len and tokens[i].typ == ttAsync:
+    inc i
+  if i < tokens.len and tokens[i].typ in {ttFunction, ttClass}:
+    inc i
+  if i < tokens.len and tokens[i].typ == ttStar:
+    inc i
+  if i < tokens.len and tokens[i].typ in {ttName, ttGet, ttSet}:
+    tokenRaw(code, tokens[i])
+  else:
+    ""
+
+proc transformImportsTokenDriven(code: string): string =
+  let parsed = parseJs(code)
+  let tokens = parsed.tokens
+  var processor = initTokenProcessor(code, tokens)
   var moduleCounter = 0
   var imports: seq[string] = @[]
   var exports: seq[string] = @[]
-  var body = ""
-  while i < code.len:
-    if code[i] in {'\'', '"'}:
-      body.add(copyQuoted(code, i, code[i]))
-      continue
-    if code[i] == '`':
-      body.add(copyTemplate(code, i))
-      continue
-    if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      body.add(copyLineComment(code, i))
-      continue
-    if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      body.add(copyBlockComment(code, i))
+
+  while not processor.isAtEnd():
+    let index = processor.currentIndex()
+    let token = processor.currentToken()
+
+    if token.typ == ttEof:
+      processor.copyToken()
       continue
 
-    if startsWordAt(code, i, "import"):
-      let endStmt = findStatementEnd(code, i)
-      let stmt = code[i..<endStmt].strip()
-      if not stmt.startsWith("import("):
-        let emitted = emitImportDeclaration(stmt, moduleCounter)
-        if emitted.len > 0:
-          imports.add(emitted)
-        i = endStmt
+    if token.typ == ttImport:
+      let next = index + 1
+      if next < tokens.len and tokens[next].typ notin {ttParenL, ttDot}:
+        let endIndex = tokenStatementEnd(tokens, index)
+        let stmt = tokenStatementSlice(code, tokens, index, endIndex).strip()
+        if not stmt.startsWith("import("):
+          let emitted = emitImportDeclaration(stmt, moduleCounter)
+          if emitted.len > 0:
+            imports.add(emitted)
+          processor.skipProcessorThrough(endIndex)
+          continue
+
+    if token.typ == ttExport:
+      let endIndex = tokenStatementEnd(tokens, index)
+      var j = index + 1
+      if j < tokens.len and tokens[j].typ == ttType:
+        processor.skipProcessorThrough(endIndex)
         continue
 
-    if startsWordAt(code, i, "export"):
-      var j = i + "export".len
-      skipSpaces(code, j)
-      if startsWordAt(code, j, "type"):
-        i = findStatementEnd(code, i)
-        continue
-      if j < code.len and code[j] == '*':
-        let endStmt = findStatementEnd(code, i)
-        let emitted = emitExportFromDeclaration(code[i..<endStmt], moduleCounter)
+      if j < tokens.len and tokens[j].typ == ttStar:
+        let emitted = emitExportFromDeclaration(tokenStatementSlice(code, tokens, index, endIndex), moduleCounter)
         if emitted.len > 0:
           imports.add(emitted)
-        i = endStmt
+        processor.skipProcessorThrough(endIndex)
         continue
-      if startsWordAt(code, j, "const") or startsWordAt(code, j, "let") or startsWordAt(code, j, "var"):
-        let endStmt = findStatementEnd(code, i)
-        let declaration = code[j..<endStmt]
-        body.add(declaration)
+
+      if j < tokens.len and tokens[j].typ == ttBraceL:
+        let close = tokenMatching(tokens, j, ttBraceL, ttBraceR)
+        var after = close + 1
+        if close >= 0 and after < tokens.len and tokens[after].typ == ttName and tokenRaw(code, tokens[after]) == "from":
+          let emitted = emitExportFromDeclaration(tokenStatementSlice(code, tokens, index, endIndex), moduleCounter)
+          if emitted.len > 0:
+            imports.add(emitted)
+          processor.skipProcessorThrough(endIndex)
+          continue
+        if close >= 0:
+          for (localName, exportedName) in parseExportNames(code[tokens[j].`end`..<tokens[close].start]):
+            exports.add("exports." & exportedName & " = " & localName & ";")
+          processor.skipProcessorThrough(endIndex)
+          continue
+
+      if j < tokens.len and tokens[j].typ in {ttConst, ttLet, ttVar}:
+        let declaration = tokenStatementSlice(code, tokens, j, endIndex)
         for name in collectVarDeclarationNames(declaration):
           exports.add("exports." & name & " = " & name & ";")
-        i = endStmt
+        processor.removeToken()
         continue
-      if startsWordAt(code, j, "function") or startsWordAt(code, j, "class") or startsWordAt(code, j, "async"):
-        var word = ""
-        if startsWordAt(code, j, "async"):
-          var afterAsync = j + "async".len
-          skipSpaces(code, afterAsync)
-          if startsWordAt(code, afterAsync, "function"):
-            word = "async function"
-            j = afterAsync + "function".len
-          else:
-            word = "async"
-            j += "async".len
-        elif startsWordAt(code, j, "function"):
-          word = "function"
-          j += "function".len
-        else:
-          word = "class"
-          j += "class".len
-        body.add(word)
-        body.add(" ")
-        skipSpaces(code, j)
-        var namePos = j
-        let name = readIdentifier(code, namePos)
+
+      if j < tokens.len and tokens[j].typ in {ttFunction, ttClass, ttAsync}:
+        let name = exportDeclarationName(code, tokens, j)
         if name.len > 0:
           exports.add("exports." & name & " = " & name & ";")
-        i = j
+        processor.removeToken()
         continue
-      if startsWordAt(code, j, "default"):
-        j += "default".len
-        skipSpaces(code, j)
-        if startsWordAt(code, j, "function") or startsWordAt(code, j, "class") or startsWordAt(code, j, "async"):
-          var word = ""
-          var nameScanStart = j
-          if startsWordAt(code, j, "async"):
-            var afterAsync = j + "async".len
-            skipSpaces(code, afterAsync)
-            if startsWordAt(code, afterAsync, "function"):
-              word = "async function"
-              nameScanStart = afterAsync + "function".len
-            else:
-              word = "async"
-              nameScanStart = j + "async".len
-          elif startsWordAt(code, j, "function"):
-            word = "function"
-            nameScanStart = j + "function".len
-          else:
-            word = "class"
-            nameScanStart = j + "class".len
-          let endStmt = findStatementEnd(code, j)
-          var k = nameScanStart
-          skipSpaces(code, k)
-          let nameStart = k
-          let name = readIdentifier(code, k)
+
+      if j < tokens.len and tokens[j].typ == ttDefault:
+        var declarationStart = j + 1
+        if declarationStart < tokens.len and tokens[declarationStart].typ in {ttFunction, ttClass, ttAsync}:
+          let name = exportDeclarationName(code, tokens, declarationStart)
           if name.len > 0:
-            body.add(code[j..<endStmt])
             exports.add("exports.default = " & name & ";")
-          else:
-            let generated = "__frameosDefaultExport"
-            body.add(word & " " & generated & code[nameStart..<endStmt])
-            exports.add("exports.default = " & generated & ";")
-          i = endStmt
-          continue
-        body.add("exports.default = ")
-        i = j
+            processor.removeToken()
+            if not processor.isAtEnd() and processor.currentIndex() == j:
+              processor.removeToken()
+            continue
+        processor.replaceToken("exports.default =")
+        if not processor.isAtEnd() and processor.currentIndex() == j:
+          processor.removeToken()
         continue
-      if j < code.len and code[j] == '{':
-        let close = findMatching(code, j, '{', '}')
-        if close >= 0:
-          var after = close + 1
-          skipSpaces(code, after)
-          if startsWordAt(code, after, "from"):
-            let endStmt = findStatementEnd(code, i)
-            let emitted = emitExportFromDeclaration(code[i..<endStmt], moduleCounter)
-            if emitted.len > 0:
-              imports.add(emitted)
-          else:
-            let names = parseExportNames(code[j + 1..<close])
-            for (localName, exportedName) in names:
-              exports.add("exports." & exportedName & " = " & localName & ";")
-          i = findStatementEnd(code, close + 1)
-          continue
 
-    body.add(code[i])
-    inc i
+    processor.copyToken()
 
+  let body = processor.finish().code
   result = "\"use strict\";Object.defineProperty(exports, \"__esModule\", {value: true});"
   if imports.len > 0:
     result.add(imports.join(""))
@@ -1843,6 +1956,9 @@ proc transformImports(code: string): string =
   if exports.len > 0:
     result.add("\n")
     result.add(exports.join("\n"))
+
+proc transformImports(code: string): string =
+  return transformImportsTokenDriven(code)
 
 proc transform*(code: string, options: TransformOptions): TransformResult =
   try:

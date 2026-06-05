@@ -241,14 +241,20 @@ Deliverable:
 
 Replace scanner-based TypeScript erasure with token-driven behavior:
 
-- Type annotations and return types.
-- Type parameters and type arguments.
-- Interfaces, type aliases, mapped/conditional/indexed-access types.
-- Type-only imports/exports and unknown type-only export elision.
-- `declare`, `abstract`, TS modifiers, overloads.
-- Enums and const enums.
-- Constructor parameter properties.
-- Non-null assertions, `as`, and `satisfies`.
+- [x] Token-driven cleanup pass for annotated type tokens, modifiers,
+  declarations, assertions, and non-null assertions.
+- [x] Type annotations and return types for current FrameOS/Sucrase parity
+  fixtures.
+- [x] Type parameters and type arguments for current FrameOS/Sucrase parity
+  fixtures.
+- [x] Interfaces, type aliases, and common object/function type syntax.
+- [x] Type-only imports/exports and unknown type-only export elision.
+- [x] `declare`, `abstract`, TS modifiers, overloads.
+- [x] Enums and const enums remain lowered before erasure.
+- [x] Constructor parameter properties remain lowered before erasure.
+- [x] Non-null assertions, `as`, and `satisfies`.
+- [ ] Retire remaining scanner cleanup fallback after full parser annotation
+  parity covers complex function/object type contexts.
 - Decorators only if current Sucrase behavior and FrameOS use cases require it.
 
 Deliverable:
@@ -259,10 +265,11 @@ Deliverable:
 
 Replace scanner-based JSX lowering with token-driven classic FrameOS JSX output:
 
-- Emit `__frameosJsx(...)` and `__frameosFragment`.
-- Support fragments, tag names, member names, prop spreads, boolean props,
+- [x] Token-stream detection/replacement of JSX element ranges.
+- [x] Emit `__frameosJsx(...)` and `__frameosFragment`.
+- [x] Support fragments, tag names, member names, prop spreads, boolean props,
   expression props, nested JSX, children, text, comments, and entities.
-- Keep automatic runtime/dev metadata out of FrameOS unless a future codepath
+- [x] Keep automatic runtime/dev metadata out of FrameOS unless a future codepath
   needs it.
 
 Deliverable:
@@ -274,12 +281,13 @@ Deliverable:
 
 Move module rewriting onto token roles:
 
-- `export const/function/class/default`.
-- Named exports and empty exports.
-- Re-exports and namespace exports.
-- Default/named/namespace imports.
-- Type-only import/export elision.
-- `import = require`.
+- [x] Token-driven statement discovery/removal/copying for module rewrites.
+- [x] `export const/function/class/default`.
+- [x] Named exports and empty exports.
+- [x] Re-exports and namespace exports.
+- [x] Default/named/namespace imports.
+- [x] Type-only import/export elision.
+- [x] `import = require`.
 - Babel/Sucrase interop helpers only where FrameOS/runtime behavior actually
   needs them.
 

@@ -34,17 +34,22 @@ function demo(input: number) {
 
   test "rewrites simple app module exports":
     let output = transformFrameosModule("""
-export const get = (app: { config: { message?: string } }) => {
+export const makeImage = (app: { config: { message?: string } }) => {
   return <image width={3} height={2} color="#336699" />;
 }
 export function run(app: { config: { duration: number } }) {
   return app.config.duration;
 }
+export function get(app, context) {
+  return context.image;
+}
 """)
     check output.startsWith("\"use strict\";")
-    check "const get = (app) =>" in output
+    check "const makeImage = (app) =>" in output
     check "function run(app)" in output
+    check "function get(app, context)" in output
     check "exports.get = get;" in output
+    check "exports.makeImage = makeImage;" in output
     check "exports.run = run;" in output
     check "__frameosJsx(\"image\"" in output
 
@@ -166,12 +171,14 @@ let third: boolean, fourth: number = 4;
     let output = transformFrameosModule("""
 export function get(app: FrameOSApp): string {
   const label = app.config.label as string;
+  const eventLabel = app.context.event ? ` (${app.context.event})` : '';
   return `<svg><text>${label as string}</text><title>${(app.config.title satisfies string)}</title></svg>`;
 }
 """)
     check "app: FrameOSApp" notin output
     check "as string" notin output
     check "satisfies string" notin output
+    check "app.context.event ? ` (${app.context.event})` : ''" in output
     check "<text>${label" in output
     check "<title>${(app.config.title" in output
 

@@ -68,6 +68,11 @@ proc markRangeType(tokens: var seq[JsToken], first, lastInclusive: int) =
   for i in first..min(lastInclusive, tokens.len - 1):
     tokens[i].isType = true
 
+proc prevTokenIndex(tokens: seq[JsToken], index: int): int =
+  result = index - 1
+  while result >= 0 and tokens[result].typ == ttEof:
+    dec result
+
 proc roleForDeclaration(scopeDepth: int, functionScoped: bool): IdentifierRole =
   if scopeDepth == 0:
     irTopLevelDeclaration
@@ -259,6 +264,32 @@ proc inImportExportStatement(tokens: seq[JsToken], index: int): bool =
     dec i
   false
 
+proc isPropertyAccessName(tokens: seq[JsToken], index: int): bool =
+  let prev = prevTokenIndex(tokens, index)
+  prev >= 0 and tokens[prev].typ in {ttDot, ttQuestionDot}
+
+proc isLikelyTernaryColon(tokens: seq[JsToken], index: int): bool =
+  var depth = 0
+  var i = index - 1
+  while i >= 0:
+    case tokens[i].typ
+    of ttParenR, ttBraceR, ttBracketR:
+      inc depth
+    of ttParenL, ttBraceL, ttBracketL, ttDollarBraceL:
+      if depth == 0:
+        return false
+      dec depth
+    of ttQuestion:
+      if depth == 0:
+        return i != index - 1
+    of ttComma, ttSemi:
+      if depth == 0:
+        return false
+    else:
+      discard
+    dec i
+  false
+
 proc annotateTypeSpans(code: string, tokens: var seq[JsToken]) =
   var i = 0
   while i < tokens.len:
@@ -286,24 +317,28 @@ proc annotateTypeSpans(code: string, tokens: var seq[JsToken]) =
       markRangeType(tokens, i, endIndex)
       i = endIndex
 
-    if tokens[i].typ == ttColon:
-      var j = i + 1
-      var depth = 0
-      while j < tokens.len:
-        if tokens[j].typ in {ttLessThan, ttBraceL, ttBracketL, ttParenL}:
-          inc depth
-        elif tokens[j].typ in {ttGreaterThan, ttBraceR, ttBracketR, ttParenR}:
-          if depth == 0:
+    if tokens[i].typ == ttColon and not isLikelyTernaryColon(tokens, i):
+      let prev = prevTokenIndex(tokens, i)
+      if prev >= 0 and tokens[prev].identifierRole != irObjectKey:
+        var j = i + 1
+        var depth = 0
+        while j < tokens.len:
+          if tokens[j].typ in {ttLessThan, ttBraceL, ttBracketL, ttParenL}:
+            inc depth
+          elif tokens[j].typ in {ttGreaterThan, ttBraceR, ttBracketR, ttParenR}:
+            if depth == 0:
+              break
+            dec depth
+          if depth == 0 and isTypeBoundary(tokens[j].typ):
             break
-          dec depth
-        if depth == 0 and isTypeBoundary(tokens[j].typ):
-          break
-        inc j
-      markRangeType(tokens, i, j - 1)
-      i = max(i, j - 1)
+          inc j
+        markRangeType(tokens, i, j - 1)
+        i = max(i, j - 1)
 
     if (tokens[i].typ == ttAs or (tokens[i].typ == ttName and tokens[i].contextualKeyword == ckSatisfies)) and
-        not inImportExportStatement(tokens, i):
+        not inImportExportStatement(tokens, i) and
+        not isPropertyAccessName(tokens, i) and
+        tokens[i].identifierRole != irObjectKey:
       var j = i + 1
       while j < tokens.len and not isTypeBoundary(tokens[j].typ):
         inc j
@@ -318,6 +353,11 @@ proc annotateTypeSpans(code: string, tokens: var seq[JsToken]) =
       if close > i and prev >= 0 and tokens[prev].typ in {ttName, ttFunction, ttClass, ttParenR}:
         var after = close + 1
         if after < tokens.len and tokens[after].typ in {ttParenL, ttBraceL, ttExtends, ttImplements}:
+          markRangeType(tokens, i, close)
+          i = close
+      elif close > i and close + 1 < tokens.len and tokens[close + 1].typ == ttParenL:
+        let parenClose = findMatching(tokens, close + 1, ttParenL, ttParenR)
+        if parenClose > close and parenClose + 1 < tokens.len and tokens[parenClose + 1].typ == ttArrow:
           markRangeType(tokens, i, close)
           i = close
     inc i
