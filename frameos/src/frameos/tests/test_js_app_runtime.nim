@@ -277,6 +277,30 @@ suite "js app runtime":
     check "event" in payload["contextKeys"].mapIt(it.getStr())
     check payload["spreadConfig"]["message"].getStr() == "hello"
 
+  test "maps JS app runtime errors to original source lines":
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-app-error-map".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 16.NodeId, nodeName: "jsErrorMap", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function get(app: FrameOSApp): string {
+          const value: number = 1
+          throw new Error("app mapped boom")
+        }"""
+    )
+
+    discard runtime.get(owner, %*{}, context)
+    let stackLogs = logged.filterIt("jsApp:error" in it{"event"}.getStr())
+    check stackLogs.len == 1
+    check ">:3:" in stackLogs[0]{"stack"}.getStr()
+
   test "releases overwritten dynamic field image refs":
     let config = testConfig()
     let logger = testLogger(config)

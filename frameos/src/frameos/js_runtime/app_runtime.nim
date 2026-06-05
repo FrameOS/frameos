@@ -485,7 +485,13 @@ proc ensureReady(runtime: JsAppRuntime) =
       : undefined;
   }
   """ & sceneJsPrelude)
-  discard runtime.js.eval(transpileModuleSource(runtime.source, "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"))
+  let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
+  let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+  try:
+    discard runtime.js.eval(transformed.code, filename)
+  except CatchableError as error:
+    raise newException(JSException, error.msg.mapJsErrorText(transformed.sourceMap))
+  registerJsSourceMap(runtime.js.context, transformed.sourceMap)
   runtime.ready = true
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
@@ -652,7 +658,7 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
         jsAppEnvByCtx.del(ctx)
 
   if JS_IsException(result) != 0:
-    let details = jsExceptionDetails(ctx)
+    let details = mappedJsExceptionDetails(ctx)
     frameos_apps.logError(owner, &"JS app {fnName} failed: " & details.message)
     if details.stack.len > 0:
       frameos_apps.log(owner, %*{

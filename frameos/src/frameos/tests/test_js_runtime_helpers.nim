@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, sequtils, strutils, unittest]
 
 import ../js_runtime/runtime
 import ../types
@@ -110,6 +110,27 @@ function demo(input: number) {
     check jsonValue["type"].getStr() == "result"
     check jsonValue["props"]["total"].getInt() == 3
     check jsonValue["props"]["children"].getInt() == 2
+    cleanupSceneJs(scene)
+    cleanupCompilerJs()
+
+  test "evalSnippet maps runtime errors to original source lines":
+    var logs: seq[JsonNode] = @[]
+    var scene = testScene()
+    scene.logger.log = proc(payload: JsonNode) =
+      logs.add(payload)
+
+    let value = evalSnippet(
+      scene,
+      testContext(scene),
+      2.NodeId,
+      "(() => {\n  const count: number = 1\n  throw new Error(\"mapped boom\")\n})()"
+    )
+
+    check value.kind == fkNone
+    let errorLogs = logs.filterIt(it{"event"}.getStr() == "interpreter:jsError")
+    check errorLogs.len == 1
+    check "mapped boom" in errorLogs[0]{"message"}.getStr()
+    check ">:3:" in errorLogs[0]{"stack"}.getStr()
     cleanupSceneJs(scene)
     cleanupCompilerJs()
 

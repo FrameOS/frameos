@@ -19,12 +19,14 @@ import std/[strutils, sequtils]
 from std/unicode import Rune, toUTF8
 
 import ./parser
+import ./source_map
 import ./token_processor
 import ./tokens
 
 type
   TransformResult* = object
     code*: string
+    sourceMap*: SourceLineMap
 
   TransformOptions* = object
     filePath*: string
@@ -1966,6 +1968,8 @@ proc transformImports(code: string): string =
   return transformImportsTokenDriven(code)
 
 proc transform*(code: string, options: TransformOptions): TransformResult =
+  let originalCode = code
+  let path = if options.filePath.len == 0: "<frameos>" else: options.filePath
   try:
     result.code = code
     if options.hasTransform("typescript"):
@@ -1976,8 +1980,8 @@ proc transform*(code: string, options: TransformOptions): TransformResult =
         result.code = stripTypeScript(result.code)
     if options.hasTransform("imports"):
       result.code = transformImports(result.code)
+    result.sourceMap = lineBasedSourceLineMap(originalCode, result.code, path, path)
   except CatchableError as error:
-    let path = if options.filePath.len == 0: "<frameos>" else: options.filePath
     raise newException(ValueError, "Error transforming " & path & ": " & error.msg)
 
 proc transformFrameosScript*(code: string, filePath: string = "<frameos>"): string =

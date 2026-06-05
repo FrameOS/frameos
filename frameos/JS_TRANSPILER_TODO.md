@@ -78,9 +78,9 @@ implementation easy to compare with upstream Sucrase.
 - [x] ES transform policy settled: preserve syntax accepted by bundled QuickJS
   instead of lowering it. Only add an ES transformer when a required FrameOS
   codepath uses syntax QuickJS cannot execute.
-- [x] Source-map policy settled: not needed for current on-device QuickJS
-  execution. Add source maps later only if editor/runtime workflows need
-  original-source positions.
+- [x] Runtime source-location passthrough: transformed code registered with
+  QuickJS has generated-line to original-line mappings so runtime/compile error
+  stacks can point back to app/snippet source lines.
 - [x] Diagnostic token formatting is available through native token/parse output
   used by the parity harness; richer Sucrase-style diagnostics can be added
   later if backend/editor validation moves off npm Sucrase.
@@ -330,17 +330,21 @@ that FrameOS users should reasonably paste. Candidate upstream transformers:
 
 ### Phase 9: Diagnostics and Source Maps
 
-Current policy: runtime transpilation does not need source maps because the
-transpiled output is immediately handed to QuickJS. Backend/editor validation
-can keep npm Sucrase diagnostics until there is a concrete reason to route those
-diagnostics through native Nim.
+Current policy: runtime transpilation does not need full source-map files
+because the transpiled output is immediately handed to QuickJS. It does need a
+lightweight line map for errors that come back from QuickJS, so the runtime
+registers generated-line to original-line mappings and rewrites QuickJS
+locations in compile/runtime logs.
+
+Backend/editor validation can keep npm Sucrase diagnostics until there is a
+concrete reason to route those diagnostics through native Nim.
 
 If that changes:
 
 - Port formatted token output for debugging.
-- Improve native error messages and source locations.
-- Add source-map support equivalent to `computeSourceMap` if editor/runtime
-  workflows need original source positions.
+- Improve native parser error messages and source locations.
+- Add source-map support equivalent to `computeSourceMap` if editor workflows
+  need column-level original-source positions.
 
 ### Cutover Criteria
 
