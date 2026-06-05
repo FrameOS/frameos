@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import os
-import shutil
-import tarfile
-import tempfile
 from pathlib import Path
 
-import httpx
 import pytest
 
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED
@@ -15,7 +10,6 @@ from app.models.frame import Frame
 from app.models.log import Log
 from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import BuildrootImageBuilder, ensure_buildroot_frame_defaults
-from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_target
 from app.tenancy import ensure_default_project
 
 
@@ -118,94 +112,6 @@ def _log_lines(db, frame: Frame) -> list[str]:
     ]
 
 
-def _file_md5sum(path: Path) -> str:
-    hasher = hashlib.md5()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
-    root = path.resolve()
-    for member in tar.getmembers():
-        member_path = (path / member.name).resolve()
-        if os.path.commonpath([str(root), str(member_path)]) != str(root):
-            raise RuntimeError("Tar file attempted to escape target directory")
-    tar.extractall(path=path, filter="data")
-
-
-def _normalize_component_dir(dest_dir: Path) -> None:
-    entries = [path for path in dest_dir.iterdir() if path.name != ".build-info"]
-    subdirs = [path for path in entries if path.is_dir()]
-    files = [path for path in entries if path.is_file()]
-    if files or len(subdirs) != 1:
-        return
-    inner = subdirs[0]
-    for child in inner.iterdir():
-        shutil.move(str(child), dest_dir / child.name)
-    shutil.rmtree(inner)
-
-
-def _lgpio_component_is_valid(path: Path) -> bool:
-    return (path / "include" / "lgpio.h").is_file() and any(
-        library.is_file()
-        for pattern in ("liblgpio.so*", "librgpio.so*")
-        for library in (path / "lib").glob(pattern)
-    )
-
-
-async def _ensure_lgpio_prebuilt_deps() -> None:
-    target = resolve_prebuilt_target(
-        buildroot_image_module.FRAMEOS_BUILD_TARGET.distro,
-        buildroot_image_module.FRAMEOS_BUILD_TARGET.version,
-        buildroot_image_module.FRAMEOS_BUILD_TARGET.arch,
-    )
-    if not target:
-        raise RuntimeError("Buildroot E2E target has no matching prebuilt dependency target")
-
-    manifest = await fetch_prebuilt_manifest()
-    entry = manifest.get(target)
-    if not entry:
-        raise RuntimeError(f"Prebuilt dependency manifest has no entry for {target}")
-
-    version = entry.version_for("lgpio", "unknown") or "unknown"
-    url = entry.url_for("lgpio")
-    if not url:
-        raise RuntimeError(f"Prebuilt dependency manifest has no lgpio archive for {target}")
-
-    dest_dir = buildroot_image_module.REPO_ROOT / "build" / "prebuilt-deps" / target / f"lgpio-{version}"
-    marker = dest_dir / ".build-info"
-    expected_marker = f"lgpio|{version}|{url}|{entry.md5_for('lgpio') or ''}"
-    if marker.is_file() and marker.read_text() == expected_marker and _lgpio_component_is_valid(dest_dir):
-        return
-
-    shutil.rmtree(dest_dir, ignore_errors=True)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
-    os.close(fd)
-    archive_path = Path(tmp_path)
-    try:
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            async with client.stream("GET", url) as response:
-                response.raise_for_status()
-                with archive_path.open("wb") as fh:
-                    async for chunk in response.aiter_bytes():
-                        fh.write(chunk)
-        expected_md5 = entry.md5_for("lgpio")
-        if expected_md5 and _file_md5sum(archive_path) != expected_md5:
-            raise RuntimeError(f"Prebuilt lgpio archive checksum mismatch for {target}")
-        with tarfile.open(archive_path, "r:gz") as tar:
-            _safe_extract(tar, dest_dir)
-        _normalize_component_dir(dest_dir)
-        if not _lgpio_component_is_valid(dest_dir):
-            raise RuntimeError(f"Prebuilt lgpio archive for {target} did not contain runtime libraries")
-        marker.write_text(expected_marker)
-    finally:
-        archive_path.unlink(missing_ok=True)
-
-
 @pytest.mark.asyncio
 async def test_real_buildroot_sd_image_generation_from_precompiled_release(
     async_client,
@@ -223,7 +129,6 @@ async def test_real_buildroot_sd_image_generation_from_precompiled_release(
     monkeypatch.setenv("FRAMEOS_CROSS_MAKE_JOBS", os.environ.get("FRAMEOS_CROSS_MAKE_JOBS", "2"))
 
     frame = _frame(db)
-    await _ensure_lgpio_prebuilt_deps()
     _say(f"building Buildroot SD image from precompiled releases for frame {frame.id}")
     metadata = await BuildrootImageBuilder(db=db, redis=redis, frame=frame).run()
 

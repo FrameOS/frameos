@@ -285,8 +285,6 @@ async def test_full_plan_supports_buildroot_without_remote_apt(monkeypatch: pyte
     assert plan.full_deploy.package_plans == []
     assert plan.full_deploy.package_alternatives == []
     assert plan.full_deploy.remote_build_fallback_package_plans == []
-    assert plan.full_deploy.lgpio_required is True
-    assert plan.full_deploy.lgpio_installed is True
     assert plan.full_deploy.quickjs_required_if_remote_build is False
 
 
@@ -543,7 +541,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
 
 
 @pytest.mark.asyncio
-async def test_full_plan_native_hyperpixel_uses_lgpio_without_vendor_sync(monkeypatch: pytest.MonkeyPatch):
+async def test_full_plan_native_hyperpixel_uses_native_gpio_without_vendor_sync(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=30,
         name="NativeHyperPixel",
@@ -573,7 +571,6 @@ async def test_full_plan_native_hyperpixel_uses_lgpio_without_vendor_sync(monkey
 
     assert plan.full_deploy is not None
     package_names = {pkg.name for pkg in plan.full_deploy.package_plans}
-    assert "liblgpio-dev" in package_names
     assert "python3-dev" not in package_names
     assert "python3-pip" not in package_names
     assert "python3-venv" not in package_names
@@ -614,7 +611,6 @@ async def test_full_plan_legacy_hyperpixel_keeps_python_vendor_setup(monkeypatch
 
     assert plan.full_deploy is not None
     package_names = {pkg.name for pkg in plan.full_deploy.package_plans}
-    assert "liblgpio-dev" not in package_names
     assert "python3-dev" in package_names
     assert "python3-pip" in package_names
     assert "python3-venv" in package_names

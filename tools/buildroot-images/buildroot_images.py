@@ -39,7 +39,6 @@ from app.tasks.buildroot_image import (  # noqa: E402
     FRAMEOS_BUILD_TARGET,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
-    copy_lgpio_runtime_libraries,
     ensure_buildroot_base_image,
     resolve_buildroot_base_entry,
     buildroot_base_cache_dir,
@@ -350,7 +349,6 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "srv" / "frameos").mkdir(parents=True, exist_ok=True)
     (overlay / "srv" / "assets").mkdir(parents=True, exist_ok=True)
-    copy_lgpio_runtime_libraries(overlay)
 
 
 def build(args: argparse.Namespace) -> None:

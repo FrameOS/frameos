@@ -1,6 +1,6 @@
 # Prebuilt dependency builder
 
-These scripts produce Nim, QuickJS and lgpio builds for the Raspberry Pi OS and
+These scripts produce Nim and QuickJS builds for the Raspberry Pi OS and
 Ubuntu LTS variants we care about. They run each build inside a container
 matching one of the following releases and architectures:
 
@@ -35,16 +35,13 @@ nim-2.2.4/bin/*
 nim-2.2.4/lib/*
 quickjs-2025-04-26/include/quickjs/*.h
 quickjs-2025-04-26/lib/libquickjs.a
-lgpio-v0.2.2/include/*.h
-lgpio-v0.2.2/lib/*
 nim-2.2.4/.build-info
 quickjs-2025-04-26/.build-info
-lgpio-v0.2.2/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.
 
-Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
+Each dependency (Nim and QuickJS) is built by its own Dockerfile. When you
 rerun the builder it reuses any dependency whose `.build-info` marker matches
 the requested versions/platform so you only rebuild the missing pieces. Delete a
 component directory (e.g. `rm -rf build/prebuilt-deps/debian-bookworm-arm64/nim`
@@ -61,11 +58,8 @@ QuickJS from source when no published component matches.
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 \
-LGPIO_VERSION=v0.2.2 ./tools/prebuilt-deps/build.sh
+NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 ./tools/prebuilt-deps/build.sh
 ```
-
-`LGPIO_REPO` can also be overridden to point to a fork.
 
 ## Cloudflare R2 sync helper
 

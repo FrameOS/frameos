@@ -304,7 +304,6 @@ function deployPlan(frameId: number): Record<string, unknown> {
       },
       packages: [],
       package_alternatives: [],
-      lgpio: { required: false, installed: true },
       quickjs: { required_if_remote_build: false, dirname: null, installed: true },
       ssh_keys_need_install: false,
       post_deploy: { final_action: 'restart_frameos' },

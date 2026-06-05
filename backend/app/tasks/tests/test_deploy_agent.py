@@ -426,7 +426,6 @@ async def test_agent_source_build_cross_compiles_before_remote_build(
     assert kwargs["output_name"] == "frameos_agent"
     assert kwargs["compile_script_name"] == "compile_frameos_agent.sh"
     assert kwargs["needs_quickjs"] is False
-    assert kwargs["needs_lgpio"] is False
 
 
 @pytest.mark.asyncio

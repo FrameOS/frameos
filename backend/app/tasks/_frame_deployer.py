@@ -727,6 +727,11 @@ $(OBJECTS): pre-build
                 os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, wf),
                 os.path.join(destination_dir, wf),
             )
+        if "DEV_Config.h" in waveshare_files:
+            shutil.copy(
+                os.path.join(source_dir, "src", "lib", "lgpio.h"),
+                os.path.join(destination_dir, "lgpio.h"),
+            )
 
     async def create_local_build_archive(
         self,

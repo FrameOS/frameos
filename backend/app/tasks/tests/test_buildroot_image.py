@@ -341,7 +341,6 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     sys.modules[spec.name] = buildroot_images
     spec.loader.exec_module(buildroot_images)
 
-    monkeypatch.setattr(buildroot_images, "copy_lgpio_runtime_libraries", lambda _overlay: None)
     overlay = tmp_path / "overlay"
 
     buildroot_images.write_base_bootstrap_overlay(overlay)
@@ -789,7 +788,6 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
     monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db, project_id=None: {"ssh_keys": {"keys": []}})
     monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
-    monkeypatch.setattr(BuildrootImageBuilder, "_copy_runtime_libraries", lambda _self, _overlay_dir: None)
 
     builder._stage_overlay(
         overlay_dir=overlay_dir,
@@ -831,44 +829,13 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()
 
 
-def test_buildroot_copies_lgpio_runtime_libraries(tmp_path, monkeypatch):
-    liblgpio = tmp_path / "liblgpio.so.1"
-    librgpio = tmp_path / "librgpio.so.1"
-    liblgpio.write_bytes(b"lgpio")
-    librgpio.write_bytes(b"rgpio")
-    builder = BuildrootImageBuilder(
-        db=None,
-        redis=None,
-        frame=SimpleNamespace(id=1),
-    )
-
-    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [liblgpio, librgpio])
-    builder._copy_runtime_libraries(tmp_path / "overlay")
-
-    assert (tmp_path / "overlay" / "usr" / "lib" / "liblgpio.so.1").read_bytes() == b"lgpio"
-    assert (tmp_path / "overlay" / "usr" / "lib" / "librgpio.so.1").read_bytes() == b"rgpio"
-
-
-def test_buildroot_requires_lgpio_runtime_libraries(tmp_path, monkeypatch):
-    builder = BuildrootImageBuilder(
-        db=None,
-        redis=None,
-        frame=SimpleNamespace(id=1),
-    )
-
-    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [])
-
-    with pytest.raises(RuntimeError, match="requires lgpio runtime libraries"):
-        builder._copy_runtime_libraries(tmp_path / "overlay")
-
-
 def test_buildroot_boot_config_merge_is_written_to_active_boot_location(tmp_path):
     builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
     overlay_dir = tmp_path / "overlay"
     existing_config = overlay_dir / "boot" / "config.txt"
     existing_firmware_config = overlay_dir / "boot" / "firmware" / "config.txt"
-    existing_config.parent.mkdir(parents=True)
-    existing_firmware_config.parent.mkdir(parents=True)
+    existing_config.parent.mkdir(parents=True, exist_ok=True)
+    existing_firmware_config.parent.mkdir(parents=True, exist_ok=True)
     existing_config.write_text("dtoverlay=spi1-1cs\n#dtoverlay=spi0-0cs\n", encoding="utf-8")
     existing_firmware_config.write_text("disable_splash=1\n", encoding="utf-8")
 

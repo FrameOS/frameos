@@ -33,7 +33,7 @@
 #ifndef _DEV_CONFIG_H_
 #define _DEV_CONFIG_H_
 
-#include <lgpio.h>
+#include "lgpio.h"
 #define LFLAGS 0
 #define NUM_MAXBUF  4
 

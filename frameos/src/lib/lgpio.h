@@ -1,4 +1,16 @@
 /*
+FrameOS note:
+
+This header is retained for the remaining Waveshare C driver shims, but the
+symbols are now implemented by frameos/src/lib/lgpio.nim instead of liblgpio.
+The Nim implementation ports the FrameOS-used subset from joan2937/lg v0.2.2
+(commit b959a17d723360e85648316757b02dbea9902feb).
+
+FrameOS is distributed under the GNU Affero General Public License v3. The
+upstream joan2937/lg v0.2.2 sources and this derived compatibility header
+declare the Unlicense/public-domain dedication below; this upstream tag does
+not declare LGPL.
+
 This is free and unencumbered software released into the public domain.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or
@@ -56,15 +68,9 @@ o a simple interface to start and stop new threads
 
 *Usage*
 
-Include <lgpio.h> in your source files.
-
-Assuming your source is in a single file called prog.c use the following
-command to build and run the executable.
-
-. .
-gcc -Wall -o prog prog.c -llgpio
-./prog
-. .
+Include <lgpio.h> in C driver shims. In FrameOS, link the resulting object
+files with the FrameOS binary; the matching symbols are exported by
+frameos/src/lib/lgpio.nim, so no -llgpio flag is required.
 
 For examples of usage see the C programs within the lg archive file.
 

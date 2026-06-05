@@ -743,7 +743,6 @@ async def build_release_target(
                 output_name=AGENT_BINARY,
                 compile_script_name="compile_frameos_agent.sh",
                 needs_quickjs=False,
-                needs_lgpio=False,
             )
             agent_binary_path = await agent_compiler.build(str(agent_source_dir))
         if not agent_binary_path:
