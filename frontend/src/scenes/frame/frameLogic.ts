@@ -41,6 +41,7 @@ import {
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
+import { normalizeFrameCompilationMode, normalizeFrameCrossCompilation } from '../../utils/frameBuildOptions'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -494,24 +495,14 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
     .map(({ change }) => change)
 }
 
-function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
-  return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
-    ? value
-    : 'precompiled'
-}
-
-function normalizeRpiosCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
-  return value === 'always' || value === 'never' ? value : 'auto'
-}
-
 function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
 
   return {
     ...rest,
-    compilationMode: normalizeRpiosCompilationMode(compilationMode),
-    crossCompilation: normalizeRpiosCrossCompilation(crossCompilation),
+    compilationMode: normalizeFrameCompilationMode(compilationMode),
+    crossCompilation: normalizeFrameCrossCompilation(crossCompilation),
   }
 }
 
@@ -1334,7 +1325,8 @@ export const frameLogic = kea<frameLogicType>([
     },
     showDeployPlanModal: () => {
       const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
-      const buildrootFirstInstall = isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
+      const buildrootFirstInstall =
+        isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
       if (buildrootFirstInstall) {
         return
       }

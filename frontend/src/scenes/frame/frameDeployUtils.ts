@@ -1,5 +1,10 @@
 import type { FrameType } from '../../types'
 import versions from '../../../../versions.json'
+import {
+  type FrameCompilationMode,
+  normalizeFrameCompilationMode,
+  normalizeFrameCrossCompilation,
+} from '../../utils/frameBuildOptions'
 
 export interface ChangeDetail {
   label: string
@@ -27,8 +32,8 @@ export interface FullDeployPlanResponse {
   low_memory: boolean
   drivers: string[]
   binary: {
-    requested_compilation_mode?: 'static' | 'shared' | 'shared-scenes' | 'precompiled'
-    compilation_mode?: 'static' | 'shared' | 'shared-scenes' | 'precompiled'
+    requested_compilation_mode?: FrameCompilationMode
+    compilation_mode?: FrameCompilationMode
     will_attempt_cross_compile?: boolean
     will_attempt_precompiled?: boolean
     cross_compile_supported?: boolean
@@ -166,20 +171,10 @@ function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`
 }
 
-function normalizeCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
-  return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
-    ? value
-    : 'precompiled'
-}
-
-function frameCompilationMode(frame?: Partial<FrameType> | null): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
-  return normalizeCompilationMode(
+function frameCompilationMode(frame?: Partial<FrameType> | null): FrameCompilationMode {
+  return normalizeFrameCompilationMode(
     frame?.mode === 'buildroot' ? frame?.buildroot?.compilationMode : frame?.rpios?.compilationMode
   )
-}
-
-function normalizeCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
-  return value === 'always' || value === 'never' ? value : 'auto'
 }
 
 function frameCompiledSceneCount(frame?: Partial<FrameType> | null): number {
@@ -258,7 +253,7 @@ function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: Depl
   }
 
   const compilationMode = frameCompilationMode(frame)
-  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
 }
 
@@ -267,8 +262,8 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
     return 'Build the configured Buildroot target'
   }
 
-  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
-  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  const compilationMode = normalizeFrameCompilationMode(frame?.rpios?.compilationMode)
+  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   const skipReason = precompiledSkipReason(frame)
   const crossCompileText =
     crossCompilation === 'never'
@@ -295,7 +290,7 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
   const compilationMode = frameCompilationMode(frame)
-  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   if (compilationMode === 'shared') {
     return 'Shared libraries deployed next to the FrameOS binary'
   }
@@ -428,6 +423,19 @@ export function buildFullDeployPlanSummary(
 
   const packagesToInstall = fullPlan.packages.filter((pkg) => pkg.needs_install).map((pkg) => pkg.name)
   const previousVersion = previousFrameosVersion(plan)
+  const buildStrategyItem: SummaryItem = {
+    label: 'Build strategy',
+    value: fullPlan.binary.will_attempt_precompiled
+      ? 'Download and install the precompiled FrameOS release'
+      : fullPlan.binary.will_attempt_cross_compile
+      ? fullPlan.binary.build_host_configured
+        ? 'Cross-compile on the configured build host'
+        : 'Cross-compile locally on this server'
+      : fullPlan.binary.cross_compile_supported
+      ? 'Build on device because cross-compilation is disabled'
+      : 'Build on device because cross-compilation is unavailable for this target',
+  }
+  let compilationItem: SummaryItem | null = null
   const items: SummaryItem[] = [
     {
       label: 'FrameOS version',
@@ -441,18 +449,6 @@ export function buildFullDeployPlanSummary(
       label: 'Target',
       value: `${fullPlan.target.distro} ${fullPlan.target.version} · ${fullPlan.target.arch} · ${fullPlan.target.total_memory_mb} MiB`,
     },
-    {
-      label: 'Build strategy',
-      value: fullPlan.binary.will_attempt_precompiled
-        ? 'Download and install the precompiled FrameOS release'
-        : fullPlan.binary.will_attempt_cross_compile
-        ? fullPlan.binary.build_host_configured
-          ? 'Cross-compile on the configured build host'
-          : 'Cross-compile locally on this server'
-        : fullPlan.binary.cross_compile_supported
-        ? 'Build on device because cross-compilation is disabled'
-        : 'Build on device because cross-compilation is unavailable for this target',
-    },
   ]
 
   if (fullPlan.drivers.length > 0) {
@@ -460,26 +456,29 @@ export function buildFullDeployPlanSummary(
   }
   const requestedCompilationMode = fullPlan.binary.requested_compilation_mode ?? fullPlan.binary.compilation_mode
   if (fullPlan.binary.compilation_mode === 'shared' && requestedCompilationMode !== 'precompiled') {
-    items.push({ label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' })
+    compilationItem = { label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' }
   }
   if (fullPlan.binary.compilation_mode === 'shared-scenes' && requestedCompilationMode === 'precompiled') {
-    items.push({ label: 'Compilation', value: 'Compiled scenes bundled into scenes.so next to the FrameOS binary' })
+    compilationItem = {
+      label: 'Compilation',
+      value: 'Compiled scenes bundled into scenes.so next to the FrameOS binary',
+    }
   }
   if (requestedCompilationMode === 'precompiled') {
     const fallbackMode =
       fullPlan.binary.compilation_mode === 'static'
         ? 'Single executable'
         : fullPlan.binary.compilation_mode === 'shared-scenes'
-          ? 'Bundled scenes library'
-          : 'Shared libraries'
-    items.push({
+        ? 'Bundled scenes library'
+        : 'Shared libraries'
+    compilationItem = {
       label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled
         ? 'Precompiled FrameOS binary and shared driver libraries'
         : `${fallbackMode}; precompiled release skipped${
             fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
           }`,
-    })
+    }
   }
   if (packagesToInstall.length > 0) {
     items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })
@@ -541,6 +540,11 @@ export function buildFullDeployPlanSummary(
     items.push({ label: 'After deploy', value: 'Device reboot required' })
   }
 
+  items.push(buildStrategyItem)
+  if (compilationItem) {
+    items.push(compilationItem)
+  }
+
   return items
 }
 
@@ -558,16 +562,11 @@ export function buildInferredFullDeployPlanSummary(
           : `${previousVersion ?? 'Not deployed'} -> ${CURRENT_FRAMEOS_VERSION}`,
     },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
-    {
-      label: 'Build strategy',
-      value: inferBuildStrategy(frame),
-    },
   ]
   const drivers = inferFrameDriverNames(frame)
   if (drivers.length > 0) {
     items.push({ label: 'Drivers', value: stringifyList(drivers) })
   }
-  items.push({ label: 'Compilation', value: inferCompilationSummary(frame) })
   const rebootSchedule = rebootScheduleSummary(frame?.reboot)
   if (rebootSchedule) {
     items.push({ label: 'Reboot schedule', value: `Automatic ${rebootSchedule}` })
@@ -576,6 +575,8 @@ export function buildInferredFullDeployPlanSummary(
   if (mounts) {
     items.push({ label: 'Mountpoints', value: mounts })
   }
+  items.push({ label: 'Build strategy', value: inferBuildStrategy(frame) })
+  items.push({ label: 'Compilation', value: inferCompilationSummary(frame) })
 
   return items
 }

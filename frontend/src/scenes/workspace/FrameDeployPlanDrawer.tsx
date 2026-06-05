@@ -32,6 +32,11 @@ import {
   type DeployRecommendation,
   type SummaryItem,
 } from '../frame/frameLogic'
+import {
+  frameCompilationModeOptions,
+  frameCrossCompilationOptions,
+  normalizeFrameCrossCompilation,
+} from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
@@ -267,6 +272,82 @@ function SummaryRows({ items }: { items: SummaryItem[] }): JSX.Element | null {
         </div>
       ))}
     </div>
+  )
+}
+
+function DeployBuildOptionsSection({
+  frame,
+  frameForm,
+}: {
+  frame: FrameType
+  frameForm: Partial<FrameType>
+}): JSX.Element {
+  const { setFrameFormValues, touchFrameFormField } = useActions(frameLogic({ frameId: frame.id }))
+  const mode = frameForm.mode ?? frame.mode ?? 'rpios'
+  const isBuildroot = mode === 'buildroot'
+  const rpios = {
+    ...(frame.rpios ?? {}),
+    ...(frameForm.rpios ?? {}),
+  }
+  const buildroot = {
+    ...(frame.buildroot ?? {}),
+    ...(frameForm.buildroot ?? {}),
+  }
+  const crossCompilation = normalizeFrameCrossCompilation(rpios.crossCompilation)
+  const compilationMode = String((isBuildroot ? buildroot.compilationMode : rpios.compilationMode) ?? '')
+  const selectClassName =
+    'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
+
+  const updateRpios = (field: keyof NonNullable<FrameType['rpios']>, value: string): void => {
+    setFrameFormValues({ rpios: { ...rpios, [field]: value } })
+    touchFrameFormField(`rpios.${field}`)
+  }
+
+  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string): void => {
+    setFrameFormValues({ buildroot: { ...buildroot, [field]: value } })
+    touchFrameFormField(`buildroot.${field}`)
+  }
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>FrameOS compilation</DrawerHeading>
+      <label className="block space-y-1">
+        <select
+          className={selectClassName}
+          value={compilationMode}
+          onChange={(event) =>
+            isBuildroot
+              ? updateBuildroot('compilationMode', event.target.value)
+              : updateRpios('compilationMode', event.target.value)
+          }
+        >
+          {frameCompilationModeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block space-y-1">
+        <span className="frame-tool-heading text-sm font-semibold">Build strategy</span>
+        <select
+          className={selectClassName}
+          value={isBuildroot ? 'buildroot' : crossCompilation}
+          disabled={isBuildroot}
+          onChange={(event) => updateRpios('crossCompilation', event.target.value)}
+        >
+          {isBuildroot ? (
+            <option value="buildroot">Build the configured Buildroot target</option>
+          ) : (
+            frameCrossCompilationOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+    </section>
   )
 }
 
@@ -783,9 +864,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs FrameOS, starts the remote management agent, and connects
-          back to this backend. The installer supports most major Debian and Ubuntu releases, including Raspberry Pi OS
-          releases based on Debian.
+          Run this command on the device as a user with sudo access. It installs FrameOS, starts the remote management
+          agent, and connects back to this backend. The installer supports most major Debian and Ubuntu releases,
+          including Raspberry Pi OS releases based on Debian.
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
@@ -875,6 +956,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     closeFrameChangeDrawer()
   }
   const showMainDeployView = (): void => setDeployDrawerView('main')
+  const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
+    (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
+  )
 
   const saveSdCardSettingsAndDownload = async (): Promise<void> => {
     const response = await apiFetch(`/api/frames/${frame.id}`, {
@@ -1001,11 +1085,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       </div>
                     </section>
                   ) : null}
-                  {fullDeployPlanSummary.length > 0 ? (
+                  {deploySummaryWithoutBuildOptions.length > 0 ? (
                     <section>
-                      <SummaryRows items={fullDeployPlanSummary} />
+                      <SummaryRows items={deploySummaryWithoutBuildOptions} />
                     </section>
                   ) : null}
+                  <DeployBuildOptionsSection frame={frame} frameForm={frameForm} />
                 </div>
               )}
             </>
