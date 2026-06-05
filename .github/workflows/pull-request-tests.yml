@@ -428,6 +428,22 @@ jobs:
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
 
+  frameos-setup-script:
+    name: Standalone setup script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Docker
+        run: docker version
+
+      - name: Check shell syntax
+        run: sh -n scripts/frameos-setup.sh
+
+      - name: Run setup script container tests
+        run: python3 -m unittest scripts.tests.test_frameos_setup -v
+
   deploy-e2e:
     name: Deploy E2E SSH
     runs-on: ubuntu-latest
