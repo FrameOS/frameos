@@ -163,6 +163,10 @@ BUILDROOT_SKIP_PULL = os.environ.get(
 BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_BUILDROOT_IMAGE_STALE_AFTER_SECONDS", str(6 * 60 * 60))
 )
+BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS = int(
+    os.environ.get("FRAMEOS_BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", str(10 * 60))
+)
+BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS = max(1, min(60, BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS // 3))
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
@@ -758,6 +762,7 @@ class BuildrootImageBuilder:
         self.build_environment_provider: BuildEnvironmentProvider = "docker"
         self.build_executor_config: BuildHostConfig | ModalSandboxConfig | None = None
         self.executor: BuildExecutor | None = None
+        self._last_sd_image_heartbeat_at: datetime | None = None
 
     async def run(self) -> dict[str, Any]:
         settings = _get_frame_settings(self.db, self.frame)
@@ -827,6 +832,7 @@ class BuildrootImageBuilder:
             raw_output_path = artifact_dir / raw_filename
             output_path = artifact_dir / filename
 
+            started_at = _utc_now()
             await _set_sd_image_status(
                 self.db,
                 self.redis,
@@ -841,7 +847,8 @@ class BuildrootImageBuilder:
                     "rawFilename": raw_filename,
                     "compilationMode": frame_compilation_mode(self.frame),
                     "configFingerprint": buildroot_sd_image_config_fingerprint(self.frame),
-                    "startedAt": _utc_now(),
+                    "startedAt": started_at,
+                    "lastHeartbeatAt": started_at,
                 }, self.request_id),
             )
             await self._log("stdout", f"Starting Buildroot SD image build {build_id}")
@@ -2008,6 +2015,34 @@ fi
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
+        await self._heartbeat_sd_image()
+
+    async def _heartbeat_sd_image(self) -> None:
+        if self.db is None or self.redis is None:
+            return
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_sd_image_heartbeat_at is not None
+            and (now - self._last_sd_image_heartbeat_at).total_seconds() < BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS
+        ):
+            return
+
+        current = latest_buildroot_sd_image(self.frame) or {}
+        if current.get("status") not in ACTIVE_SD_IMAGE_STATUSES:
+            return
+        if self.request_id and current.get("requestId") != self.request_id:
+            return
+
+        self._last_sd_image_heartbeat_at = now
+        await _set_sd_image_status(
+            self.db,
+            self.redis,
+            self.frame,
+            {
+                **current,
+                "lastHeartbeatAt": now.isoformat(),
+            },
+        )
 
     async def _with_progress_updates(self, message: str, awaitable: Awaitable[T]) -> T:
         interval = BUILDROOT_PROGRESS_LOG_INTERVAL_SECONDS
@@ -2756,9 +2791,17 @@ async def _buildroot_sd_image_queue_job_active(redis: Redis, sd_image: dict[str,
         return False
     try:
         status = await Job(job_id, redis).status()
-        return status in ACTIVE_ARQ_JOB_STATUSES
+        return status in ACTIVE_ARQ_JOB_STATUSES and not _sd_image_inactive(sd_image)
     except Exception:
         return not _sd_image_state_stale(sd_image)
+
+
+def _sd_image_inactive(sd_image: dict[str, Any]) -> bool:
+    timestamp = _parse_utc(sd_image.get("lastHeartbeatAt") or sd_image.get("startedAt") or sd_image.get("queuedAt"))
+    if timestamp is None:
+        return True
+    age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    return age_seconds > BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS
 
 
 def _sd_image_state_stale(sd_image: dict[str, Any]) -> bool:

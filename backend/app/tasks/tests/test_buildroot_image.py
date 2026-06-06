@@ -6,6 +6,7 @@ import importlib.util
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
@@ -62,6 +63,58 @@ async def test_buildroot_progress_updates_after_interval(monkeypatch):
     assert logs[0][0] == "stdout"
     assert logs[0][1].startswith("Still working on SD image (")
     assert "elapsed" in logs[0][1]
+
+
+@pytest.mark.asyncio
+async def test_buildroot_sd_image_queue_job_active_requires_recent_heartbeat(monkeypatch):
+    class FakeJob:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def status(self):
+            return buildroot_image_module.JobStatus.in_progress
+
+    monkeypatch.setattr(buildroot_image_module, "Job", FakeJob)
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", 60)
+
+    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+    active = await buildroot_image_module._buildroot_sd_image_queue_job_active(
+        None,
+        {
+            "queueJobId": "buildroot_sd_image:1:stale",
+            "status": "building",
+            "startedAt": stale_at,
+            "lastHeartbeatAt": stale_at,
+        },
+    )
+
+    assert active is False
+
+
+@pytest.mark.asyncio
+async def test_buildroot_sd_image_queue_job_active_keeps_recent_heartbeat(monkeypatch):
+    class FakeJob:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def status(self):
+            return buildroot_image_module.JobStatus.in_progress
+
+    monkeypatch.setattr(buildroot_image_module, "Job", FakeJob)
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", 60)
+
+    recent_at = datetime.now(timezone.utc).isoformat()
+    active = await buildroot_image_module._buildroot_sd_image_queue_job_active(
+        None,
+        {
+            "queueJobId": "buildroot_sd_image:1:active",
+            "status": "building",
+            "startedAt": recent_at,
+            "lastHeartbeatAt": recent_at,
+        },
+    )
+
+    assert active is True
 
 
 def test_buildroot_frameos_cross_target_uses_docker_arm64_platform(tmp_path, monkeypatch):
