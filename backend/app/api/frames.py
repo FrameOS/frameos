@@ -122,6 +122,7 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.buildroot_image import (
     buildroot_sd_image_config_fingerprint,
+    can_use_precompiled_buildroot_sd_image,
     clear_buildroot_sd_image,
     ensure_buildroot_frame_defaults,
     latest_buildroot_sd_image,
@@ -2416,7 +2417,12 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
         platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
     except ValueError as exc:
         _bad_request(str(exc))
-    base_entry = await resolve_buildroot_base_entry(platform)
+    base_entry = None
+    try:
+        base_entry = await resolve_buildroot_base_entry(platform)
+    except Exception:
+        if not can_use_precompiled_buildroot_sd_image(frame):
+            raise
     return {
         "sdImage": latest_buildroot_sd_image(frame, base_entry)
         or {
@@ -2441,9 +2447,10 @@ async def api_frame_buildroot_sd_image(
 
     settings = get_settings_dict(db, project_id=frame.project_id)
     build_environment_provider = selected_build_environment_provider(settings)
-    if build_environment_provider == "none":
+    if build_environment_provider == "none" and not can_use_precompiled_buildroot_sd_image(frame):
         _bad_request(
-            "Buildroot SD card image generation requires Docker, build host, or Modal sandboxes as the global build environment."
+            "Buildroot SD card image generation without Docker, build host, or Modal sandboxes requires "
+            "precompiled Buildroot SD image mode with no compiled scenes."
         )
     if build_environment_requires_executor_config(build_environment_provider) and get_build_executor_config(db, frame.project_id) is None:
         _bad_request(f"Selected build environment '{build_environment_provider}' is not configured")

@@ -54,7 +54,7 @@ from app.tasks.setup_json_reset import (
 )
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
-from app.utils.build_environment import selected_build_environment_provider
+from app.utils.build_environment import BuildEnvironmentProvider, selected_build_environment_provider
 from app.utils.build_host import BuildHostConfig, get_build_executor_config
 from app.utils.build_executor import (
     BuildExecutor,
@@ -128,6 +128,7 @@ BUILDROOT_DOCKER_APT_DEPS = (
 )
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
 BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
+BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 LEGACY_PLATFORM_ALIASES = {
@@ -617,7 +618,11 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
             "status": "stale",
             "error": "The generated image was built with an older SD image customization version",
         }
-    if sd_image.get("status") == "ready" and not _sd_image_base_matches_current(sd_image, current_base_entry):
+    if (
+        sd_image.get("status") == "ready"
+        and not sd_image.get("precompiledSdImage")
+        and not _sd_image_base_matches_current(sd_image, current_base_entry)
+    ):
         return {
             **sd_image,
             "status": "stale",
@@ -628,6 +633,10 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
     return sd_image
 
 
+def can_use_precompiled_buildroot_sd_image(frame: Frame) -> bool:
+    return frame_compilation_mode(frame) == COMPILATION_MODE_PRECOMPILED and frame_compiled_scene_count(frame) == 0
+
+
 async def start_buildroot_sd_image(
     db: Session,
     redis: Redis,
@@ -635,7 +644,12 @@ async def start_buildroot_sd_image(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
-    current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+    current_base_entry = None
+    try:
+        current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+    except Exception:
+        if not can_use_precompiled_buildroot_sd_image(frame):
+            raise
     sd_image = latest_buildroot_sd_image(frame, current_base_entry)
     if sd_image and sd_image.get("status") == "ready" and not force:
         return False, sd_image
@@ -741,16 +755,19 @@ class BuildrootImageBuilder:
         self.redis = redis
         self.frame = frame
         self.request_id = request_id
+        self.build_environment_provider: BuildEnvironmentProvider = "docker"
         self.build_executor_config: BuildHostConfig | ModalSandboxConfig | None = None
         self.executor: BuildExecutor | None = None
 
     async def run(self) -> dict[str, Any]:
         settings = _get_frame_settings(self.db, self.frame)
         provider = selected_build_environment_provider(settings)
+        self.build_environment_provider = provider
         self.build_executor_config = self._selected_build_executor()
-        if provider == "none":
+        if provider == "none" and not self._can_use_precompiled_sd_image():
             raise RuntimeError(
-                "Buildroot SD image generation requires Docker, build host, or Modal sandboxes as the global build environment."
+                "Buildroot SD image generation without Docker, build host, or Modal sandboxes requires "
+                "precompiled Buildroot SD image mode with no compiled scenes."
             )
         ensure_build_executor_configured(provider, self.build_executor_config)
 
@@ -829,16 +846,28 @@ class BuildrootImageBuilder:
             )
             await self._log("stdout", f"Starting Buildroot SD image build {build_id}")
 
-            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
-            compose_image = await self._compose_tools_image()
-            precompiled_sd_image = await self._try_compose_precompiled_sd_image(
-                temp_dir=temp_dir,
-                output_path=raw_output_path,
-                bootstrap_frame=bootstrap_frame,
-                setup_payload=setup_payload,
-                image=compose_image,
-            )
+            base_entry: dict[str, Any] | None = None
+            compose_image = None
+            precompiled_sd_image = None
+            if self._can_use_precompiled_sd_image():
+                compose_image = await self._precompiled_sd_image_patch_image()
+                precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                    temp_dir=temp_dir,
+                    output_path=raw_output_path,
+                    bootstrap_frame=bootstrap_frame,
+                    setup_payload=setup_payload,
+                    image=compose_image,
+                    allow_fallback=self.build_environment_provider != "none",
+                )
+            if precompiled_sd_image is None and self.build_environment_provider == "none":
+                raise RuntimeError(
+                    "Buildroot SD image generation without Docker, build host, or Modal sandboxes requires "
+                    "an available full precompiled Buildroot SD image release."
+                )
             if precompiled_sd_image is None:
+                base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+                if compose_image is None:
+                    compose_image = await self._compose_tools_image()
                 frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
                 agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
                 overlay_dir = temp_dir / "overlay"
@@ -896,12 +925,18 @@ class BuildrootImageBuilder:
                 "platform": SUPPORTED_BUILDROOT_PLATFORM,
                 "frameosVersion": current_frameos_version(),
                 "buildrootVersion": BUILDROOT_VERSION,
-                "baseImage": {
-                    "frameosVersion": base_entry.get("frameos_version"),
-                    "objectKey": base_entry.get("object_key"),
-                    "sha256": base_entry.get("sha256"),
-                    "updatedAt": base_entry.get("updated_at"),
-                },
+                **(
+                    {
+                        "baseImage": {
+                            "frameosVersion": base_entry.get("frameos_version"),
+                            "objectKey": base_entry.get("object_key"),
+                            "sha256": base_entry.get("sha256"),
+                            "updatedAt": base_entry.get("updated_at"),
+                        },
+                    }
+                    if base_entry is not None
+                    else {}
+                ),
                 **(
                     {
                         "precompiledSdImage": {
@@ -932,10 +967,7 @@ class BuildrootImageBuilder:
             return metadata
 
     def _can_use_precompiled_sd_image(self) -> bool:
-        return (
-            frame_compilation_mode(self.frame) == COMPILATION_MODE_PRECOMPILED
-            and frame_compiled_scene_count(self.frame) == 0
-        )
+        return can_use_precompiled_buildroot_sd_image(self.frame)
 
     def _selected_build_executor(self) -> BuildHostConfig | ModalSandboxConfig | None:
         project_id = getattr(self.frame, "project_id", None)
@@ -975,6 +1007,7 @@ class BuildrootImageBuilder:
         bootstrap_frame: Frame | Any,
         setup_payload: dict[str, Any],
         image: str | None,
+        allow_fallback: bool = True,
     ) -> PrecompiledBuildrootSdImageResult | None:
         if not self._can_use_precompiled_sd_image():
             return None
@@ -1002,6 +1035,8 @@ class BuildrootImageBuilder:
             )
         except Exception as exc:
             output_path.unlink(missing_ok=True)
+            if not allow_fallback:
+                raise RuntimeError(f"Could not customize full precompiled Buildroot SD image release: {exc}") from exc
             await self._log(
                 "stderr",
                 f"Could not use full precompiled Buildroot SD image release: {exc}. Falling back to composed image.",
@@ -2060,6 +2095,19 @@ fi
     @staticmethod
     def _host_has_compose_tools() -> bool:
         return all(shutil.which(tool) for tool in BUILDROOT_COMPOSE_TOOLS)
+
+    @staticmethod
+    def _host_has_boot_patch_tools() -> bool:
+        return all(shutil.which(tool) for tool in BUILDROOT_BOOT_PATCH_TOOLS)
+
+    async def _precompiled_sd_image_patch_image(self) -> str | None:
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+        if self.build_environment_provider == "none":
+            return None
+        if self.executor.uses_local_filesystem and self._host_has_boot_patch_tools():
+            return None
+        return await self._compose_tools_image()
 
     async def _ensure_buildroot_image(self) -> str:
         image = self._buildroot_image()

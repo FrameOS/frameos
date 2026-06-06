@@ -444,6 +444,100 @@ def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monk
     )
 
 
+def test_precompiled_sd_image_status_does_not_require_cached_base_metadata(tmp_path):
+    image_path = tmp_path / "frameos.img.gz"
+    image_path.write_bytes(b"image")
+    frame = SimpleNamespace(
+        mode="buildroot",
+        buildroot={
+            "compilationMode": "precompiled",
+            "sdImage": {
+                "status": "ready",
+                "path": str(image_path),
+                "compilationMode": "precompiled",
+                "customizationVersion": buildroot_image_module.BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "precompiledSdImage": {
+                    "releaseUrl": "https://example.test/releases/v2026.6.3/frameos.img.gz",
+                    "cacheHit": False,
+                },
+            },
+        },
+        scenes=[],
+    )
+
+    sd_image = buildroot_image_module.latest_buildroot_sd_image(
+        frame,
+        {
+            "object_key": "buildroot-images/new-base.img.gz",
+            "sha256": "new-base-sha256",
+        },
+    )
+
+    assert sd_image is not None
+    assert sd_image["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_buildroot_run_allows_precompiled_sd_image_without_build_environment(monkeypatch):
+    frame = SimpleNamespace(
+        id=1,
+        project_id=7,
+        mode="buildroot",
+        buildroot={"compilationMode": "precompiled"},
+        scenes=[{"id": "scene-1", "settings": {"execution": "interpreted"}}],
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+
+    async def fake_run_with_context():
+        return {"status": "ready"}
+
+    monkeypatch.setattr(
+        buildroot_image_module,
+        "_get_frame_settings",
+        lambda _db, _frame: {"buildEnvironment": {"provider": "none"}},
+    )
+    monkeypatch.setattr(builder, "_run_with_context", fake_run_with_context)
+
+    assert await builder.run() == {"status": "ready"}
+    assert builder.build_environment_provider == "none"
+
+
+@pytest.mark.asyncio
+async def test_precompiled_sd_image_patch_uses_local_boot_tools_without_docker(monkeypatch):
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
+    builder.build_environment_provider = "docker"
+    builder.executor = SimpleNamespace(uses_local_filesystem=True)
+
+    async def fail_compose_tools_image():
+        raise AssertionError("precompiled SD image boot patch should not require Docker when mtools are local")
+
+    monkeypatch.setattr(builder, "_host_has_boot_patch_tools", lambda: True)
+    monkeypatch.setattr(builder, "_compose_tools_image", fail_compose_tools_image)
+
+    assert await builder._precompiled_sd_image_patch_image() is None
+
+
+@pytest.mark.asyncio
+async def test_buildroot_run_rejects_source_sd_image_without_build_environment(monkeypatch):
+    frame = SimpleNamespace(
+        id=1,
+        project_id=7,
+        mode="buildroot",
+        buildroot={"compilationMode": "static"},
+        scenes=[],
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+
+    monkeypatch.setattr(
+        buildroot_image_module,
+        "_get_frame_settings",
+        lambda _db, _frame: {"buildEnvironment": {"provider": "none"}},
+    )
+
+    with pytest.raises(RuntimeError, match="precompiled Buildroot SD image mode"):
+        await builder.run()
+
+
 @pytest.mark.asyncio
 async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeypatch):
     frame_data = {
@@ -536,6 +630,59 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
     assert "managed_boot_files=(" in captured["patch_script"]
     assert "frameos-wifi.nmconnection" in captured["patch_script"]
     assert 'mdel -i "$target"' in captured["patch_script"]
+
+
+@pytest.mark.asyncio
+async def test_precompiled_sd_image_shortcut_does_not_fallback_when_disabled(tmp_path, monkeypatch):
+    frame = SimpleNamespace(
+        id=42,
+        project_id=7,
+        mode="buildroot",
+        buildroot={"platform": "raspberry-pi-zero-2-w", "compilationMode": "precompiled"},
+        scenes=[],
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    logs: list[tuple[str, str]] = []
+
+    async def fake_download_precompiled_buildroot_sd_image(**_kwargs):
+        return PrecompiledBuildrootSdImageResult(
+            release_url="https://example.test/releases/v2026.6.3/frameos.img.gz",
+            archive_path=tmp_path / "release.img.gz",
+            cache_hit=False,
+        )
+
+    def fake_stage_boot_overlay(*, overlay_dir, **_kwargs):
+        (overlay_dir / "boot").mkdir(parents=True)
+
+    async def fake_compose_sd_image_from_precompiled_release(**_kwargs):
+        raise RuntimeError("mtools unavailable")
+
+    async def fake_log(level, message):
+        logs.append((level, message))
+
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.download_precompiled_buildroot_sd_image",
+        fake_download_precompiled_buildroot_sd_image,
+    )
+    monkeypatch.setattr(builder, "_stage_boot_overlay", fake_stage_boot_overlay)
+    monkeypatch.setattr(
+        builder,
+        "_compose_sd_image_from_precompiled_release",
+        fake_compose_sd_image_from_precompiled_release,
+    )
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    with pytest.raises(RuntimeError, match="Could not customize full precompiled Buildroot SD image release"):
+        await builder._try_compose_precompiled_sd_image(
+            temp_dir=tmp_path / "tmp",
+            output_path=tmp_path / "output.img",
+            bootstrap_frame=SimpleNamespace(),
+            setup_payload={},
+            image=None,
+            allow_fallback=False,
+        )
+
+    assert not any("Falling back to composed image" in message for _level, message in logs)
 
 
 def _write_test_mbr(path: Path, partitions: list[tuple[int, int]]) -> None:

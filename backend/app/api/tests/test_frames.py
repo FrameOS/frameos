@@ -1210,6 +1210,72 @@ async def test_api_frame_buildroot_sd_image_accepts_configured_build_host(async_
 
 
 @pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_allows_precompiled_when_build_environment_is_none(
+    async_client, db, redis, monkeypatch
+):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'precompiled'}
+    frame.scenes = [{'id': 'scene-1', 'settings': {'execution': 'interpreted'}}]
+    db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'none'}))
+    db.add(frame)
+    db.commit()
+    captured: list[int] = []
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append(id)
+
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image preparation started'
+    assert captured == [frame.id]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_rejects_source_build_when_build_environment_is_none(
+    async_client, db, redis
+):
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'static'}
+    db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'none'}))
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 400
+    assert 'precompiled Buildroot SD image mode' in response.json()['detail']
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_status_allows_precompiled_when_base_manifest_is_unavailable(
+    async_client, db, redis, monkeypatch
+):
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    db.add(frame)
+    db.commit()
+
+    async def fake_resolve_buildroot_base_entry(*_args, **_kwargs):
+        raise RuntimeError('base manifest unavailable')
+
+    monkeypatch.setattr(frames_api, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+
+    response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['sdImage']['status'] == 'idle'
+
+
+@pytest.mark.asyncio
 async def test_api_frame_buildroot_sd_image_does_not_publish_previous_error(async_client, db, redis, monkeypatch):
     import app.api.frames as frames_api_module
     import app.tasks.buildroot_image as buildroot_image_module
