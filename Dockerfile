@@ -136,6 +136,14 @@ RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
       /app/frameos/agent/build \
       /app/frameos/agent/tmp
 
+WORKDIR /app/frameos
+RUN nim c \
+      --nimCache:/tmp/frameos-native-js-transpile-nimcache \
+      --out:/app/frameos/build/native_js_transpile \
+      tools/native_js_transpile.nim \
+    && test -x /app/frameos/build/native_js_transpile \
+    && rm -rf /tmp/frameos-native-js-transpile-nimcache
+
 FROM ${PYTHON_IMAGE} AS python-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -163,6 +171,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
+ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app
