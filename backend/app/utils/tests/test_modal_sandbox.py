@@ -161,3 +161,42 @@ async def test_modal_sandbox_run_exports_frameos_path(monkeypatch):
     assert f"export PATH={FRAMEOS_SANDBOX_PATH}" in args[2]
     assert args[2].endswith("; nimble --version")
     assert kwargs["timeout"] == session.config.timeout
+
+
+@pytest.mark.asyncio
+async def test_modal_sandbox_run_logs_timeout_notice():
+    entries = []
+
+    async def fake_log(level, message):
+        entries.append((level, message))
+
+    class FakeSandbox:
+        def exec(self, *_args, **_kwargs):
+            raise TimeoutError("sandbox command timed out")
+
+    session = ModalSandboxSession(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            app_name="frameos-custom",
+            image="frameos/frameos:custom",
+            timeout=120,
+            idle_timeout=30,
+        ),
+        logger=fake_log,
+    )
+    session._sandbox = FakeSandbox()
+
+    with pytest.raises(TimeoutError):
+        await session.run("nimble --version", log_command=False, log_output=False)
+
+    assert entries == [
+        (
+            "stderr",
+            "Modal sandbox timed out while running Modal command. "
+            "Configured timeout=120s, idle_timeout=30s, app=frameos-custom, "
+            "image=frameos/frameos:custom. Increase the Modal sandbox timeout/idle timeout "
+            "in global settings if this build legitimately needs longer.",
+        )
+    ]

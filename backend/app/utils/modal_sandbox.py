@@ -240,6 +240,14 @@ async def _call_modal(method, *args, **kwargs):
     return result
 
 
+def _is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    name = exc.__class__.__name__.lower()
+    message = str(exc).lower()
+    return "timeout" in name or "timed out" in message or "timeout" in message
+
+
 class ModalSandboxSession:
     def __init__(self, config: ModalSandboxConfig, *, logger: LogFunc | None = None) -> None:
         self.config = config
@@ -302,7 +310,12 @@ class ModalSandboxSession:
             "experimental_options": {"enable_docker": True} if self.config.enable_docker else None,
         }
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
-        self._sandbox = await _call_modal(modal.Sandbox.create, "sleep", str(self.config.timeout), **kwargs)
+        try:
+            self._sandbox = await _call_modal(modal.Sandbox.create, "sleep", str(self.config.timeout), **kwargs)
+        except Exception as exc:
+            if _is_timeout_error(exc):
+                await self._log_timeout_notice("creating Modal sandbox")
+            raise
         identity = await self._sandbox_identity()
         await self._log("stdout", self._connection_summary(identity))
 
@@ -368,6 +381,16 @@ class ModalSandboxSession:
         if self._logger:
             await self._logger(level, message)
 
+    async def _log_timeout_notice(self, action: str) -> None:
+        await self._log(
+            "stderr",
+            "Modal sandbox timed out while "
+            f"{action}. Configured timeout={self.config.timeout}s, "
+            f"idle_timeout={self.config.idle_timeout}s, app={self.config.app_name}, "
+            f"image={self.config.image}. Increase the Modal sandbox timeout/idle timeout "
+            "in global settings if this build legitimately needs longer.",
+        )
+
     async def run(
         self,
         command: str,
@@ -382,32 +405,37 @@ class ModalSandboxSession:
             await self._log("stdout", f"$ {log_command if isinstance(log_command, str) else command}")
 
         wrapped_command = f"export PATH={shlex.quote(FRAMEOS_SANDBOX_PATH)} HOME=/root; {command}"
-        proc = await _call_modal(self._sandbox.exec, "bash", "-lc", wrapped_command, timeout=self.config.timeout)
-        out_buf: list[str] = []
-        err_buf: list[str] = []
+        try:
+            proc = await _call_modal(self._sandbox.exec, "bash", "-lc", wrapped_command, timeout=self.config.timeout)
+            out_buf: list[str] = []
+            err_buf: list[str] = []
 
-        async def pump(stream, level: str, buf: list[str]) -> None:
-            pending = ""
-            async for chunk in stream:
-                text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, (bytes, bytearray)) else str(chunk)
-                pending += text
-                while True:
-                    split_index = pending.find("\n")
-                    if split_index == -1:
-                        break
-                    segment = pending[:split_index].rstrip("\r")
-                    pending = pending[split_index + 1 :]
-                    buf.append(f"{segment}\n")
-                    if log_output and segment:
-                        await self._log(level, segment)
-            pending = pending.rstrip("\r")
-            if pending:
-                buf.append(pending)
-                if log_output:
-                    await self._log(level, pending)
+            async def pump(stream, level: str, buf: list[str]) -> None:
+                pending = ""
+                async for chunk in stream:
+                    text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+                    pending += text
+                    while True:
+                        split_index = pending.find("\n")
+                        if split_index == -1:
+                            break
+                        segment = pending[:split_index].rstrip("\r")
+                        pending = pending[split_index + 1 :]
+                        buf.append(f"{segment}\n")
+                        if log_output and segment:
+                            await self._log(level, segment)
+                pending = pending.rstrip("\r")
+                if pending:
+                    buf.append(pending)
+                    if log_output:
+                        await self._log(level, pending)
 
-        await asyncio.gather(pump(proc.stdout, "stdout", out_buf), pump(proc.stderr, "stderr", err_buf))
-        return_code = await _call_modal(proc.wait)
+            await asyncio.gather(pump(proc.stdout, "stdout", out_buf), pump(proc.stderr, "stderr", err_buf))
+            return_code = await _call_modal(proc.wait)
+        except Exception as exc:
+            if _is_timeout_error(exc):
+                await self._log_timeout_notice("running Modal command")
+            raise
         if return_code and log_output:
             await self._log("exit_status", f"The command exited with status {return_code}")
         return int(return_code or 0), "".join(out_buf) or None, "".join(err_buf) or None
