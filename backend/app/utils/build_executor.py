@@ -437,6 +437,13 @@ class ModalBuildExecutor(BuildExecutor):
         # build-host executors keep using digest-pinned references.
         return image
 
+    @staticmethod
+    def _requires_nested_docker(platform: str | None) -> bool:
+        if not platform:
+            return False
+        normalized = platform.lower()
+        return normalized not in {"linux/amd64", "amd64", "x86_64"}
+
     async def _sandbox_log(self, level: str, message: str) -> None:
         if self.logger:
             await self.logger(level, message)
@@ -512,6 +519,20 @@ class ModalBuildExecutor(BuildExecutor):
         log_output: bool = True,
         stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
     ) -> RunResult:
+        if self._requires_nested_docker(platform):
+            return await self._nested_docker_run(
+                image=image,
+                args=args,
+                mounts=mounts,
+                env=env,
+                workdir=workdir,
+                platform=platform,
+                ulimits=ulimits,
+                log_command=log_command,
+                log_output=log_output,
+                stderr_log_tag=stderr_log_tag,
+            )
+
         config = replace(self.config, image=image, enable_docker=False)
         run_command = " ".join(shlex.quote(arg) for arg in args) if args else "true"
         if workdir:
@@ -550,6 +571,57 @@ class ModalBuildExecutor(BuildExecutor):
                         await sandbox.download_dir_tarball(mount.target, str(mount.source))
                     elif mount.source.is_file():
                         await sandbox.download_file(mount.target, str(mount.source))
+        return status, out, err
+
+    async def _nested_docker_run(
+        self,
+        *,
+        image: str,
+        args: list[str],
+        mounts: list[DockerMount],
+        env: dict[str, str] | None,
+        workdir: str | None,
+        platform: str | None,
+        ulimits: list[str] | None,
+        log_command: str | bool,
+        log_output: bool,
+        stderr_log_tag: Literal["stderr", "stdout"],
+    ) -> RunResult:
+        config = replace(self.config, enable_docker=True)
+        command = self._docker_run_command(
+            image=image,
+            args=args,
+            mounts=mounts,
+            env=env,
+            workdir=workdir,
+            platform=platform,
+            ulimits=ulimits,
+        )
+        async with ModalSandboxSession(config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
+            await self._sandbox_log(
+                "stdout",
+                f"Preparing Modal sandbox with nested Docker for {platform or 'default'} image {image}"
+                + (f" and {len(mounts)} mount" + ("s" if len(mounts) != 1 else "") if mounts else ""),
+            )
+            for mount in mounts:
+                if mount.source.is_dir():
+                    await sandbox.sync_dir_tarball(str(mount.source), str(mount.source))
+                elif mount.source.is_file():
+                    await sandbox.sync_file(str(mount.source), str(mount.source))
+
+            status, out, err = await sandbox.run(
+                command,
+                log_command=log_command if log_command is not True else f"Modal nested Docker run {image}",
+                log_output=log_output,
+            )
+            if status == 0:
+                for mount in mounts:
+                    if mount.read_only:
+                        continue
+                    if mount.source.is_dir():
+                        await sandbox.download_dir_tarball(str(mount.source), str(mount.source))
+                    elif mount.source.is_file():
+                        await sandbox.download_file(str(mount.source), str(mount.source))
         return status, out, err
 
 

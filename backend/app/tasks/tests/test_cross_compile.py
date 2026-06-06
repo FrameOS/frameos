@@ -197,7 +197,7 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
 
 
 @pytest.mark.asyncio
-async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monkeypatch: pytest.MonkeyPatch):
+async def test_modal_toolchain_build_uses_nested_docker_for_arm64(tmp_path, monkeypatch: pytest.MonkeyPatch):
     temp_dir = tmp_path / "tmp"
     build_dir = tmp_path / "build"
     temp_dir.mkdir()
@@ -272,7 +272,11 @@ async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monk
 
     assert result == str(build_dir / "frameos")
     image_calls = [value for kind, value in calls if kind == "image"]
-    assert image_calls[0].startswith("frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest")
+    assert image_calls == ["frameos/frameos:latest"]
     run_commands = [value for kind, value in calls if kind == "run"]
-    assert any("bash /tmp/frameos-cross/build.sh" in command for command in run_commands)
-    assert all("docker " not in command for command in run_commands)
+    assert any("docker run --rm --platform linux/arm64" in command for command in run_commands)
+    assert any(
+        "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest" in command
+        and "bash /tmp/frameos-cross/build.sh" in command
+        for command in run_commands
+    )
