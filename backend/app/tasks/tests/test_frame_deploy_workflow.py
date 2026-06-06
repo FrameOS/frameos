@@ -87,6 +87,12 @@ class RecordingDeployer(FakeDeployer):
             return 1
         return 0
 
+    async def run_command(self, command: str, **_kwargs) -> tuple[int, str, str]:
+        self.commands.append(command)
+        if "frameos-firstboot-setup.service" in command or "frameos-setup-reset.sh" in command:
+            return 1, "", ""
+        return 0, "", ""
+
     async def restart_service(self, service: str) -> None:
         self.restarted_services.append(service)
 
@@ -274,12 +280,13 @@ async def test_full_plan_supports_buildroot_without_remote_apt(monkeypatch: pyte
     plan = await workflow.plan("full")
 
     assert captured_kwargs == [
-        {
-            "allow_cross_compile": True,
-            "force_cross_compile": True,
-            "compilation_mode": "static",
-        }
-    ]
+            {
+                "allow_cross_compile": True,
+                "force_cross_compile": True,
+                "allow_on_device_fallback": False,
+                "compilation_mode": "static",
+            }
+        ]
     assert plan.full_deploy is not None
     assert plan.full_deploy.target["distro"] == "buildroot"
     assert plan.full_deploy.package_plans == []
@@ -360,12 +367,13 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
     assert plan.frame_dict["mode"] == "rpios"
     assert plan.frame_dict["ssh_user"] == "pi"
     assert captured_kwargs == [
-        {
-            "allow_cross_compile": False,
-            "force_cross_compile": False,
-            "compilation_mode": "precompiled",
-        }
-    ]
+            {
+                "allow_cross_compile": False,
+                "force_cross_compile": False,
+                "allow_on_device_fallback": True,
+                "compilation_mode": "precompiled",
+            }
+        ]
     assert plan.full_deploy is not None
     assert plan.full_deploy.target["distro"] == "ubuntu"
     assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "imagemagick", "build-essential", "caddy"}
@@ -1628,6 +1636,28 @@ def test_legacy_shared_driver_setup_segfault_guard_requires_successful_setup_out
         1,
         ["FrameOS setup: shared driver inkyPython: setup complete"],
     ) is False
+
+
+@pytest.mark.asyncio
+async def test_setup_json_reset_cleanup_skips_when_helper_absent():
+    frame = SimpleNamespace(id=24, name="NoFirstbootHelper", mode="rpios")
+    deployer = RecordingDeployer()
+    deployer.db = None
+    deployer.redis = None
+    deployer.frame = frame
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._remove_setup_json_reset_helper()
+
+    assert not any("Removing setup JSON reset helper" in message for _level, message in deployer.logs)
+    assert not any("systemctl disable frameos-firstboot-setup.service" in command for command in deployer.commands)
 
 
 @pytest.mark.asyncio

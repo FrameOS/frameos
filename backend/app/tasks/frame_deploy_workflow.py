@@ -37,6 +37,7 @@ from app.tasks.setup_json_reset import (
     render_setup_json_reset_service,
     setup_json_reset_file_path,
 )
+from app.utils.build_environment import selected_build_environment_provider
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
@@ -394,6 +395,8 @@ class FrameDeployWorkflow:
         drivers = drivers_for_frame(self.frame)
         driver_names = sorted(drivers.keys())
 
+        settings = _get_frame_settings(self.db, self.frame)
+        build_environment_provider = selected_build_environment_provider(settings)
         compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
         cross_compilation_setting = (
             "always" if is_buildroot else (compile_settings.get("crossCompilation") or "auto").lower()
@@ -402,15 +405,22 @@ class FrameDeployWorkflow:
             cross_compilation_setting = "auto"
         compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
 
-        allow_cross_compile = cross_compilation_setting != "never"
+        if build_environment_provider == "none" and (is_buildroot or cross_compilation_setting == "always"):
+            raise RuntimeError(
+                "Server-side compilation is disabled in global settings. Choose Docker, build host, or Modal "
+                "sandboxes as the build environment, or set this frame to always compile on device."
+            )
+
+        allow_cross_compile = cross_compilation_setting != "never" and build_environment_provider != "none"
         force_cross_compile = is_buildroot or cross_compilation_setting == "always"
+        allow_on_device_fallback = build_environment_provider == "none" or cross_compilation_setting == "never"
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
+            allow_on_device_fallback=allow_on_device_fallback,
             compilation_mode=compilation_mode,
         )
 
-        settings = _get_frame_settings(self.db, self.frame)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
         known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]
@@ -1219,8 +1229,25 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
 
     async def _remove_setup_json_reset_helper(self) -> None:
+        status, _out, _err = await self.deployer.run_command(
+            "test -e /etc/systemd/system/frameos-firstboot-setup.service "
+            "|| test -e /usr/local/bin/frameos-setup-reset.sh "
+            "|| test -e /srv/frameos/build/frameos-firstboot-setup.service "
+            "|| test -e /srv/frameos/build/frameos-setup-reset.sh",
+            log_command=False,
+            log_output=False,
+        )
+        if status != 0:
+            return
+
         await self.deployer.log("stdout", f"{icon} Removing setup JSON reset helper")
-        await self.deployer.exec_command(f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
+        await self.deployer.exec_command(
+            f"if systemctl list-unit-files --type=service --no-legend {SETUP_JSON_RESET_SERVICE_NAME} "
+            f"| grep -q '^{SETUP_JSON_RESET_SERVICE_NAME}'; then "
+            f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}; "
+            "fi",
+            raise_on_error=False,
+        )
         await self._exec_host_root_command(
             f"rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
             fallback_command=f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",

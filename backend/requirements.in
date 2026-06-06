@@ -8,6 +8,7 @@ fonttools
 honcho
 jwt
 mypy
+modal>=1.4.0
 packaging
 pillow
 pip-tools

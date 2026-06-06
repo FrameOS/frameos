@@ -38,6 +38,7 @@ export interface FullDeployPlanResponse {
     will_attempt_precompiled?: boolean
     cross_compile_supported?: boolean
     build_host_configured?: boolean
+    build_executor?: string | null
     prebuilt_target?: string | null
     has_prebuilt_entry?: boolean
     precompiled_release_url?: string | null
@@ -270,7 +271,7 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
       ? 'Build on device'
       : crossCompilation === 'always'
       ? 'Cross-compile'
-      : 'Cross-compile if the detected target supports it, otherwise build on device'
+      : 'Use the global build environment'
 
   if (compilationMode === 'precompiled') {
     if (crossCompilation === 'always') {
@@ -428,8 +429,8 @@ export function buildFullDeployPlanSummary(
     value: fullPlan.binary.will_attempt_precompiled
       ? 'Download and install the precompiled FrameOS release'
       : fullPlan.binary.will_attempt_cross_compile
-      ? fullPlan.binary.build_host_configured
-        ? 'Cross-compile on the configured build host'
+      ? fullPlan.binary.build_executor
+        ? `Cross-compile via ${fullPlan.binary.build_executor}`
         : 'Cross-compile locally on this server'
       : fullPlan.binary.cross_compile_supported
       ? 'Build on device because cross-compilation is disabled'

@@ -112,6 +112,7 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.build_environment import selected_build_environment_provider
 from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.timezone import frame_timezone, normalize_timezone, stored_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
@@ -2435,6 +2436,13 @@ async def api_frame_buildroot_sd_image(
         _not_found()
     if (frame.mode or "rpios") != "buildroot":
         _bad_request("SD card image generation is only available for Buildroot frames")
+
+    settings = get_settings_dict(db, project_id=frame.project_id)
+    build_environment_provider = selected_build_environment_provider(settings)
+    if build_environment_provider not in {"docker", "modal"}:
+        _bad_request(
+            "Buildroot SD card image generation requires Docker or Modal sandboxes as the global build environment."
+        )
 
     try:
         ensure_buildroot_frame_defaults(frame)

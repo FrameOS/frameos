@@ -8,7 +8,7 @@ import shlex
 import shutil
 import tarfile
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from textwrap import dedent, indent
@@ -27,7 +27,13 @@ from app.tasks.prebuilt_deps import (
     fetch_prebuilt_manifest,
     resolve_prebuilt_target,
 )
-from app.utils.build_host import BuildHostConfig, BuildHostSession
+from app.utils.build_host import (
+    BuildHostConfig,
+    BuildHostSession,
+    build_executor_display_name,
+    create_build_executor_session,
+)
+from app.utils.modal_sandbox import ModalSandboxConfig, ModalSandboxSession
 from app.utils.local_exec import exec_local_command
 
 icon = "🔶"
@@ -168,7 +174,7 @@ class CrossCompiler:
         prebuilt_target: str | None = None,
         logger: LogFunc | None = None,
         build_dir: str | Path | None = None,
-        build_host: BuildHostConfig | None = None,
+        build_host: BuildHostConfig | ModalSandboxConfig | None = None,
         output_name: str = "frameos",
         compile_script_name: str = "compile_frameos.sh",
         needs_quickjs: bool = True,
@@ -195,7 +201,7 @@ class CrossCompiler:
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
         self.build_host = build_host
-        self._build_host_session: BuildHostSession | None = None
+        self._build_host_session: BuildHostSession | ModalSandboxSession | None = None
         self._remote_root: Path | None = None
         self.output_name = output_name
         self.compile_script_name = compile_script_name
@@ -206,17 +212,17 @@ class CrossCompiler:
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
     async def build(self, source_dir: str) -> str:
-        if self.build_host:
+        if self.build_host and not isinstance(self.build_host, ModalSandboxConfig):
             await self._log(
                 "stdout",
-                f"{icon} Connecting to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port}",
+                f"{icon} Connecting to {build_executor_display_name(self.build_host)}",
             )
-            async with BuildHostSession(self.build_host, logger=self._log) as session:
+            async with create_build_executor_session(self.build_host, logger=self._log) as session:
                 self._build_host_session = session
                 self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
                 await self._log(
                     "stdout",
-                    f"🟢 Connected to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
+                    f"Connected to {build_executor_display_name(self.build_host)} for cross compilation",
                 )
                 try:
                     return await self._build_with_context(source_dir)
@@ -341,6 +347,9 @@ class CrossCompiler:
 
         image = await self._ensure_toolchain_image()
 
+        if isinstance(self.build_host, ModalSandboxConfig):
+            return await self._run_modal_toolchain_build(build_dir, script_content, image)
+
         if self._build_host_session:
             return await self._run_remote_docker_build(build_dir, script_content, image)
 
@@ -370,6 +379,58 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, self.output_name)
+
+    async def _run_modal_toolchain_build(
+        self, build_dir: str, script_content: str, image: str
+    ) -> str:
+        if not isinstance(self.build_host, ModalSandboxConfig):
+            raise RuntimeError("Modal sandbox configuration unavailable during cross compilation")
+
+        config = replace(self.build_host, image=image, enable_docker=False)
+        await self._log("stdout", f"{icon} Starting Modal cross-toolchain sandbox from {image}")
+        async with ModalSandboxSession(config, logger=self._log) as sandbox:
+            remote_root = Path(await sandbox.mktemp_dir("frameos-cross-"))
+            remote_build_dir = str(remote_root / "src")
+            remote_sysroot_dir = str(remote_root / "sysroot")
+            remote_script_path = str(remote_root / "build.sh")
+
+            build_dir_size = self._dir_size_bytes(Path(build_dir))
+            await self._log(
+                "stdout",
+                f"{icon} Syncing build directory ({self._format_size(build_dir_size)}) to Modal toolchain sandbox",
+            )
+            await sandbox.sync_dir_tarball(build_dir, remote_build_dir)
+            sysroot_size = self._dir_size_bytes(self.sysroot_dir)
+            await self._log(
+                "stdout",
+                f"{icon} Syncing sysroot ({self._format_size(sysroot_size)}) to Modal toolchain sandbox",
+            )
+            await sandbox.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
+            await sandbox.write_file(remote_script_path, script_content, mode=0o755)
+
+            status, _out, err = await sandbox.run(
+                f"cd {shlex.quote(remote_build_dir)} && bash {shlex.quote(remote_script_path)}",
+                log_command="Modal cross-toolchain build",
+            )
+            if status != 0:
+                raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
+
+            local_binary = os.path.join(build_dir, self.output_name)
+            await sandbox.download_file(f"{remote_build_dir}/{self.output_name}", local_binary)
+            status, stdout, _err = await sandbox.run(
+                f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
+                log_command=False,
+                log_output=False,
+            )
+            if status == 0 and stdout:
+                for rel_path in stdout.splitlines():
+                    rel_path = rel_path.strip()
+                    if not rel_path:
+                        continue
+                    local_path = os.path.join(build_dir, rel_path)
+                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    await sandbox.download_file(f"{remote_build_dir}/{rel_path}", local_path)
+            return local_binary
 
     async def _run_remote_docker_build(
         self, build_dir: str, script_content: str, image: str
@@ -895,6 +956,8 @@ class CrossCompiler:
     async def _ensure_toolchain_image(self) -> str:
         image = self._toolchain_image()
         resolved_image = self._resolved_toolchain_image()
+        if isinstance(self.build_host, ModalSandboxConfig):
+            return resolved_image
         if not TOOLCHAIN_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",
@@ -1029,7 +1092,7 @@ async def build_binary_with_cross_toolchain(
     prebuilt_target: str | None = None,
     target_override: TargetMetadata | None = None,
     logger: LogFunc | None = None,
-    build_host: BuildHostConfig | None = None,
+    build_host: BuildHostConfig | ModalSandboxConfig | None = None,
 ) -> str:
     arch: str | None
     distro: str | None

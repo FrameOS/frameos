@@ -1,5 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { Form, Group } from 'kea-forms'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import clsx from 'clsx'
 import { Box } from '../../components/Box'
 import { settingsLogic } from './settingsLogic'
 import { Spinner } from '../../components/Spinner'
@@ -26,21 +28,47 @@ import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspac
 import { accountLogic } from './accountLogic'
 import versions from '../../../../versions.json'
 import { timezoneOptions } from '../../decorators/timezones'
+import { systemInfoLogic } from './systemInfoLogic'
 
-const settingsNavItems = [
-  ['Account', '#settings-account'],
-  ['Defaults', '#settings-defaults'],
-  ['SSH Keys', '#settings-ssh'],
-  ['FrameOS Gallery', '#settings-gallery'],
-  ['OpenAI', '#settings-openai'],
-  ['PostHog', '#settings-posthog'],
-  ['Home Assistant', '#settings-home-assistant'],
-  ['GitHub', '#settings-github'],
-  ['Unsplash API', '#settings-unsplash'],
-  ['Cross-compilation build host', '#settings-build-host'],
-  ['System information', '#settings-system'],
-  ['Custom fonts', '#settings-fonts'],
+type SettingsNavItem = readonly [string, string]
+type SettingsNavSection = {
+  label: string
+  items: readonly SettingsNavItem[]
+}
+type SettingsSectionId = string
+
+const settingsNavSections: readonly SettingsNavSection[] = [
+  {
+    label: '',
+    items: [['Account', '#settings-account']],
+  },
+  {
+    label: 'Settings',
+    items: [
+      ['Defaults', '#settings-defaults'],
+      ['SSH Keys', '#settings-ssh'],
+      ['Build environment', '#settings-build-environment'],
+      ['Custom fonts', '#settings-fonts'],
+    ],
+  },
+  {
+    label: 'Services',
+    items: [
+      ['FrameOS Gallery', '#settings-gallery'],
+      ['OpenAI', '#settings-openai'],
+      ['PostHog', '#settings-posthog'],
+      ['Home Assistant', '#settings-home-assistant'],
+      ['GitHub', '#settings-github'],
+      ['Unsplash API', '#settings-unsplash'],
+    ],
+  },
+  {
+    label: 'Information',
+    items: [['System information', '#settings-system']],
+  },
 ] as const
+
+const settingsNavItems = settingsNavSections.flatMap((section) => section.items)
 
 const frameosVersion = typeof versions.frameos === 'string' ? versions.frameos.split('+')[0] : null
 const frameosVersionLabel = frameosVersion ? `FrameOS ${frameosVersion}` : 'FrameOS'
@@ -61,12 +89,8 @@ function scrollToSettingsSection(sectionId: string, attempt = 0): void {
   window.requestAnimationFrame(() => {
     const section = document.getElementById(sectionId)
     if (section) {
-      if (isMobileWorkspaceViewport()) {
-        const top = section.getBoundingClientRect().top + window.scrollY - settingsHeaderOffset()
-        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
-      } else {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
+      const top = section.getBoundingClientRect().top + window.scrollY - settingsHeaderOffset()
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
       return
     }
 
@@ -76,7 +100,38 @@ function scrollToSettingsSection(sectionId: string, attempt = 0): void {
   })
 }
 
-function AccountSettingsSection(): JSX.Element {
+function activeSettingsSectionId(): SettingsSectionId {
+  const viewportTop = settingsHeaderOffset() + 8
+  const viewportBottom = typeof window === 'undefined' ? viewportTop : window.innerHeight
+  const candidates = settingsNavItems
+    .map(([_label, href]) => {
+      const section = document.getElementById(href.slice(1))
+      if (!section) {
+        return null
+      }
+      const rect = section.getBoundingClientRect()
+      return { href, rect }
+    })
+    .filter((candidate): candidate is { href: SettingsSectionId; rect: DOMRect } => {
+      return !!candidate && candidate.rect.bottom >= viewportTop && candidate.rect.top <= viewportBottom
+    })
+
+  if (candidates.length === 0) {
+    return settingsNavItems[0][1]
+  }
+
+  const current =
+    candidates
+      .filter((candidate) => candidate.rect.top <= viewportTop)
+      .toSorted((first, second) => second.rect.top - first.rect.top)[0] ??
+    candidates.toSorted(
+      (first, second) => Math.abs(first.rect.top - viewportTop) - Math.abs(second.rect.top - viewportTop)
+    )[0]
+
+  return current.href
+}
+
+function AccountSettingsSection({ onLogout }: { onLogout: () => void }): JSX.Element {
   const {
     account,
     accountEmail,
@@ -96,12 +151,15 @@ function AccountSettingsSection(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <H6 id="settings-account" className="pt-4">
-        Account
-      </H6>
+      <div className="flex flex-wrap items-center gap-2 pt-4">
+        <H6 id="settings-account">Account</H6>
+        <Button size="small" color="secondary" onClick={onLogout} className="rounded-lg px-4 py-2">
+          Logout
+        </Button>
+      </div>
       <Box className="settings-account-card space-y-4">
-        <div className="space-y-1 @md:flex @md:gap-2">
-          <div className="@md:w-1/3">
+        <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+          <div className="@md:w-1/3 @md:shrink-0">
             <Label>Email</Label>
           </div>
           {emailEditorOpen ? (
@@ -190,8 +248,8 @@ function AccountSettingsSection(): JSX.Element {
             </div>
           </Form>
         ) : (
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <div className="@md:w-1/3">
+          <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+            <div className="@md:w-1/3 @md:shrink-0">
               <Label>Password</Label>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 text-sm">
@@ -224,6 +282,14 @@ function IngressAccountSettingsSection(): JSX.Element {
   )
 }
 
+function SettingsGroupDivider({ label }: { label: string }): JSX.Element {
+  return (
+    <div className="settings-group-divider" aria-hidden="true">
+      <span>{label}</span>
+    </div>
+  )
+}
+
 export function Settings() {
   const {
     settings,
@@ -237,6 +303,8 @@ export function Settings() {
     customFonts,
     generatingSshKeyId,
     sshKeyExpandedIds,
+    isTestingBuildHost,
+    isTestingModalSandbox,
   } = useValues(settingsLogic)
   const { framesList } = useValues(framesModel)
   const {
@@ -246,49 +314,106 @@ export function Settings() {
     generateSshKey,
     removeSshKey,
     newBuildHostKey,
+    testBuildHost,
+    testModalSandbox,
     deleteCustomFont,
     setSettingsValue,
     toggleSshKeyExpanded,
     toggleOpenAiModelOverrides,
   } = useActions(settingsLogic)
+  const { systemInfo } = useValues(systemInfoLogic)
+  const { loadSystemInfo } = useActions(systemInfoLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const { closeSecondarySidebar } = useActions(workspaceLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
+  const buildEnvironmentProvider = settings?.buildEnvironment?.provider || 'docker'
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavItems[0][1])
+  const settingsNavLinkRefs = useRef<Record<string, HTMLAnchorElement | null>>({})
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
-  const settingsTree = (
-    <div className="space-y-1">
-      {settingsNavItems.map(([label, href]) => (
-        <a
-          key={href}
-          href={href}
-          onClick={(event) => {
-            if (!isMobileWorkspaceViewport()) {
-              return
-            }
 
-            event.preventDefault()
-            closeSecondarySidebar()
-            window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${href}`)
-            scrollToSettingsSection(href.slice(1))
-          }}
-          className="frameos-settings-nav-link block rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          {label}
-        </a>
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    let frame: number | null = null
+    const scheduleUpdate = (): void => {
+      if (frame !== null) {
+        return
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = null
+        setActiveSettingsSection(activeSettingsSectionId())
+      })
+    }
+
+    scheduleUpdate()
+    window.addEventListener('scroll', scheduleUpdate, { passive: true })
+    window.addEventListener('resize', scheduleUpdate)
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame)
+      }
+      window.removeEventListener('scroll', scheduleUpdate)
+      window.removeEventListener('resize', scheduleUpdate)
+    }
+  }, [buildEnvironmentProvider, customFonts.length, openAiModelOverridesExpanded, savedSettingsLoading])
+
+  useEffect(() => {
+    settingsNavLinkRefs.current[activeSettingsSection]?.scrollIntoView({ block: 'nearest' })
+  }, [activeSettingsSection])
+
+  const handleSettingsNavClick = (event: ReactMouseEvent<HTMLAnchorElement>, href: SettingsSectionId): void => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+
+    event.preventDefault()
+    setActiveSettingsSection(href)
+    if (isMobileWorkspaceViewport()) {
+      closeSecondarySidebar()
+    }
+    window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${href}`)
+    scrollToSettingsSection(href.slice(1))
+  }
+
+  const settingsTree = (
+    <div className="space-y-4">
+      {settingsNavSections.map((section) => (
+        <div key={section.label} className="space-y-1">
+          {section.label ? (
+            <div className="settings-nav-divider px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <span>{section.label}</span>
+            </div>
+          ) : null}
+          {section.items.map(([label, href]) => (
+            <a
+              key={href}
+              ref={(element) => {
+                settingsNavLinkRefs.current[href] = element
+              }}
+              href={href}
+              aria-current={activeSettingsSection === href ? 'true' : undefined}
+              onClick={(event) => handleSettingsNavClick(event, href)}
+              className={clsx(
+                'frameos-settings-nav-link block rounded-xl px-3 py-2.5 text-base font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                activeSettingsSection === href
+                  ? 'frameos-settings-nav-link-active'
+                  : 'text-slate-700 hover:bg-slate-100'
+              )}
+            >
+              {label}
+            </a>
+          ))}
+        </div>
       ))}
     </div>
   )
   const settingsActions = (
     <div className="settings-page-actions flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">{frameosVersionLabel}</div>
       <div className="flex flex-wrap items-center gap-2">
-        {!isHassioIngress ? (
-          <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
-            Logout
-          </Button>
-        ) : null}
         <Button
           size="small"
           color="secondary"
@@ -322,15 +447,19 @@ export function Settings() {
     >
       <div>
         <div className="settings-page-header mx-auto mb-6 max-w-5xl">
-          <h1 className="frameos-strong text-3xl font-bold tracking-normal text-slate-950">Global settings</h1>
+          <div>
+            <h1 className="frameos-strong text-3xl font-bold tracking-normal text-slate-950">Global settings</h1>
+            <div className="frameos-muted mt-1 text-xs tracking-wide text-slate-400">{frameosVersionLabel}</div>
+          </div>
           {settingsActions}
         </div>
         <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
-          {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection />}
+          {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection onLogout={logout} />}
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
             <>
+              <SettingsGroupDivider label="Settings" />
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
                 <Group name="defaults">
                   <H6 id="settings-defaults" className="pt-4">
@@ -482,6 +611,206 @@ export function Settings() {
                     </div>
                   </Box>
                 </Group>
+                <H6 id="settings-build-environment" className="pt-4">
+                  Build environment
+                </H6>
+                <Box className="p-3 space-y-3">
+                  <p className="text-sm leading-loose">
+                    Choose the one place where FrameOS is allowed to do server-side source compilation and image
+                    composition. You can override this and force on-frame compilation for each frame individually.
+                  </p>
+                  <Group name="buildEnvironment">
+                    <Field name="provider" label="Build system">
+                      <Select
+                        options={[
+                          { value: 'none', label: 'No server-side compilation' },
+                          { value: 'docker', label: 'Docker in privileged mode' },
+                          { value: 'buildHost', label: 'Build host via SSH' },
+                          { value: 'modal', label: 'Modal sandboxes' },
+                        ]}
+                      />
+                    </Field>
+                  </Group>
+                  {buildEnvironmentProvider === 'none' ? (
+                    <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
+                      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-amber-950">
+                        !
+                      </span>
+                      <span>
+                        Server-side build commands are disabled. Raspberry Pi OS frames compile on the frame itself;
+                        server-only features such as Buildroot SD card image generation and required cross-compilation
+                        are unavailable.
+                      </span>
+                    </div>
+                  ) : null}
+                  {buildEnvironmentProvider === 'docker' ? (
+                    <div className="frameos-inset rounded-lg border p-3 text-sm leading-loose">
+                      <p>
+                        FrameOS will use Docker from the backend host. If this backend runs in a container, the
+                        container needs Docker CLI access and a reachable Docker daemon, usually by running privileged
+                        Docker-in-Docker or mounting the host Docker socket.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className={systemInfo?.docker?.daemonAvailable ? 'text-emerald-600' : 'text-amber-600'}>
+                          {systemInfo?.docker?.daemonAvailable
+                            ? 'Docker daemon is reachable.'
+                            : systemInfo?.docker?.cliAvailable
+                            ? `Docker daemon is not reachable${
+                                systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'
+                              }`
+                            : 'Docker CLI is not installed.'}
+                        </p>
+                        <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
+                          Recheck
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {buildEnvironmentProvider === 'buildHost' ? (
+                    <Group name="buildHost">
+                      <div className="space-y-2">
+                        <p className="text-sm leading-loose">
+                          FrameOS will upload generated sources and sysroot assets via SSH/SCP, run Docker Buildx on the
+                          build host, and download the resulting binary. Install Docker and the Docker Buildx plugin on
+                          that host.
+                        </p>
+                        <Field name="host" label="Build host address">
+                          <TextInput placeholder="builder.example.com" />
+                        </Field>
+                        <Field name="port" label="SSH port">
+                          <NumberTextInput placeholder="22" />
+                        </Field>
+                        <Field name="user" label="SSH user">
+                          <TextInput placeholder="ubuntu" />
+                        </Field>
+                        <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
+                          <TextArea rows={3} />
+                        </Field>
+                        <Field
+                          name="sshPublicKey"
+                          label="Public SSH key"
+                          secret={!!savedSettings?.buildHost?.sshPublicKey}
+                        >
+                          <TextArea rows={3} />
+                        </Field>
+                        <div className="flex flex-wrap gap-2">
+                          <Button onClick={testBuildHost} color="secondary" size="small" disabled={isTestingBuildHost}>
+                            {isTestingBuildHost ? 'Checking...' : 'Check connection'}
+                          </Button>
+                          <Button
+                            onClick={newBuildHostKey}
+                            color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
+                            size="small"
+                          >
+                            Generate new keypair
+                          </Button>
+                        </div>
+                      </div>
+                    </Group>
+                  ) : null}
+                  {buildEnvironmentProvider === 'modal' ? (
+                    <Group name="modalSandbox">
+                      <div className="space-y-2">
+                        <p className="text-sm leading-loose">
+                          FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
+                          compilation containers directly, avoiding Docker-in-Docker for supported targets.
+                        </p>
+                        <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
+                          <TextInput placeholder="ak-..." />
+                        </Field>
+                        <Field
+                          name="tokenSecret"
+                          label="Token secret"
+                          secret={!!savedSettings?.modalSandbox?.tokenSecret}
+                        >
+                          <TextInput placeholder="as-..." />
+                        </Field>
+                        <Field name="appName" label="Modal app name">
+                          <TextInput placeholder="frameos-build" />
+                        </Field>
+                        <Field name="image" label="Source-generation image">
+                          <TextInput placeholder="frameos/frameos:latest" />
+                        </Field>
+                        <Field name="timeout" label="Sandbox timeout (seconds)">
+                          <NumberTextInput placeholder="21600" />
+                        </Field>
+                        <Field name="idleTimeout" label="Idle timeout (seconds)">
+                          <NumberTextInput placeholder="900" />
+                        </Field>
+                        <Field name="cpu" label="CPU cores">
+                          <NumberTextInput placeholder="4" />
+                        </Field>
+                        <Field name="memory" label="Memory (MiB)">
+                          <NumberTextInput placeholder="8192" />
+                        </Field>
+                        <Field name="region" label="Region">
+                          <TextInput placeholder="us-east-1" />
+                        </Field>
+                        <Field name="cloud" label="Cloud">
+                          <TextInput placeholder="aws" />
+                        </Field>
+                        <Field name="environmentName" label="Environment">
+                          <TextInput placeholder="main" />
+                        </Field>
+                        <Button
+                          onClick={testModalSandbox}
+                          color="secondary"
+                          size="small"
+                          disabled={isTestingModalSandbox}
+                        >
+                          {isTestingModalSandbox ? 'Testing...' : 'Test Modal sandbox'}
+                        </Button>
+                      </div>
+                    </Group>
+                  ) : null}
+                </Box>
+              </Form>
+              <div className="space-y-4 mt-4">
+                <H6 id="settings-fonts" className="pt-4">
+                  Custom fonts
+                </H6>
+                <Box className="p-3 space-y-3">
+                  <p className="text-sm leading-loose">
+                    These fonts will be uploaded to all frames and can be used in the FrameOS editor.
+                  </p>
+                  <div className="space-y-1">
+                    {customFonts.map((font) => (
+                      <div key={font.id} className="flex items-center gap-2">
+                        <div className="flex-1">{font.path.substring(6)}</div>
+                        <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
+                          <TrashIcon className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
+                  <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
+                    <Field label="" name="files">
+                      {({ onChange }) => (
+                        <input
+                          type="file"
+                          accept=".ttf"
+                          multiple
+                          className="w-full"
+                          onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                            const target = e.target as HTMLInputElement & {
+                              files: FileList
+                            }
+                            onChange(target.files)
+                          }}
+                        />
+                      )}
+                    </Field>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="small" color="primary">
+                        Upload fonts
+                      </Button>
+                    </div>
+                  </Form>
+                </Box>
+              </div>
+              <SettingsGroupDivider label="Services" />
+              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
                 <Group name="frameOS">
                   <H6 id="settings-gallery" className="pt-4">
                     FrameOS Gallery
@@ -614,116 +943,12 @@ export function Settings() {
                     </Field>
                   </Box>
                 </Group>
-                <Group name="buildHost">
-                  <H6 id="settings-build-host" className="pt-4">
-                    Cross-compilation build host
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      When deploying FrameOS, we compile it from source. We can compile on-device for maximal
-                      compatibility, but this is slow and inefficient. Therefore we also support cross-compilation,
-                      where we compile the FrameOS binary on this server, and only upload the resulting binary onto the
-                      device.
-                    </p>
-                    <p className="text-sm leading-loose">
-                      Cross-compilation is performed via Docker. We need to spin up new docker containers for the
-                      various build environments. If FrameOS itself is running in Docker, we will need to run
-                      Docker-in-Docker, which requires elevated privileges. See the{' '}
-                      <a href="https://github.com/FrameOS/frameos/blob/main/README.md" target="_blank">
-                        README
-                      </a>{' '}
-                      for more.
-                    </p>
-                    <p className="text-sm leading-loose">
-                      Alternatively you may configure a remote build host below. We'll upload generated C sources and
-                      sysroot assets via SSH/SCP, run Docker Buildx on that host, and download the resulting binary.
-                      Ensure Docker and the Docker Buildx plugin are installed on your build host. For best performance,
-                      make sure this is an ARM-based system when deploying to an ARM-based system like the Raspberry Pi.
-                    </p>
-                    <Field name="enabled" label="Enable build host">
-                      <Switch fullWidth />
-                    </Field>
-                    {settings?.buildHost?.enabled ? (
-                      <>
-                        <Field name="host" label="Build host address">
-                          <TextInput placeholder="builder.example.com" />
-                        </Field>
-                        <Field name="port" label="SSH port">
-                          <NumberTextInput placeholder="22" />
-                        </Field>
-                        <Field name="user" label="SSH user">
-                          <TextInput placeholder="ubuntu" />
-                        </Field>
-                        <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
-                          <TextArea rows={3} />
-                        </Field>
-                        <Field
-                          name="sshPublicKey"
-                          label="Public SSH key"
-                          secret={!!savedSettings?.buildHost?.sshPublicKey}
-                        >
-                          <TextArea rows={3} />
-                        </Field>
-                        <Button
-                          onClick={newBuildHostKey}
-                          color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
-                          size="small"
-                        >
-                          Generate new keypair
-                        </Button>
-                      </>
-                    ) : null}
-                  </Box>
-                </Group>
               </Form>
+              <SettingsGroupDivider label="Information" />
               <H6 id="settings-system" className="pt-4">
                 System information
               </H6>
               <SystemInfo />
-              <div className="space-y-4 mt-4">
-                <H6 id="settings-fonts" className="pt-4">
-                  Custom fonts
-                </H6>
-                <Box className="p-2 space-y-2">
-                  <p className="text-sm leading-loose">
-                    These fonts will be uploaded to all frames and can be used in the FrameOS editor.
-                  </p>
-                  <div className="space-y-1">
-                    {customFonts.map((font) => (
-                      <div key={font.id} className="flex items-center gap-2">
-                        <div className="flex-1">{font.path.substring(6)}</div>
-                        <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
-                          <TrashIcon className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                  {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
-                  <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
-                    <Field label="" name="files">
-                      {({ onChange }) => (
-                        <input
-                          type="file"
-                          accept=".ttf"
-                          multiple
-                          className="w-full"
-                          onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                            const target = e.target as HTMLInputElement & {
-                              files: FileList
-                            }
-                            onChange(target.files)
-                          }}
-                        />
-                      )}
-                    </Field>
-                    <div className="flex gap-2">
-                      <Button type="submit" size="small" color="primary">
-                        Upload fonts
-                      </Button>
-                    </div>
-                  </Form>
-                </Box>
-              </div>
             </>
           )}
         </div>

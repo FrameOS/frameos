@@ -31,6 +31,8 @@ def default_settings() -> dict:
             "wifiSSID": "",
             "wifiPassword": "",
         },
+        "buildEnvironment": {},
+        "modalSandbox": {},
     }
 
 

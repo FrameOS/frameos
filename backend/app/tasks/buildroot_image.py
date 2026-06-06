@@ -52,6 +52,7 @@ from app.tasks.setup_json_reset import (
 )
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
+from app.utils.build_environment import selected_build_environment_provider
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.local_exec import exec_local_command
@@ -1901,6 +1902,15 @@ fi
     async def _ensure_buildroot_image(self) -> str:
         image = self._buildroot_image()
         resolved_image = self._resolved_buildroot_image()
+        project_id = getattr(self.frame, "project_id", None)
+        settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
+        build_environment_provider = selected_build_environment_provider(settings)
+        if build_environment_provider == "modal":
+            return resolved_image
+        if build_environment_provider != "docker":
+            raise RuntimeError(
+                "Buildroot SD image generation requires Docker or Modal sandboxes as the global build environment."
+            )
         if not BUILDROOT_FORCE_LOCAL_BUILD:
             status, _out, _err = await exec_local_command(
                 self.db,

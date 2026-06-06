@@ -35,12 +35,19 @@ export interface DatabaseInfo {
   exists: boolean
 }
 
+export interface DockerInfo {
+  cliAvailable: boolean
+  daemonAvailable: boolean
+  error?: string | null
+}
+
 export interface SystemInfoResponse {
   disk: DiskInfo
   caches: CacheInfo[]
   database: DatabaseInfo
   memory: MemoryInfo
   load: LoadInfo
+  docker: DockerInfo
 }
 
 export interface SystemMetricsResponse {

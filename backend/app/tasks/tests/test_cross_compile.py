@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
+from app.utils.modal_sandbox import ModalSandboxConfig
 
 
 def make_cross_compiler(
@@ -191,3 +193,70 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
     assert "make -C quickjs clean" in script
     assert "make -C quickjs libquickjs.a" in script
     assert script.index("make -C quickjs libquickjs.a") < script.index("make -j\"$make_jobs\"")
+
+
+@pytest.mark.asyncio
+async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    temp_dir = tmp_path / "tmp"
+    build_dir = tmp_path / "build"
+    temp_dir.mkdir()
+    build_dir.mkdir()
+    calls: list[tuple[str, str]] = []
+
+    class FakeModalSandboxSession:
+        def __init__(self, config, *, logger=None):
+            self.config = config
+            self.logger = logger
+
+        async def __aenter__(self):
+            calls.append(("image", self.config.image))
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def mktemp_dir(self, prefix: str = "frameos-cross-") -> str:
+            return "/tmp/frameos-cross-test"
+
+        async def sync_dir_tarball(self, local_path: str, remote_path: str) -> None:
+            calls.append(("sync", f"{local_path}->{remote_path}"))
+
+        async def write_file(self, remote_path: str, content: str, mode: int = 0o644) -> None:
+            calls.append(("write", remote_path))
+
+        async def run(self, command: str, **kwargs):
+            calls.append(("run", command))
+            if "find drivers scenes" in command:
+                return 0, "", ""
+            return 0, "", ""
+
+        async def download_file(self, remote_path: str, local_path: str) -> None:
+            calls.append(("download", f"{remote_path}->{local_path}"))
+            Path(local_path).write_text("binary")
+
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bookworm"),
+        temp_dir=str(temp_dir),
+        prebuilt_entry=None,
+        build_host=ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:latest",
+        ),
+    )
+
+    monkeypatch.setattr("app.utils.cross_compile.ModalSandboxSession", FakeModalSandboxSession)
+
+    result = await compiler._run_docker_build(str(build_dir))
+
+    assert result == str(build_dir / "frameos")
+    image_calls = [value for kind, value in calls if kind == "image"]
+    assert image_calls[0].startswith("frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest")
+    run_commands = [value for kind, value in calls if kind == "run"]
+    assert any("bash /tmp/frameos-cross-test/build.sh" in command for command in run_commands)
+    assert all("docker " not in command for command in run_commands)
