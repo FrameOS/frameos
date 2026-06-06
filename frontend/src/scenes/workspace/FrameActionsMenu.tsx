@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import type { FormEvent } from 'react'
 import {
   ArchiveBoxIcon,
+  ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUturnLeftIcon,
   CommandLineIcon,
@@ -71,6 +72,12 @@ export function FrameActionsMenu({
           title: 'Open deploy options',
           onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
           icon: <RocketLaunchIcon className="h-5 w-5" />,
+        },
+        {
+          label: 'Build SD card',
+          title: 'Build or download a flashable SD card image',
+          onClick: () => openFrameChangeDrawer(frame.id, 'deploy', 'sdCard'),
+          icon: <ArrowDownTrayIcon className="h-5 w-5" />,
         },
         {
           label: 'Stop FrameOS',
