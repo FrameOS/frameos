@@ -34,6 +34,12 @@ from app.utils.build_executor import (
     build_executor_display_name,
     create_build_executor,
 )
+from app.utils.cross_toolchain_packages import (
+    TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS,
+    TARGET_CROSS_TOOLCHAIN_PACKAGES,
+    TARGET_CROSS_TOOLCHAINS,
+    TargetCrossToolchain,
+)
 from app.utils.modal_sandbox import ModalSandboxConfig
 
 icon = "🔶"
@@ -46,14 +52,6 @@ class TargetMetadata:
     version: str
     platform: str | None = None
     image: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TargetCrossToolchain:
-    dpkg_arch: str
-    triplet: str
-    cc: str
-    packages: tuple[str, ...]
 
 
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -101,41 +99,6 @@ PLATFORM_MAP = {
     "armhf": "linux/arm/v7",
     "armv6l": "linux/arm/v6",
 }
-TARGET_CROSS_TOOLCHAINS = {
-    "linux/arm64": TargetCrossToolchain(
-        dpkg_arch="arm64",
-        triplet="aarch64-linux-gnu",
-        cc="aarch64-linux-gnu-gcc",
-        packages=(
-            "gcc-aarch64-linux-gnu",
-            "g++-aarch64-linux-gnu",
-            "pkg-config",
-            "zlib1g-dev:arm64",
-            "libssl-dev:arm64",
-            "libffi-dev:arm64",
-            "libjpeg-dev:arm64",
-            "libfreetype6-dev:arm64",
-            "libevdev-dev:arm64",
-        ),
-    ),
-    "linux/arm/v7": TargetCrossToolchain(
-        dpkg_arch="armhf",
-        triplet="arm-linux-gnueabihf",
-        cc="arm-linux-gnueabihf-gcc",
-        packages=(
-            "gcc-arm-linux-gnueabihf",
-            "g++-arm-linux-gnueabihf",
-            "pkg-config",
-            "zlib1g-dev:armhf",
-            "libssl-dev:armhf",
-            "libffi-dev:armhf",
-            "libjpeg-dev:armhf",
-            "libfreetype6-dev:armhf",
-            "libevdev-dev:armhf",
-        ),
-    ),
-}
-
 def can_cross_compile_target(arch: str | None) -> bool:
     """Return ``True`` when *arch* has a known Docker platform mapping."""
 
@@ -910,6 +873,11 @@ class CrossCompiler:
             """
         ).strip()
 
+    def _target_cross_toolchain_build_args(self, container_platform: str) -> tuple[str, str]:
+        if container_platform != "linux/amd64":
+            return "", ""
+        return " ".join(TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS), " ".join(TARGET_CROSS_TOOLCHAIN_PACKAGES)
+
     def _docker_image(self) -> str:
         if getattr(self.target, "image", None):
             return str(self.target.image)
@@ -1029,6 +997,7 @@ class CrossCompiler:
             Path(dockerfile),
             "cross-toolchain",
         )
+        target_cross_dpkg_archs, target_cross_packages = self._target_cross_toolchain_build_args(container_platform)
 
         build_cmd = " ".join(
             [
@@ -1036,6 +1005,8 @@ class CrossCompiler:
                 f"--platform {container_platform}",
                 f"--build-arg BASE_IMAGE={shlex.quote(self._docker_image())}",
                 f"--build-arg TOOLCHAIN_PACKAGES={shlex.quote(TOOLCHAIN_PACKAGES)}",
+                f"--build-arg TARGET_CROSS_DPKG_ARCHS={shlex.quote(target_cross_dpkg_archs)}",
+                f"--build-arg TARGET_CROSS_PACKAGES={shlex.quote(target_cross_packages)}",
                 f"-t {shlex.quote(image)}",
                 f"-f {shlex.quote(dockerfile_arg)}",
                 shlex.quote(context_dir),

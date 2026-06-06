@@ -102,6 +102,31 @@ def test_cross_compiler_canonicalizes_ubuntu_codename(tmp_path, monkeypatch: pyt
     assert compiler._docker_image() == "ubuntu:24.04"
 
 
+def test_cross_compiler_bakes_target_cross_packages_into_amd64_toolchain_image(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bookworm"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    dpkg_archs, packages = compiler._target_cross_toolchain_build_args("linux/amd64")
+
+    assert dpkg_archs == "arm64 armhf"
+    assert "gcc-aarch64-linux-gnu" in packages
+    assert "libssl-dev:arm64" in packages
+    assert "gcc-arm-linux-gnueabihf" in packages
+    assert "libssl-dev:armhf" in packages
+    assert compiler._target_cross_toolchain_build_args("linux/arm64") == ("", "")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("component", "version"),

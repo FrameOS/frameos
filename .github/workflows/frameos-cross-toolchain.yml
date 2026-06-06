@@ -56,7 +56,14 @@ jobs:
           import os
           import re
           import subprocess
+          import sys
           from pathlib import Path
+
+          sys.path.insert(0, str(Path("backend").resolve()))
+          from app.utils.cross_toolchain_packages import (  # noqa: E402
+              TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS,
+              TARGET_CROSS_TOOLCHAIN_PACKAGES,
+          )
 
           def sanitize(value: str) -> str:
               return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
@@ -72,6 +79,11 @@ jobs:
               safe_platform = sanitize(target["platform"].replace("/", "_"))
               image = f"{image_repo}:{safe_base}-{safe_platform}-{image_tag}"
               metadata_file = Path(f"/tmp/toolchain-metadata-{index}.json")
+              target_cross_dpkg_archs = ""
+              target_cross_packages = ""
+              if target["platform"] == "linux/amd64":
+                  target_cross_dpkg_archs = " ".join(TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS)
+                  target_cross_packages = " ".join(TARGET_CROSS_TOOLCHAIN_PACKAGES)
 
               subprocess.run(
                   [
@@ -82,6 +94,10 @@ jobs:
                       target["platform"],
                       "--build-arg",
                       f"BASE_IMAGE={base_image}",
+                      "--build-arg",
+                      f"TARGET_CROSS_DPKG_ARCHS={target_cross_dpkg_archs}",
+                      "--build-arg",
+                      f"TARGET_CROSS_PACKAGES={target_cross_packages}",
                       "--tag",
                       image,
                       "--push",
