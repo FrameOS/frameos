@@ -5,7 +5,7 @@ import importlib.util
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -633,6 +633,31 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_buildroot_image_selection_allows_build_host(monkeypatch):
+    commands: list[str] = []
+
+    class FakeBuildHostSession:
+        async def run(self, command, **_kwargs):
+            commands.append(command)
+            return 0, "", ""
+
+    frame = SimpleNamespace(id=1, project_id=7)
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+    builder._build_host_session = FakeBuildHostSession()
+
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.get_settings_dict",
+        lambda _db, project_id=None: {"buildEnvironment": {"provider": "buildHost"}},
+    )
+
+    image = await builder._ensure_buildroot_image()
+
+    assert image
+    assert any(command.startswith("docker image inspect ") for command in commands)
+    assert any("command -v genimage" in command for command in commands)
+
+
+@pytest.mark.asyncio
 async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     temp_dir = tmp_path / "tmp"
@@ -731,6 +756,102 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert output_image.read_bytes() == b"base"
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
     assert len(commands) == 2
+
+
+@pytest.mark.asyncio
+async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "tmp"
+    frameos_overlay = temp_dir / "overlay" / "srv" / "frameos"
+    assets_overlay = temp_dir / "overlay" / "srv" / "assets"
+    boot_overlay = temp_dir / "overlay" / "boot"
+    frameos_overlay.mkdir(parents=True)
+    assets_overlay.mkdir(parents=True)
+    boot_overlay.mkdir(parents=True)
+    (frameos_overlay / "frameos").write_bytes(b"binary")
+    (boot_overlay / "frameos-setup.json").write_text("{}", encoding="utf-8")
+    base_image = tmp_path / "base.img"
+    output_image = tmp_path / "output.img"
+    base_image.write_bytes(b"base")
+    commands: list[str] = []
+    synced_dirs: list[tuple[str, str]] = []
+    downloaded_dirs: list[tuple[str, str]] = []
+    synced_files: list[tuple[str, str]] = []
+    downloaded_files: list[tuple[str, str]] = []
+    replaced: list[tuple[int, str]] = []
+
+    class FakeBuildHostSession:
+        async def sync_dir_tarball(self, local_path, remote_path):
+            synced_dirs.append((local_path, remote_path))
+
+        async def download_dir_tarball(self, remote_path, local_path):
+            downloaded_dirs.append((remote_path, local_path))
+            local = Path(local_path)
+            local.mkdir(parents=True, exist_ok=True)
+            (local / "frameos.ext4").write_bytes(b"frameos")
+            (local / "assets.vfat").write_bytes(b"assets")
+
+        async def run(self, command, **_kwargs):
+            commands.append(command)
+            return 0, "", ""
+
+        async def remove_path(self, _remote_path):
+            return None
+
+        async def ensure_dir(self, _remote_path):
+            return None
+
+        async def sync_file(self, local_path, remote_path):
+            synced_files.append((local_path, remote_path))
+
+        async def download_file(self, remote_path, local_path):
+            downloaded_files.append((remote_path, local_path))
+
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    builder._build_host_session = FakeBuildHostSession()
+    builder._remote_root = PurePosixPath("/tmp/frameos-buildroot-test")
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    def fake_replace_partition(_image_path, _partitions, partition_number, partition_image):
+        replaced.append((partition_number, partition_image.name))
+
+    def fake_shrink_data_partitions(_image_path, partitions, **_kwargs):
+        return partitions
+
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image._mbr_partitions",
+        lambda _path: [
+            {"start": 512, "size": 32 * 1024 * 1024},
+            {"start": 33554944, "size": 768 * 1024 * 1024},
+            {"start": 838861312, "size": 512 * 1024 * 1024},
+            {"start": 1375732224, "size": 512 * 1024 * 1024},
+        ],
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image._shrink_data_partitions", fake_shrink_data_partitions)
+    monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    await builder._compose_sd_image_from_base(
+        temp_dir=temp_dir,
+        base_image_path=base_image,
+        output_path=output_image,
+        image="frameos/frameos-buildroot:test",
+    )
+
+    assert "-v /tmp/frameos-buildroot-test/compose:/work" in commands[0]
+    assert str(temp_dir / "compose") not in commands[0]
+    assert synced_dirs[0] == (str(temp_dir / "compose"), "/tmp/frameos-buildroot-test/compose")
+    assert downloaded_dirs == [
+        ("/tmp/frameos-buildroot-test/compose/images", str(temp_dir / "compose" / "images"))
+    ]
+    assert "-v /tmp/frameos-buildroot-test/boot-patch/image:/image" in commands[1]
+    assert synced_files[0][0] == str(output_image)
+    assert synced_files[0][1].endswith("/boot-patch/image/output.img")
+    assert downloaded_files == [
+        ("/tmp/frameos-buildroot-test/boot-patch/image/output.img", str(output_image))
+    ]
+    assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
 
 
 @pytest.mark.asyncio
