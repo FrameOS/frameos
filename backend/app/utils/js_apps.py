@@ -121,15 +121,65 @@ def _ensure_native_transpiler(repo_root: Path) -> tuple[Path | None, dict | None
     return binary, None
 
 
-def _node_check_error_payload(proc: subprocess.CompletedProcess[str], source: str, generated_path: str) -> dict:
+def _source_map_generated_position(source_map: dict | None, line: int, column: int) -> tuple[int, int]:
+    if not source_map:
+        return line, column
+
+    mapped_line = 0
+    generated_to_source_line = source_map.get("generatedToSourceLine") or []
+    if 0 < line < len(generated_to_source_line):
+        try:
+            mapped_line = int(generated_to_source_line[line])
+        except (TypeError, ValueError):
+            mapped_line = 0
+
+    mapped_column = max(1, column)
+    best_segment: dict | None = None
+    for segment in source_map.get("segments") or []:
+        try:
+            segment_line = int(segment.get("generatedLine", 0))
+            segment_column = int(segment.get("generatedColumn", 0))
+        except (TypeError, ValueError):
+            continue
+        if segment_line == line and segment_column <= column:
+            if best_segment is None or segment_column > int(best_segment.get("generatedColumn", 0)):
+                best_segment = segment
+
+    if best_segment is not None:
+        try:
+            mapped_line = int(best_segment.get("sourceLine", mapped_line))
+            source_column = int(best_segment.get("sourceColumn", 1))
+            generated_column = int(best_segment.get("generatedColumn", 1))
+        except (TypeError, ValueError):
+            return mapped_line or line, mapped_column
+        mapped_column = max(1, source_column + (column - generated_column))
+
+    return mapped_line or line, mapped_column
+
+
+def _path_line_prefixes(path: str) -> tuple[str, ...]:
+    paths = [path, os.path.realpath(path)]
+    if path.startswith("/var/"):
+        paths.append("/private" + path)
+    return tuple(dict.fromkeys(path + ":" for path in paths))
+
+
+def _node_check_error_payload(
+    proc: subprocess.CompletedProcess[str],
+    source: str,
+    generated_path: str,
+    source_map: dict | None = None,
+) -> dict:
     output = (proc.stderr or proc.stdout).strip()
     line = 1
     column = 1
+    found_column = False
     text = "Unknown JavaScript error"
     source_lines = source.splitlines() or [""]
+    line_prefixes = _path_line_prefixes(generated_path)
 
     for raw_line in output.splitlines():
-        if raw_line.startswith(generated_path + ":"):
+        if raw_line.startswith(line_prefixes):
             try:
                 line = int(raw_line.rsplit(":", 1)[1])
             except ValueError:
@@ -139,29 +189,31 @@ def _node_check_error_payload(proc: subprocess.CompletedProcess[str], source: st
 
     output_lines = output.splitlines()
     for index, raw_line in enumerate(output_lines):
-        if raw_line.startswith(generated_path + ":") and index + 2 < len(output_lines):
+        if raw_line.startswith(line_prefixes) and index + 2 < len(output_lines):
             caret_line = output_lines[index + 2]
             caret_index = caret_line.find("^")
             if caret_index >= 0:
                 column = caret_index + 1
+                found_column = True
                 break
 
-    source_line = min(line, len(source_lines))
-    if column <= 1:
-        column = len(source_lines[source_line - 1]) + 1
+    source_line, source_column = _source_map_generated_position(source_map, line, column)
+    source_line = min(max(1, source_line), len(source_lines))
+    if not found_column:
+        source_column = len(source_lines[source_line - 1]) + 1
 
     return {
         "ok": False,
         "errors": [
             {
                 "text": text,
-                "location": {"line": source_line, "column": max(1, column)},
+                "location": {"line": source_line, "column": max(1, source_column)},
             }
         ],
     }
 
 
-def _run_node_syntax_check(code: str, source: str) -> tuple[bool, dict]:
+def _run_node_syntax_check(code: str, source: str, source_map: dict | None = None) -> tuple[bool, dict]:
     node = shutil.which("node")
     if not node:
         return False, {
@@ -182,7 +234,7 @@ def _run_node_syntax_check(code: str, source: str) -> tuple[bool, dict]:
         proc = subprocess.run([node, "--check", tmp_path], capture_output=True, text=True, check=False)
         if proc.returncode == 0:
             return True, {"ok": True}
-        return False, _node_check_error_payload(proc, source, tmp_path)
+        return False, _node_check_error_payload(proc, source, tmp_path, source_map)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -202,28 +254,41 @@ def _run_native_frameos_transpiler(filename: str, source_path: str, source: str,
         }
 
     proc = subprocess.run(
-        [str(binary), "module", source_path],
+        [str(binary), "module-json", source_path],
         cwd=repo_root / "frameos",
         capture_output=True,
         text=True,
         check=False,
     )
-    if proc.returncode != 0:
-        return _json_payload_from_process(
-            proc,
-            json.dumps(
+    ok, payload = _json_payload_from_process(
+        proc,
+        json.dumps(
+            {
+                "ok": False,
+                "errors": [
+                    {
+                        "text": f"Failed to transform {filename}",
+                        "location": {"line": 1, "column": 1},
+                    }
+                ],
+            }
+        ),
+    )
+    if not ok or not payload.get("ok", ok):
+        return False, payload
+
+    code = payload.get("code")
+    if not isinstance(code, str):
+        return False, {
+            "ok": False,
+            "errors": [
                 {
-                    "ok": False,
-                    "errors": [
-                        {
-                            "text": f"Failed to transform {filename}",
-                            "location": {"line": 1, "column": 1},
-                        }
-                    ],
+                    "text": f"Failed to transform {filename}",
+                    "location": {"line": 1, "column": 1},
                 }
-            ),
-        )
-    return _run_node_syntax_check(proc.stdout, source)
+            ],
+        }
+    return _run_node_syntax_check(code, source, payload.get("sourceMap"))
 
 
 def _run_frameos_js_validation(filename: str, source_path: str, source: str) -> tuple[bool, dict]:
