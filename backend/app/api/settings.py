@@ -24,14 +24,15 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
     if not payload:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="No JSON payload received")
 
-    provider = selected_build_environment_provider(payload)
-    if isinstance(payload.get("buildHost"), dict):
-        payload["buildHost"] = {**payload["buildHost"], "enabled": provider == "buildHost"}
-    if isinstance(payload.get("modalSandbox"), dict):
-        payload["modalSandbox"] = {**payload["modalSandbox"], "enabled": provider == "modal"}
-
     try:
         current_settings = get_settings_dict(db, project_id=project_id)
+        merged_settings = {**current_settings, **payload}
+        provider = selected_build_environment_provider(merged_settings)
+        if isinstance(payload.get("buildHost"), dict):
+            payload["buildHost"] = {**payload["buildHost"], "enabled": provider == "buildHost"}
+        if isinstance(payload.get("modalSandbox"), dict):
+            payload["modalSandbox"] = {**payload["modalSandbox"], "enabled": provider == "modal"}
+
         for key, value in payload.items():
             if value != current_settings.get(key):
                 setting = db.query(Settings).filter_by(project_id=project_id, key=key).first()

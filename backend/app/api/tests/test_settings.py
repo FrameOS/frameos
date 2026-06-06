@@ -32,6 +32,27 @@ async def test_set_settings_normalizes_build_environment_enabled_flags(async_cli
 
 
 @pytest.mark.asyncio
+async def test_set_settings_normalizes_partial_provider_settings_from_current_settings(async_client):
+    initial_response = await async_client.post(
+        '/api/settings',
+        json={
+            "buildEnvironment": {"provider": "buildHost"},
+            "buildHost": {"enabled": True, "host": "builder.local"},
+        },
+    )
+    assert initial_response.status_code == 200, (
+        f"Got {initial_response.status_code} and {initial_response.json()}"
+    )
+
+    response = await async_client.post('/api/settings', json={"buildHost": {"host": "builder-2.local"}})
+    assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+    updated = response.json()
+    assert updated["buildEnvironment"]["provider"] == "buildHost"
+    assert updated["buildHost"]["enabled"] is True
+    assert updated["buildHost"]["host"] == "builder-2.local"
+
+
+@pytest.mark.asyncio
 async def test_set_settings_no_payload(async_client):
     response = await async_client.post('/api/settings', json={})
     assert response.status_code == 400
