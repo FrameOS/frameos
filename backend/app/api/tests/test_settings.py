@@ -77,9 +77,10 @@ async def test_build_host_test_requires_credentials(async_client):
 
 @pytest.mark.asyncio
 async def test_build_host_test_runs_probe(async_client, monkeypatch):
-    class FakeBuildHostSession:
-        def __init__(self, config):
+    class FakeBuildExecutor:
+        def __init__(self, config, **kwargs):
             self.config = config
+            self.kwargs = kwargs
 
         async def __aenter__(self):
             return self
@@ -93,7 +94,17 @@ async def test_build_host_test_runs_probe(async_client, monkeypatch):
             assert kwargs["log_output"] is False
             return 0, "frameos-build-host-ok\n", None
 
-    monkeypatch.setattr("app.api.settings.BuildHostSession", FakeBuildHostSession)
+    def fake_create_build_executor(config, **kwargs):
+        assert config.host == "builder.local"
+        assert config.user == "ubuntu"
+        assert config.ssh_key == "dummy-key"
+        assert kwargs["db"] is None
+        assert kwargs["redis"] is None
+        assert kwargs["frame"].id == 0
+        assert kwargs["workspace_prefix"] == "frameos-build-host-test-"
+        return FakeBuildExecutor(config, **kwargs)
+
+    monkeypatch.setattr("app.api.settings.create_build_executor", fake_create_build_executor)
 
     response = await async_client.post(
         '/api/settings/test_build_host',
@@ -112,9 +123,10 @@ async def test_build_host_test_runs_probe(async_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_modal_sandbox_test_runs_probe(async_client, monkeypatch):
-    class FakeModalSandboxSession:
-        def __init__(self, config):
+    class FakeBuildExecutor:
+        def __init__(self, config, **kwargs):
             self.config = config
+            self.kwargs = kwargs
 
         async def __aenter__(self):
             return self
@@ -128,7 +140,15 @@ async def test_modal_sandbox_test_runs_probe(async_client, monkeypatch):
             assert kwargs["log_output"] is False
             return 0, "frameos-modal-sandbox-ok\n", None
 
-    monkeypatch.setattr("app.api.settings.ModalSandboxSession", FakeModalSandboxSession)
+    def fake_create_build_executor(config, **kwargs):
+        assert config.token_id == "ak-test"
+        assert config.token_secret == "as-test"
+        assert kwargs["db"] is None
+        assert kwargs["redis"] is None
+        assert kwargs["frame"].id == 0
+        return FakeBuildExecutor(config, **kwargs)
+
+    monkeypatch.setattr("app.api.settings.create_build_executor", fake_create_build_executor)
 
     response = await async_client.post(
         '/api/settings/test_modal_sandbox',

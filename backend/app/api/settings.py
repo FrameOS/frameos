@@ -1,4 +1,6 @@
 from http import HTTPStatus
+from types import SimpleNamespace
+
 from fastapi import Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -8,8 +10,9 @@ from app.models.settings import get_settings_dict, Settings
 from app.schemas.settings import SettingsResponse, SettingsUpdateRequest
 from app.tenancy import current_project_id
 from app.utils.build_environment import selected_build_environment_provider
-from app.utils.build_host import BuildHostConfig, BuildHostSession
-from app.utils.modal_sandbox import ModalSandboxConfig, ModalSandboxSession
+from app.utils.build_executor import create_build_executor
+from app.utils.build_host import BuildHostConfig
+from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.posthog import initialize_posthog
 from . import api_project
 
@@ -62,11 +65,17 @@ async def test_build_host(data: SettingsUpdateRequest):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Select build host via SSH and enter a host, user, and private SSH key first",
-        )
+    )
 
     try:
-        async with BuildHostSession(build_host_config) as build_host:
-            status, out, err = await build_host.run(
+        async with create_build_executor(
+            build_host_config,
+            db=None,
+            redis=None,
+            frame=SimpleNamespace(id=0),
+            workspace_prefix="frameos-build-host-test-",
+        ) as executor:
+            status, out, err = await executor.run(
                 "echo frameos-build-host-ok && command -v docker >/dev/null && docker buildx version >/dev/null",
                 log_command=False,
                 log_output=False,
@@ -92,11 +101,16 @@ async def test_modal_sandbox(data: SettingsUpdateRequest):
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Select Modal sandboxes and enter a token ID and token secret first",
-        )
+    )
 
     try:
-        async with ModalSandboxSession(modal_config) as sandbox:
-            status, out, err = await sandbox.run(
+        async with create_build_executor(
+            modal_config,
+            db=None,
+            redis=None,
+            frame=SimpleNamespace(id=0),
+        ) as executor:
+            status, out, err = await executor.run(
                 "command -v nimble && nimble --version >/dev/null && echo frameos-modal-sandbox-ok",
                 log_command=False,
                 log_output=False,

@@ -15,7 +15,12 @@ from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.utils.build_environment import BuildEnvironmentProvider
 from app.utils.build_host import BuildHostConfig, BuildHostSession
-from app.utils.modal_sandbox import ModalSandboxConfig, ModalSandboxSession
+from app.utils.modal_sandbox import (
+    ModalSandboxConfig,
+    ModalSandboxSession,
+    parse_docker_run_command,
+    sandbox_sync_paths_for_command,
+)
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 RunResult = tuple[int, str | None, str | None]
@@ -441,8 +446,45 @@ class ModalBuildExecutor(BuildExecutor):
         log_output: bool = True,
         stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
     ) -> RunResult:
+        docker_run = parse_docker_run_command(command)
+        if docker_run:
+            return await self.docker_run(
+                image=docker_run.image,
+                args=docker_run.args or [],
+                mounts=[
+                    DockerMount(mount.source, mount.target, read_only=mount.read_only)
+                    for mount in docker_run.mounts
+                ],
+                env=docker_run.env,
+                workdir=docker_run.workdir,
+                log_command=log_command,
+                log_output=log_output,
+                stderr_log_tag=stderr_log_tag,
+            )
+
+        sync_paths = sandbox_sync_paths_for_command(command)
         async with ModalSandboxSession(self.config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
-            return await sandbox.run(command, log_command=log_command, log_output=log_output)
+            if sync_paths:
+                await self._sandbox_logger(stderr_log_tag)(
+                    "stdout",
+                    f"Preparing Modal sandbox with {len(sync_paths)} local path"
+                    + ("s" if len(sync_paths) != 1 else ""),
+                )
+            for path in sync_paths:
+                if path.is_dir():
+                    await sandbox.sync_dir_tarball(str(path), str(path))
+                elif path.is_file():
+                    await sandbox.sync_file(str(path), str(path))
+
+            status, out, err = await sandbox.run(command, log_command=log_command, log_output=log_output)
+
+            if status == 0:
+                for path in sync_paths:
+                    if path.is_dir():
+                        await sandbox.download_dir_tarball(str(path), str(path))
+                    elif path.is_file():
+                        await sandbox.download_file(str(path), str(path))
+            return status, out, err
 
     async def docker_run(
         self,
