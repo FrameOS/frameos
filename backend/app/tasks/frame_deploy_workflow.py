@@ -1229,13 +1229,14 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
 
     async def _remove_setup_json_reset_helper(self) -> None:
-        status, _out, _err = await self.deployer.run_command(
+        status = await self.deployer.exec_command(
             "test -e /etc/systemd/system/frameos-firstboot-setup.service "
             "|| test -e /usr/local/bin/frameos-setup-reset.sh "
             "|| test -e /srv/frameos/build/frameos-firstboot-setup.service "
             "|| test -e /srv/frameos/build/frameos-setup-reset.sh",
             log_command=False,
             log_output=False,
+            raise_on_error=False,
         )
         if status != 0:
             return

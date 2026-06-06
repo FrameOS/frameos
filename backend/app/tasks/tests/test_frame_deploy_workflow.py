@@ -85,6 +85,8 @@ class RecordingDeployer(FakeDeployer):
             return self.setup_exit_code
         if command.startswith('grep -q "^dtoverlay=vc4-kms-v3d" '):
             return 1
+        if "frameos-firstboot-setup.service" in command or "frameos-setup-reset.sh" in command:
+            return 1
         return 0
 
     async def run_command(self, command: str, **_kwargs) -> tuple[int, str, str]:

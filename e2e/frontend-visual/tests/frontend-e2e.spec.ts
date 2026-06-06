@@ -50,7 +50,7 @@ const globalSettingsSections = [
   ['Home Assistant', 'settings-home-assistant'],
   ['GitHub', 'settings-github'],
   ['Unsplash API', 'settings-unsplash'],
-  ['Cross-compilation build host', 'settings-build-host'],
+  ['Build environment', 'settings-build-environment'],
   ['System information', 'settings-system'],
   ['Custom fonts', 'settings-fonts'],
 ] as const
