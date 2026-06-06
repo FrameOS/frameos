@@ -190,10 +190,46 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
 
     script = captured_script["content"]
     assert result == str(build_dir / "frameos")
-    assert "Rebuilding QuickJS archive for target" in script
     assert "make -C quickjs clean" in script
     assert "make -C quickjs libquickjs.a" in script
+    assert "Rebuilding QuickJS archive for target" not in script
+    assert "Indexing QuickJS archive" not in script
     assert script.index("make -C quickjs libquickjs.a") < script.index("make -j\"$make_jobs\"")
+
+
+@pytest.mark.asyncio
+async def test_quickjs_preparation_is_quiet_on_success(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    logs: list[tuple[str, str]] = []
+
+    async def logger(level: str, message: str) -> None:
+        logs.append((level, message))
+
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bookworm"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+        logger=logger,
+    )
+    prebuilt_dir = tmp_path / "prebuilt" / "quickjs-2026-06-04"
+    source_dir = tmp_path / "source"
+    build_dir = tmp_path / "build"
+    prebuilt_dir.mkdir(parents=True)
+    source_dir.mkdir()
+    build_dir.mkdir()
+    write_component_payload("quickjs", prebuilt_dir, valid=True)
+    compiler.prebuilt_components["quickjs"] = prebuilt_dir
+
+    await compiler._ensure_quickjs_sources(str(source_dir))
+    await compiler._ensure_quickjs_in_build_dir(str(source_dir), build_dir)
+
+    assert logs == []
+    assert (source_dir / "quickjs" / "libquickjs.a").exists()
+    assert (build_dir / "quickjs" / "libquickjs.a").exists()
 
 
 @pytest.mark.asyncio

@@ -317,10 +317,7 @@ class CrossCompiler:
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
-        await self._log(
-            "stdout",
-            f"{icon} Using default include/lib paths without remote sysroot synchronization",
-        )
+        return
 
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
@@ -471,10 +468,6 @@ class CrossCompiler:
 
     async def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
-        await self._log(
-            "stdout",
-            f"{icon} Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
-        )
         await self._ensure_quickjs_tree(
             quickjs_root,
             context="source directory",
@@ -498,10 +491,6 @@ class CrossCompiler:
     async def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
         dest = Path(build_dir) / "quickjs"
         source_quickjs = Path(source_dir) / "quickjs"
-        await self._log(
-            "stdout",
-            f"{icon} Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
-        )
         fallback_src = source_quickjs if source_quickjs.exists() else None
         await self._ensure_quickjs_tree(
             dest,
@@ -522,27 +511,42 @@ class CrossCompiler:
     ) -> None:
         libquickjs = dest / "libquickjs.a"
         prebuilt_quickjs = self.prebuilt_components.get("quickjs")
-        if prebuilt_quickjs:
-            await self._log(
-                "stdout",
-                f"{icon} Staging prebuilt QuickJS component from {prebuilt_quickjs} into {dest}",
-            )
-            self._stage_prebuilt_quickjs(dest)
+        try:
+            if prebuilt_quickjs:
+                self._stage_prebuilt_quickjs(dest)
 
-        if not libquickjs.exists() and fallback_src:
-            if dest.exists():
-                shutil.rmtree(dest)
+            if not libquickjs.exists() and fallback_src:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+        except Exception as exc:
             await self._log(
-                "stdout",
-                f"{icon} Copying QuickJS tree from {fallback_src} into {dest}",
+                "stderr",
+                f"{icon} Failed to prepare QuickJS artifacts for {context}: {exc}",
             )
-            shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+            await self._log_quickjs_probe(
+                dest.parent,
+                context,
+                expected=libquickjs,
+                prebuilt=prebuilt_quickjs,
+                fallback=fallback_src,
+            )
+            raise
 
         if libquickjs.exists():
-            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
             return
 
-        await self._log_quickjs_probe(dest.parent, context)
+        await self._log(
+            "stderr",
+            f"{icon} QuickJS artifacts missing for {context}: expected {libquickjs}",
+        )
+        await self._log_quickjs_probe(
+            dest.parent,
+            context,
+            expected=libquickjs,
+            prebuilt=prebuilt_quickjs,
+            fallback=fallback_src,
+        )
         raise RuntimeError(error_message)
 
     async def _prepare_prebuilt_components(self) -> None:
@@ -569,11 +573,8 @@ class CrossCompiler:
             """
             if [ -d quickjs ]; then
                 if [ -f quickjs/Makefile ]; then
-                    log_debug "Rebuilding QuickJS archive for target"
                     make -C quickjs clean >/dev/null
                     make -C quickjs libquickjs.a
-                elif [ -f quickjs/libquickjs.a ]; then
-                    log_debug "Indexing QuickJS archive"
                 fi
                 if [ -f quickjs/libquickjs.a ]; then
                     ranlib quickjs/libquickjs.a
@@ -815,11 +816,25 @@ class CrossCompiler:
 
         return f"{value:.1f} TiB"
 
-    async def _log_quickjs_probe(self, root: Path, context: str) -> None:
+    async def _log_quickjs_probe(
+        self,
+        root: Path,
+        context: str,
+        *,
+        expected: Path | None = None,
+        prebuilt: Path | None = None,
+        fallback: Path | None = None,
+    ) -> None:
         await self._log(
             "stderr",
             f"{icon} Probing {context} {root} for QuickJS artifacts",
         )
+        if expected:
+            await self._log("stderr", f"    - Expected archive: {expected}")
+        if prebuilt:
+            await self._log("stderr", f"    - Prebuilt source: {prebuilt}")
+        if fallback:
+            await self._log("stderr", f"    - Fallback source: {fallback}")
         libs = sorted(root.rglob("libquickjs.a"))
         headers = sorted(root.rglob("quickjs.h"))
         folders = [p for p in root.rglob("quickjs") if p.is_dir()]
