@@ -1,6 +1,6 @@
 import std/[sequtils, unittest]
 
-import ../js_runtime/tokens
+import frameos/js_runtime/tokens
 
 proc tokenNames(code: string): seq[string] =
   tokenizeJs(code).mapIt(formatTokenType(it.typ))

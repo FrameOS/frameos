@@ -1,8 +1,8 @@
 import std/[sequtils, strutils, unittest]
 
-import ../js_runtime/parser
-import ../js_runtime/token_processor
-import ../js_runtime/tokens
+import frameos/js_runtime/parser
+import frameos/js_runtime/token_processor
+import frameos/js_runtime/tokens
 
 proc tokensOf(code: string): seq[JsToken] =
   parseJs(code).tokens

@@ -1,6 +1,6 @@
 import std/[strutils, unittest]
 
-import ../js_runtime/transpiler
+import frameos/js_runtime/transpiler
 
 suite "native js transpiler":
   test "strips common TypeScript syntax":

@@ -6,8 +6,8 @@ import frameos/types
 import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/transpiler
+import frameos/js_runtime/burrito
 import lib/tz
-import lib/burrito
 import tables, json, strutils, locks
 import chrono, times
 import pixie

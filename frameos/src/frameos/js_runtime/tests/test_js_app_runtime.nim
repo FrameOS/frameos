@@ -1,9 +1,9 @@
 import std/[json, sequtils, strutils, tables, unittest]
 import pixie
 
-import ../js_runtime/app_runtime
-import ../types
-import ../values
+import frameos/js_runtime/app_runtime
+import frameos/types
+import frameos/values
 
 proc testConfig(): FrameConfig =
   FrameConfig(

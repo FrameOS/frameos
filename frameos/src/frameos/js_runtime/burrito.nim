@@ -12,7 +12,7 @@
 ##
 ## **Example: Basic Usage**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## # Create a QuickJS instance
 ## var js = newQuickJS()
@@ -33,7 +33,7 @@
 ##
 ## **Example: Embedded REPL**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## # Create QuickJS with full standard library support
 ## var js = newQuickJS(configWithBothLibs())
@@ -54,7 +54,7 @@
 ##
 ## **Example: Bytecode Compilation**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## var js = newQuickJS()
 ##

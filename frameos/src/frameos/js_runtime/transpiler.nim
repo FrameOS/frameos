@@ -13,7 +13,7 @@
 # Sucrase itself includes a modified fork of Babylon, which was forked from
 # Acorn. This file intentionally keeps public naming close to Sucrase concepts
 # (`TransformOptions`, `TransformResult`, `transform`) so upstream changes can
-# be tracked and ported incrementally. See `frameos/JS_TRANSPILER_TODO.md`.
+# be tracked and ported incrementally. See `js_runtime/README.md`.
 
 import std/[strutils, sequtils]
 from std/unicode import Rune, toUTF8

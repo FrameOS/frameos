@@ -1,8 +1,8 @@
 import std/[json, sequtils, strutils, unittest]
 
-import ../js_runtime/runtime
-import ../types
-import ../values
+import frameos/js_runtime/runtime
+import frameos/types
+import frameos/values
 
 proc testScene(): InterpretedFrameScene =
   InterpretedFrameScene(

@@ -1,8 +1,8 @@
 import std/[json, tables, unittest]
 
-import ../js_runtime/runtime
-import ../scenes
-import ../types
+import frameos/js_runtime/runtime
+import frameos/scenes
+import frameos/types
 
 proc testLogger(): Logger =
   Logger(

@@ -7,7 +7,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/image
-import lib/burrito
+import frameos/js_runtime/burrito
 
 type
   JsAppRuntime* = ref object
