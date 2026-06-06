@@ -61,6 +61,7 @@ from app.tasks.setup_json_reset import (  # noqa: E402
     render_setup_json_reset_script,
     render_setup_json_reset_service,
 )
+from app.utils.build_executor import create_build_executor  # noqa: E402
 
 BUILD_DIR = REPO_ROOT / "build" / "buildroot-images"
 LOCAL_MANIFEST_PATH = REPO_ROOT / "tools" / "buildroot-images" / "manifest.json"
@@ -604,15 +605,28 @@ async def build_release_image(args: argparse.Namespace) -> None:
 
         base_entry = await resolve_buildroot_base_entry(platform)
         base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
-        compose_image = None
-        if not builder._host_has_compose_tools():
-            compose_image = await builder._ensure_buildroot_image()
-        await builder._compose_sd_image_from_base(
-            temp_dir=temp_dir,
-            base_image_path=base_image_path,
-            output_path=raw_output_path,
-            image=compose_image,
+        executor = create_build_executor(
+            None,
+            db=None,
+            redis=None,
+            frame=frame,
+            logger=builder._log,
+            workspace_prefix="frameos-buildroot-release-",
         )
+        async with executor:
+            builder.executor = executor
+            try:
+                compose_image = None
+                if not builder._host_has_compose_tools():
+                    compose_image = await builder._ensure_buildroot_image()
+                await builder._compose_sd_image_from_base(
+                    temp_dir=temp_dir,
+                    base_image_path=base_image_path,
+                    output_path=raw_output_path,
+                    image=compose_image,
+                )
+            finally:
+                builder.executor = None
 
         raw_size = raw_output_path.stat().st_size
         raw_sha256 = _sha256(raw_output_path)
