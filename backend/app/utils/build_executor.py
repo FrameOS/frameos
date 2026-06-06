@@ -4,6 +4,8 @@ import asyncio
 import os
 import shlex
 import shutil
+import tarfile
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Awaitable, Callable, Literal
@@ -24,6 +26,13 @@ from app.utils.modal_sandbox import (
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 RunResult = tuple[int, str | None, str | None]
+
+MODAL_DEFAULT_CPU = 2.0
+MODAL_DEFAULT_MEMORY = 4096
+MODAL_COMPILE_CPU = 8.0
+MODAL_COMPILE_MEMORY = 16384
+MODAL_COMPOSE_CPU = 4.0
+MODAL_COMPOSE_MEMORY = 8192
 
 
 @dataclass(slots=True)
@@ -466,6 +475,30 @@ class ModalBuildExecutor(BuildExecutor):
 
         return sandbox_log
 
+    def _config_with_resources(
+        self,
+        *,
+        image: str | None = None,
+        workspace: str = "docker-run",
+        enable_docker: bool = False,
+    ) -> ModalSandboxConfig:
+        cpu, memory = self._resource_profile(workspace)
+        return replace(
+            self.config,
+            image=image if image is not None else self.config.image,
+            enable_docker=enable_docker,
+            cpu=self.config.cpu if self.config.cpu is not None else cpu,
+            memory=self.config.memory if self.config.memory is not None else memory,
+        )
+
+    @staticmethod
+    def _resource_profile(workspace: str) -> tuple[float, int]:
+        if workspace in {"cross-compile", "buildroot-image"}:
+            return MODAL_COMPILE_CPU, MODAL_COMPILE_MEMORY
+        if workspace in {"compose", "boot-patch"}:
+            return MODAL_COMPOSE_CPU, MODAL_COMPOSE_MEMORY
+        return MODAL_DEFAULT_CPU, MODAL_DEFAULT_MEMORY
+
     async def run(
         self,
         command: str,
@@ -491,7 +524,8 @@ class ModalBuildExecutor(BuildExecutor):
             )
 
         sync_paths = sandbox_sync_paths_for_command(command)
-        async with ModalSandboxSession(self.config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
+        config = self._config_with_resources(workspace="command")
+        async with ModalSandboxSession(config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
             if sync_paths:
                 await self._sandbox_logger(stderr_log_tag)(
                     "stdout",
@@ -538,7 +572,7 @@ class ModalBuildExecutor(BuildExecutor):
             await self._sandbox_logger(stderr_log_tag)("stderr", message)
             return 125, None, f"{message}\n"
 
-        config = replace(self.config, image=image, enable_docker=False)
+        config = self._config_with_resources(image=image, workspace=workspace, enable_docker=False)
         run_command = " ".join(shlex.quote(arg) for arg in args) if args else "true"
         if workdir:
             run_command = f"cd {shlex.quote(workdir)} && {run_command}"
@@ -550,32 +584,46 @@ class ModalBuildExecutor(BuildExecutor):
             exports = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
             run_command = f"export {exports}; {run_command}"
 
-        async with ModalSandboxSession(config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
-            if mounts:
-                await self._sandbox_log(
-                    "stdout",
-                    f"Preparing Modal sandbox from {image} with {len(mounts)} mount"
-                    + ("s" if len(mounts) != 1 else ""),
-                )
+        prepared_archives: dict[Path, Path] = {}
+        try:
             for mount in mounts:
-                if mount.source.is_dir():
-                    await sandbox.sync_dir_tarball(str(mount.source), mount.target)
-                elif mount.source.is_file():
-                    await sandbox.sync_file(str(mount.source), mount.target)
+                if not mount.source.is_dir():
+                    continue
+                with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                    archive_path = Path(tmp.name)
+                with tarfile.open(archive_path, "w:gz") as tar:
+                    tar.add(mount.source, arcname=".")
+                prepared_archives[mount.source] = archive_path
 
-            status, out, err = await sandbox.run(
-                run_command,
-                log_command=log_command if log_command is not True else f"Modal run {image}",
-                log_output=log_output,
-            )
-            if status == 0:
+            async with ModalSandboxSession(config, logger=self._sandbox_logger(stderr_log_tag)) as sandbox:
+                if mounts:
+                    await self._sandbox_log(
+                        "stdout",
+                        f"Preparing Modal sandbox from {image} with {len(mounts)} mount"
+                        + ("s" if len(mounts) != 1 else ""),
+                    )
                 for mount in mounts:
-                    if mount.read_only:
-                        continue
                     if mount.source.is_dir():
-                        await sandbox.download_dir_tarball(mount.target, str(mount.source))
+                        await sandbox.sync_dir_archive(str(prepared_archives[mount.source]), mount.target)
                     elif mount.source.is_file():
-                        await sandbox.download_file(mount.target, str(mount.source))
+                        await sandbox.sync_file(str(mount.source), mount.target)
+
+                status, out, err = await sandbox.run(
+                    run_command,
+                    log_command=log_command if log_command is not True else f"Modal run {image}",
+                    log_output=log_output,
+                )
+                if status == 0:
+                    for mount in mounts:
+                        if mount.read_only:
+                            continue
+                        if mount.source.is_dir():
+                            await sandbox.download_dir_tarball(mount.target, str(mount.source))
+                        elif mount.source.is_file():
+                            await sandbox.download_file(mount.target, str(mount.source))
+        finally:
+            for archive_path in prepared_archives.values():
+                archive_path.unlink(missing_ok=True)
         return status, out, err
 
 

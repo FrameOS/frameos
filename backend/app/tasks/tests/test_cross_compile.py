@@ -214,6 +214,7 @@ async def test_modal_toolchain_build_uses_amd64_image_with_target_cross_compiler
 
         async def __aenter__(self):
             calls.append(("image", self.config.image))
+            calls.append(("resources", f"{self.config.cpu}:{self.config.memory}"))
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
@@ -224,6 +225,9 @@ async def test_modal_toolchain_build_uses_amd64_image_with_target_cross_compiler
 
         async def sync_dir_tarball(self, local_path: str, remote_path: str) -> None:
             calls.append(("sync", f"{local_path}->{remote_path}"))
+
+        async def sync_dir_archive(self, archive_path: str, remote_path: str) -> None:
+            calls.append(("sync-archive", f"{archive_path}->{remote_path}"))
 
         async def write_file(self, remote_path: str, content: str, mode: int = 0o644) -> None:
             calls.append(("write", remote_path))
@@ -278,6 +282,7 @@ async def test_modal_toolchain_build_uses_amd64_image_with_target_cross_compiler
     assert result == str(build_dir / "frameos")
     image_calls = [value for kind, value in calls if kind == "image"]
     assert image_calls == ["frameos/frameos-cross-toolchain:debian_bookworm-linux_amd64-latest"]
+    assert ("resources", "8.0:16384") in calls
     run_commands = [value for kind, value in calls if kind == "run"]
     assert any(
         "bash /tmp/frameos-cross/build.sh" in command

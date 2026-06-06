@@ -784,8 +784,8 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert captured["compose"]["args"] == ["bash", "/work/compose-partitions.sh"]
     assert captured["patch"]["args"] == ["bash", "/patch-boot.sh"]
     patch_mounts = captured["patch"]["mounts"]
-    assert patch_mounts[0].source == (tmp_path / "release-assets").resolve()
-    assert patch_mounts[0].target == "/image"
+    assert patch_mounts[0].source == output_image.resolve()
+    assert patch_mounts[0].target == "/image/output.img"
     assert captured["compose"]["image"] == "frameos/frameos-buildroot:test"
     assert captured["patch"]["image"] == "frameos/frameos-buildroot:test"
     assert 'tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -' in (
@@ -897,10 +897,12 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
         "/tmp/frameos-buildroot-test/compose/mount-0-compose",
         str(temp_dir / "compose"),
     ) in downloaded_dirs
-    assert "-v /tmp/frameos-buildroot-test/boot-patch/mount-0-" in commands[1]
-    assert ":/image" in commands[1]
-    assert synced_files[0][0].endswith("patch-boot.sh")
-    assert synced_files[0][1].endswith("/boot-patch/mount-2-patch-boot.sh")
+    assert "-v /tmp/frameos-buildroot-test/boot-patch/mount-0-output.img:/image/output.img" in commands[1]
+    assert any(local.endswith("output.img") and remote.endswith("/boot-patch/mount-0-output.img") for local, remote in synced_files)
+    assert any(
+        local.endswith("patch-boot.sh") and remote.endswith("/boot-patch/mount-2-patch-boot.sh")
+        for local, remote in synced_files
+    )
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
 
 

@@ -29,6 +29,9 @@ async def test_modal_executor_routes_docker_run_through_direct_image(monkeypatch
         async def sync_dir_tarball(self, local_path, remote_path):
             calls.append(("sync_dir", Path(local_path), remote_path))
 
+        async def sync_dir_archive(self, archive_path, remote_path):
+            calls.append(("sync_archive", Path(archive_path), remote_path))
+
         async def sync_file(self, local_path, remote_path):
             calls.append(("sync_file", Path(local_path), remote_path))
 
@@ -65,7 +68,12 @@ async def test_modal_executor_routes_docker_run_through_direct_image(monkeypatch
     config = calls[0][1]
     assert config.image == "example/image:latest"
     assert config.enable_docker is False
-    assert ("sync_dir", work, "/work") in calls
+    assert config.cpu == 2
+    assert config.memory == 4096
+    sync_archive_calls = [call for call in calls if call[0] == "sync_archive"]
+    assert len(sync_archive_calls) == 1
+    assert sync_archive_calls[0][1].suffixes[-2:] == [".tar", ".gz"]
+    assert sync_archive_calls[0][2] == "/work"
     assert (
         "run",
         "cd /work && bash build.sh",
@@ -156,3 +164,33 @@ def test_modal_executor_maps_non_amd64_targets_to_amd64_container_platform():
 
     assert executor.container_platform_for_target("linux/arm64") == "linux/amd64"
     assert executor.container_platform_for_target("linux/amd64") == "linux/amd64"
+
+
+def test_modal_executor_resource_profiles_respect_user_overrides():
+    executor = ModalBuildExecutor(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:base",
+        )
+    )
+
+    cross_compile = executor._config_with_resources(image="toolchain", workspace="cross-compile")
+    compose = executor._config_with_resources(image="buildroot", workspace="compose")
+
+    assert (cross_compile.cpu, cross_compile.memory) == (8, 16384)
+    assert (compose.cpu, compose.memory) == (4, 8192)
+
+    overridden = ModalBuildExecutor(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:base",
+            cpu=6,
+            memory=12288,
+        )
+    )._config_with_resources(image="toolchain", workspace="cross-compile")
+
+    assert (overridden.cpu, overridden.memory) == (6, 12288)

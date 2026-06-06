@@ -1884,7 +1884,7 @@ fi
             status, _, err = await self.executor.docker_run(
                 image=image,
                 mounts=[
-                    DockerMount(output_path.parent.resolve(), "/image"),
+                    DockerMount(output_path.resolve(), f"/image/{output_path.name}"),
                     DockerMount(boot_root.resolve(), "/boot-root"),
                     DockerMount(script_path.resolve(), "/patch-boot.sh", read_only=True),
                 ],

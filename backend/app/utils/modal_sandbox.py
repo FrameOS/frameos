@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODAL_APP_NAME = os.environ.get("FRAMEOS_MODAL_SANDBOX_APP", "frameos-build")
 DEFAULT_MODAL_IMAGE = os.environ.get("FRAMEOS_MODAL_SANDBOX_IMAGE", "frameos/frameos:latest")
 DEFAULT_MODAL_TIMEOUT = int(os.environ.get("FRAMEOS_MODAL_SANDBOX_TIMEOUT", str(6 * 60 * 60)))
-DEFAULT_MODAL_IDLE_TIMEOUT = int(os.environ.get("FRAMEOS_MODAL_SANDBOX_IDLE_TIMEOUT", str(15 * 60)))
+DEFAULT_MODAL_IDLE_TIMEOUT = int(os.environ.get("FRAMEOS_MODAL_SANDBOX_IDLE_TIMEOUT", "60"))
 FRAMEOS_SANDBOX_PATH = "/opt/nim/bin:/root/.nimble/bin:/app/backend/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 PATH_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?:[A-Za-z0-9_@%+=:,.-]+/?)+")
 SKIP_PATH_PREFIXES = (
@@ -242,9 +242,13 @@ async def _call_modal(method, *args, **kwargs):
 
 
 class _FrameOSModalOutputManager:
-    def __init__(self, base_manager, logger: LogFunc | None) -> None:
+    def __init__(self, base_manager, logger: LogFunc | None, loop: asyncio.AbstractEventLoop | None = None) -> None:
         self._base_manager = base_manager
         self._logger = logger
+        try:
+            self._loop = loop or asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = loop
         self._pending: dict[int, str] = {}
         self.logged_lines = 0
 
@@ -289,7 +293,7 @@ class _FrameOSModalOutputManager:
             message = line.rstrip("\r\n")
             if message:
                 self.logged_lines += 1
-                await self._logger(tag, f"Modal image build: {message}")
+                await self._emit_log(tag, f"Modal image build: {message}")
 
     async def flush_pending(self) -> None:
         if self._logger is None:
@@ -300,8 +304,24 @@ class _FrameOSModalOutputManager:
             if message:
                 tag = "stderr" if fd == 2 else "stdout"
                 self.logged_lines += 1
-                await self._logger(tag, f"Modal image build: {message}")
+                await self._emit_log(tag, f"Modal image build: {message}")
         self._pending.clear()
+
+    async def _emit_log(self, tag: str, message: str) -> None:
+        if self._logger is None:
+            return
+        if self._loop is None:
+            await self._logger(tag, message)
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is self._loop:
+            await self._logger(tag, message)
+            return
+        future = asyncio.run_coroutine_threadsafe(self._logger(tag, message), self._loop)
+        await asyncio.wrap_future(future)
 
 
 @contextlib.contextmanager
@@ -312,7 +332,11 @@ def _modal_output_to_logs(modal, logger: LogFunc | None):  # noqa: ANN001
         yield None
         return
     previous = OutputManager.get()
-    manager = _FrameOSModalOutputManager(previous, logger)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    manager = _FrameOSModalOutputManager(previous, logger, loop=loop)
     OutputManager._set(manager)
     try:
         yield manager
@@ -359,7 +383,7 @@ class ModalSandboxSession:
             raise RuntimeError("Modal sandbox execution requires the 'modal' Python package") from exc
 
         self._modal = modal
-        self._client = modal.Client.from_credentials(self.config.token_id, self.config.token_secret)
+        self._client = await _call_modal(modal.Client.from_credentials, self.config.token_id, self.config.token_secret)
         app = await _call_modal(
             modal.App.lookup,
             self.config.app_name,
@@ -453,14 +477,8 @@ class ModalSandboxSession:
                 if value:
                     sandbox_id = str(value)
                     break
-        cpu = f"{self.config.cpu:g} requested" if self.config.cpu is not None else identity.get("cpu_count", "auto")
-        memory = (
-            f"{self.config.memory} MiB requested"
-            if self.config.memory is not None
-            else f"{identity['memory_mib']} MiB reported"
-            if identity.get("memory_mib")
-            else "auto"
-        )
+        cpu = f"{self.config.cpu:g} requested" if self.config.cpu is not None else "auto requested"
+        memory = f"{self.config.memory} MiB requested" if self.config.memory is not None else "auto requested"
         parts = [
             "Connected to Modal sandbox",
             f"app={self.config.app_name}",
@@ -559,35 +577,38 @@ class ModalSandboxSession:
         local = Path(local_path)
         if not local.exists():
             return
-        await self.ensure_dir(str(Path(remote_path).parent))
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             archive_path = Path(tmp.name)
         try:
             with tarfile.open(archive_path, "w:gz") as tar:
                 tar.add(local, arcname=".")
-            remote_archive = f"{remote_path}.tar.gz"
-            await self.remove_path(remote_path)
-            await self._copy_from_local(str(archive_path), remote_archive)
-            status, _out, err = await self.run(
-                " ".join(
-                    [
-                        "mkdir -p",
-                        shlex.quote(remote_path),
-                        "&& tar -xzf",
-                        shlex.quote(remote_archive),
-                        "-C",
-                        shlex.quote(remote_path),
-                        "&& rm -f",
-                        shlex.quote(remote_archive),
-                    ]
-                ),
-                log_command=False,
-                log_output=False,
-            )
-            if status != 0:
-                raise RuntimeError(f"Failed to extract Modal sandbox archive: {err or 'see logs'}")
+            await self.sync_dir_archive(str(archive_path), remote_path)
         finally:
             archive_path.unlink(missing_ok=True)
+
+    async def sync_dir_archive(self, archive_path: str, remote_path: str) -> None:
+        remote_archive = f"{remote_path}.tar.gz"
+        await self.ensure_dir(str(Path(remote_path).parent))
+        await self.remove_path(remote_path)
+        await self._copy_from_local(archive_path, remote_archive)
+        status, _out, err = await self.run(
+            " ".join(
+                [
+                    "mkdir -p",
+                    shlex.quote(remote_path),
+                    "&& tar -xzf",
+                    shlex.quote(remote_archive),
+                    "-C",
+                    shlex.quote(remote_path),
+                    "&& rm -f",
+                    shlex.quote(remote_archive),
+                ]
+            ),
+            log_command=False,
+            log_output=False,
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed to extract Modal sandbox archive: {err or 'see logs'}")
 
     async def sync_file(self, local_path: str, remote_path: str) -> None:
         if not Path(local_path).is_file():

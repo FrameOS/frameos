@@ -46,6 +46,19 @@ def test_modal_sandbox_config_parses_settings():
     assert config.enable_docker is False
 
 
+def test_modal_sandbox_config_defaults_idle_timeout_to_60_seconds():
+    config = ModalSandboxConfig.from_settings(
+        {
+            "enabled": True,
+            "tokenId": "ak-test",
+            "tokenSecret": "as-test",
+        }
+    )
+
+    assert isinstance(config, ModalSandboxConfig)
+    assert config.idle_timeout == 60
+
+
 def test_modal_sandbox_connection_summary_includes_resource_details():
     session = ModalSandboxSession(
         ModalSandboxConfig(
@@ -74,11 +87,29 @@ def test_modal_sandbox_connection_summary_includes_resource_details():
     assert "image=frameos/frameos:custom" in summary
     assert "cpu=4 requested" in summary
     assert "memory=8192 MiB requested" in summary
+    assert "reported" not in summary
     assert "region=us-east" in summary
     assert "cloud=aws" in summary
     assert "timeout=120s" in summary
     assert "idle_timeout=30s" in summary
     assert "nested_docker=disabled" in summary
+
+
+def test_modal_sandbox_connection_summary_uses_requested_resource_labels_without_overrides():
+    session = ModalSandboxSession(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:custom",
+        )
+    )
+
+    summary = session._connection_summary({"host": "modal-host", "cpu_count": "8", "memory_mib": "16384"})
+
+    assert "cpu=auto requested" in summary
+    assert "memory=auto requested" in summary
+    assert "reported" not in summary
 
 
 @pytest.mark.asyncio
