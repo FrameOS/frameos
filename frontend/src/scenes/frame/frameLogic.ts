@@ -37,9 +37,11 @@ import {
   buildInferredFullDeployPlanSummary,
   deployedFrameosVersion,
   deployPlanPreviousFrameosVersion,
+  isFrameosVersionBefore,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
+import { normalizeFrameCompilationMode, normalizeFrameCrossCompilation } from '../../utils/frameBuildOptions'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -112,6 +114,19 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'buildroot',
   'rpios',
 ]
+
+// When adding a runtime-consumed field to FRAME_KEYS, add its introduced version here.
+// During active development, use the next patch after versions.json's frameos base version
+// (for example, 2026.6.9 while versions.json says 2026.6.8).
+const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, string>> = {
+  mountpoints: '2026.6.0',
+  error_behavior: '2026.6.1',
+  buildroot: '2026.6.2',
+  image_engine: '2026.6.3',
+  max_http_response_bytes: '2026.6.4',
+  rpios: '2026.6.7',
+  timezone_updater: '2026.6.7',
+}
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
@@ -309,6 +324,11 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
+function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVersion: string | null): boolean {
+  const introducedVersion = FRAME_KEY_INTRODUCED_FRAMEOS_VERSION[key]
+  return introducedVersion ? isFrameosVersionBefore(previousFrameosVersion, introducedVersion) : false
+}
+
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
   return FRAME_KEYS
 }
@@ -385,19 +405,20 @@ function computeChangeDetails(
 ): ChangeDetail[] {
   const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
   const details: ChangeDetail[] = []
+  const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
 
   for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: keyLabel(key),
-        requiresFullDeploy: recompileFields.has(key),
+        requiresFullDeploy:
+          recompileFields.has(key) ||
+          (includeFrameosVersion && frameKeyRequiresVersionUpgrade(key, previousFrameosVersion)),
       })
     }
   }
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
-
-  const previousFrameosVersion = deployedFrameosVersion(previous)
 
   if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
@@ -474,24 +495,14 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
     .map(({ change }) => change)
 }
 
-function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
-  return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
-    ? value
-    : 'precompiled'
-}
-
-function normalizeRpiosCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
-  return value === 'always' || value === 'never' ? value : 'auto'
-}
-
 function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
 
   return {
     ...rest,
-    compilationMode: normalizeRpiosCompilationMode(compilationMode),
-    crossCompilation: normalizeRpiosCrossCompilation(crossCompilation),
+    compilationMode: normalizeFrameCompilationMode(compilationMode),
+    crossCompilation: normalizeFrameCrossCompilation(crossCompilation),
   }
 }
 
@@ -518,9 +529,17 @@ function normalizeMountpointsForComparison(value: unknown): Record<string, any> 
   }
 }
 
+function normalizeTimezoneForComparison(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'image_engine') {
     return value ?? ''
+  }
+
+  if (key === 'timezone') {
+    return normalizeTimezoneForComparison(value)
   }
 
   if (key === 'rpios') {
@@ -1306,7 +1325,8 @@ export const frameLogic = kea<frameLogicType>([
     },
     showDeployPlanModal: () => {
       const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
-      const buildrootFirstInstall = isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
+      const buildrootFirstInstall =
+        isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
       if (buildrootFirstInstall) {
         return
       }
@@ -1498,7 +1518,10 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
-      const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
+      const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
+      const frameFormMatchesPrevious = oldFrame
+        ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
+        : false
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
       }

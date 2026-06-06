@@ -400,6 +400,16 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install redis
         run: sudo apt-get -y update && sudo apt-get install -y redis-server
 
@@ -427,6 +437,22 @@ jobs:
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
+
+  frameos-setup-script:
+    name: Standalone setup script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Docker
+        run: docker version
+
+      - name: Check shell syntax
+        run: sh -n scripts/frameos-setup.sh
+
+      - name: Run setup script container tests
+        run: python3 -m unittest scripts.tests.test_frameos_setup -v
 
   deploy-e2e:
     name: Deploy E2E SSH

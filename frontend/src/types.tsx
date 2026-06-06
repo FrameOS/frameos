@@ -1,4 +1,5 @@
 import { Edge, Node } from 'reactflow'
+import type { FrameCompilationModeOptionValue, FrameCrossCompilationOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 
@@ -721,7 +722,7 @@ export interface Palette {
 
 export interface FrameBuildrootConfig {
   platform?: string
-  compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
+  compilationMode?: FrameCompilationModeOptionValue
   sdImage?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     buildId?: string
@@ -749,6 +750,6 @@ export interface FrameBuildrootConfig {
 
 export interface FrameRpiOSConfig {
   platform?: string
-  crossCompilation?: '' | 'auto' | 'always' | 'never'
-  compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
+  crossCompilation?: FrameCrossCompilationOptionValue
+  compilationMode?: FrameCompilationModeOptionValue
 }

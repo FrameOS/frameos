@@ -103,7 +103,7 @@ def test_cross_compiler_canonicalizes_ubuntu_codename(tmp_path, monkeypatch: pyt
 @pytest.mark.parametrize(
     ("component", "version"),
     [
-        ("quickjs", "2025-04-26"),
+        ("quickjs", "2026-06-04"),
     ],
 )
 async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
@@ -138,8 +138,8 @@ async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
 
 @pytest.mark.asyncio
 async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2025-04-26")
-    dest_dir = compiler.prebuilt_dir / "quickjs-2025-04-26"
+    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04")
+    dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04"
 
     async def fake_download(_url: str, extract_dir, _expected_md5: str | None) -> None:
         write_component_payload("quickjs", extract_dir, valid=False)

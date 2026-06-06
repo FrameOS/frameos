@@ -4,6 +4,7 @@ import gzip
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -63,9 +64,11 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 14
-BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "100M")
-BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "100M")
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 15
+BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
+BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
+BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
+BUILDROOT_DATA_PARTITION_HEADROOM_RATIO = 1.25
 BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
 BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -1547,6 +1550,10 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         if not any(assets_root.iterdir()):
             (assets_root / "frameos-assets-placeholder").write_text("", encoding="utf-8")
 
+        frameos_partition_size = _partition_size_for_root(
+            frameos_root,
+            minimum_size=BUILDROOT_FRAMEOS_PARTITION_SIZE,
+        )
         compose_roots = f"/tmp/frameos-compose-roots-{os.getpid()}-{secure_token(6)}"
         genimage_cfg = compose_dir / "frameos-genimage.cfg"
         genimage_cfg.write_text(
@@ -1556,7 +1563,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 		label = "FRAMEOS"
 	}}
 	srcpath = "{compose_roots}/frameos"
-	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+	size = {frameos_partition_size}
 }}
 
 image assets.vfat {{
@@ -1627,6 +1634,12 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
 
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
+        partitions = _shrink_data_partitions(
+            output_path,
+            partitions,
+            frameos_image=images_dir / "frameos.ext4",
+            assets_image=images_dir / "assets.vfat",
+        )
         _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
@@ -1655,6 +1668,12 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             shutil.copy2(release_image_path, output_path)
 
         partitions = _mbr_partitions(output_path)
+        max_frameos_size = _partition_size_bytes(BUILDROOT_FRAMEOS_PARTITION_SIZE)
+        max_assets_size = _partition_size_bytes(BUILDROOT_ASSETS_PARTITION_SIZE)
+        if partitions[2]["size"] > max_frameos_size or partitions[3]["size"] > max_assets_size:
+            raise RuntimeError(
+                "Full precompiled Buildroot SD image uses larger data partitions than the current image layout"
+            )
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     async def _patch_boot_partition(
@@ -2146,6 +2165,41 @@ if [ -n "$kernel" ]; then
   files+=("$kernel")
 fi
 
+partition_size_for_root() {{
+  python3 - "$1" "$2" <<'PY'
+import math
+import os
+import re
+import sys
+
+HEADROOM_BYTES = {BUILDROOT_DATA_PARTITION_HEADROOM_BYTES}
+HEADROOM_RATIO = {BUILDROOT_DATA_PARTITION_HEADROOM_RATIO}
+MIB = 1024 * 1024
+
+def parse_size(value):
+    match = re.fullmatch(r"\\s*([0-9]+)\\s*([KMG]?)\\s*", value, flags=re.IGNORECASE)
+    if not match:
+        raise SystemExit(f"Unsupported partition size {{value!r}}")
+    number = int(match.group(1))
+    unit = match.group(2).upper()
+    return number * {{"": 1, "K": 1024, "M": MIB, "G": 1024 * MIB}}[unit]
+
+root = sys.argv[1]
+minimum = parse_size(sys.argv[2])
+payload = 0
+for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    for name in dirnames + filenames:
+        try:
+            payload += os.lstat(os.path.join(dirpath, name)).st_size
+        except FileNotFoundError:
+            pass
+
+required = max(minimum, math.ceil(payload * HEADROOM_RATIO) + HEADROOM_BYTES)
+print(f"{{math.ceil(required / MIB)}}M")
+PY
+}}
+
+frameos_partition_size="$(partition_size_for_root "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root" "{BUILDROOT_FRAMEOS_PARTITION_SIZE}")"
 boot_files="$(printf '\\t\\t\\t"%s",\\n' "${{files[@]}}")"
 cat > "$genimage_cfg" <<EOF
 image boot.vfat {{
@@ -2165,7 +2219,7 @@ image frameos.ext4 {{
 		label = "FRAMEOS"
 	}}
 	srcpath = "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root"
-	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+	size = $frameos_partition_size
 }}
 
 image assets.vfat {{
@@ -2283,7 +2337,7 @@ move_partition_data() {
     return 0
   fi
   echo "Moving $name data: $old_start -> $new_start ($sectors sectors)"
-  chunk_sectors=$((1024 * 1024 / sector_size))
+  chunk_sectors=$((4 * 1024 * 1024 / sector_size))
   if [ "$chunk_sectors" -lt 1 ]; then
     chunk_sectors=1
   fi
@@ -2630,6 +2684,93 @@ def _mbr_partitions(image_path: Path) -> list[dict[str, int]]:
         sectors = int.from_bytes(entry[12:16], "little")
         partitions.append({"start": start_lba * 512, "size": sectors * 512})
     return partitions
+
+
+def _partition_size_bytes(size: str) -> int:
+    match = re.fullmatch(r"\s*([0-9]+)\s*([KMG]?)\s*", size, flags=re.IGNORECASE)
+    if not match:
+        raise RuntimeError(f"Unsupported partition size {size!r}")
+    value = int(match.group(1))
+    unit = match.group(2).upper()
+    multiplier = {
+        "": 1,
+        "K": 1024,
+        "M": 1024 * 1024,
+        "G": 1024 * 1024 * 1024,
+    }[unit]
+    return value * multiplier
+
+
+def _align_up_bytes(value: int, alignment: int = 1024 * 1024) -> int:
+    return ((value + alignment - 1) // alignment) * alignment
+
+
+def _directory_payload_size_bytes(root: Path) -> int:
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in [*dirnames, *filenames]:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except FileNotFoundError:
+                continue
+    return total
+
+
+def _partition_size_for_root(root: Path, *, minimum_size: str) -> str:
+    minimum_bytes = _partition_size_bytes(minimum_size)
+    payload_bytes = _directory_payload_size_bytes(root)
+    required_bytes = max(
+        minimum_bytes,
+        math.ceil(payload_bytes * BUILDROOT_DATA_PARTITION_HEADROOM_RATIO) + BUILDROOT_DATA_PARTITION_HEADROOM_BYTES,
+    )
+    return f"{_align_up_bytes(required_bytes) // (1024 * 1024)}M"
+
+
+def _set_mbr_partition_geometry(image_path: Path, partition_number: int, *, start: int, size: int) -> None:
+    if partition_number < 1 or partition_number > 4:
+        raise RuntimeError(f"Invalid partition number {partition_number}")
+    if start % 512 != 0 or size % 512 != 0:
+        raise RuntimeError(f"Partition {partition_number} geometry must be sector-aligned")
+    with image_path.open("r+b") as image:
+        image.seek(446 + (partition_number - 1) * 16 + 8)
+        image.write((start // 512).to_bytes(4, "little"))
+        image.write((size // 512).to_bytes(4, "little"))
+
+
+def _shrink_data_partitions(
+    image_path: Path,
+    partitions: list[dict[str, int]],
+    *,
+    frameos_image: Path,
+    assets_image: Path,
+) -> list[dict[str, int]]:
+    if len(partitions) < 4:
+        raise RuntimeError("Cannot shrink data partitions; SD image has fewer than four partitions")
+
+    frameos_size = frameos_image.stat().st_size
+    assets_size = assets_image.stat().st_size
+    frameos_partition = partitions[2]
+    assets_partition = partitions[3]
+    if frameos_size > frameos_partition["size"]:
+        raise RuntimeError(
+            f"{frameos_image.name} is larger than partition 3: {frameos_size} > {frameos_partition['size']}"
+        )
+    if assets_size > assets_partition["size"]:
+        raise RuntimeError(
+            f"{assets_image.name} is larger than partition 4: {assets_size} > {assets_partition['size']}"
+        )
+
+    frameos_start = frameos_partition["start"]
+    assets_start = _align_up_bytes(frameos_start + frameos_size)
+    output_size = assets_start + assets_size
+    if output_size > image_path.stat().st_size:
+        raise RuntimeError(f"Shrunk data partition layout would exceed {image_path.name}")
+
+    _set_mbr_partition_geometry(image_path, 3, start=frameos_start, size=frameos_size)
+    _set_mbr_partition_geometry(image_path, 4, start=assets_start, size=assets_size)
+    with image_path.open("r+b") as image:
+        image.truncate(output_size)
+    return _mbr_partitions(image_path)
 
 
 def _replace_partition(image_path: Path, partitions: list[dict[str, int]], partition_number: int, source_path: Path) -> None:

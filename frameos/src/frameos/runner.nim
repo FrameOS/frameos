@@ -29,6 +29,14 @@ const RENDER_SLEEP_SLICE_MS = 100.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
+proc logSignal(self: RunnerThread, payload: JsonNode) =
+  let wasEnabled = self.logger.enabled
+  if not wasEnabled:
+    self.logger.enable()
+  self.logger.log(payload)
+  if not wasEnabled:
+    self.logger.disable()
+
 proc renderSceneInitError(scene: FrameScene, context: ExecutionContext): Image =
   let message = scene.state{SCENE_INIT_ERROR_STATE_KEY}.getStr("Scene failed to start.")
   context.image = renderError(context.image.width, context.image.height, message)
@@ -133,12 +141,12 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
     setLastImage(errorImage)
     result = (errorImage, context.nextSleep)
-    self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+    self.logSignal(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
   self.lastRenderAt = epochTime()
   let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
   markRuntimeCheckpoint("scene:done", currentSceneId = scene.id.string, clearNode = true)
-  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
+  self.logSignal(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
@@ -166,7 +174,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       sceneId = getFirstSceneId()
       exportedScene = findExportedScene(sceneId)
     if exportedScene.isNone:
-      self.logger.log(%*{"event": "render:error:scene:missing", "sceneId": sceneId.string})
+      self.logSignal(%*{"event": "render:error:scene:missing", "sceneId": sceneId.string})
       self.isRendering = false
       await sleepAsync(RENDER_SLEEP_SLICE_MS)
       continue
@@ -174,7 +182,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       self.currentSceneId = sceneId
     if lastSceneId != sceneId:
       var sceneInitialized = true
-      self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
+      self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       # Persist the active scene context early in boot, then stop writing it
       # after a few successful renders to reduce SD card writes.
       if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):
@@ -190,7 +198,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           sceneInitialized = false
           currentScene = initSceneInitErrorScene(sceneId, self.frameConfig, self.logger, $e.msg)
           exportedScene = some(sceneInitErrorExport())
-          self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
+          self.logSignal(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       if sceneInitialized:
         lastSceneId = sceneId
@@ -293,12 +301,12 @@ proc triggerRender*(self: RunnerThread): void =
 proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
   let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
   if not self.scenes.hasKey(targetSceneId):
-    self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
+    self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
         "sceneId": targetSceneId.string, "event": event, "payload": payload})
     return
   let exportedScene = findExportedScene(targetSceneId)
   if exportedScene.isNone:
-    self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
+    self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
         "sceneId": targetSceneId.string, "event": event, "payload": payload})
     return
   let scene = self.scenes[targetSceneId]
@@ -332,7 +340,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     if success:
       waitTime = 1
       if not event.startsWith("mouse"):
-        self.logger.log(%*{"event": "event:" & event, "payload": payload})
+        self.logSignal(%*{"event": "event:" & event, "payload": payload})
       try:
         case event:
           of "render":
@@ -353,7 +361,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             let sceneId = SceneId(payload["sceneId"].getStr())
             let exportedScene = findExportedScene(sceneId)
             if exportedScene.isNone:
-              self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
+              self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
             if sceneId != self.currentSceneId:
@@ -401,7 +409,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
           else: discard
         self.dispatchSceneEvent(sceneId, event, payload)
       except Exception as e:
-        self.logger.log(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+        self.logSignal(%*{"event": "event:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
     # after we have processed all queued messages
     if not success:

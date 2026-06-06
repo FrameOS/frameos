@@ -31,13 +31,13 @@ RUN set -eux; \
     touch /boot/config.txt; \
     sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
     sed -ri 's/^#?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config; \
-    wget -q -O /tmp/quickjs.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz; \
-    echo "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf  /tmp/quickjs.tar.xz" | sha256sum -c -; \
+    wget -q -O /tmp/quickjs.tar.xz https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz; \
+    echo "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a  /tmp/quickjs.tar.xz" | sha256sum -c -; \
     tar -xf /tmp/quickjs.tar.xz -C /tmp; \
-    cp -a /tmp/quickjs-2025-04-26 /srv/frameos/vendor/quickjs/quickjs-2025-04-26; \
-    make -C /srv/frameos/vendor/quickjs/quickjs-2025-04-26 libquickjs.a; \
+    cp -a /tmp/quickjs-2026-06-04 /srv/frameos/vendor/quickjs/quickjs-2026-06-04; \
+    make -C /srv/frameos/vendor/quickjs/quickjs-2026-06-04 libquickjs.a; \
     chown -R "${FRAMEOS_E2E_USER}:${FRAMEOS_E2E_USER}" /srv/frameos; \
-    rm -rf /tmp/quickjs.tar.xz /tmp/quickjs-2025-04-26; \
+    rm -rf /tmp/quickjs.tar.xz /tmp/quickjs-2026-06-04; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

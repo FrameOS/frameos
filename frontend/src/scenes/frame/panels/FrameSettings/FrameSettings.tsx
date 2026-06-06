@@ -14,6 +14,7 @@ import {
   frameLogic,
   normalizeFrameErrorBehavior,
 } from '../../frameLogic'
+import { frameCompilationModeOptions, frameCrossCompilationOptions } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
@@ -207,7 +208,9 @@ export function FrameSettings({
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
   const timezoneUpdater = frameForm.timezone_updater ?? {}
   const timezoneUpdateHourValue =
-    typeof timezoneUpdater.hour === 'number' && Number.isInteger(timezoneUpdater.hour) ? String(timezoneUpdater.hour) : ''
+    typeof timezoneUpdater.hour === 'number' && Number.isInteger(timezoneUpdater.hour)
+      ? String(timezoneUpdater.hour)
+      : ''
   const timezoneUpdateUrlValue = timezoneUpdater.url ?? ''
   const setTimezoneUpdaterValue = (patch: Partial<NonNullable<FrameType['timezone_updater']>>) => {
     const next = {
@@ -627,19 +630,7 @@ export function FrameSettings({
                   </div>
                 }
               >
-                <Select
-                  name="buildroot.compilationMode"
-                  options={[
-                    { value: '', label: 'Default (Precompiled)' },
-                    { value: 'precompiled', label: 'Use precompiled binaries if possible' },
-                    { value: 'static', label: 'Build as a single executable' },
-                    { value: 'shared', label: 'Scenes and drivers as shared libraries' },
-                    {
-                      value: 'shared-scenes',
-                      label: 'Scenes bundled in one shared library (scenes.so)',
-                    },
-                  ]}
-                />
+                <Select name="buildroot.compilationMode" options={frameCompilationModeOptions} />
               </Field>
             </Group>
           ) : null}
@@ -699,14 +690,7 @@ export function FrameSettings({
                   </div>
                 }
               >
-                <Select
-                  name="rpios.crossCompilation"
-                  options={[
-                    { value: 'auto', label: 'Auto (try to cross-compile, fallback if needed)' },
-                    { value: 'always', label: 'Always cross-compile (fail if unavailable)' },
-                    { value: 'never', label: 'Never cross-compile (build on device)' },
-                  ]}
-                />
+                <Select name="rpios.crossCompilation" options={frameCrossCompilationOptions} />
               </Field>
               <Field
                 name="compilationMode"
@@ -725,19 +709,7 @@ export function FrameSettings({
                   </div>
                 }
               >
-                <Select
-                  name="rpios.compilationMode"
-                  options={[
-                    { value: '', label: 'Default (Precompiled)' },
-                    { value: 'precompiled', label: 'Use precompiled binaries if possible' },
-                    { value: 'static', label: 'Build as a single executable' },
-                    { value: 'shared', label: 'Scenes and drivers as shared libraries' },
-                    {
-                      value: 'shared-scenes',
-                      label: 'Scenes bundled in one shared library (scenes.so)',
-                    },
-                  ]}
-                />
+                <Select name="rpios.compilationMode" options={frameCompilationModeOptions} />
               </Field>
             </Group>
           ) : null}

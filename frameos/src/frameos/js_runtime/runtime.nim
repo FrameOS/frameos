@@ -1,14 +1,16 @@
-# frameos/src/frameos/js_runtime.nim
+# frameos/src/frameos/js_runtime/runtime.nim
 # Centralized JavaScript runtime helpers for interpreted scenes.
 # Extracted from interpreter.nim so the JS bridge can be reused anywhere.
 
 import frameos/types
 import frameos/values
-import assets/vendor as vendorAssets
+import frameos/js_runtime/source_map
+import frameos/js_runtime/transpiler
+import frameos/js_runtime/burrito
 import lib/tz
-import lib/burrito
 import tables, json, strutils, locks
 import chrono, times
+import pixie
 
 # -------------------------
 # Internal evaluation scope
@@ -24,12 +26,12 @@ type
     outputTypes: Table[string, string]
     targetField: string
 
-var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+var jsSourceMapsByCtx = initTable[ptr JSContext, Table[string, SourceLineMap]]()
+var currentEvalCtx: ptr JSContext
+var currentEvalEnv: EvalEnv
 var tzName = ""
-var compilerJsLock: Lock
-var compilerJs: QuickJS
-var compilerJsReady = false
-initLock(compilerJsLock)
+var sceneJsLock: Lock
+initLock(sceneJsLock)
 
 const sceneJsPrelude* = """
 const __frameosFragment = Symbol.for("frameos.fragment");
@@ -100,26 +102,46 @@ proc getCodeSnippet(node: DiagramNode): string =
     return node.data["code"].getStr()
   ""
 
-proc ensureCompilerJsLocked() =
-  if compilerJsReady:
-    return
-  compilerJs = newQuickJS()
-  discard compilerJs.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
-  compilerJsReady = true
-
 proc transpileSource*(source: string, filename: string): string =
   if source.len == 0:
     return source
-  withLock compilerJsLock:
-    ensureCompilerJsLocked()
-    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
+  transformFrameosScript(source, filename)
+
+proc transpileSourceWithMap*(source: string, filename: string): TransformResult =
+  if source.len == 0:
+    return TransformResult(code: source, sourceMap: identitySourceLineMap(source, filename, filename))
+  transform(source, TransformOptions(filePath: filename, transforms: @["typescript", "jsx"]))
 
 proc transpileModuleSource*(source: string, filename: string): string =
   if source.len == 0:
     return source
-  withLock compilerJsLock:
-    ensureCompilerJsLocked()
-    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\", transforms: [\"typescript\", \"jsx\", \"imports\"] })")
+  transformFrameosModule(source, filename)
+
+proc transpileModuleSourceWithMap*(source: string, filename: string): TransformResult =
+  if source.len == 0:
+    return TransformResult(code: source, sourceMap: identitySourceLineMap(source, filename, filename))
+  transform(source, TransformOptions(filePath: filename, transforms: @["typescript", "jsx", "imports"]))
+
+proc registerJsSourceMap*(ctx: ptr JSContext, sourceMap: SourceLineMap) =
+  if ctx == nil or sourceMap.generatedName.len == 0:
+    return
+  if not jsSourceMapsByCtx.hasKey(ctx):
+    jsSourceMapsByCtx[ctx] = initTable[string, SourceLineMap]()
+  jsSourceMapsByCtx[ctx][sourceMap.generatedName] = sourceMap
+
+proc clearJsSourceMaps*(ctx: ptr JSContext) =
+  if ctx != nil and jsSourceMapsByCtx.hasKey(ctx):
+    jsSourceMapsByCtx.del(ctx)
+
+proc mapJsErrorText*(ctx: ptr JSContext, text: string): string =
+  result = text
+  if ctx == nil or not jsSourceMapsByCtx.hasKey(ctx):
+    return
+  for _, sourceMap in jsSourceMapsByCtx[ctx]:
+    result = result.rewriteQuickJsLocations(sourceMap)
+
+proc mapJsErrorText*(text: string, sourceMap: SourceLineMap): string =
+  text.rewriteQuickJsLocations(sourceMap)
 
 proc logCompileError(
   scene: InterpretedFrameScene,
@@ -140,12 +162,32 @@ proc logCompileError(
     "snippet": snippet
   })
 
+proc logCompileError(
+  scene: InterpretedFrameScene,
+  nodeId: NodeId,
+  sourceKind: string,
+  sourceName: string,
+  snippet: string,
+  error: ref CatchableError,
+  sourceMap: SourceLineMap
+) =
+  scene.logger.log(%*{
+    "event": "interpreter:jsCompileError",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "sourceKind": sourceKind,
+    "sourceName": sourceName,
+    "error": error.msg.mapJsErrorText(sourceMap),
+    "stacktrace": error.getStackTrace().mapJsErrorText(sourceMap),
+    "snippet": snippet
+  })
+
 # -------------------------
 # Build JS envelope function
 # -------------------------
 
-proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
-  ## Create a named function returning a BigInt-safe JSON envelope (no re-parsing each call).
+proc buildEnvelopeFunctionWithMap(code: string, argNames: seq[string], fnName: string, filename: string): tuple[code: string, sourceMap: SourceLineMap] =
+  ## Create a named function returning a BigInt-safe JSON envelope.
   var decls = newSeq[string]()
   for rawName in argNames:
     let lc = rawName.toLowerAscii
@@ -154,32 +196,68 @@ proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string):
       continue
     let ident = toJsIdent(rawName)
     decls.add("const " & ident & " = __args[\"" & jsQuote(rawName) & "\"];")
-  let declBlock = decls.join("\n")
 
-  result = """
-function """ & fnName & """() {
-  "use strict";
-  """ & declBlock & """
-  try {
-    const __v = ((state, args, context) => (""" & code & """))(__state, __args, __context);
-    const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
-    const json = (typeof __v === 'undefined')
-      ? JSON.stringify({ k: __k })
-      : JSON.stringify({ k: __k, v: __v  }, __jsReplacer);
-    return json;
-  } catch (e) {
-    const msg = (e && e.stack) ? e.stack : String(e);
-    return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
-  }
-}
-"""
+  var mapLines: seq[int] = @[0]
+  var mapSegments: seq[SourceMapSegment] = @[]
+  template addGeneratedLine(line: string, sourceLine: int = 0) =
+    if result.code.len > 0:
+      result.code.add("\n")
+    result.code.add(line)
+    mapLines.add(sourceLine)
+
+  addGeneratedLine("function " & fnName & "() {")
+  addGeneratedLine("  \"use strict\";")
+  for decl in decls:
+    addGeneratedLine("  " & decl)
+  addGeneratedLine("  try {")
+
+  let sourceLines = code.splitLines()
+  if sourceLines.len == 0:
+    addGeneratedLine("    const __v = ((state, args, context) => ())(__state, __args, __context);")
+  else:
+    for index, line in sourceLines:
+      let sourceLine = index + 1
+      if index == 0 and index == sourceLines.high:
+        let prefix = "    const __v = ((state, args, context) => ("
+        addGeneratedLine(prefix & line & "))(__state, __args, __context);", sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
+      elif index == 0:
+        let prefix = "    const __v = ((state, args, context) => ("
+        addGeneratedLine(prefix & line, sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
+      elif index == sourceLines.high:
+        addGeneratedLine(line & "))(__state, __args, __context);", sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
+      else:
+        addGeneratedLine(line, sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
+  addGeneratedLine("    const __k = (__v === null) ? \"null\" : (Array.isArray(__v) ? \"array\" : typeof __v);")
+  addGeneratedLine("    const json = (typeof __v === 'undefined')")
+  addGeneratedLine("      ? JSON.stringify({ k: __k })")
+  addGeneratedLine("      : JSON.stringify({ k: __k, v: __v }, __jsReplacer);")
+  addGeneratedLine("    return json;")
+  addGeneratedLine("  } catch (e) {")
+  addGeneratedLine("    const msg = (e && e.stack) ? e.stack : String(e);")
+  addGeneratedLine("    return JSON.stringify({ k: \"error\", v: { message: String(e && e.message || e), stack: msg } });")
+  addGeneratedLine("  }")
+  addGeneratedLine("}")
+
+  result.sourceMap = SourceLineMap(
+    generatedName: filename,
+    sourceName: filename,
+    generatedToSourceLine: mapLines,
+    segments: mapSegments
+  )
+
+proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
+  buildEnvelopeFunctionWithMap(code, argNames, fnName, "<frameos>").code
 
 # -------------------------
 # QuickJS bridge utilities
 # -------------------------
 
 proc env(ctx: ptr JSContext): EvalEnv =
-  if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
+  if currentEvalCtx == ctx: currentEvalEnv else: nil
 
 # Return an object sentinel to represent "undefined" without using JS_UNDEFINED across the C boundary.
 proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
@@ -209,7 +287,7 @@ proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.
   return jsUndefSentinel(ctx)
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
-proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
+proc jsonToJS*(ctx: ptr JSContext, j: JsonNode): JSValue =
   if j.isNil: return jsNull(ctx)
   case j.kind
   of JNull: return jsNull(ctx)
@@ -237,8 +315,28 @@ proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
       inc idx
     return arr
 
-proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
-  jsonToJS(ctx, valueToJson(v))
+proc valueToJS*(ctx: ptr JSContext, v: Value): JSValue =
+  case v.kind
+  of fkString, fkText:
+    return nimStringToJS(ctx, v.s)
+  of fkFloat:
+    return nimFloatToJS(ctx, v.f)
+  of fkInteger:
+    if v.i >= low(int32).int64 and v.i <= high(int32).int64:
+      return nimIntToJS(ctx, v.i.int32)
+    return nimFloatToJS(ctx, v.i.float64)
+  of fkBoolean:
+    return nimBoolToJS(ctx, v.b)
+  of fkColor:
+    return nimStringToJS(ctx, v.col.toHtmlHex)
+  of fkJson:
+    return jsonToJS(ctx, v.j)
+  of fkNode:
+    return nimIntToJS(ctx, v.nId.int32)
+  of fkScene:
+    return nimStringToJS(ctx, v.sId.string)
+  of fkImage, fkNone:
+    return jsNull(ctx)
 
 proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
@@ -352,41 +450,172 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
   else:
     return Value(kind: fkNone)
 
+proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst): string =
+  let globalObj = JS_GetGlobalObject(ctx)
+  defer: JS_FreeValue(ctx, globalObj)
+
+  let stringifyFn = JS_GetPropertyStr(ctx, globalObj, "__frameosStringify")
+  defer: JS_FreeValue(ctx, stringifyFn)
+
+  if JS_IsFunction(ctx, stringifyFn) != 0:
+    var argv: array[1, JSValueConst]
+    argv[0] = val
+    let strVal = JS_Call(ctx, stringifyFn, globalObj, 1.cint, addr argv[0])
+    defer: JS_FreeValue(ctx, strVal)
+    if JS_IsException(strVal) == 0:
+      return toNimString(ctx, strVal)
+
+  let fallback = JS_JSONStringify(ctx, val, jsUndefined(ctx), jsUndefined(ctx))
+  defer: JS_FreeValue(ctx, fallback)
+  if JS_IsException(fallback) == 0:
+    return toNimString(ctx, fallback)
+  return "null"
+
+proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst): JsonNode =
+  if jsIsUndefined(val) or jsIsNull(val):
+    return newJNull()
+  if jsIsBool(val):
+    return %*toNimBool(ctx, val)
+  if jsIsNumber(val):
+    let f = toNimFloat(ctx, val)
+    if f >= low(int64).float64 and f <= high(int64).float64:
+      let i = f.int64
+      if i.float64 == f:
+        return %*i
+    return %*f
+  if jsIsBigInt(ctx, val):
+    try:
+      return %*toNimInt64Ext(ctx, val)
+    except CatchableError:
+      return %*toNimString(ctx, val)
+  if jsIsString(val):
+    return %*toNimString(ctx, val)
+
+  let jsonText = stringifyJsValue(ctx, val)
+  try:
+    return parseJson(jsonText)
+  except CatchableError:
+    return %*jsonText
+
+proc jsValueToValue*(ctx: ptr JSContext, val: JSValueConst, expectedType: string = ""): Value =
+  if expectedType.len > 0:
+    if jsIsUndefined(val) or jsIsNull(val):
+      return valueFromJsonByType(newJNull(), expectedType)
+    case expectedType
+    of "float":
+      if jsIsNumber(val):
+        return VFloat(toNimFloat(ctx, val))
+    of "integer":
+      if jsIsNumber(val):
+        return VInt(toNimFloat(ctx, val).int64)
+    of "boolean":
+      if jsIsBool(val):
+        return VBool(toNimBool(ctx, val))
+    of "string":
+      if jsIsString(val):
+        return VString(toNimString(ctx, val))
+    of "text":
+      if jsIsString(val):
+        return VText(toNimString(ctx, val))
+    of "json":
+      return VJson(jsValueToJson(ctx, val))
+    else:
+      discard
+    return valueFromJsonByType(jsValueToJson(ctx, val), expectedType)
+
+  if jsIsUndefined(val):
+    return Value(kind: fkNone)
+  if jsIsNull(val):
+    return Value(kind: fkJson, j: newJNull())
+  if jsIsBool(val):
+    return Value(kind: fkBoolean, b: toNimBool(ctx, val))
+  if jsIsNumber(val):
+    let f = toNimFloat(ctx, val)
+    if f >= low(int64).float64 and f <= high(int64).float64:
+      let i = f.int64
+      if i.float64 == f:
+        return Value(kind: fkInteger, i: i)
+    return Value(kind: fkFloat, f: f)
+  if jsIsBigInt(ctx, val):
+    try:
+      return Value(kind: fkInteger, i: toNimInt64Ext(ctx, val))
+    except CatchableError:
+      return Value(kind: fkString, s: toNimString(ctx, val))
+  if jsIsString(val):
+    return Value(kind: fkString, s: toNimString(ctx, val))
+
+  return Value(kind: fkJson, j: jsValueToJson(ctx, val))
+
+proc jsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: string] =
+  let exception = JS_GetException(ctx)
+  defer: JS_FreeValue(ctx, exception)
+  if jsIsObject(exception):
+    let messageVal = JS_GetPropertyStr(ctx, exception, "message")
+    defer: JS_FreeValue(ctx, messageVal)
+    let stackVal = JS_GetPropertyStr(ctx, exception, "stack")
+    defer: JS_FreeValue(ctx, stackVal)
+    result.message = toNimString(ctx, messageVal)
+    result.stack = toNimString(ctx, stackVal)
+  else:
+    result.message = toNimString(ctx, exception)
+    result.stack = result.message
+  if result.message.len == 0:
+    result.message = "JavaScript error"
+
+proc mappedJsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: string] =
+  result = jsExceptionDetails(ctx)
+  result.message = mapJsErrorText(ctx, result.message)
+  result.stack = mapJsErrorText(ctx, result.stack)
+
+proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSValueConst] = []): JSValue =
+  let globalObj = JS_GetGlobalObject(ctx)
+  defer: JS_FreeValue(ctx, globalObj)
+  let fn = JS_GetPropertyStr(ctx, globalObj, fnName.cstring)
+  defer: JS_FreeValue(ctx, fn)
+  if args.len == 0:
+    return JS_Call(ctx, fn, globalObj, 0.cint, nil)
+  var argv = newSeq[JSValueConst](args.len)
+  for i, arg in args:
+    argv[i] = arg
+  return JS_Call(ctx, fn, globalObj, args.len.cint, addr argv[0])
+
 # -------------------------
 # Scene JS context
 # -------------------------
 
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
-  if scene.jsReady: return
-  scene.js = newQuickJS()
-  # Register bridge functions ONCE per scene/context
-  scene.js.registerFunction("getState", jsGetState)
-  scene.js.registerFunction("getArg", jsGetArg)
-  scene.js.registerFunction("getContext", jsGetContext)
-  scene.js.registerFunction("jsLog", jsLog)
-  scene.js.registerFunction("parseTs", jsChronoParseTs)
-  scene.js.registerFunction("format", jsChronoFormat)
-  scene.js.registerFunction("now", jsChronoNow)
-  discard scene.js.eval("""
-  "use strict";
-  const __jsReplacer = (k, v) =>
-    (typeof v === 'bigint') ? { __bigint: v.toString() }
-    : (v === undefined ? null : v);
-  const console = {
-    log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
-    warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
-    error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
-  };
-  const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
-  const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
-  const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
-  const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-  """ & sceneJsPrelude)
-  # Initialize registries
-  scene.jsFuncNameByNode = initTable[NodeId, string]()
-  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.jsReady = true
+  withLock sceneJsLock:
+    if scene.jsReady: return
+    scene.js = newQuickJS()
+    # Register bridge functions ONCE per scene/context
+    scene.js.registerFunction("getState", jsGetState)
+    scene.js.registerFunction("getArg", jsGetArg)
+    scene.js.registerFunction("getContext", jsGetContext)
+    scene.js.registerFunction("jsLog", jsLog)
+    scene.js.registerFunction("parseTs", jsChronoParseTs)
+    scene.js.registerFunction("format", jsChronoFormat)
+    scene.js.registerFunction("now", jsChronoNow)
+    discard scene.js.eval("""
+    "use strict";
+    const __jsReplacer = (k, v) =>
+      (typeof v === 'bigint') ? { __bigint: v.toString() }
+      : (v === undefined ? null : v);
+    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+    const console = {
+      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
+      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
+      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
+    };
+    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
+    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
+    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
+    """ & sceneJsPrelude)
+    # Initialize registries
+    scene.jsFuncNameByNode = initTable[NodeId, string]()
+    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.jsReady = true
 
 # -------------------------
 # Code function naming
@@ -417,12 +646,17 @@ proc compileInlineFn(scene: InterpretedFrameScene,
                      nameBuilder: InlineNameProc) =
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
+  let filename = "<frameos:inline:" & $nodeId.int & ":" & name & ">"
+  var sourceMap = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename).sourceMap
   try:
-    let src = transpileSource(buildEnvelopeFunction(snippet, @[], fnName),
-      "<frameos:inline:" & $nodeId.int & ":" & name & ">")
-    discard scene.js.eval(src)
+    let envelope = buildEnvelopeFunctionWithMap(snippet, @[], fnName, filename)
+    let transformed = transpileSourceWithMap(envelope.code, filename)
+    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
+    withLock sceneJsLock:
+      discard scene.js.eval(transformed.code, filename)
+      registerJsSourceMap(scene.js.context, sourceMap)
   except CatchableError as e:
-    logCompileError(scene, nodeId, "inline", name, snippet, e)
+    logCompileError(scene, nodeId, "inline", name, snippet, e, sourceMap)
     raise
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
@@ -457,12 +691,17 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
       if k notin argNames: argNames.add(k)
 
   let fnName = uniqueCodeFnName(scene, node.id)
+  let filename = "<frameos:code:" & $node.id.int & ">"
+  var sourceMap = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename).sourceMap
   try:
-    let src = transpileSource(buildEnvelopeFunction(codeSnippet, argNames, fnName),
-      "<frameos:code:" & $node.id.int & ">")
-    discard scene.js.eval(src)
+    let envelope = buildEnvelopeFunctionWithMap(codeSnippet, argNames, fnName, filename)
+    let transformed = transpileSourceWithMap(envelope.code, filename)
+    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
+    withLock sceneJsLock:
+      discard scene.js.eval(transformed.code, filename)
+      registerJsSourceMap(scene.js.context, sourceMap)
   except CatchableError as e:
-    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e)
+    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e, sourceMap)
     raise
   scene.jsFuncNameByNode[node.id] = fnName
 
@@ -499,13 +738,16 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
     targetField: targetField
   )
 
-  evalEnvByCtx[scene.js.context] = e
   var envelopeJson = ""
-  try:
-    envelopeJson = scene.js.eval(fnName & "()")
-  finally:
-    if evalEnvByCtx.hasKey(scene.js.context):
-      evalEnvByCtx.del(scene.js.context)
+  withLock sceneJsLock:
+    currentEvalCtx = scene.js.context
+    currentEvalEnv = e
+    try:
+      envelopeJson = scene.js.eval(fnName & "()")
+    finally:
+      if currentEvalCtx == scene.js.context:
+        currentEvalCtx = nil
+        currentEvalEnv = nil
 
   var parsed: JsonNode
   try:
@@ -515,12 +757,14 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
 
   let kind = parsed{"k"}.getStr()
   if kind == "error":
+    let message = mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr())
+    let stack = mapJsErrorText(scene.js.context, parsed{"v"}{"stack"}.getStr())
     scene.logger.log(%*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
       "nodeId": nodeId.int,
-      "message": parsed{"v"}{"message"}.getStr(),
-      "stack": parsed{"v"}{"stack"}.getStr()
+      "message": message,
+      "stack": stack
     })
     if expectedType.len > 0:
       if expectedType == "string": return Value(kind: fkString, s: "")
@@ -573,12 +817,17 @@ proc evalSnippet*(
   ensureSceneJs(scene)
   inc anonCounter
   let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
+  let filename = "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">"
+  var sourceMap = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename).sourceMap
   try:
-    let src = transpileSource(buildEnvelopeFunction(code, argNames, fnName),
-      "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
-    discard scene.js.eval(src)
+    let envelope = buildEnvelopeFunctionWithMap(code, argNames, fnName, filename)
+    let transformed = transpileSourceWithMap(envelope.code, filename)
+    sourceMap = composeSourceLineMaps(transformed.sourceMap, envelope.sourceMap).withGeneratedName(filename)
+    withLock sceneJsLock:
+      discard scene.js.eval(transformed.code, filename)
+      registerJsSourceMap(scene.js.context, sourceMap)
   except CatchableError as e:
-    logCompileError(scene, nodeId, "eval", fnName, code, e)
+    logCompileError(scene, nodeId, "eval", fnName, code, e, sourceMap)
     raise
 
   var outs = outputTypes
@@ -602,25 +851,22 @@ proc transpileSourceForTest*(source: string, filename: string = "<test>"): strin
   transpileSource(source, filename)
 
 proc cleanupCompilerJs*() =
-  withLock compilerJsLock:
-    if not compilerJsReady:
-      return
-    if compilerJs.runtime != nil:
-      compilerJs.runPendingJobs()
-      JS_RunGC(compilerJs.runtime)
-    compilerJs.close()
-    compilerJsReady = false
+  discard
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
-  if not scene.jsReady:
-    return
-  if scene.js.context != nil and evalEnvByCtx.hasKey(scene.js.context):
-    evalEnvByCtx.del(scene.js.context)
-  if scene.js.runtime != nil:
-    scene.js.runPendingJobs()
-    JS_RunGC(scene.js.runtime)
-  scene.js.close()
-  scene.jsReady = false
-  scene.jsFuncNameByNode = initTable[NodeId, string]()
-  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  withLock sceneJsLock:
+    if not scene.jsReady:
+      return
+    if scene.js.context != nil and currentEvalCtx == scene.js.context:
+      currentEvalCtx = nil
+      currentEvalEnv = nil
+    if scene.js.context != nil:
+      clearJsSourceMaps(scene.js.context)
+    if scene.js.runtime != nil:
+      scene.js.runPendingJobs()
+      JS_RunGC(scene.js.runtime)
+    scene.js.close()
+    scene.jsReady = false
+    scene.jsFuncNameByNode = initTable[NodeId, string]()
+    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()

@@ -1194,6 +1194,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         applyWorkspaceScrollGuard(values.secondarySidebarOpen)
       },
       openSceneControl: ({ frameId, sceneId }) => {
+        frameLogic({ frameId }).actions.hideDeployPlanModal()
         newFrameForm.actions.hideForm()
         if (isMobileWorkspaceViewport()) {
           actions.closeSecondarySidebar()
@@ -1201,7 +1202,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
         preserveFramesScroll()
         ensureSceneTileVisibleAfterLayoutChange(frameId, sceneId, cache)
       },
-      openLiveSceneControl: () => {
+      openLiveSceneControl: ({ frameId }) => {
+        frameLogic({ frameId }).actions.hideDeployPlanModal()
         newFrameForm.actions.hideForm()
         if (isMobileWorkspaceViewport()) {
           actions.closeSecondarySidebar()

@@ -2,12 +2,12 @@ import std/[base64, json, options, strformat, strutils, tables]
 import pixie
 
 import frameos/apps as frameos_apps
-import frameos/js_runtime
+import frameos/js_runtime/runtime
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/image
-import lib/burrito
+import frameos/js_runtime/burrito
 
 type
   JsAppRuntime* = ref object
@@ -24,7 +24,9 @@ type
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
     owner: AppRoot
+    configJson: JsonNode
     context: ExecutionContext
+    contextImageJson: JsonNode
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
 
@@ -108,6 +110,132 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     if e != nil:
       frameos_apps.logError(e.owner, "JS app fetchText failed: " & err.msg)
     return nimStringToJS(ctx, "")
+
+proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
+
+proc jsGetAppMeta(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  case toNimString(ctx, key)
+  of "nodeId":
+    return nimIntToJS(ctx, e.owner.nodeId.int32)
+  of "nodeName":
+    return nimStringToJS(ctx, e.owner.nodeName)
+  of "category":
+    return nimStringToJS(ctx, e.runtime.category)
+  else:
+    return jsUndefSentinel(ctx)
+
+proc jsGetAppConfig(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+  let configJson = if e.configJson.isNil: %*{} else: e.configJson
+  let keyStr = toNimString(ctx, key)
+  if configJson.kind == JObject and configJson.hasKey(keyStr):
+    return jsonToJS(ctx, configJson[keyStr])
+  return jsUndefSentinel(ctx)
+
+proc jsGetAppState(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+  let state = e.owner.scene.state
+  let keyStr = toNimString(ctx, key)
+  if not state.isNil and state.kind == JObject and state.hasKey(keyStr):
+    return jsonToJS(ctx, state[keyStr])
+  return jsUndefSentinel(ctx)
+
+proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  case toNimString(ctx, key)
+  of "width":
+    return nimIntToJS(ctx, e.owner.frameConfig.width.int32)
+  of "height":
+    return nimIntToJS(ctx, e.owner.frameConfig.height.int32)
+  of "rotate":
+    return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
+  of "assetsPath":
+    return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
+  of "timeZone":
+    return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
+  else:
+    return jsUndefSentinel(ctx)
+
+proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  case toNimString(ctx, key)
+  of "event":
+    return nimStringToJS(ctx, e.context.event)
+  of "hasImage":
+    return nimBoolToJS(ctx, e.context.hasImage)
+  of "payload":
+    if e.context.payload.isNil:
+      return jsNull(ctx)
+    return jsonToJS(ctx, e.context.payload)
+  of "loopIndex":
+    return nimIntToJS(ctx, e.context.loopIndex.int32)
+  of "loopKey":
+    return nimStringToJS(ctx, e.context.loopKey)
+  of "nextSleep":
+    return nimFloatToJS(ctx, e.context.nextSleep)
+  of "image":
+    if e.context.hasImage and not e.context.image.isNil:
+      if e.contextImageJson.isNil:
+        e.contextImageJson = e.runtime.storeTransientImageJson(e.context.image)
+      return jsonToJS(ctx, e.contextImageJson)
+    return jsUndefSentinel(ctx)
+  of "imageWidth":
+    if e.context.hasImage and not e.context.image.isNil:
+      return nimIntToJS(ctx, e.context.image.width.int32)
+    return jsUndefSentinel(ctx)
+  of "imageHeight":
+    if e.context.hasImage and not e.context.image.isNil:
+      return nimIntToJS(ctx, e.context.image.height.int32)
+    return jsUndefSentinel(ctx)
+  else:
+    return jsUndefSentinel(ctx)
+
+proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsonToJS(ctx, %*[])
+
+  var keys: seq[string] = @[]
+  case toNimString(ctx, scope)
+  of "config":
+    let configJson = if e.configJson.isNil: %*{} else: e.configJson
+    if configJson.kind == JObject:
+      for key in configJson.keys:
+        keys.add(key)
+  of "state":
+    let state = e.owner.scene.state
+    if not state.isNil and state.kind == JObject:
+      for key in state.keys:
+        keys.add(key)
+  of "frame":
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone"]
+  of "context":
+    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
+    if e.context.hasImage and not e.context.image.isNil:
+      keys.add("image")
+      keys.add("imageWidth")
+      keys.add("imageHeight")
+  else:
+    discard
+
+  let arr = newJArray()
+  for key in keys:
+    arr.add(%*key)
+  return jsonToJS(ctx, arr)
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string): JsAppRuntime =
   return JsAppRuntime(
@@ -285,10 +413,32 @@ proc ensureReady(runtime: JsAppRuntime) =
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsFetchText", jsFetchText)
+  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
+  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
+  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
+  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
+  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
+  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
   discard runtime.js.eval("""
   "use strict";
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
+  globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+  const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+  const __frameosProxy = (scope, getter) => new Proxy({}, {
+    get(_, k) { return (typeof k === "string") ? __frameosUnwrap(getter(k)) : undefined; },
+    has(_, k) { return typeof k === "string" && jsGetAppKeys(scope).includes(k); },
+    ownKeys() { return jsGetAppKeys(scope); },
+    getOwnPropertyDescriptor(_, k) {
+      return (typeof k === "string" && jsGetAppKeys(scope).includes(k))
+        ? { enumerable: true, configurable: true }
+        : undefined;
+    },
+  });
+  const __frameosAppConfig = __frameosProxy("config", jsGetAppConfig);
+  const __frameosAppState = __frameosProxy("state", jsGetAppState);
+  const __frameosAppFrame = __frameosProxy("frame", jsGetAppFrame);
+  globalThis.__frameosContext = __frameosProxy("context", jsGetAppContext);
   const frameos = {
     image: (spec = {}) => ({ __frameosType: "image", ...spec }),
     svg: (svg, spec = {}) => ({ __frameosType: "image", svg, ...spec }),
@@ -313,6 +463,14 @@ proc ensureReady(runtime: JsAppRuntime) =
       logError: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     });
   }
+  globalThis.__frameosAppInstance = __frameosWrapApp({
+    get nodeId() { return __frameosUnwrap(jsGetAppMeta("nodeId")); },
+    get nodeName() { return __frameosUnwrap(jsGetAppMeta("nodeName")); },
+    get category() { return __frameosUnwrap(jsGetAppMeta("category")); },
+    config: __frameosAppConfig,
+    state: __frameosAppState,
+    frame: __frameosAppFrame,
+  });
   function __frameosExports() {
     if (globalThis.__frameosModule && globalThis.__frameosModule.default) {
       return globalThis.__frameosModule.default;
@@ -320,65 +478,21 @@ proc ensureReady(runtime: JsAppRuntime) =
     return globalThis.__frameosModule || {};
   }
   function __frameosInvoke(name) {
-    try {
-      const mod = __frameosExports();
-      const fn = mod && mod[name];
-      const value = typeof fn === "function"
-        ? fn(globalThis.__frameosAppInstance, globalThis.__frameosContext)
-        : undefined;
-      return JSON.stringify({ ok: true, value }, __jsReplacer);
-    } catch (error) {
-      return JSON.stringify({
-        ok: false,
-        error: {
-          message: String(error && error.message || error),
-          stack: String(error && error.stack || error),
-        },
-      }, __jsReplacer);
-    }
+    const mod = __frameosExports();
+    const fn = mod && mod[name];
+    return typeof fn === "function"
+      ? fn(globalThis.__frameosAppInstance, globalThis.__frameosContext)
+      : undefined;
   }
   """ & sceneJsPrelude)
-  discard runtime.js.eval(transpileModuleSource(runtime.source, "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"))
+  let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
+  let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+  try:
+    discard runtime.js.eval(transformed.code, filename)
+  except CatchableError as error:
+    raise newException(JSException, error.msg.mapJsErrorText(transformed.sourceMap))
+  registerJsSourceMap(runtime.js.context, transformed.sourceMap)
   runtime.ready = true
-
-proc buildAppJson(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode): JsonNode =
-  result = %*{
-    "nodeId": owner.nodeId.int,
-    "nodeName": owner.nodeName,
-    "category": runtime.category,
-    "config": if configJson.isNil: %*{} else: configJson,
-    "state": if owner.scene.state.isNil: %*{} else: owner.scene.state,
-    "frame": {
-      "width": owner.frameConfig.width,
-      "height": owner.frameConfig.height,
-      "rotate": owner.frameConfig.rotate,
-      "assetsPath": owner.frameConfig.assetsPath,
-      "timeZone": owner.frameConfig.timeZone,
-    },
-  }
-
-proc buildContextJson(runtime: JsAppRuntime, context: ExecutionContext): JsonNode =
-  result = %*{
-    "event": context.event,
-    "hasImage": context.hasImage,
-    "payload": if context.payload.isNil: newJNull() else: context.payload,
-    "loopIndex": context.loopIndex,
-    "loopKey": context.loopKey,
-    "nextSleep": context.nextSleep,
-  }
-  if context.hasImage and not context.image.isNil:
-    result["image"] = runtime.storeTransientImageJson(context.image)
-    result["imageWidth"] = %* context.image.width
-    result["imageHeight"] = %* context.image.height
-
-proc setCallGlobals(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
-  let appJson = buildAppJson(runtime, owner, configJson)
-  let contextJson = buildContextJson(runtime, context)
-  discard runtime.js.eval(
-    "globalThis.__frameosAppInstance = __frameosWrapApp(Object.assign(globalThis.__frameosAppInstance || {}, " &
-      $appJson & "));"
-  )
-  discard runtime.js.eval("globalThis.__frameosContext = " & $contextJson & ";")
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
   if spec.kind == JObject and spec.hasKey("width"):
@@ -494,29 +608,67 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   else:
     return VNone()
 
-proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JsonNode =
-  ensureReady(runtime)
-  setCallGlobals(runtime, owner, configJson, context)
-  jsAppEnvByCtx[runtime.js.context] = JsAppEvalEnv(runtime: runtime, owner: owner, context: context)
-  let response =
-    try:
-      runtime.js.eval(&"""__frameosInvoke("{fnName}")""")
-    finally:
-      if jsAppEnvByCtx.hasKey(runtime.js.context):
-        jsAppEnvByCtx.del(runtime.js.context)
+proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst, expectedType: string): Value =
+  let ctx = runtime.js.context
 
-  let parsed = parseJson(response)
-  if not parsed{"ok"}.getBool():
-    frameos_apps.logError(owner, &"JS app {fnName} failed: " & parsed{"error"}{"message"}.getStr())
-    if parsed{"error"}{"stack"}.getStr().len > 0:
+  if jsIsUndefined(payload) or jsIsNull(payload):
+    if expectedType.len > 0:
+      return valueFromJsonByType(newJNull(), expectedType)
+    return VNone()
+
+  if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
+    return runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
+
+  if expectedType.len > 0:
+    if expectedType in ["string", "text"]:
+      return VString(toNimString(ctx, payload))
+    return valueFromJsonByType(jsValueToJson(ctx, payload), expectedType)
+
+  if jsIsString(payload):
+    return VString(toNimString(ctx, payload))
+  if jsIsBool(payload):
+    return VBool(toNimBool(ctx, payload))
+  if jsIsNumber(payload):
+    let f = toNimFloat(ctx, payload)
+    if f >= low(int64).float64 and f <= high(int64).float64:
+      let i = f.int64
+      if i.float64 == f:
+        return VInt(i)
+    return VFloat(f)
+  if jsIsBigInt(ctx, payload):
+    try:
+      return VInt(toNimInt64Ext(ctx, payload))
+    except CatchableError:
+      return VString(toNimString(ctx, payload))
+
+  runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
+
+proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
+  ensureReady(runtime)
+  let ctx = runtime.js.context
+  let fnNameValue = nimStringToJS(ctx, fnName)
+  defer: JS_FreeValue(ctx, fnNameValue)
+
+  jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
+  result =
+    try:
+      callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+    finally:
+      if jsAppEnvByCtx.hasKey(ctx):
+        jsAppEnvByCtx.del(ctx)
+
+  if JS_IsException(result) != 0:
+    let details = mappedJsExceptionDetails(ctx)
+    frameos_apps.logError(owner, &"JS app {fnName} failed: " & details.message)
+    if details.stack.len > 0:
       frameos_apps.log(owner, %*{
         "event": "jsApp:error",
         "nodeId": owner.nodeId.int,
         "nodeName": owner.nodeName,
-        "stack": parsed{"error"}{"stack"}.getStr()
+        "stack": details.stack
       })
-    return newJNull()
-  return parsed{"value"}
+    JS_FreeValue(ctx, result)
+    return jsNull(ctx)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   if runtime.initialized:
@@ -530,13 +682,15 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     loopKey: ".",
     nextSleep: -1
   )
-  discard runtime.invoke(owner, configJson, context, "init")
+  let payload = runtime.invoke(owner, configJson, context, "init")
+  JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
   try:
     let payload = runtime.invoke(owner, configJson, context, "get")
+    defer: JS_FreeValue(runtime.js.context, payload)
     return toValue(runtime, owner, context, payload, runtime.outputType)
   finally:
     runtime.clearTransientImages()
@@ -545,6 +699,7 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
   runtime.init(owner, configJson)
   try:
     let payload = runtime.invoke(owner, configJson, context, "run")
+    defer: JS_FreeValue(runtime.js.context, payload)
     if runtime.category == "render":
       let value = toValue(runtime, owner, context, payload, "image")
       if value.kind == fkImage and not value.asImage().isNil:

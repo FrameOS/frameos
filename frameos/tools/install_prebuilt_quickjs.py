@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-QUICKJS_VERSION = os.environ.get("QUICKJS_VERSION", "2025-04-26")
+QUICKJS_VERSION = os.environ.get("QUICKJS_VERSION", "2026-06-04")
 ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
 MANIFEST_PATH = "prebuilt-deps/manifest.json"
 TIMEOUT = float(os.environ.get("FRAMEOS_PREBUILT_TIMEOUT", "20"))

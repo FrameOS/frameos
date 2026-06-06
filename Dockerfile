@@ -56,8 +56,8 @@ RUN nim --version && nimble --version
 FROM nim-toolchain AS app-builder
 
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
-ARG QUICKJS_VERSION=2025-04-26
-ARG QUICKJS_SHA256=2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf
+ARG QUICKJS_VERSION=2026-06-04
+ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -136,6 +136,14 @@ RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
       /app/frameos/agent/build \
       /app/frameos/agent/tmp
 
+WORKDIR /app/frameos
+RUN nim c \
+      --nimCache:/tmp/frameos-native-js-transpile-nimcache \
+      --out:/app/frameos/build/native_js_transpile \
+      tools/native_js_transpile.nim \
+    && test -x /app/frameos/build/native_js_transpile \
+    && rm -rf /tmp/frameos-native-js-transpile-nimcache
+
 FROM ${PYTHON_IMAGE} AS python-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -163,6 +171,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
+ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app

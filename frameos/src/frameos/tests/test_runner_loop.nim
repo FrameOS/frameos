@@ -37,7 +37,8 @@ proc resetBootGuardState() =
 proc testLogger(config: FrameConfig, store: LogStore): Logger =
   var logger = Logger(frameConfig: config, enabled: true)
   logger.log = proc(payload: JsonNode) =
-    store.entries.add(payload)
+    if logger.enabled:
+      store.entries.add(payload)
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =
@@ -61,10 +62,30 @@ proc hasEvent(store: LogStore, eventName: string): bool =
   store.entries.anyIt(it.kind == JObject and it.hasKey("event") and it["event"].kind == JString and
     it["event"].getStr() == eventName)
 
+proc countEvent(store: LogStore, eventName: string): int =
+  for entry in store.entries:
+    if entry.kind == JObject and entry.hasKey("event") and entry["event"].kind == JString and
+        entry["event"].getStr() == eventName:
+      result += 1
+
 proc failingInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   raise newException(IOError, "network path unavailable")
 
+proc fastInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+  FrameScene(
+    id: sceneId,
+    frameConfig: frameConfig,
+    logger: logger,
+    state: %*{},
+    refreshInterval: 0.05,
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+
 proc unusedRender(scene: FrameScene, context: ExecutionContext): Image =
+  context.image
+
+proc fastRender(scene: FrameScene, context: ExecutionContext): Image =
+  context.image.fill(scene.backgroundColor)
   context.image
 
 proc failingRender(scene: FrameScene, context: ExecutionContext): Image =
@@ -167,6 +188,129 @@ suite "runner loop safety":
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
       restoreBootGuardState(savedBootGuardState)
+
+  test "render signals are logged while fast render logging is paused":
+    let sceneId = "tests/runner/fast-render".SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[sceneId] = ExportedInterpretedScene(
+        name: "Fast render scene",
+        publicStateFields: @[],
+        persistedStateKeys: @[],
+        init: fastInit,
+        render: fastRender,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+      )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      config.controlCode = ControlCode(
+        enabled: false,
+        position: "center",
+        size: 0,
+        padding: 0,
+        offsetX: 0,
+        offsetY: 0,
+        qrCodeColor: parseHtmlColor("#000000"),
+        backgroundColor: parseHtmlColor("#ffffff")
+      )
+
+      let store = LogStore(entries: @[])
+      let logger = testLogger(config, store)
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneId,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: logger
+      )
+
+      waitFor runnerThread.startRenderLoop(maxCycles = 3)
+
+      check countEvent(store, "render:pause") == 1
+      check countEvent(store, "render:done") == 3
+      check not logger.enabled
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "activation control events are logged while render logging is paused":
+    clearEventChannel()
+
+    var config = loadConfig()
+    let store = LogStore(entries: @[])
+    let logger = testLogger(config, store)
+    logger.disable()
+    var runnerThread = RunnerThread(
+      frameConfig: config,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: getFirstSceneId(),
+      lastRenderAt: 0.0,
+      sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: logger
+    )
+
+    let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
+    sendEvent("setCurrentScene", %*{"sceneId": "tests/runner/missing-scene"})
+
+    let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
+    check finished
+    if finished:
+      waitFor messageLoop
+    check hasEvent(store, "event:setCurrentScene")
+    check not logger.enabled
+
+  test "scene changes are logged while render logging is paused":
+    let sceneId = "tests/runner/paused-scene-change".SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[sceneId] = ExportedInterpretedScene(
+        name: "Paused scene change",
+        publicStateFields: @[],
+        persistedStateKeys: @[],
+        init: fastInit,
+        render: fastRender,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+      )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      config.controlCode = ControlCode(
+        enabled: false,
+        position: "center",
+        size: 0,
+        padding: 0,
+        offsetX: 0,
+        offsetY: 0,
+        qrCodeColor: parseHtmlColor("#000000"),
+        backgroundColor: parseHtmlColor("#ffffff")
+      )
+
+      let store = LogStore(entries: @[])
+      let logger = testLogger(config, store)
+      logger.disable()
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneId,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: logger
+      )
+
+      waitFor runnerThread.startRenderLoop(maxCycles = 1)
+
+      check hasEvent(store, "render:sceneChange")
+      check hasEvent(store, "render:done")
+      check not logger.enabled
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
   test "scene render errors do not update boot guard failure details":
     let savedBootGuardState = saveBootGuardState()

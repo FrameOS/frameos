@@ -17,14 +17,11 @@ const isWatch = process.argv.includes('--watch')
 
 const outputDir = path.resolve(__dirname, '../assets/compiled/frame_web')
 const staticDir = path.join(outputDir, 'static')
-const vendorOutputDir = path.resolve(__dirname, '../assets/compiled/vendor')
 
 await import('../../frontend/scripts/generateRepoApps.mjs')
 
 await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
-await fs.rm(vendorOutputDir, { recursive: true, force: true })
-await fs.mkdir(vendorOutputDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
 
 const postcssPlugins = [
@@ -134,35 +131,9 @@ const buildOptions = {
 }
 
 if (isWatch) {
-  const vendorBuildContext = await context({
-    absWorkingDir: __dirname,
-    entryPoints: ['src/sucrase.ts'],
-    bundle: true,
-    format: 'iife',
-    globalName: '__frameosSucraseBundle',
-    platform: 'browser',
-    target: ['es2020'],
-    minify: true,
-    write: true,
-    outfile: path.join(vendorOutputDir, 'sucrase.js'),
-  })
   const buildContext = await context(buildOptions)
-  await Promise.all([vendorBuildContext.watch(), buildContext.watch()])
+  await buildContext.watch()
   console.log(`👀 Watching ${staticDir}`)
 } else {
-  await Promise.all([
-    build({
-      absWorkingDir: __dirname,
-      entryPoints: ['src/sucrase.ts'],
-      bundle: true,
-      format: 'iife',
-      globalName: '__frameosSucraseBundle',
-      platform: 'browser',
-      target: ['es2020'],
-      minify: true,
-      write: true,
-      outfile: path.join(vendorOutputDir, 'sucrase.js'),
-    }),
-    build(buildOptions),
-  ])
+  await build(buildOptions)
 }

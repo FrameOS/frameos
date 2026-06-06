@@ -253,22 +253,22 @@ function FrameTreeRow({
       )}
     >
       <FrameChangeStatusIcon frameId={frame.id} />
-      <button
-        type="button"
-        title={`Scroll to ${frameName}. Double-click to open overview.`}
-        onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
-        onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      >
-        <span className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <button
+          type="button"
+          title={`Scroll to ${frameName}. Double-click to open overview.`}
+          onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
+          onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
+          className="min-w-0 flex-1 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
           <span className="flex min-w-0 items-center gap-1.5">
             <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
-            <FrameMetricAlertIndicator frame={frame} />
           </span>
           <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
-        </span>
+        </button>
+        <FrameMetricAlertIndicator frame={frame} />
         <SidebarStatusDots frame={frame} inactive={inactive} />
-      </button>
+      </div>
     </div>
   )
 }
