@@ -12,7 +12,7 @@
 ##
 ## **Example: Basic Usage**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## # Create a QuickJS instance
 ## var js = newQuickJS()
@@ -33,7 +33,7 @@
 ##
 ## **Example: Embedded REPL**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## # Create QuickJS with full standard library support
 ## var js = newQuickJS(configWithBothLibs())
@@ -54,7 +54,7 @@
 ##
 ## **Example: Bytecode Compilation**
 ## ```nim
-## import burrito
+## import frameos/js_runtime/burrito
 ##
 ## var js = newQuickJS()
 ##
@@ -132,7 +132,10 @@ proc js_std_init_handlers*(rt: ptr JSRuntime)
 proc js_std_free_handlers*(rt: ptr JSRuntime)
 proc js_std_await*(ctx: ptr JSContext, val: JSValue): JSValue
 proc js_std_loop*(ctx: ptr JSContext)
-proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.}
+proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer,
+    attributes: JSValueConst): ptr JSModuleDef {.cdecl.}
+proc js_module_check_attributes*(ctx: ptr JSContext, opaque: pointer,
+    attributes: JSValueConst): cint {.cdecl.}
 
 {.pop.}
 
@@ -224,6 +227,10 @@ proc JS_AtomToString*(ctx: ptr JSContext, atom: JSAtom): JSValue
 # Module loading
 proc JS_SetModuleLoaderFunc*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
     moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.}, opaque: pointer)
+proc JS_SetModuleLoaderFunc2*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
+    moduleName: cstring, opaque: pointer, attributes: JSValueConst): ptr JSModuleDef {.cdecl.},
+    module_check_attrs: proc(ctx: ptr JSContext, opaque: pointer, attributes: JSValueConst): cint {.cdecl.},
+    opaque: pointer)
 # Promise-related functions
 proc JS_PromiseState*(ctx: ptr JSContext, promise: JSValueConst): cint
 proc JS_PromiseResult*(ctx: ptr JSContext, promise: JSValueConst): JSValue

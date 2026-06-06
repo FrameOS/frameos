@@ -1,7 +1,7 @@
 import json, pixie, locks, tables, options, asyncdispatch, mummy
 import frameos/ids
 export ids
-import lib/burrito
+import frameos/js_runtime/burrito
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
 

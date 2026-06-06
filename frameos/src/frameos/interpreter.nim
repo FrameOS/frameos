@@ -1,7 +1,7 @@
 import frameos/types
 import frameos/values
-import frameos/js_runtime
-import frameos/js_app_runtime
+import frameos/js_runtime/app_runtime
+import frameos/js_runtime/runtime
 import frameos/channels
 import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
