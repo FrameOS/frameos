@@ -14,13 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
+from app.models.settings import get_settings_dict
+from app.utils.build_environment import selected_build_environment_provider
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import RemoteTransport, upload_file
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_agent import download_precompiled_agent_release
-from app.utils.build_host import get_build_host_config
+from app.utils.build_host import get_build_executor_config
+from app.utils.build_executor import build_executor_display_name, ensure_build_executor_configured
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, can_cross_compile_target
 from app.utils.versions import current_agent_version, get_versions
 from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
@@ -30,6 +33,13 @@ PRECOMPILED_AGENT_ENV = "FRAMEOS_AGENT_PRECOMPILED"
 AGENT_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
 AGENT_BINARY = "frameos_agent"
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def get_build_host_config(*args, **kwargs):  # noqa: ANN002, ANN003
+    """Compatibility shim for older tests monkeypatching this module symbol."""
+    from app.utils.build_host import get_build_host_config as _get_build_host_config
+
+    return _get_build_host_config(*args, **kwargs)
 
 
 def precompiled_agent_enabled() -> bool:
@@ -366,17 +376,25 @@ class AgentDeployer(FrameDeployer):
         distro: str,
         distro_version: str,
     ) -> bool:
+        project_id = getattr(self.frame, "project_id", None)
+        build_executor = get_build_executor_config(self.db, project_id)
+        settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
+        build_environment_provider = selected_build_environment_provider(settings)
+        if build_environment_provider == "none":
+            await self.log("stdout", "- Server-side compilation is disabled; building agent on the device")
+            return False
         if not can_cross_compile_target(arch):
+            if build_environment_provider != "none":
+                raise RuntimeError(f"Selected build environment cannot cross compile agent for {arch}")
             await self.log(
                 "stdout",
                 f"- Agent target architecture {arch} does not support cross compilation; building on the device",
             )
             return False
 
-        project_id = getattr(self.frame, "project_id", None)
-        build_host = get_build_host_config(self.db, project_id)
-        if build_host:
-            await self.log("stdout", "- Cross compiling agent via build host")
+        ensure_build_executor_configured(build_environment_provider, build_executor)
+        if build_executor:
+            await self.log("stdout", f"- Cross compiling agent via {build_executor_display_name(build_executor)}")
         else:
             await self.log("stdout", "- Cross compiling agent locally")
 
@@ -390,12 +408,15 @@ class AgentDeployer(FrameDeployer):
                 temp_dir=self.temp_dir,
                 build_dir=build_dir,
                 logger=self.log,
-                build_host=build_host,
+                build_host=build_executor,
                 output_name=AGENT_BINARY,
                 compile_script_name="compile_frameos_agent.sh",
                 needs_quickjs=False,
             ).build(source_dir)
         except Exception as exc:  # noqa: BLE001
+            if build_environment_provider != "none":
+                await self.log("stderr", f"- Agent cross compilation failed ({exc})")
+                raise
             await self.log("stderr", f"- Agent cross compilation failed ({exc}); falling back to on-device build")
             return False
 

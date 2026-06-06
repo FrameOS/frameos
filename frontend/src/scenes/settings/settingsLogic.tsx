@@ -12,6 +12,9 @@ import { isFrameControlMode } from '../../utils/frameControlMode'
 import { guessBrowserTimezone } from '../../utils/timezone'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
+  const buildEnvironmentProvider =
+    settings.buildEnvironment?.provider ||
+    (settings.modalSandbox?.enabled ? 'modal' : settings.buildHost?.enabled ? 'buildHost' : 'docker')
   return {
     ...settings,
     defaults: {
@@ -28,7 +31,12 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     repositories: settings.repositories ?? [],
     ssh_keys: normalizeSshKeys(settings.ssh_keys),
     unsplash: settings.unsplash ?? {},
+    buildEnvironment: {
+      ...(settings.buildEnvironment ?? {}),
+      provider: buildEnvironmentProvider,
+    },
     buildHost: settings.buildHost ?? {},
+    modalSandbox: settings.modalSandbox ?? {},
   }
 }
 
@@ -51,6 +59,10 @@ export const settingsLogic = kea<settingsLogicType>([
     toggleSshKeyExpanded: (id: string) => ({ id }),
     toggleOpenAiModelOverrides: true,
     newBuildHostKey: true,
+    testBuildHost: true,
+    testModalSandbox: true,
+    setTestingBuildHost: (testing: boolean) => ({ testing }),
+    setTestingModalSandbox: (testing: boolean) => ({ testing }),
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
   }),
   loaders(({ values }) => ({
@@ -124,6 +136,18 @@ export const settingsLogic = kea<settingsLogicType>([
       false,
       {
         toggleOpenAiModelOverrides: (state) => !state,
+      },
+    ],
+    isTestingModalSandbox: [
+      false,
+      {
+        setTestingModalSandbox: (_, { testing }) => testing,
+      },
+    ],
+    isTestingBuildHost: [
+      false,
+      {
+        setTestingBuildHost: (_, { testing }) => testing,
       },
     ],
   }),
@@ -265,6 +289,50 @@ export const settingsLogic = kea<settingsLogicType>([
         ['buildHost', 'sshPublicKey'],
         `${data.public} frameos-buildhost@${window.location.hostname}`
       )
+    },
+    testBuildHost: async () => {
+      actions.setTestingBuildHost(true)
+      const workingMessage = showWorkingMessage('Checking build host connection...')
+      try {
+        const response = await apiFetch(`/api/settings/test_build_host`, {
+          method: 'POST',
+          body: JSON.stringify({ buildHost: values.settings.buildHost ?? {} }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!response.ok) {
+          const data = await response.json().catch(() => null)
+          throw new Error(data?.detail || 'Build host connection check failed')
+        }
+        workingMessage.success('Build host connection check succeeded')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Build host connection check failed'
+        workingMessage.error(message)
+        throw error
+      } finally {
+        actions.setTestingBuildHost(false)
+      }
+    },
+    testModalSandbox: async () => {
+      actions.setTestingModalSandbox(true)
+      const workingMessage = showWorkingMessage('Testing Modal sandbox...')
+      try {
+        const response = await apiFetch(`/api/settings/test_modal_sandbox`, {
+          method: 'POST',
+          body: JSON.stringify({ modalSandbox: { ...(values.settings.modalSandbox ?? {}), enabled: true } }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!response.ok) {
+          const data = await response.json().catch(() => null)
+          throw new Error(data?.detail || 'Modal sandbox test failed')
+        }
+        workingMessage.success('Modal sandbox test succeeded')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Modal sandbox test failed'
+        workingMessage.error(message)
+        throw error
+      } finally {
+        actions.setTestingModalSandbox(false)
+      }
     },
   })),
 ])

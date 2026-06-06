@@ -26,7 +26,14 @@ from app.tasks.precompiled_frameos import (
     precompiled_frameos_release_url,
 )
 from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, resolve_prebuilt_target
-from app.utils.build_host import get_build_host_config
+from app.models.settings import get_settings_dict
+from app.utils.build_environment import selected_build_environment_provider
+from app.utils.build_host import get_build_executor_config
+from app.utils.build_executor import (
+    build_executor_display_name,
+    build_executor_kind_name,
+    ensure_build_executor_configured,
+)
 from app.utils.cross_compile import (
     TargetMetadata,
     build_binary_with_cross_toolchain,
@@ -44,6 +51,13 @@ LINKER_ERROR_HINTS = (
     "collect2: error",
     "undefined reference",
 )
+
+
+def get_build_host_config(*args, **kwargs):  # noqa: ANN002, ANN003
+    """Compatibility shim for older tests monkeypatching this module symbol."""
+    from app.utils.build_host import get_build_host_config as _get_build_host_config
+
+    return _get_build_host_config(*args, **kwargs)
 
 
 def should_suggest_clearing_build_cache(error_message: str) -> bool:
@@ -64,6 +78,8 @@ class FrameBinaryPlan:
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
     requested_compilation_mode: str | None = None
+    build_executor: str | None = None
+    allow_on_device_fallback: bool = True
     will_attempt_precompiled: bool = False
     precompiled_release_url: str | None = None
     precompiled_skip_reason: str | None = None
@@ -82,6 +98,8 @@ class FrameBinaryPlan:
             "force_cross_compile": self.force_cross_compile,
             "cross_compile_supported": self.cross_compile_supported,
             "build_host_configured": self.build_host_configured,
+            "build_executor": self.build_executor,
+            "allow_on_device_fallback": self.allow_on_device_fallback,
             "will_attempt_cross_compile": self.will_attempt_cross_compile,
             "prebuilt_target": self.prebuilt_target,
             "has_prebuilt_entry": self.prebuilt_entry is not None,
@@ -176,6 +194,7 @@ class FrameBinaryBuilder:
         *,
         allow_cross_compile: bool = True,
         force_cross_compile: bool = False,
+        allow_on_device_fallback: bool = True,
         target_override: TargetMetadata | None = None,
         compilation_mode: str | None = None,
     ) -> FrameBinaryPlan:
@@ -217,10 +236,15 @@ class FrameBinaryBuilder:
                 )
 
         project_id = getattr(self.frame, "project_id", None)
-        build_host = get_build_host_config(self.db, project_id)
+        build_executor = get_build_executor_config(self.db, project_id)
+        settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
+        build_environment_provider = selected_build_environment_provider(settings)
         cross_compile_supported = can_cross_compile_target(target.arch)
         will_attempt_cross_compile = (
-            allow_cross_compile and cross_compile_supported and not will_attempt_precompiled
+            allow_cross_compile
+            and build_environment_provider != "none"
+            and cross_compile_supported
+            and not will_attempt_precompiled
         )
 
         return FrameBinaryPlan(
@@ -230,7 +254,9 @@ class FrameBinaryBuilder:
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
             cross_compile_supported=cross_compile_supported,
-            build_host_configured=build_host is not None,
+            build_host_configured=build_executor is not None,
+            build_executor=build_executor_display_name(build_executor) if build_executor else None,
+            allow_on_device_fallback=allow_on_device_fallback,
             will_attempt_cross_compile=will_attempt_cross_compile,
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,
@@ -247,7 +273,9 @@ class FrameBinaryBuilder:
         precompiled_install_all_drivers: bool = False,
     ) -> FrameBinaryBuildResult:
         project_id = getattr(self.frame, "project_id", None)
-        build_host = get_build_host_config(self.db, project_id)
+        build_executor = get_build_executor_config(self.db, project_id)
+        settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
+        build_environment_provider = selected_build_environment_provider(settings)
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         if plan.will_attempt_precompiled:
             await self._log("stdout", f"{icon} Using precompiled FrameOS release")
@@ -304,10 +332,11 @@ class FrameBinaryBuilder:
         cross_compiled = False
         binary_path: str | None = None
         if plan.will_attempt_cross_compile:
-            if build_host:
+            ensure_build_executor_configured(build_environment_provider, build_executor)
+            if build_executor:
                 await self._log(
                     "stdout",
-                    f"{icon} Target supports cross compilation; building binary via build host",
+                    f"{icon} Target supports cross compilation; building binary via {build_executor_display_name(build_executor)}",
                 )
             else:
                 await self._log("stdout", f"{icon} Target supports cross compilation; building binary locally")
@@ -324,13 +353,14 @@ class FrameBinaryBuilder:
                     prebuilt_target=plan.prebuilt_target,
                     target_override=plan.target,
                     logger=self._log,
-                    build_host=build_host,
+                    build_host=build_executor,
                 )
             except Exception as exc:
                 error_message = str(exc)
                 failure_msg = f"Cross compilation failed ({exc})"
-                if build_host:
-                    failure_msg = f"Cross compilation failed on build host ({exc})"
+                if build_executor:
+                    executor_name = build_executor_kind_name(build_executor)
+                    failure_msg = f"Cross compilation failed on {executor_name} ({exc})"
                 await self._log(
                     "stderr",
                     f"{icon} {failure_msg}",
@@ -355,7 +385,7 @@ class FrameBinaryBuilder:
                         "stderr",
                         f"{icon} If the failure is caused by a stale linker cache, clear the build cache (press ... in logs or settings) and try deploying again.",
                     )
-                if plan.force_cross_compile:
+                if plan.force_cross_compile or not plan.allow_on_device_fallback:
                     raise
                 else:
                     await self._log(
@@ -365,7 +395,7 @@ class FrameBinaryBuilder:
             else:
                 cross_compiled = True
                 await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")
-        elif plan.force_cross_compile:
+        elif plan.force_cross_compile or not plan.allow_on_device_fallback:
             raise RuntimeError("Cross compilation required but not supported for this target")
 
         return FrameBinaryBuildResult(

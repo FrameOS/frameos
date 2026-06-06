@@ -1,10 +1,14 @@
-from arq import ArqRedis
-import asyncio
+from __future__ import annotations
+
 from typing import Literal, Optional, Tuple
+
+from arq import ArqRedis
 from sqlalchemy.orm import Session
 
-from app.models.log import new_log as log
 from app.models.frame import Frame
+from app.utils.build_executor import create_build_executor
+from app.utils.modal_sandbox import get_modal_sandbox_config
+
 
 async def exec_local_command(
     db: Session | None,
@@ -15,79 +19,20 @@ async def exec_local_command(
     log_output: bool = True,
     stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
 ) -> Tuple[int, Optional[str], Optional[str]]:
-
-    if log_command:
-        if db and redis:
-            await log(db, redis, int(frame.id), "stdout", f"$ {log_command if isinstance(log_command, str) else command}")
-        else:
-            print(f"$ {log_command if isinstance(log_command, str) else command}")
-
-    proc = await asyncio.create_subprocess_shell(
-        command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    project_id = getattr(frame, "project_id", None)
+    # Keep this compatibility helper scoped to local/Modal execution. Build-host
+    # commands need structured path syncing via explicit BuildExecutor use.
+    modal_config = get_modal_sandbox_config(db, project_id) if project_id is not None else None
+    executor = create_build_executor(
+        modal_config,
+        db=db,
+        redis=redis,
+        frame=frame,
     )
-
-    async def pump(stream, tag, buf):
-        pending = ""
-
-        async def _flush(segment: str, *, terminated: bool):
-            if not segment:
-                return
-            buf.append(f"{segment}\n" if terminated else segment)
-            if log_output:
-                if db and redis:
-                    await log(db, redis, int(frame.id), tag, segment)
-                else:
-                    print(segment)
-
-        while True:
-            raw = await stream.read(1024)
-            if not raw:  # EOF
-                break
-
-            chunk = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
-            pending += chunk
-
-            while True:
-                newline_index = pending.find("\n")
-                carriage_index = pending.find("\r")
-
-                split_index = -1
-                if newline_index != -1 and carriage_index != -1:
-                    split_index = min(newline_index, carriage_index)
-                elif newline_index != -1:
-                    split_index = newline_index
-                elif carriage_index != -1:
-                    split_index = carriage_index
-
-                if split_index == -1:
-                    break
-
-                segment = pending[:split_index].strip("\r")
-                pending = pending[split_index + 1 :]
-                await _flush(segment, terminated=True)
-
-        pending = pending.strip("\r")
-        if pending:
-            await _flush(pending, terminated=False)
-
-    out_buf: list[str] = []
-    err_buf: list[str] = []
-    await asyncio.gather(
-        pump(proc.stdout, "stdout", out_buf),
-        pump(proc.stderr, stderr_log_tag, err_buf),
-    )
-
-    exit_code = await proc.wait()
-    if exit_code:
-        if db and redis:
-            await log(db, redis, int(frame.id), "exit_status", f"The command exited with status {exit_code}")
-        else:
-            print( f"The command exited with status {exit_code}")
-
-    return (
-        exit_code,
-        "".join(out_buf) or None,
-        "".join(err_buf) or None,
-    )
+    async with executor:
+        return await executor.run(
+            command,
+            log_command=log_command,
+            log_output=log_output,
+            stderr_log_tag=stderr_log_tag,
+        )

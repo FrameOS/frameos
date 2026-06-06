@@ -52,6 +52,13 @@ class DatabaseUsage:
     exists: bool
 
 
+@dataclass(frozen=True)
+class DockerInfo:
+    cli_available: bool
+    daemon_available: bool
+    error: str | None = None
+
+
 def _safe_stat(path: Path) -> int:
     try:
         return path.stat().st_size
@@ -174,13 +181,36 @@ def get_cache_usage() -> list[CacheUsage]:
     return caches
 
 
-def get_system_info() -> tuple[DiskUsage, list[CacheUsage], DatabaseUsage, MemoryInfo, LoadAverage]:
+def get_docker_info() -> DockerInfo:
+    if shutil.which("docker") is None:
+        return DockerInfo(cli_available=False, daemon_available=False, error="Docker CLI is not installed")
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DockerInfo(cli_available=True, daemon_available=False, error=str(exc))
+    if result.returncode == 0:
+        return DockerInfo(cli_available=True, daemon_available=True)
+    return DockerInfo(
+        cli_available=True,
+        daemon_available=False,
+        error=(result.stderr or result.stdout or "Docker daemon is not reachable").strip(),
+    )
+
+
+def get_system_info() -> tuple[DiskUsage, list[CacheUsage], DatabaseUsage, MemoryInfo, LoadAverage, DockerInfo]:
     disk = get_disk_usage()
     caches = get_cache_usage()
     database = get_database_usage()
     memory = get_memory_info()
     load = get_load_average()
-    return disk, caches, database, memory, load
+    docker = get_docker_info()
+    return disk, caches, database, memory, load, docker
 
 
 def get_system_metrics() -> tuple[DiskUsage, MemoryInfo, LoadAverage]:

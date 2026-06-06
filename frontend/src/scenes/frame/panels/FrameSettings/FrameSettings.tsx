@@ -679,14 +679,11 @@ export function FrameSettings({
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose how to build the FrameOS binary: auto will try to cross-compile and fall back to on-device
-                      builds, always will fail if cross compilation is unavailable, and never will always build on the
-                      device.
+                      Choose how to build the FrameOS binary: auto follows the build environment selected in global
+                      settings, always fails if server-side compilation is disabled or unavailable, and never always
+                      builds on the device.
                     </p>
-                    <p>
-                      If you're running FrameOS via Docker, you may need to configure a build host for cross-compilation
-                      on the global settings page.
-                    </p>
+                    <p>Configure Docker, a build host, or Modal sandboxes from global settings.</p>
                   </div>
                 }
               >

@@ -27,8 +27,20 @@ from app.tasks.prebuilt_deps import (
     fetch_prebuilt_manifest,
     resolve_prebuilt_target,
 )
-from app.utils.build_host import BuildHostConfig, BuildHostSession
-from app.utils.local_exec import exec_local_command
+from app.utils.build_host import BuildHostConfig
+from app.utils.build_executor import (
+    BuildExecutor,
+    DockerMount,
+    build_executor_display_name,
+    create_build_executor,
+)
+from app.utils.cross_toolchain_packages import (
+    TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS,
+    TARGET_CROSS_TOOLCHAIN_PACKAGES,
+    TARGET_CROSS_TOOLCHAINS,
+    TargetCrossToolchain,
+)
+from app.utils.modal_sandbox import ModalSandboxConfig
 
 icon = "🔶"
 
@@ -87,7 +99,6 @@ PLATFORM_MAP = {
     "armhf": "linux/arm/v7",
     "armv6l": "linux/arm/v6",
 }
-
 def can_cross_compile_target(arch: str | None) -> bool:
     """Return ``True`` when *arch* has a known Docker platform mapping."""
 
@@ -168,7 +179,7 @@ class CrossCompiler:
         prebuilt_target: str | None = None,
         logger: LogFunc | None = None,
         build_dir: str | Path | None = None,
-        build_host: BuildHostConfig | None = None,
+        build_host: BuildHostConfig | ModalSandboxConfig | None = None,
         output_name: str = "frameos",
         compile_script_name: str = "compile_frameos.sh",
         needs_quickjs: bool = True,
@@ -195,8 +206,7 @@ class CrossCompiler:
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
         self.build_host = build_host
-        self._build_host_session: BuildHostSession | None = None
-        self._remote_root: Path | None = None
+        self.executor: BuildExecutor | None = None
         self.output_name = output_name
         self.compile_script_name = compile_script_name
         self.needs_quickjs = needs_quickjs
@@ -206,24 +216,35 @@ class CrossCompiler:
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
     async def build(self, source_dir: str) -> str:
+        executor = create_build_executor(
+            self.build_host,
+            db=self.db,
+            redis=self.redis,
+            frame=self.frame,
+            logger=self._log,
+            workspace_prefix="frameos-cross-",
+        )
         if self.build_host:
+            connection_action = (
+                f"Connecting to {build_executor_display_name(self.build_host)}"
+                if executor.connects_on_enter
+                else f"Using {build_executor_display_name(self.build_host)}; sandbox will be created when the build command starts"
+            )
             await self._log(
                 "stdout",
-                f"{icon} Connecting to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port}",
+                f"{icon} {connection_action}",
             )
-            async with BuildHostSession(self.build_host, logger=self._log) as session:
-                self._build_host_session = session
-                self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
+        async with executor:
+            self.executor = executor
+            if self.build_host and executor.connects_on_enter:
                 await self._log(
                     "stdout",
-                    f"🟢 Connected to build host {self.build_host.user}@{self.build_host.host}:{self.build_host.port} for cross compilation",
+                    f"Connected to {build_executor_display_name(self.build_host)} for cross compilation",
                 )
-                try:
-                    return await self._build_with_context(source_dir)
-                finally:
-                    self._build_host_session = None
-                    self._remote_root = None
-        return await self._build_with_context(source_dir)
+            try:
+                return await self._build_with_context(source_dir)
+            finally:
+                self.executor = None
 
     async def _build_with_context(self, source_dir: str) -> str:
         await self._log(
@@ -259,14 +280,18 @@ class CrossCompiler:
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
-        await self._log(
-            "stdout",
-            f"{icon} Using default include/lib paths without remote sysroot synchronization",
-        )
+        return
 
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
+        target_platform = self._platform()
+        container_platform = self._container_platform()
+        target_cross_toolchain = self._target_cross_toolchain(container_platform)
+        if container_platform != target_platform and target_cross_toolchain is None:
+            raise RuntimeError(
+                f"No target cross compiler bootstrap is configured for {target_platform} on {container_platform}"
+            )
         include_candidates = (
             [f"/sysroot{path}" for path in sorted(self._sysroot_include_dirs)]
             if self._sysroot_include_dirs
@@ -290,12 +315,28 @@ class CrossCompiler:
                 f"{icon} Enabling CPU feature flags for cross-compile: "
                 + " ".join(feature_flags),
             )
+        if target_cross_toolchain:
+            await self._log(
+                "stdout",
+                f"{icon} Using {container_platform} toolchain image with "
+                f"{target_cross_toolchain.triplet} compiler for {target_platform}",
+            )
+            include_dirs = self._dedupe_preserve_order(
+                [f"/usr/include/{target_cross_toolchain.triplet}", *include_dirs]
+            )
+            lib_dirs = self._dedupe_preserve_order(
+                [f"/usr/lib/{target_cross_toolchain.triplet}", *lib_dirs]
+            )
         include_flags = [f"-I{path}" for path in include_dirs]
         extra_cflags_parts = [*feature_flags, *include_flags]
         extra_cflags = (
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        target_toolchain_script = indent(
+            self._target_cross_toolchain_setup_script(target_cross_toolchain),
+            " " * 16,
+        )
         prepare_quickjs_script = indent(self._prepare_quickjs_archive_script(), " " * 16)
         make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
         make_jobs_assignment = (
@@ -315,6 +356,8 @@ class CrossCompiler:
 
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
+
+                {target_toolchain_script}
 
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
@@ -341,97 +384,27 @@ class CrossCompiler:
 
         image = await self._ensure_toolchain_image()
 
-        if self._build_host_session:
-            return await self._run_remote_docker_build(build_dir, script_content, image)
-
         script_path.write_text(script_content)
         os.chmod(script_path, 0o755)
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
 
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"--platform {self._platform()}",
-                f"-v {shlex.quote(build_dir)}:/src",
-                f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot:ro",
-                f"-v {shlex.quote(str(script_path))}:/tmp/frameos-cross/build.sh:ro",
-                "-w /src",
-                shlex.quote(image),
-                "bash /tmp/frameos-cross/build.sh",
-            ]
-        )
-
-        status, _, err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
-            docker_cmd,
+        status, _, err = await self.executor.docker_run(
+            image=image,
+            platform=container_platform,
+            mounts=[
+                DockerMount(Path(build_dir), "/src"),
+                DockerMount(self.sysroot_dir, "/sysroot", read_only=True),
+                DockerMount(script_path, "/tmp/frameos-cross/build.sh", read_only=True),
+            ],
+            workdir="/src",
+            args=["bash", "/tmp/frameos-cross/build.sh"],
+            workspace="cross-compile",
             log_command="docker run (cross compile)",
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, self.output_name)
-
-    async def _run_remote_docker_build(
-        self, build_dir: str, script_content: str, image: str
-    ) -> str:
-        if not self._build_host_session or not self._remote_root:
-            raise RuntimeError("Build host session unavailable during cross compilation")
-
-        host = self._build_host_session
-        remote_build_dir = str(self._remote_root / "src")
-        remote_sysroot_dir = str(self._remote_root / "sysroot")
-        remote_script_path = str(self._remote_root / "build.sh")
-
-        build_dir_size = self._dir_size_bytes(Path(build_dir))
-        await self._log(
-            "stdout",
-            f"{icon} Syncing build directory ({self._format_size(build_dir_size)}) to build host"
-        )
-        await host.sync_dir_tarball(build_dir, remote_build_dir)
-        sysroot_size = self._dir_size_bytes(self.sysroot_dir)
-        await self._log(
-            "stdout",
-            f"{icon} Syncing sysroot ({self._format_size(sysroot_size)}) to build host"
-        )
-        await host.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
-        await host.write_file(remote_script_path, script_content, mode=0o755)
-
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"--platform {self._platform()}",
-                f"-v {shlex.quote(remote_build_dir)}:/src",
-                f"-v {shlex.quote(remote_sysroot_dir)}:/sysroot:ro",
-                f"-v {shlex.quote(remote_script_path)}:/tmp/build.sh:ro",
-                "-w /src",
-                shlex.quote(image),
-                "bash /tmp/build.sh",
-            ]
-        )
-
-        status, _, err = await host.run(
-            docker_cmd,
-            log_command="docker run (build host cross compile)",
-        )
-        if status != 0:
-            raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
-
-        local_binary = os.path.join(build_dir, self.output_name)
-        await host.download_file(f"{remote_build_dir}/{self.output_name}", local_binary)
-        status, stdout, _err = await host.run(
-            f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
-            log_command=False,
-            log_output=False,
-        )
-        if status == 0 and stdout:
-            for rel_path in stdout.splitlines():
-                rel_path = rel_path.strip()
-                if not rel_path:
-                    continue
-                local_path = os.path.join(build_dir, rel_path)
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                await host.download_file(f"{remote_build_dir}/{rel_path}", local_path)
-        return local_binary
 
     async def _run_command(
         self,
@@ -440,14 +413,9 @@ class CrossCompiler:
         log_command: str | bool = True,
         log_output: bool = True,
     ) -> tuple[int, str | None, str | None]:
-        if self._build_host_session:
-            return await self._build_host_session.run(
-                command, log_command=log_command, log_output=log_output
-            )
-        return await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
+        return await self.executor.run(
             command,
             log_command=log_command,
             log_output=log_output,
@@ -463,10 +431,6 @@ class CrossCompiler:
 
     async def _ensure_quickjs_sources(self, source_dir: str) -> None:
         quickjs_root = Path(source_dir) / "quickjs"
-        await self._log(
-            "stdout",
-            f"{icon} Ensuring QuickJS sources are available at {quickjs_root} (exists={quickjs_root.exists()})",
-        )
         await self._ensure_quickjs_tree(
             quickjs_root,
             context="source directory",
@@ -490,10 +454,6 @@ class CrossCompiler:
     async def _ensure_quickjs_in_build_dir(self, source_dir: str, build_dir: Path) -> None:
         dest = Path(build_dir) / "quickjs"
         source_quickjs = Path(source_dir) / "quickjs"
-        await self._log(
-            "stdout",
-            f"{icon} Ensuring QuickJS assets exist within build dir {dest} (exists={dest.exists()})",
-        )
         fallback_src = source_quickjs if source_quickjs.exists() else None
         await self._ensure_quickjs_tree(
             dest,
@@ -514,27 +474,42 @@ class CrossCompiler:
     ) -> None:
         libquickjs = dest / "libquickjs.a"
         prebuilt_quickjs = self.prebuilt_components.get("quickjs")
-        if prebuilt_quickjs:
-            await self._log(
-                "stdout",
-                f"{icon} Staging prebuilt QuickJS component from {prebuilt_quickjs} into {dest}",
-            )
-            self._stage_prebuilt_quickjs(dest)
+        try:
+            if prebuilt_quickjs:
+                self._stage_prebuilt_quickjs(dest)
 
-        if not libquickjs.exists() and fallback_src:
-            if dest.exists():
-                shutil.rmtree(dest)
+            if not libquickjs.exists() and fallback_src:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+        except Exception as exc:
             await self._log(
-                "stdout",
-                f"{icon} Copying QuickJS tree from {fallback_src} into {dest}",
+                "stderr",
+                f"{icon} Failed to prepare QuickJS artifacts for {context}: {exc}",
             )
-            shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+            await self._log_quickjs_probe(
+                dest.parent,
+                context,
+                expected=libquickjs,
+                prebuilt=prebuilt_quickjs,
+                fallback=fallback_src,
+            )
+            raise
 
         if libquickjs.exists():
-            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
             return
 
-        await self._log_quickjs_probe(dest.parent, context)
+        await self._log(
+            "stderr",
+            f"{icon} QuickJS artifacts missing for {context}: expected {libquickjs}",
+        )
+        await self._log_quickjs_probe(
+            dest.parent,
+            context,
+            expected=libquickjs,
+            prebuilt=prebuilt_quickjs,
+            fallback=fallback_src,
+        )
         raise RuntimeError(error_message)
 
     async def _prepare_prebuilt_components(self) -> None:
@@ -561,11 +536,8 @@ class CrossCompiler:
             """
             if [ -d quickjs ]; then
                 if [ -f quickjs/Makefile ]; then
-                    log_debug "Rebuilding QuickJS archive for target"
                     make -C quickjs clean >/dev/null
                     make -C quickjs libquickjs.a
-                elif [ -f quickjs/libquickjs.a ]; then
-                    log_debug "Indexing QuickJS archive"
                 fi
                 if [ -f quickjs/libquickjs.a ]; then
                     ranlib quickjs/libquickjs.a
@@ -807,11 +779,25 @@ class CrossCompiler:
 
         return f"{value:.1f} TiB"
 
-    async def _log_quickjs_probe(self, root: Path, context: str) -> None:
+    async def _log_quickjs_probe(
+        self,
+        root: Path,
+        context: str,
+        *,
+        expected: Path | None = None,
+        prebuilt: Path | None = None,
+        fallback: Path | None = None,
+    ) -> None:
         await self._log(
             "stderr",
             f"{icon} Probing {context} {root} for QuickJS artifacts",
         )
+        if expected:
+            await self._log("stderr", f"    - Expected archive: {expected}")
+        if prebuilt:
+            await self._log("stderr", f"    - Prebuilt source: {prebuilt}")
+        if fallback:
+            await self._log("stderr", f"    - Fallback source: {fallback}")
         libs = sorted(root.rglob("libquickjs.a"))
         headers = sorted(root.rglob("quickjs.h"))
         folders = [p for p in root.rglob("quickjs") if p.is_dir()]
@@ -842,6 +828,56 @@ class CrossCompiler:
             return str(self.target.platform)
         return PLATFORM_MAP.get(self.target.arch, "linux/amd64")
 
+    def _container_platform(self) -> str:
+        platform = self._platform()
+        if self.executor is None:
+            return platform
+        platform_for_target = getattr(self.executor, "container_platform_for_target", None)
+        if platform_for_target is None:
+            return platform
+        return platform_for_target(platform) or platform
+
+    def _target_cross_toolchain(self, container_platform: str | None = None) -> TargetCrossToolchain | None:
+        target_platform = self._platform()
+        if (container_platform or target_platform) == target_platform:
+            return None
+        return TARGET_CROSS_TOOLCHAINS.get(target_platform)
+
+    def _target_cross_toolchain_setup_script(self, toolchain: TargetCrossToolchain | None) -> str:
+        if toolchain is None:
+            return ""
+        package_list = " ".join(shlex.quote(package) for package in toolchain.packages)
+        pkg_config_libdir = (
+            f"/usr/lib/{toolchain.triplet}/pkgconfig:"
+            f"/usr/share/pkgconfig"
+        )
+        return dedent(
+            f"""
+            if ! command -v {shlex.quote(toolchain.cc)} >/dev/null 2>&1 || ! test -e /usr/lib/{shlex.quote(toolchain.triplet)}/libssl.so; then
+                log_debug "Installing {toolchain.triplet} cross compiler and target libraries"
+                if ! command -v apt-get >/dev/null 2>&1; then
+                    log_debug "apt-get is required to install target cross compiler packages"
+                    exit 1
+                fi
+                export DEBIAN_FRONTEND=noninteractive
+                if command -v dpkg >/dev/null 2>&1 && ! dpkg --print-foreign-architectures | grep -qx {shlex.quote(toolchain.dpkg_arch)}; then
+                    dpkg --add-architecture {shlex.quote(toolchain.dpkg_arch)}
+                fi
+                apt-get update
+                apt-get install -y --no-install-recommends {package_list}
+                rm -rf /var/lib/apt/lists/*
+            fi
+            export CC={shlex.quote(toolchain.cc)}
+            export PKG_CONFIG_LIBDIR={shlex.quote(pkg_config_libdir)}
+            log_debug "Using target compiler: $CC"
+            """
+        ).strip()
+
+    def _target_cross_toolchain_build_args(self, container_platform: str) -> tuple[str, str]:
+        if container_platform != "linux/amd64":
+            return "", ""
+        return " ".join(TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS), " ".join(TARGET_CROSS_TOOLCHAIN_PACKAGES)
+
     def _docker_image(self) -> str:
         if getattr(self.target, "image", None):
             return str(self.target.image)
@@ -861,9 +897,9 @@ class CrossCompiler:
             safe_version = version or default_version
         return f"{base}:{safe_version}"
 
-    def _toolchain_image(self) -> str:
+    def _toolchain_image(self, platform_override: str | None = None) -> str:
         base = self._sanitize(self._docker_image().replace("/", "_"))
-        platform = self._sanitize(self._platform().replace("/", "_"))
+        platform = self._sanitize((platform_override or self._platform()).replace("/", "_"))
         slug = f"{base}-{platform}"
         if CROSS_TOOLCHAIN_IMAGE:
             try:
@@ -878,8 +914,8 @@ class CrossCompiler:
         tag = f"{slug}-{TOOLCHAIN_IMAGE_TAG}" if TOOLCHAIN_IMAGE_TAG else slug
         return f"{TOOLCHAIN_IMAGE_REPO}:{tag}"
 
-    def _resolved_toolchain_image(self) -> str:
-        image = self._toolchain_image()
+    def _resolved_toolchain_image(self, platform_override: str | None = None) -> str:
+        image = self._toolchain_image(platform_override)
         if CROSS_TOOLCHAIN_IMAGE:
             return image
         digest = _toolchain_digest_map().get(image)
@@ -887,14 +923,19 @@ class CrossCompiler:
             return f"{image}@{digest}"
         return image
 
-    def _legacy_toolchain_image(self) -> str:
+    def _legacy_toolchain_image(self, platform_override: str | None = None) -> str:
         base = self._sanitize(self._docker_image().replace("/", "_"))
-        platform = self._sanitize(self._platform().replace("/", "_"))
+        platform = self._sanitize((platform_override or self._platform()).replace("/", "_"))
         return f"frameos-cross-{base}-{platform}-v1"
 
     async def _ensure_toolchain_image(self) -> str:
-        image = self._toolchain_image()
-        resolved_image = self._resolved_toolchain_image()
+        container_platform = self._container_platform()
+        image = self._toolchain_image(container_platform)
+        resolved_image = self._resolved_toolchain_image(container_platform)
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
+        if self.executor.uses_container_images_directly:
+            return self.executor.container_image_reference(image, resolved_image)
         if not TOOLCHAIN_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",
@@ -913,7 +954,7 @@ class CrossCompiler:
                 if status == 0:
                     return image
 
-            legacy_image = self._legacy_toolchain_image()
+            legacy_image = self._legacy_toolchain_image(container_platform)
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(legacy_image)} >/dev/null 2>&1",
                 log_command=False,
@@ -952,27 +993,20 @@ class CrossCompiler:
                 "Cross toolchain Dockerfile is missing; expected at backend/tools/cross-toolchain.Dockerfile",
             )
 
-        if self._build_host_session:
-            if not self._remote_root:
-                raise RuntimeError("Build host workspace missing for toolchain build")
-            remote_dir = self._remote_root / "cross-toolchain"
-            dockerfile_path = remote_dir / Path(dockerfile).name
-            await self._build_host_session.ensure_dir(str(remote_dir))
-            await self._build_host_session.write_file(
-                str(dockerfile_path), Path(dockerfile).read_text()
-            )
-            context_dir = str(remote_dir)
-            dockerfile_arg = str(dockerfile_path)
-        else:
-            context_dir = str(Path(dockerfile).parent)
-            dockerfile_arg = dockerfile
+        context_dir, dockerfile_arg = await self.executor.prepare_docker_build_context(
+            Path(dockerfile),
+            "cross-toolchain",
+        )
+        target_cross_dpkg_archs, target_cross_packages = self._target_cross_toolchain_build_args(container_platform)
 
         build_cmd = " ".join(
             [
                 "docker buildx build --load",
-                f"--platform {self._platform()}",
+                f"--platform {container_platform}",
                 f"--build-arg BASE_IMAGE={shlex.quote(self._docker_image())}",
                 f"--build-arg TOOLCHAIN_PACKAGES={shlex.quote(TOOLCHAIN_PACKAGES)}",
+                f"--build-arg TARGET_CROSS_DPKG_ARCHS={shlex.quote(target_cross_dpkg_archs)}",
+                f"--build-arg TARGET_CROSS_PACKAGES={shlex.quote(target_cross_packages)}",
                 f"-t {shlex.quote(image)}",
                 f"-f {shlex.quote(dockerfile_arg)}",
                 shlex.quote(context_dir),
@@ -1029,7 +1063,7 @@ async def build_binary_with_cross_toolchain(
     prebuilt_target: str | None = None,
     target_override: TargetMetadata | None = None,
     logger: LogFunc | None = None,
-    build_host: BuildHostConfig | None = None,
+    build_host: BuildHostConfig | ModalSandboxConfig | None = None,
 ) -> str:
     arch: str | None
     distro: str | None

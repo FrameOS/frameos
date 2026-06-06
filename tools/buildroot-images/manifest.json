@@ -1,37 +1,37 @@
 {
   "entries": [
     {
-      "assets_partition_size": "100M",
+      "assets_partition_size": "30M",
       "buildroot_apt_deps": "bc bison build-essential ca-certificates cpio curl file flex g++ gfortran genimage git dosfstools e2fsprogs libncurses-dev libssl-dev make mtools perl python3 rsync unzip wget xdg-utils xz-utils",
       "buildroot_version": "2025.02.13",
-      "created_at": "2026-06-04T01:08:42.048570+00:00",
+      "created_at": "2026-06-06T01:27:24.460639+00:00",
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",
-      "frameos_partition_size": "100M",
-      "frameos_version": "2026.6.7",
-      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.7/raspberry-pi-zero-2-w-2026.6.7-3d9cf693335e8cf3.img.gz",
+      "frameos_partition_size": "30M",
+      "frameos_version": "2026.6.8",
+      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.8/raspberry-pi-zero-2-w-2026.6.8-26afa6e67f8bd831.img.gz",
       "partitions": [
         {
           "size": 33554432,
           "start": 512
         },
         {
-          "size": 182751232,
+          "size": 182464512,
           "start": 33554944
         },
         {
-          "size": 104857600,
-          "start": 216306176
+          "size": 31457280,
+          "start": 216019456
         },
         {
-          "size": 104857600,
-          "start": 321163776
+          "size": 31457280,
+          "start": 247476736
         }
       ],
       "platform": "raspberry-pi-zero-2-w",
-      "sha256": "3d9cf693335e8cf3c9317380d34d227ebcb6723ab3b783146eb545ea6e05f745",
-      "size": 426021376,
-      "updated_at": "2026-06-04T01:09:46.048578+00:00"
+      "sha256": "26afa6e67f8bd831d59bdc2648428e9cf41623f38d9aeef2cffccb60ce347756",
+      "size": 278934016,
+      "updated_at": "2026-06-06T01:27:31.284918+00:00"
     }
   ]
 }

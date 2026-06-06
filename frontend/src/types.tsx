@@ -677,6 +677,9 @@ export interface FrameOSSettings {
   unsplash?: {
     accessKey?: string
   }
+  buildEnvironment?: {
+    provider?: 'none' | 'docker' | 'buildHost' | 'modal'
+  }
   buildHost?: {
     enabled?: boolean
     host?: string
@@ -684,6 +687,21 @@ export interface FrameOSSettings {
     port?: number
     sshKey?: string
     sshPublicKey?: string
+  }
+  modalSandbox?: {
+    enabled?: boolean
+    tokenId?: string
+    tokenSecret?: string
+    appName?: string
+    image?: string
+    timeout?: number
+    idleTimeout?: number
+    cpu?: number
+    memory?: number
+    region?: string
+    cloud?: string
+    environmentName?: string
+    enableDocker?: boolean
   }
 }
 

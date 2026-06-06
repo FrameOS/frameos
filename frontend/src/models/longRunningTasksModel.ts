@@ -63,8 +63,8 @@ export interface UpdateTaskProgressPayload {
   frameId: number
   kind?: LongRunningTaskKind
   sceneId?: string | null
-  progressCurrent: number
-  progressTotal: number
+  progressCurrent: number | null
+  progressTotal: number | null
   detail?: string | null
 }
 

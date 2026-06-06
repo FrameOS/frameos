@@ -17,6 +17,7 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
 from app.models.metrics import Metrics
+from app.models.settings import Settings
 from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
@@ -1165,6 +1166,47 @@ async def test_api_frame_buildroot_sd_image_enqueue(async_client, db, monkeypatc
     assert frame.agent['agentEnabled'] is True
     assert frame.agent['agentRunCommands'] is True
     assert frame.agent['deployWithAgent'] is True
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_accepts_configured_build_host(async_client, db, redis, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.network = {
+        **(frame.network or {}),
+        'wifiSSID': 'Test WiFi',
+        'wifiPassword': 'secret1234',
+    }
+    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w'}
+    db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'buildHost'}))
+    db.add(
+        Settings(
+            project_id=frame.project_id,
+            key='buildHost',
+            value={
+                'enabled': True,
+                'host': 'builder.local',
+                'user': 'ubuntu',
+                'sshKey': 'dummy-key',
+            },
+        )
+    )
+    db.add(frame)
+    db.commit()
+    captured: list[int] = []
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append(id)
+
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image preparation started'
+    assert captured == [frame.id]
 
 
 @pytest.mark.asyncio

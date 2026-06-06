@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.settings import Settings
-from app.utils.build_host import BuildHostConfig, BuildHostSession, get_build_host_config
+from app.utils.build_host import BuildHostConfig, BuildHostSession, get_build_executor_config, get_build_host_config
+from app.utils.modal_sandbox import ModalSandboxConfig
 
 
 @pytest.mark.asyncio
@@ -50,6 +51,74 @@ async def test_get_build_host_config_requires_fields(db, default_project):
     db.commit()
 
     assert get_build_host_config(db, default_project.id) is None
+
+
+@pytest.mark.asyncio
+async def test_get_build_executor_config_prefers_modal_sandbox(db, default_project):
+    db.query(Settings).delete()
+    db.add(
+        Settings(
+            project_id=default_project.id,
+            key="buildHost",
+            value={
+                "enabled": True,
+                "host": "builder.local",
+                "user": "ubuntu",
+                "sshKey": "dummy-key",
+            },
+        )
+    )
+    db.add(
+        Settings(
+            project_id=default_project.id,
+            key="modalSandbox",
+            value={
+                "enabled": True,
+                "tokenId": "ak-test",
+                "tokenSecret": "as-test",
+                "appName": "frameos-test",
+                "image": "frameos/frameos:test",
+            },
+        )
+    )
+    db.commit()
+
+    config = get_build_executor_config(db, default_project.id)
+    assert isinstance(config, ModalSandboxConfig)
+    assert config.app_name == "frameos-test"
+    assert config.image == "frameos/frameos:test"
+
+
+@pytest.mark.asyncio
+async def test_get_build_executor_config_uses_selected_provider(db, default_project):
+    db.query(Settings).delete()
+    db.add(Settings(project_id=default_project.id, key="buildEnvironment", value={"provider": "docker"}))
+    db.add(
+        Settings(
+            project_id=default_project.id,
+            key="buildHost",
+            value={
+                "enabled": True,
+                "host": "builder.local",
+                "user": "ubuntu",
+                "sshKey": "dummy-key",
+            },
+        )
+    )
+    db.add(
+        Settings(
+            project_id=default_project.id,
+            key="modalSandbox",
+            value={
+                "enabled": True,
+                "tokenId": "ak-test",
+                "tokenSecret": "as-test",
+            },
+        )
+    )
+    db.commit()
+
+    assert get_build_executor_config(db, default_project.id) is None
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import shutil
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ import asyncssh
 from sqlalchemy.orm import Session
 
 from app.models.settings import get_settings_dict
+from app.utils.build_environment import selected_build_environment_provider
+from app.utils.modal_sandbox import ModalSandboxConfig, get_modal_sandbox_config
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 
@@ -45,7 +48,15 @@ def get_build_host_config(db: Session | None, project_id: int | None = None) -> 
     if db is None:
         return None
     settings = get_settings_dict(db, project_id=project_id)
+    if selected_build_environment_provider(settings) != "buildHost":
+        return None
     return BuildHostConfig.from_settings(settings.get("buildHost"))
+
+
+def get_build_executor_config(db: Session | None, project_id: int | None = None) -> BuildHostConfig | ModalSandboxConfig | None:
+    if db is None or project_id is None:
+        return None
+    return get_modal_sandbox_config(db, project_id) or get_build_host_config(db, project_id)
 
 
 class BuildHostSession:
@@ -206,6 +217,14 @@ class BuildHostSession:
         finally:
             archive_path.unlink(missing_ok=True)
 
+    async def sync_file(self, local_path: str, remote_path: str) -> None:
+        if not self._conn:
+            raise RuntimeError("Build host session is not connected")
+        if not Path(local_path).is_file():
+            return
+        await self.ensure_dir(str(Path(remote_path).parent))
+        await asyncssh.scp(local_path, (self._conn, remote_path), preserve=True)
+
     async def write_file(self, remote_path: str, content: str, mode: int = 0o644) -> None:
         if not self._conn:
             raise RuntimeError("Build host session is not connected")
@@ -224,3 +243,44 @@ class BuildHostSession:
             raise RuntimeError("Build host session is not connected")
         Path(local_path).parent.mkdir(parents=True, exist_ok=True)
         await asyncssh.scp((self._conn, remote_path), local_path)
+
+    async def download_dir_tarball(self, remote_path: str, local_path: str) -> None:
+        if not self._conn:
+            raise RuntimeError("Build host session is not connected")
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(fd)
+        archive_path = Path(tmp_path)
+        remote_archive = f"{remote_path}.download.tar.gz"
+        local = Path(local_path)
+        try:
+            status, _out, _err = await self.run(
+                " ".join(
+                    [
+                        "test -e",
+                        shlex.quote(remote_path),
+                        "&& tar -czf",
+                        shlex.quote(remote_archive),
+                        "-C",
+                        shlex.quote(remote_path),
+                        ".",
+                    ]
+                ),
+                log_command=False,
+                log_output=False,
+            )
+            if status != 0:
+                return
+            await self.download_file(remote_archive, str(archive_path))
+            if local.exists() and local.is_dir():
+                for child in local.iterdir():
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+            local.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(local)
+        finally:
+            archive_path.unlink(missing_ok=True)
+            await self.remove_path(remote_archive)

@@ -31,12 +31,19 @@ class DatabaseInfo(BaseModel):
     exists: bool
 
 
+class DockerInfo(BaseModel):
+    cliAvailable: bool
+    daemonAvailable: bool
+    error: str | None = None
+
+
 class SystemInfoResponse(BaseModel):
     disk: DiskInfo
     caches: list[CacheInfo]
     database: DatabaseInfo
     memory: MemoryInfo
     load: LoadInfo
+    docker: DockerInfo
 
 
 class SystemMetricsResponse(BaseModel):

@@ -1,5 +1,5 @@
 from app.api import api_user
-from app.schemas.system import CacheInfo, DatabaseInfo, DiskInfo, LoadInfo, MemoryInfo, SystemInfoResponse, SystemMetricsResponse
+from app.schemas.system import CacheInfo, DatabaseInfo, DiskInfo, DockerInfo, LoadInfo, MemoryInfo, SystemInfoResponse, SystemMetricsResponse
 from app.utils.system_info import get_system_info, get_system_metrics
 
 
@@ -27,15 +27,24 @@ def _database_to_schema(database) -> DatabaseInfo:
     )
 
 
+def _docker_to_schema(docker) -> DockerInfo:
+    return DockerInfo(
+        cliAvailable=docker.cli_available,
+        daemonAvailable=docker.daemon_available,
+        error=docker.error,
+    )
+
+
 @api_user.get("/system/info", response_model=SystemInfoResponse)
 def system_info():
-    disk, caches, database, memory, load = get_system_info()
+    disk, caches, database, memory, load, docker = get_system_info()
     return SystemInfoResponse(
         disk=_disk_to_schema(disk),
         caches=_cache_to_schema(caches),
         database=_database_to_schema(database),
         memory=_memory_to_schema(memory),
         load=_load_to_schema(load),
+        docker=_docker_to_schema(docker),
     )
 
 

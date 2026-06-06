@@ -9,6 +9,7 @@ email_validator
 fastapi[standard]
 fonttools
 jwt
+modal>=1.4.0
 openai
 packaging
 pillow

@@ -6,6 +6,12 @@
 #
 aiofiles==24.1.0
     # via -r requirements.in
+aiohappyeyeballs==2.6.2
+    # via aiohttp
+aiohttp==3.14.0
+    # via modal
+aiosignal==1.4.0
+    # via aiohttp
 alembic==1.11.2
     # via -r requirements.in
 annotated-types==0.7.0
@@ -20,14 +26,19 @@ arq==0.26.1
     # via -r requirements.in
 asyncssh==2.19.0
     # via -r requirements.in
+attrs==26.1.0
+    # via aiohttp
 backoff==2.2.1
     # via posthog
 build==1.0.3
     # via pip-tools
+cbor2==6.1.2
+    # via modal
 certifi==2023.7.22
     # via
     #   httpcore
     #   httpx
+    #   modal
     #   requests
 cffi==1.15.1
     # via cryptography
@@ -38,6 +49,7 @@ charset-normalizer==3.2.0
 click==8.1.7
     # via
     #   arq
+    #   modal
     #   pip-tools
     #   rich-toolkit
     #   typer
@@ -70,14 +82,24 @@ filelock==3.13.1
     # via virtualenv
 fonttools==4.55.3
     # via -r requirements.in
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+grpclib==0.4.9
+    # via modal
 h11==0.14.0
     # via
     #   httpcore
     #   uvicorn
+h2==4.3.0
+    # via grpclib
 hiredis==3.1.0
     # via redis
 honcho==1.1.0
     # via -r requirements.in
+hpack==4.1.0
+    # via h2
 httpcore==1.0.7
     # via httpx
 httptools==0.6.4
@@ -86,6 +108,8 @@ httpx==0.28.1
     # via
     #   fastapi
     #   openai
+hyperframe==6.1.0
+    # via h2
 identify==2.5.33
     # via pre-commit
 idna==3.4
@@ -94,6 +118,7 @@ idna==3.4
     #   email-validator
     #   httpx
     #   requests
+    #   yarl
 iniconfig==2.0.0
     # via pytest
 jinja2==3.1.2
@@ -113,6 +138,13 @@ markupsafe==2.1.3
     #   werkzeug
 mdurl==0.1.2
     # via markdown-it-py
+modal==1.4.3
+    # via -r requirements.in
+multidict==6.7.1
+    # via
+    #   aiohttp
+    #   grpclib
+    #   yarl
 mypy==1.13.0
     # via -r requirements.in
 mypy-extensions==1.0.0
@@ -138,6 +170,12 @@ posthog==7.5.1
     # via -r requirements.in
 pre-commit==3.6.0
     # via -r requirements.in
+propcache==0.5.2
+    # via
+    #   aiohttp
+    #   yarl
+protobuf==6.33.6
+    # via modal
 pyasn1==0.6.1
     # via
     #   python-jose
@@ -185,6 +223,7 @@ requests==2.31.0
     #   posthog
 rich==13.9.4
     # via
+    #   modal
     #   rich-toolkit
     #   typer
 rich-toolkit==0.12.0
@@ -213,10 +252,16 @@ sqlmodel==0.0.22
     # via -r requirements.in
 starlette==0.41.3
     # via fastapi
+synchronicity==0.12.3
+    # via modal
+toml==0.10.2
+    # via modal
 tqdm==4.67.1
     # via openai
 typer==0.15.1
     # via fastapi-cli
+types-certifi==2021.10.8.3
+    # via modal
 types-cffi==1.16.0.20240331
     # via types-pyopenssl
 types-pillow==10.2.0.20240822
@@ -233,12 +278,17 @@ types-requests==2.32.0.20241016
     # via -r requirements.in
 types-setuptools==75.6.0.20241126
     # via types-cffi
+types-toml==0.10.8.20260518
+    # via modal
 typing-extensions==4.12.2
     # via
+    #   aiohttp
+    #   aiosignal
     #   alembic
     #   anyio
     #   asyncssh
     #   fastapi
+    #   modal
     #   mypy
     #   openai
     #   posthog
@@ -246,6 +296,7 @@ typing-extensions==4.12.2
     #   pydantic-core
     #   rich-toolkit
     #   sqlalchemy
+    #   synchronicity
     #   typer
 urllib3==2.0.4
     # via
@@ -260,13 +311,17 @@ uvloop==0.21.0
 virtualenv==20.25.0
     # via pre-commit
 watchfiles==1.0.3
-    # via uvicorn
+    # via
+    #   modal
+    #   uvicorn
 websockets==14.1
     # via uvicorn
 werkzeug==3.1.3
     # via -r requirements.in
 wheel==0.41.3
     # via pip-tools
+yarl==1.24.2
+    # via aiohttp
 
 # The following packages are considered to be unsafe in a requirements file:
 # pip
