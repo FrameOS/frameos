@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import copy
 import hashlib
@@ -10,11 +11,12 @@ import re
 import shlex
 import shutil
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Awaitable, Literal, Optional, TypeVar
 from types import SimpleNamespace
 from urllib.parse import urljoin
 
@@ -96,6 +98,7 @@ BUILDROOT_BASE_MANIFEST_FILE = os.environ.get(
 BUILDROOT_BASE_USE_REMOTE = os.environ.get("FRAMEOS_BUILDROOT_BASE_USE_REMOTE", "").lower() in {"1", "true", "yes"}
 BUILDROOT_BASE_TIMEOUT = float(os.environ.get("FRAMEOS_BUILDROOT_BASE_TIMEOUT", "60"))
 BUILDROOT_DOCKER_NOFILE_LIMIT = int(os.environ.get("FRAMEOS_BUILDROOT_DOCKER_NOFILE_LIMIT", "65535"))
+BUILDROOT_PROGRESS_LOG_INTERVAL_SECONDS = float(os.environ.get("FRAMEOS_BUILDROOT_PROGRESS_LOG_INTERVAL_SECONDS", "30"))
 BUILDROOT_DOCKER_APT_DEPS = (
     "bc",
     "bison",
@@ -182,6 +185,7 @@ ACTIVE_ARQ_JOB_STATUSES = {
     JobStatus.queued,
     JobStatus.in_progress,
 }
+T = TypeVar("T")
 
 
 def normalize_buildroot_platform(platform: str | None) -> str:
@@ -871,9 +875,19 @@ class BuildrootImageBuilder:
                 raise RuntimeError(f"SD image composer completed without producing {raw_output_path.name}")
 
             raw_size = raw_output_path.stat().st_size
-            raw_sha256 = _sha256(raw_output_path)
-            _gzip_file(raw_output_path, output_path)
+            raw_sha256 = await self._with_progress_updates(
+                "Still checksumming raw Buildroot SD image",
+                asyncio.to_thread(_sha256, raw_output_path),
+            )
+            await self._with_progress_updates(
+                "Still compressing Buildroot SD image",
+                asyncio.to_thread(_gzip_file, raw_output_path, output_path),
+            )
             raw_output_path.unlink(missing_ok=True)
+            compressed_sha256 = await self._with_progress_updates(
+                "Still checksumming compressed Buildroot SD image",
+                asyncio.to_thread(_sha256, output_path),
+            )
 
             metadata = {
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
@@ -908,7 +922,7 @@ class BuildrootImageBuilder:
                 "rawSize": raw_size,
                 "rawSha256": raw_sha256,
                 "size": output_path.stat().st_size,
-                "sha256": _sha256(output_path),
+                "sha256": compressed_sha256,
                 "downloadUrl": f"/api/projects/{self.frame.project_id}/frames/{self.frame.id}/buildroot/sd_image/download",
                 "createdAt": _utc_now(),
                 "completedAt": _utc_now(),
@@ -1588,23 +1602,26 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
         if self.executor is None:
             raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
-        status, _, err = await self.executor.docker_run(
-            image=image,
-            mounts=[
-                DockerMount(temp_dir, "/work"),
-                DockerMount(source_dir, "/build/buildroot"),
-                DockerMount(output_dir, "/build/output"),
-                DockerMount(cache_dir, "/cache"),
-                DockerMount(artifact_dir, "/artifacts"),
-            ],
-            env={
-                **({"BUILDROOT_SKIP_APT_INSTALL": "1"} if skip_apt_install else {}),
-                "FORCE_UNSAFE_CONFIGURE": "1",
-            },
-            ulimits=[f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}"],
-            args=["bash", "/work/buildroot-build.sh"],
-            workspace="buildroot-image",
-            log_command="docker run (buildroot image)",
+        status, _, err = await self._with_progress_updates(
+            "Still running Buildroot image build",
+            self.executor.docker_run(
+                image=image,
+                mounts=[
+                    DockerMount(temp_dir, "/work"),
+                    DockerMount(source_dir, "/build/buildroot"),
+                    DockerMount(output_dir, "/build/output"),
+                    DockerMount(cache_dir, "/cache"),
+                    DockerMount(artifact_dir, "/artifacts"),
+                ],
+                env={
+                    **({"BUILDROOT_SKIP_APT_INSTALL": "1"} if skip_apt_install else {}),
+                    "FORCE_UNSAFE_CONFIGURE": "1",
+                },
+                ulimits=[f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}"],
+                args=["bash", "/work/buildroot-build.sh"],
+                workspace="buildroot-image",
+                log_command="docker run (buildroot image)",
+            ),
         )
         if status != 0:
             raise RuntimeError(f"Buildroot image build failed: {err or 'see logs'}")
@@ -1687,13 +1704,16 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         if image:
             if self.executor is None:
                 raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
-            status, _, err = await self.executor.docker_run(
-                image=image,
-                mounts=[DockerMount(compose_dir.resolve(), "/work")],
-                args=["bash", "/work/compose-partitions.sh"],
-                workspace="compose",
-                log_command="docker run (buildroot image composer)",
-                stderr_log_tag="stdout",
+            status, _, err = await self._with_progress_updates(
+                "Still composing Buildroot SD image partitions",
+                self.executor.docker_run(
+                    image=image,
+                    mounts=[DockerMount(compose_dir.resolve(), "/work")],
+                    args=["bash", "/work/compose-partitions.sh"],
+                    workspace="compose",
+                    log_command="docker run (buildroot image composer)",
+                    stderr_log_tag="stdout",
+                ),
             )
         else:
             compose_cmd = " ".join(
@@ -1705,25 +1725,47 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 ]
             )
             log_command = "buildroot image composer"
-            status, _, err = await self._run_command(
-                compose_cmd,
-                log_command=log_command,
-                stderr_log_tag="stdout",
+            status, _, err = await self._with_progress_updates(
+                "Still composing Buildroot SD image partitions",
+                self._run_command(
+                    compose_cmd,
+                    log_command=log_command,
+                    stderr_log_tag="stdout",
+                ),
             )
         if status != 0:
             raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
 
+        partitions = await self._with_progress_updates(
+            "Still applying composed partitions to Buildroot SD image",
+            asyncio.to_thread(
+                self._apply_composed_partitions,
+                base_image_path,
+                output_path,
+                images_dir / "frameos.ext4",
+                images_dir / "assets.vfat",
+            ),
+        )
+        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+
+    @staticmethod
+    def _apply_composed_partitions(
+        base_image_path: Path,
+        output_path: Path,
+        frameos_image: Path,
+        assets_image: Path,
+    ) -> list[dict[str, int]]:
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
         partitions = _shrink_data_partitions(
             output_path,
             partitions,
-            frameos_image=images_dir / "frameos.ext4",
-            assets_image=images_dir / "assets.vfat",
+            frameos_image=frameos_image,
+            assets_image=assets_image,
         )
-        _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
-        _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
-        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+        _replace_partition(output_path, partitions, 3, frameos_image)
+        _replace_partition(output_path, partitions, 4, assets_image)
+        return partitions
 
     async def _compose_sd_image_from_precompiled_release(
         self,
@@ -1743,6 +1785,18 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             shutil.rmtree(boot_root)
         shutil.copytree(temp_dir / "overlay" / "boot", boot_root, symlinks=True)
 
+        partitions = await self._with_progress_updates(
+            "Still customizing precompiled Buildroot SD image",
+            asyncio.to_thread(
+                self._prepare_precompiled_release_image,
+                release_image_path,
+                output_path,
+            ),
+        )
+        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+
+    @staticmethod
+    def _prepare_precompiled_release_image(release_image_path: Path, output_path: Path) -> list[dict[str, int]]:
         if release_image_path.name.endswith(".gz"):
             _gunzip_file(release_image_path, output_path)
         else:
@@ -1755,7 +1809,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             raise RuntimeError(
                 "Full precompiled Buildroot SD image uses larger data partitions than the current image layout"
             )
-        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+        return partitions
 
     async def _patch_boot_partition(
         self,
@@ -1881,17 +1935,20 @@ fi
         if image:
             if self.executor is None:
                 raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
-            status, _, err = await self.executor.docker_run(
-                image=image,
-                mounts=[
-                    DockerMount(output_path.resolve(), f"/image/{output_path.name}"),
-                    DockerMount(boot_root.resolve(), "/boot-root"),
-                    DockerMount(script_path.resolve(), "/patch-boot.sh", read_only=True),
-                ],
-                args=["bash", "/patch-boot.sh"],
-                workspace="boot-patch",
-                log_command="docker run (buildroot boot partition patch)",
-                stderr_log_tag="stdout",
+            status, _, err = await self._with_progress_updates(
+                "Still patching Buildroot SD image boot partition",
+                self.executor.docker_run(
+                    image=image,
+                    mounts=[
+                        DockerMount(output_path.resolve(), f"/image/{output_path.name}"),
+                        DockerMount(boot_root.resolve(), "/boot-root"),
+                        DockerMount(script_path.resolve(), "/patch-boot.sh", read_only=True),
+                    ],
+                    args=["bash", "/patch-boot.sh"],
+                    workspace="boot-patch",
+                    log_command="docker run (buildroot boot partition patch)",
+                    stderr_log_tag="stdout",
+                ),
             )
         else:
             patch_cmd = " ".join(
@@ -1903,16 +1960,47 @@ fi
                 ]
             )
             log_command = "buildroot boot partition patch"
-            status, _, err = await self._run_command(
-                patch_cmd,
-                log_command=log_command,
-                stderr_log_tag="stdout",
+            status, _, err = await self._with_progress_updates(
+                "Still patching Buildroot SD image boot partition",
+                self._run_command(
+                    patch_cmd,
+                    log_command=log_command,
+                    stderr_log_tag="stdout",
+                ),
             )
         if status != 0:
             raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
+
+    async def _with_progress_updates(self, message: str, awaitable: Awaitable[T]) -> T:
+        interval = BUILDROOT_PROGRESS_LOG_INTERVAL_SECONDS
+        if interval <= 0:
+            return await awaitable
+
+        async def progress_logger() -> None:
+            elapsed = 0.0
+            while True:
+                await asyncio.sleep(interval)
+                elapsed += interval
+                await self._log("stdout", f"{message} ({self._format_elapsed(elapsed)} elapsed)")
+
+        task = asyncio.create_task(progress_logger())
+        try:
+            return await awaitable
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        total_seconds = max(1, int(round(seconds)))
+        minutes, remainder = divmod(total_seconds, 60)
+        if minutes:
+            return f"{minutes}m {remainder:02d}s"
+        return f"{remainder}s"
 
     @staticmethod
     def _sanitize(value: str) -> str:

@@ -95,6 +95,48 @@ function startBrowserDownload(path: string): void {
 }
 
 const pendingSdCardImageDownloads = new Set<number>()
+const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
+const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
+
+function sdCardImageProgressDetail(startedAt: number): string {
+  const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
+  if (elapsedMinutes > 0) {
+    return `Still preparing SD card image (${elapsedMinutes} min elapsed)`
+  }
+  return 'Still preparing SD card image'
+}
+
+function stopSdCardImageProgress(frameId: number): void {
+  const timer = sdCardImageProgressTimers.get(frameId)
+  if (timer === undefined || typeof window === 'undefined') {
+    return
+  }
+  window.clearInterval(timer)
+  sdCardImageProgressTimers.delete(frameId)
+}
+
+function startSdCardImageProgress(frameId: number): void {
+  stopSdCardImageProgress(frameId)
+  if (typeof window === 'undefined') {
+    return
+  }
+  const startedAt = Date.now()
+  const updateProgressDetail = (): void => {
+    if (!pendingSdCardImageDownloads.has(frameId)) {
+      stopSdCardImageProgress(frameId)
+      return
+    }
+    longRunningTasksModel.actions.updateTaskProgress({
+      frameId,
+      kind: 'buildrootImage',
+      progressCurrent: null,
+      progressTotal: null,
+      detail: sdCardImageProgressDetail(startedAt),
+    })
+  }
+  sdCardImageProgressTimers.set(frameId, window.setInterval(updateProgressDetail, SD_CARD_IMAGE_PROGRESS_INTERVAL_MS))
+}
 
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
@@ -381,6 +423,7 @@ export const framesModel = kea<framesModelType>([
       const downloadUrl = sdImage?.downloadUrl || `/api/frames/${id}/buildroot/sd_image/download`
 
       pendingSdCardImageDownloads.add(id)
+      startSdCardImageProgress(id)
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'buildrootImage',
@@ -401,6 +444,7 @@ export const framesModel = kea<framesModelType>([
         const data = await response.json()
         if (data?.sdImage?.status === 'ready') {
           pendingSdCardImageDownloads.delete(id)
+          stopSdCardImageProgress(id)
           startBrowserDownload(data.sdImage.downloadUrl || downloadUrl)
           longRunningTasksModel.actions.finishTask({
             frameId: id,
@@ -412,6 +456,7 @@ export const framesModel = kea<framesModelType>([
         }
       } catch (error) {
         pendingSdCardImageDownloads.delete(id)
+        stopSdCardImageProgress(id)
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'buildrootImage',
@@ -427,9 +472,11 @@ export const framesModel = kea<framesModelType>([
       }
       if (sdImage.status === 'ready') {
         pendingSdCardImageDownloads.delete(frame.id)
+        stopSdCardImageProgress(frame.id)
         startBrowserDownload(sdImage.downloadUrl || `/api/frames/${frame.id}/buildroot/sd_image/download`)
       } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
         pendingSdCardImageDownloads.delete(frame.id)
+        stopSdCardImageProgress(frame.id)
       }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {

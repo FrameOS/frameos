@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import importlib.util
 import json
@@ -41,6 +42,26 @@ from app.utils.cross_compile import CrossCompiler
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+@pytest.mark.asyncio
+async def test_buildroot_progress_updates_after_interval(monkeypatch):
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PROGRESS_LOG_INTERVAL_SECONDS", 0.01)
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
+    logs: list[tuple[str, str]] = []
+
+    async def fake_log(type: str, line: str) -> None:
+        logs.append((type, line))
+
+    builder._log = fake_log
+
+    result = await builder._with_progress_updates("Still working on SD image", asyncio.sleep(0.025, result="done"))
+
+    assert result == "done"
+    assert logs
+    assert logs[0][0] == "stdout"
+    assert logs[0][1].startswith("Still working on SD image (")
+    assert "elapsed" in logs[0][1]
 
 
 def test_buildroot_frameos_cross_target_uses_docker_arm64_platform(tmp_path, monkeypatch):
