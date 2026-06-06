@@ -303,6 +303,66 @@ class ModalSandboxSession:
         }
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         self._sandbox = await _call_modal(modal.Sandbox.create, "sleep", str(self.config.timeout), **kwargs)
+        identity = await self._sandbox_identity()
+        await self._log("stdout", self._connection_summary(identity))
+
+    async def _sandbox_identity(self) -> dict[str, str]:
+        if not self._sandbox:
+            return {}
+        command = (
+            "printf 'host=%s\\n' \"$(hostname 2>/dev/null || printf unknown)\"; "
+            "printf 'cpu_count=%s\\n' \"$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || printf unknown)\"; "
+            "awk '/MemTotal/ {printf \"memory_mib=%d\\n\", $2 / 1024}' /proc/meminfo 2>/dev/null || true"
+        )
+        try:
+            proc = await _call_modal(self._sandbox.exec, "bash", "-lc", command, timeout=min(self.config.timeout, 30))
+            out_buf: list[str] = []
+            async for chunk in proc.stdout:
+                out_buf.append(chunk.decode("utf-8", errors="replace") if isinstance(chunk, (bytes, bytearray)) else str(chunk))
+            async for _chunk in proc.stderr:
+                pass
+            await _call_modal(proc.wait)
+        except Exception:
+            return {}
+        identity: dict[str, str] = {}
+        for raw_line in "".join(out_buf).splitlines():
+            key, separator, value = raw_line.partition("=")
+            if separator and key and value:
+                identity[key.strip()] = value.strip()
+        return identity
+
+    def _connection_summary(self, identity: dict[str, str]) -> str:
+        sandbox_id = ""
+        if self._sandbox:
+            for attr in ("object_id", "sandbox_id", "id", "_object_id"):
+                value = getattr(self._sandbox, attr, None)
+                if value:
+                    sandbox_id = str(value)
+                    break
+        cpu = f"{self.config.cpu:g} requested" if self.config.cpu is not None else identity.get("cpu_count", "auto")
+        memory = (
+            f"{self.config.memory} MiB requested"
+            if self.config.memory is not None
+            else f"{identity['memory_mib']} MiB reported"
+            if identity.get("memory_mib")
+            else "auto"
+        )
+        parts = [
+            "Connected to Modal sandbox",
+            f"app={self.config.app_name}",
+            f"environment={self.config.environment_name or 'default'}",
+            f"sandbox={sandbox_id or 'unknown'}",
+            f"host={identity.get('host') or 'unknown'}",
+            f"image={self.config.image}",
+            f"cpu={cpu}",
+            f"memory={memory}",
+            f"region={self.config.region or 'auto'}",
+            f"cloud={self.config.cloud or 'auto'}",
+            f"timeout={self.config.timeout}s",
+            f"idle_timeout={self.config.idle_timeout}s",
+            f"nested_docker={'enabled' if self.config.enable_docker else 'disabled'}",
+        ]
+        return f"{parts[0]}: " + ", ".join(parts[1:])
 
     async def _log(self, level: str, message: str) -> None:
         if self._logger:

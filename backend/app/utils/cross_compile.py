@@ -834,7 +834,7 @@ class CrossCompiler:
         if self.executor is None:
             raise RuntimeError("Build executor unavailable during cross compilation")
         if self.executor.uses_container_images_directly:
-            return resolved_image
+            return self.executor.container_image_reference(image, resolved_image)
         if not TOOLCHAIN_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",

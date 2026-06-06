@@ -93,6 +93,43 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "--from-file" not in script
 
 
+@pytest.mark.asyncio
+async def test_buildroot_frameos_binary_disables_on_device_fallback(monkeypatch, tmp_path):
+    calls = {}
+    frame = SimpleNamespace(id=1, project_id=1, rpios={})
+
+    class FakeFrameBinaryBuilder:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+
+        async def plan_build(self, **kwargs):
+            calls["plan"] = kwargs
+            return "plan"
+
+        async def build(self, plan, **kwargs):
+            calls["build"] = {"plan": plan, **kwargs}
+            return "result"
+
+    monkeypatch.setattr(buildroot_image_module, "FrameBinaryBuilder", FakeFrameBinaryBuilder)
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    builder = BuildrootImageBuilder(db=object(), redis=object(), frame=frame)
+    monkeypatch.setattr(builder, "_log", fake_log)
+    result = await builder._build_frameos_binary(
+        SimpleNamespace(build_id="build12345678"),
+        str(tmp_path),
+        frame,
+    )
+
+    assert result == "result"
+    assert calls["plan"]["target_override"] == FRAMEOS_BUILD_TARGET
+    assert calls["plan"]["allow_on_device_fallback"] is False
+    assert calls["build"]["plan"] == "plan"
+    assert calls["build"]["precompiled_install_all_drivers"] is True
+
+
 def test_buildroot_defaults_remove_setup_json_reset_file_path():
     frame = SimpleNamespace(
         id=7,

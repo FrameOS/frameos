@@ -42,6 +42,41 @@ def test_modal_sandbox_config_parses_settings():
     assert config.enable_docker is False
 
 
+def test_modal_sandbox_connection_summary_includes_resource_details():
+    session = ModalSandboxSession(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            app_name="frameos-custom",
+            image="frameos/frameos:custom",
+            timeout=120,
+            idle_timeout=30,
+            cpu=4,
+            memory=8192,
+            region="us-east",
+            cloud="aws",
+            environment_name="prod",
+            enable_docker=False,
+        )
+    )
+
+    summary = session._connection_summary({"host": "modal-host", "cpu_count": "8", "memory_mib": "16384"})
+
+    assert "Connected to Modal sandbox" in summary
+    assert "app=frameos-custom" in summary
+    assert "environment=prod" in summary
+    assert "host=modal-host" in summary
+    assert "image=frameos/frameos:custom" in summary
+    assert "cpu=4 requested" in summary
+    assert "memory=8192 MiB requested" in summary
+    assert "region=us-east" in summary
+    assert "cloud=aws" in summary
+    assert "timeout=120s" in summary
+    assert "idle_timeout=30s" in summary
+    assert "nested_docker=disabled" in summary
+
+
 def test_sandbox_sync_paths_for_docker_mounts(tmp_path):
     src = tmp_path / "src"
     cache = tmp_path / "cache"

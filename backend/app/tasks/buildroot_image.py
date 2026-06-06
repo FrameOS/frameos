@@ -1003,6 +1003,7 @@ class BuildrootImageBuilder:
         )
         plan = await builder.plan_build(
             force_cross_compile=False,
+            allow_on_device_fallback=False,
             target_override=FRAMEOS_BUILD_TARGET,
             compilation_mode=frame_compilation_mode(frame),
         )
@@ -1970,7 +1971,7 @@ fi
         if self.executor is None:
             raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
         if self.executor.uses_container_images_directly:
-            return resolved_image
+            return self.executor.container_image_reference(image, resolved_image)
         if not BUILDROOT_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",

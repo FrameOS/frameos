@@ -88,6 +88,9 @@ class BuildExecutor:
     async def prepare_docker_build_context(self, dockerfile: Path, workspace: str) -> tuple[str, str]:
         return str(dockerfile.parent), str(dockerfile)
 
+    def container_image_reference(self, image: str, resolved_image: str) -> str:
+        return resolved_image
+
     async def mktemp_dir(self, prefix: str = "frameos-build-") -> str:
         raise RuntimeError(f"{self.display_name} does not allocate remote workspaces")
 
@@ -425,6 +428,12 @@ class ModalBuildExecutor(BuildExecutor):
         self.config = config
         self.logger = logger
         self.display_name = f"Modal sandbox app {config.app_name} ({config.image})"
+
+    def container_image_reference(self, image: str, resolved_image: str) -> str:
+        # Modal wraps registry images in its own Image build. Plain tags are
+        # accepted more reliably than tag+digest references there; Docker and
+        # build-host executors keep using digest-pinned references.
+        return image
 
     async def _sandbox_log(self, level: str, message: str) -> None:
         if self.logger:

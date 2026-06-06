@@ -72,3 +72,19 @@ async def test_modal_executor_routes_docker_run_through_direct_image(monkeypatch
         {"log_command": False, "log_output": False},
     ) in calls
     assert ("download_dir", "/work", work) in calls
+
+
+def test_modal_executor_uses_plain_tag_for_direct_container_images():
+    executor = ModalBuildExecutor(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:base",
+        )
+    )
+
+    image = "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest"
+    resolved = f"{image}@sha256:17e810a39fb457429852a63587d39a7dcdee436771d02c50254b4f98976c1e38"
+
+    assert executor.container_image_reference(image, resolved) == image
