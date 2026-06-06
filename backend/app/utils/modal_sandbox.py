@@ -370,7 +370,14 @@ class ModalSandboxSession:
         image = (
             modal.Image.from_registry(
                 self.config.image,
-                setup_dockerfile_commands=[f"ENV PATH={FRAMEOS_SANDBOX_PATH}"],
+                setup_dockerfile_commands=[
+                    f"ENV PATH={FRAMEOS_SANDBOX_PATH}",
+                    (
+                        "RUN if ! command -v python >/dev/null 2>&1 "
+                        "&& command -v python3 >/dev/null 2>&1; then "
+                        "ln -sf \"$(command -v python3)\" /usr/local/bin/python; fi"
+                    ),
+                ],
             )
             if self.config.image
             else None

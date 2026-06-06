@@ -91,9 +91,7 @@ def test_modal_executor_uses_plain_tag_for_direct_container_images():
 
 
 @pytest.mark.asyncio
-async def test_modal_executor_uses_nested_docker_for_non_amd64_platform(monkeypatch, tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
+async def test_modal_executor_rejects_non_amd64_direct_container_platform(monkeypatch):
     calls = []
 
     class FakeModalSandboxSession:
@@ -110,23 +108,12 @@ async def test_modal_executor_uses_nested_docker_for_non_amd64_platform(monkeypa
             calls.append(("exit", exc_type))
             return None
 
-        async def sync_dir_tarball(self, local_path, remote_path):
-            calls.append(("sync_dir", Path(local_path), Path(remote_path)))
-
-        async def sync_file(self, local_path, remote_path):
-            calls.append(("sync_file", Path(local_path), Path(remote_path)))
-
-        async def download_dir_tarball(self, remote_path, local_path):
-            calls.append(("download_dir", Path(remote_path), Path(local_path)))
-
-        async def download_file(self, remote_path, local_path):
-            calls.append(("download_file", Path(remote_path), Path(local_path)))
-
-        async def run(self, command, **kwargs):
-            calls.append(("run", command, kwargs))
-            return 0, "ok\n", None
-
     monkeypatch.setattr("app.utils.build_executor.ModalSandboxSession", FakeModalSandboxSession)
+
+    logs = []
+
+    async def logger(level, message):
+        logs.append((level, message))
 
     executor = ModalBuildExecutor(
         ModalSandboxConfig(
@@ -135,27 +122,37 @@ async def test_modal_executor_uses_nested_docker_for_non_amd64_platform(monkeypa
             token_secret="as-test",
             image="frameos/frameos:base",
             enable_docker=False,
-        )
+        ),
+        logger=logger,
     )
 
     status, out, err = await executor.docker_run(
         image="frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest",
         platform="linux/arm64",
-        mounts=[DockerMount(work, "/src")],
+        mounts=[],
         workdir="/src",
         args=["bash", "build.sh"],
         log_command=False,
         log_output=False,
     )
 
-    assert (status, out, err) == (0, "ok\n", None)
-    assert calls[0][0] == "init"
-    config = calls[0][1]
-    assert config.image == "frameos/frameos:base"
-    assert config.enable_docker is True
-    assert ("sync_dir", work, work) in calls
-    run_calls = [call for call in calls if call[0] == "run"]
-    assert len(run_calls) == 1
-    assert "docker run --rm --platform linux/arm64" in run_calls[0][1]
-    assert "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest" in run_calls[0][1]
-    assert ("download_dir", work, work) in calls
+    assert status == 125
+    assert out is None
+    assert err is not None
+    assert "linux/amd64 registry images" in err
+    assert calls == []
+    assert logs == [("stderr", err.strip())]
+
+
+def test_modal_executor_maps_non_amd64_targets_to_amd64_container_platform():
+    executor = ModalBuildExecutor(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            image="frameos/frameos:base",
+        )
+    )
+
+    assert executor.container_platform_for_target("linux/arm64") == "linux/amd64"
+    assert executor.container_platform_for_target("linux/amd64") == "linux/amd64"

@@ -48,6 +48,14 @@ class TargetMetadata:
     image: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TargetCrossToolchain:
+    dpkg_arch: str
+    triplet: str
+    cc: str
+    packages: tuple[str, ...]
+
+
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 CACHE_ENV = "FRAMEOS_CROSS_CACHE"
 DEFAULT_CACHE = Path.home() / ".cache/frameos/cross"
@@ -92,6 +100,40 @@ PLATFORM_MAP = {
     "armv7": "linux/arm/v7",
     "armhf": "linux/arm/v7",
     "armv6l": "linux/arm/v6",
+}
+TARGET_CROSS_TOOLCHAINS = {
+    "linux/arm64": TargetCrossToolchain(
+        dpkg_arch="arm64",
+        triplet="aarch64-linux-gnu",
+        cc="aarch64-linux-gnu-gcc",
+        packages=(
+            "gcc-aarch64-linux-gnu",
+            "g++-aarch64-linux-gnu",
+            "pkg-config",
+            "zlib1g-dev:arm64",
+            "libssl-dev:arm64",
+            "libffi-dev:arm64",
+            "libjpeg-dev:arm64",
+            "libfreetype6-dev:arm64",
+            "libevdev-dev:arm64",
+        ),
+    ),
+    "linux/arm/v7": TargetCrossToolchain(
+        dpkg_arch="armhf",
+        triplet="arm-linux-gnueabihf",
+        cc="arm-linux-gnueabihf-gcc",
+        packages=(
+            "gcc-arm-linux-gnueabihf",
+            "g++-arm-linux-gnueabihf",
+            "pkg-config",
+            "zlib1g-dev:armhf",
+            "libssl-dev:armhf",
+            "libffi-dev:armhf",
+            "libjpeg-dev:armhf",
+            "libfreetype6-dev:armhf",
+            "libevdev-dev:armhf",
+        ),
+    ),
 }
 
 def can_cross_compile_target(arch: str | None) -> bool:
@@ -283,6 +325,13 @@ class CrossCompiler:
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
+        target_platform = self._platform()
+        container_platform = self._container_platform()
+        target_cross_toolchain = self._target_cross_toolchain(container_platform)
+        if container_platform != target_platform and target_cross_toolchain is None:
+            raise RuntimeError(
+                f"No target cross compiler bootstrap is configured for {target_platform} on {container_platform}"
+            )
         include_candidates = (
             [f"/sysroot{path}" for path in sorted(self._sysroot_include_dirs)]
             if self._sysroot_include_dirs
@@ -306,12 +355,28 @@ class CrossCompiler:
                 f"{icon} Enabling CPU feature flags for cross-compile: "
                 + " ".join(feature_flags),
             )
+        if target_cross_toolchain:
+            await self._log(
+                "stdout",
+                f"{icon} Using {container_platform} toolchain image with "
+                f"{target_cross_toolchain.triplet} compiler for {target_platform}",
+            )
+            include_dirs = self._dedupe_preserve_order(
+                [f"/usr/include/{target_cross_toolchain.triplet}", *include_dirs]
+            )
+            lib_dirs = self._dedupe_preserve_order(
+                [f"/usr/lib/{target_cross_toolchain.triplet}", *lib_dirs]
+            )
         include_flags = [f"-I{path}" for path in include_dirs]
         extra_cflags_parts = [*feature_flags, *include_flags]
         extra_cflags = (
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        target_toolchain_script = indent(
+            self._target_cross_toolchain_setup_script(target_cross_toolchain),
+            " " * 16,
+        )
         prepare_quickjs_script = indent(self._prepare_quickjs_archive_script(), " " * 16)
         make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
         make_jobs_assignment = (
@@ -331,6 +396,8 @@ class CrossCompiler:
 
                 log_debug "Container uname: $(uname -a)"
                 log_debug "Working directory before build: $(pwd)"
+
+                {target_toolchain_script}
 
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
@@ -364,7 +431,7 @@ class CrossCompiler:
 
         status, _, err = await self.executor.docker_run(
             image=image,
-            platform=self._platform(),
+            platform=container_platform,
             mounts=[
                 DockerMount(Path(build_dir), "/src"),
                 DockerMount(self.sysroot_dir, "/sysroot", read_only=True),
@@ -783,6 +850,51 @@ class CrossCompiler:
             return str(self.target.platform)
         return PLATFORM_MAP.get(self.target.arch, "linux/amd64")
 
+    def _container_platform(self) -> str:
+        platform = self._platform()
+        if self.executor is None:
+            return platform
+        platform_for_target = getattr(self.executor, "container_platform_for_target", None)
+        if platform_for_target is None:
+            return platform
+        return platform_for_target(platform) or platform
+
+    def _target_cross_toolchain(self, container_platform: str | None = None) -> TargetCrossToolchain | None:
+        target_platform = self._platform()
+        if (container_platform or target_platform) == target_platform:
+            return None
+        return TARGET_CROSS_TOOLCHAINS.get(target_platform)
+
+    def _target_cross_toolchain_setup_script(self, toolchain: TargetCrossToolchain | None) -> str:
+        if toolchain is None:
+            return ""
+        package_list = " ".join(shlex.quote(package) for package in toolchain.packages)
+        pkg_config_libdir = (
+            f"/usr/lib/{toolchain.triplet}/pkgconfig:"
+            f"/usr/share/pkgconfig"
+        )
+        return dedent(
+            f"""
+            if ! command -v {shlex.quote(toolchain.cc)} >/dev/null 2>&1 || ! test -e /usr/lib/{shlex.quote(toolchain.triplet)}/libssl.so; then
+                log_debug "Installing {toolchain.triplet} cross compiler and target libraries"
+                if ! command -v apt-get >/dev/null 2>&1; then
+                    log_debug "apt-get is required to install target cross compiler packages"
+                    exit 1
+                fi
+                export DEBIAN_FRONTEND=noninteractive
+                if command -v dpkg >/dev/null 2>&1 && ! dpkg --print-foreign-architectures | grep -qx {shlex.quote(toolchain.dpkg_arch)}; then
+                    dpkg --add-architecture {shlex.quote(toolchain.dpkg_arch)}
+                fi
+                apt-get update
+                apt-get install -y --no-install-recommends {package_list}
+                rm -rf /var/lib/apt/lists/*
+            fi
+            export CC={shlex.quote(toolchain.cc)}
+            export PKG_CONFIG_LIBDIR={shlex.quote(pkg_config_libdir)}
+            log_debug "Using target compiler: $CC"
+            """
+        ).strip()
+
     def _docker_image(self) -> str:
         if getattr(self.target, "image", None):
             return str(self.target.image)
@@ -802,9 +914,9 @@ class CrossCompiler:
             safe_version = version or default_version
         return f"{base}:{safe_version}"
 
-    def _toolchain_image(self) -> str:
+    def _toolchain_image(self, platform_override: str | None = None) -> str:
         base = self._sanitize(self._docker_image().replace("/", "_"))
-        platform = self._sanitize(self._platform().replace("/", "_"))
+        platform = self._sanitize((platform_override or self._platform()).replace("/", "_"))
         slug = f"{base}-{platform}"
         if CROSS_TOOLCHAIN_IMAGE:
             try:
@@ -819,8 +931,8 @@ class CrossCompiler:
         tag = f"{slug}-{TOOLCHAIN_IMAGE_TAG}" if TOOLCHAIN_IMAGE_TAG else slug
         return f"{TOOLCHAIN_IMAGE_REPO}:{tag}"
 
-    def _resolved_toolchain_image(self) -> str:
-        image = self._toolchain_image()
+    def _resolved_toolchain_image(self, platform_override: str | None = None) -> str:
+        image = self._toolchain_image(platform_override)
         if CROSS_TOOLCHAIN_IMAGE:
             return image
         digest = _toolchain_digest_map().get(image)
@@ -828,14 +940,15 @@ class CrossCompiler:
             return f"{image}@{digest}"
         return image
 
-    def _legacy_toolchain_image(self) -> str:
+    def _legacy_toolchain_image(self, platform_override: str | None = None) -> str:
         base = self._sanitize(self._docker_image().replace("/", "_"))
-        platform = self._sanitize(self._platform().replace("/", "_"))
+        platform = self._sanitize((platform_override or self._platform()).replace("/", "_"))
         return f"frameos-cross-{base}-{platform}-v1"
 
     async def _ensure_toolchain_image(self) -> str:
-        image = self._toolchain_image()
-        resolved_image = self._resolved_toolchain_image()
+        container_platform = self._container_platform()
+        image = self._toolchain_image(container_platform)
+        resolved_image = self._resolved_toolchain_image(container_platform)
         if self.executor is None:
             raise RuntimeError("Build executor unavailable during cross compilation")
         if self.executor.uses_container_images_directly:
@@ -858,7 +971,7 @@ class CrossCompiler:
                 if status == 0:
                     return image
 
-            legacy_image = self._legacy_toolchain_image()
+            legacy_image = self._legacy_toolchain_image(container_platform)
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(legacy_image)} >/dev/null 2>&1",
                 log_command=False,
@@ -905,7 +1018,7 @@ class CrossCompiler:
         build_cmd = " ".join(
             [
                 "docker buildx build --load",
-                f"--platform {self._platform()}",
+                f"--platform {container_platform}",
                 f"--build-arg BASE_IMAGE={shlex.quote(self._docker_image())}",
                 f"--build-arg TOOLCHAIN_PACKAGES={shlex.quote(TOOLCHAIN_PACKAGES)}",
                 f"-t {shlex.quote(image)}",

@@ -197,12 +197,15 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
 
 
 @pytest.mark.asyncio
-async def test_modal_toolchain_build_uses_nested_docker_for_arm64(tmp_path, monkeypatch: pytest.MonkeyPatch):
+async def test_modal_toolchain_build_uses_amd64_image_with_target_cross_compiler(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
     temp_dir = tmp_path / "tmp"
     build_dir = tmp_path / "build"
     temp_dir.mkdir()
     build_dir.mkdir()
     calls: list[tuple[str, str]] = []
+    synced_scripts: list[str] = []
 
     class FakeModalSandboxSession:
         def __init__(self, config, *, logger=None):
@@ -227,6 +230,8 @@ async def test_modal_toolchain_build_uses_nested_docker_for_arm64(tmp_path, monk
 
         async def sync_file(self, local_path: str, remote_path: str) -> None:
             calls.append(("sync-file", f"{local_path}->{remote_path}"))
+            if remote_path.endswith("/build.sh"):
+                synced_scripts.append(Path(local_path).read_text())
 
         async def run(self, command: str, **kwargs):
             calls.append(("run", command))
@@ -272,11 +277,12 @@ async def test_modal_toolchain_build_uses_nested_docker_for_arm64(tmp_path, monk
 
     assert result == str(build_dir / "frameos")
     image_calls = [value for kind, value in calls if kind == "image"]
-    assert image_calls == ["frameos/frameos:latest"]
+    assert image_calls == ["frameos/frameos-cross-toolchain:debian_bookworm-linux_amd64-latest"]
     run_commands = [value for kind, value in calls if kind == "run"]
-    assert any("docker run --rm --platform linux/arm64" in command for command in run_commands)
     assert any(
-        "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest" in command
-        and "bash /tmp/frameos-cross/build.sh" in command
+        "bash /tmp/frameos-cross/build.sh" in command
         for command in run_commands
     )
+    assert len(synced_scripts) == 1
+    assert "apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu" in synced_scripts[0]
+    assert "export CC=aarch64-linux-gnu-gcc" in synced_scripts[0]
