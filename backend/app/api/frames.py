@@ -114,6 +114,7 @@ from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
 from app.utils.build_host import get_build_executor_config
+from app.utils.build_executor import build_environment_requires_executor_config
 from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.timezone import frame_timezone, normalize_timezone, stored_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
@@ -2444,7 +2445,7 @@ async def api_frame_buildroot_sd_image(
         _bad_request(
             "Buildroot SD card image generation requires Docker, build host, or Modal sandboxes as the global build environment."
         )
-    if build_environment_provider in {"buildHost", "modal"} and get_build_executor_config(db, frame.project_id) is None:
+    if build_environment_requires_executor_config(build_environment_provider) and get_build_executor_config(db, frame.project_id) is None:
         _bad_request(f"Selected build environment '{build_environment_provider}' is not configured")
 
     try:

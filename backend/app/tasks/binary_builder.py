@@ -28,8 +28,12 @@ from app.tasks.precompiled_frameos import (
 from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, resolve_prebuilt_target
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
-from app.utils.build_host import build_executor_display_name, get_build_executor_config
-from app.utils.modal_sandbox import ModalSandboxConfig
+from app.utils.build_host import get_build_executor_config
+from app.utils.build_executor import (
+    build_executor_display_name,
+    build_executor_kind_name,
+    ensure_build_executor_configured,
+)
 from app.utils.cross_compile import (
     TargetMetadata,
     build_binary_with_cross_toolchain,
@@ -328,8 +332,7 @@ class FrameBinaryBuilder:
         cross_compiled = False
         binary_path: str | None = None
         if plan.will_attempt_cross_compile:
-            if build_environment_provider in {"buildHost", "modal"} and build_executor is None:
-                raise RuntimeError(f"Selected build environment '{build_environment_provider}' is not configured")
+            ensure_build_executor_configured(build_environment_provider, build_executor)
             if build_executor:
                 await self._log(
                     "stdout",
@@ -356,7 +359,7 @@ class FrameBinaryBuilder:
                 error_message = str(exc)
                 failure_msg = f"Cross compilation failed ({exc})"
                 if build_executor:
-                    executor_name = "Modal sandbox" if isinstance(build_executor, ModalSandboxConfig) else "build host"
+                    executor_name = build_executor_kind_name(build_executor)
                     failure_msg = f"Cross compilation failed on {executor_name} ({exc})"
                 await self._log(
                     "stderr",

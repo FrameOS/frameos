@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
-from app.utils.modal_sandbox import ModalSandboxConfig, ModalSandboxSession, get_modal_sandbox_config
+from app.utils.modal_sandbox import ModalSandboxConfig, get_modal_sandbox_config
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 
@@ -57,12 +57,6 @@ def get_build_executor_config(db: Session | None, project_id: int | None = None)
     if db is None or project_id is None:
         return None
     return get_modal_sandbox_config(db, project_id) or get_build_host_config(db, project_id)
-
-
-def build_executor_display_name(config: BuildHostConfig | ModalSandboxConfig) -> str:
-    if isinstance(config, ModalSandboxConfig):
-        return f"Modal sandbox app {config.app_name} ({config.image})"
-    return f"build host {config.user}@{config.host}:{config.port}"
 
 
 class BuildHostSession:
@@ -290,13 +284,3 @@ class BuildHostSession:
         finally:
             archive_path.unlink(missing_ok=True)
             await self.remove_path(remote_archive)
-
-
-def create_build_executor_session(
-    config: BuildHostConfig | ModalSandboxConfig,
-    *,
-    logger: LogFunc | None = None,
-) -> BuildHostSession | ModalSandboxSession:
-    if isinstance(config, ModalSandboxConfig):
-        return ModalSandboxSession(config, logger=logger)
-    return BuildHostSession(config, logger=logger)

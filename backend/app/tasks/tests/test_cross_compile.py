@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
+from app.utils.build_executor import create_build_executor
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
 from app.utils.modal_sandbox import ModalSandboxConfig
 
@@ -178,12 +179,12 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
     async def fake_ensure_toolchain_image() -> str:
         return "frameos-cross-test"
 
-    async def fake_exec_local_command(_db, _redis, _frame, _cmd, **_kwargs):
+    async def fake_docker_run(**_kwargs):
         captured_script["content"] = (temp_dir / "frameos-cross-build.sh").read_text()
         return 0, "", ""
 
     monkeypatch.setattr(compiler, "_ensure_toolchain_image", fake_ensure_toolchain_image)
-    monkeypatch.setattr("app.utils.cross_compile.exec_local_command", fake_exec_local_command)
+    compiler.executor = SimpleNamespace(docker_run=fake_docker_run)
 
     result = await compiler._run_docker_build(str(build_dir))
 
@@ -224,6 +225,9 @@ async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monk
         async def write_file(self, remote_path: str, content: str, mode: int = 0o644) -> None:
             calls.append(("write", remote_path))
 
+        async def sync_file(self, local_path: str, remote_path: str) -> None:
+            calls.append(("sync-file", f"{local_path}->{remote_path}"))
+
         async def run(self, command: str, **kwargs):
             calls.append(("run", command))
             if "find drivers scenes" in command:
@@ -233,6 +237,11 @@ async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monk
         async def download_file(self, remote_path: str, local_path: str) -> None:
             calls.append(("download", f"{remote_path}->{local_path}"))
             Path(local_path).write_text("binary")
+
+        async def download_dir_tarball(self, remote_path: str, local_path: str) -> None:
+            calls.append(("download-dir", f"{remote_path}->{local_path}"))
+            Path(local_path).mkdir(parents=True, exist_ok=True)
+            (Path(local_path) / "frameos").write_text("binary")
 
     compiler = CrossCompiler(
         db=None,
@@ -250,7 +259,14 @@ async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monk
         ),
     )
 
-    monkeypatch.setattr("app.utils.cross_compile.ModalSandboxSession", FakeModalSandboxSession)
+    monkeypatch.setattr("app.utils.build_executor.ModalSandboxSession", FakeModalSandboxSession)
+    compiler.executor = create_build_executor(
+        compiler.build_host,
+        db=None,
+        redis=None,
+        frame=compiler.frame,
+        logger=None,
+    )
 
     result = await compiler._run_docker_build(str(build_dir))
 
@@ -258,5 +274,5 @@ async def test_modal_toolchain_build_runs_directly_without_docker(tmp_path, monk
     image_calls = [value for kind, value in calls if kind == "image"]
     assert image_calls[0].startswith("frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest")
     run_commands = [value for kind, value in calls if kind == "run"]
-    assert any("bash /tmp/frameos-cross-test/build.sh" in command for command in run_commands)
+    assert any("bash /tmp/frameos-cross/build.sh" in command for command in run_commands)
     assert all("docker " not in command for command in run_commands)

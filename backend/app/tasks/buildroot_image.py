@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Literal, Optional
 from types import SimpleNamespace
 from urllib.parse import urljoin
@@ -53,17 +53,17 @@ from app.tasks.setup_json_reset import (
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.utils.build_environment import selected_build_environment_provider
-from app.utils.build_host import (
-    BuildHostConfig,
-    BuildHostSession,
+from app.utils.build_host import BuildHostConfig, get_build_executor_config
+from app.utils.build_executor import (
+    BuildExecutor,
+    DockerMount,
     build_executor_display_name,
-    create_build_executor_session,
-    get_build_executor_config,
+    create_build_executor,
+    ensure_build_executor_configured,
 )
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
 from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
-from app.utils.local_exec import exec_local_command
 from app.utils.token import secure_token
 from app.utils.versions import current_frameos_version
 
@@ -737,40 +737,43 @@ class BuildrootImageBuilder:
         self.redis = redis
         self.frame = frame
         self.request_id = request_id
-        self.build_executor: BuildHostConfig | ModalSandboxConfig | None = None
-        self._build_host_session: BuildHostSession | None = None
-        self._remote_root: PurePosixPath | None = None
+        self.build_executor_config: BuildHostConfig | ModalSandboxConfig | None = None
+        self.executor: BuildExecutor | None = None
 
     async def run(self) -> dict[str, Any]:
         settings = _get_frame_settings(self.db, self.frame)
         provider = selected_build_environment_provider(settings)
-        self.build_executor = self._selected_build_executor()
+        self.build_executor_config = self._selected_build_executor()
         if provider == "none":
             raise RuntimeError(
                 "Buildroot SD image generation requires Docker, build host, or Modal sandboxes as the global build environment."
             )
-        if provider in {"buildHost", "modal"} and self.build_executor is None:
-            raise RuntimeError(f"Selected build environment '{provider}' is not configured")
+        ensure_build_executor_configured(provider, self.build_executor_config)
 
-        if isinstance(self.build_executor, BuildHostConfig):
+        executor = create_build_executor(
+            self.build_executor_config,
+            db=self.db,
+            redis=self.redis,
+            frame=self.frame,
+            logger=self._log,
+            workspace_prefix="frameos-buildroot-",
+        )
+        if self.build_executor_config:
             await self._log(
                 "stdout",
-                f"Connecting to {build_executor_display_name(self.build_executor)} for Buildroot SD image generation",
+                f"Connecting to {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation",
             )
-            async with create_build_executor_session(self.build_executor, logger=self._log) as session:
-                self._build_host_session = session
-                self._remote_root = PurePosixPath(await session.mktemp_dir("frameos-buildroot-"))
+        async with executor:
+            self.executor = executor
+            if self.build_executor_config:
                 await self._log(
                     "stdout",
-                    f"Connected to {build_executor_display_name(self.build_executor)} for Buildroot SD image generation",
+                    f"Connected to {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation",
                 )
-                try:
-                    return await self._run_with_context()
-                finally:
-                    self._build_host_session = None
-                    self._remote_root = None
-
-        return await self._run_with_context()
+            try:
+                return await self._run_with_context()
+            finally:
+                self.executor = None
 
     async def _run_with_context(self) -> dict[str, Any]:
         validate_buildroot_wifi_credentials(self.frame)
@@ -919,16 +922,11 @@ class BuildrootImageBuilder:
         return get_build_executor_config(self.db, project_id)
 
     async def _compose_tools_image(self) -> str | None:
-        settings = _get_frame_settings(self.db, self.frame)
-        provider = selected_build_environment_provider(settings)
-        if provider in {"buildHost", "modal"}:
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+        if not self.executor.uses_local_filesystem:
             return await self._ensure_buildroot_image()
         return None if self._host_has_compose_tools() else await self._ensure_buildroot_image()
-
-    def _remote_workspace(self, name: str) -> PurePosixPath:
-        if self._remote_root is None:
-            raise RuntimeError("Build host workspace is not available")
-        return self._remote_root / name
 
     async def _run_command(
         self,
@@ -938,16 +936,9 @@ class BuildrootImageBuilder:
         log_output: bool = True,
         stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
     ) -> tuple[int, str | None, str | None]:
-        if self._build_host_session:
-            return await self._build_host_session.run(
-                command,
-                log_command=log_command,
-                log_output=log_output,
-            )
-        return await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+        return await self.executor.run(
             command,
             log_command=log_command,
             log_output=log_output,
@@ -1058,7 +1049,7 @@ class BuildrootImageBuilder:
             output_name="frameos_agent",
             compile_script_name="compile_frameos_agent.sh",
             needs_quickjs=False,
-            build_host=self.build_executor,
+            build_host=self.build_executor_config,
         ).build(source_dir)
 
     def _stage_overlay(
@@ -1586,23 +1577,24 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         skip_apt_install: bool,
     ) -> None:
         await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"--ulimit nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
-                f"-v {shlex.quote(str(temp_dir))}:/work",
-                f"-v {shlex.quote(str(source_dir))}:/build/buildroot",
-                f"-v {shlex.quote(str(output_dir))}:/build/output",
-                f"-v {shlex.quote(str(cache_dir))}:/cache",
-                f"-v {shlex.quote(str(artifact_dir))}:/artifacts",
-                *(["-e BUILDROOT_SKIP_APT_INSTALL=1"] if skip_apt_install else []),
-                "-e FORCE_UNSAFE_CONFIGURE=1",
-                shlex.quote(image),
-                "bash /work/buildroot-build.sh",
-            ]
-        )
-        status, _, err = await self._run_command(
-            docker_cmd,
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+        status, _, err = await self.executor.docker_run(
+            image=image,
+            mounts=[
+                DockerMount(temp_dir, "/work"),
+                DockerMount(source_dir, "/build/buildroot"),
+                DockerMount(output_dir, "/build/output"),
+                DockerMount(cache_dir, "/cache"),
+                DockerMount(artifact_dir, "/artifacts"),
+            ],
+            env={
+                **({"BUILDROOT_SKIP_APT_INSTALL": "1"} if skip_apt_install else {}),
+                "FORCE_UNSAFE_CONFIGURE": "1",
+            },
+            ulimits=[f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}"],
+            args=["bash", "/work/buildroot-build.sh"],
+            workspace="buildroot-image",
             log_command="docker run (buildroot image)",
         )
         if status != 0:
@@ -1683,29 +1675,17 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         os.chmod(script_path, 0o755)
         (compose_dir / "empty-root").mkdir(exist_ok=True)
 
-        if image and self._build_host_session:
-            remote_compose_dir = str(self._remote_workspace("compose"))
-            await self._build_host_session.sync_dir_tarball(str(compose_dir), remote_compose_dir)
-            compose_cmd = " ".join(
-                [
-                    "docker run --rm",
-                    f"-v {shlex.quote(remote_compose_dir)}:/work",
-                    shlex.quote(image),
-                    "bash /work/compose-partitions.sh",
-                ]
+        if image:
+            if self.executor is None:
+                raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+            status, _, err = await self.executor.docker_run(
+                image=image,
+                mounts=[DockerMount(compose_dir.resolve(), "/work")],
+                args=["bash", "/work/compose-partitions.sh"],
+                workspace="compose",
+                log_command="docker run (buildroot image composer)",
+                stderr_log_tag="stdout",
             )
-            log_command = "docker run (build host Buildroot image composer)"
-        elif image:
-            docker_work_dir = compose_dir.resolve()
-            compose_cmd = " ".join(
-                [
-                    "docker run --rm",
-                    f"-v {shlex.quote(str(docker_work_dir))}:/work",
-                    shlex.quote(image),
-                    "bash /work/compose-partitions.sh",
-                ]
-            )
-            log_command = "docker run (buildroot image composer)"
         else:
             compose_cmd = " ".join(
                 [
@@ -1716,18 +1696,13 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 ]
             )
             log_command = "buildroot image composer"
-        status, _, err = await self._run_command(
-            compose_cmd,
-            log_command=log_command,
-            stderr_log_tag="stdout",
-        )
+            status, _, err = await self._run_command(
+                compose_cmd,
+                log_command=log_command,
+                stderr_log_tag="stdout",
+            )
         if status != 0:
             raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
-        if image and self._build_host_session:
-            await self._build_host_session.download_dir_tarball(
-                str(self._remote_workspace("compose") / "images"),
-                str(images_dir),
-            )
 
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
@@ -1894,43 +1869,21 @@ fi
         )
         os.chmod(script_path, 0o755)
 
-        if image and self._build_host_session:
-            remote_patch_dir = self._remote_workspace("boot-patch")
-            remote_image_dir = str(remote_patch_dir / "image")
-            remote_boot_root = str(remote_patch_dir / "boot-root")
-            remote_script_path = str(remote_patch_dir / "patch-boot.sh")
-            remote_image_path = str(PurePosixPath(remote_image_dir) / output_path.name)
-            await self._build_host_session.remove_path(str(remote_patch_dir))
-            await self._build_host_session.ensure_dir(remote_image_dir)
-            await self._build_host_session.sync_file(str(output_path), remote_image_path)
-            await self._build_host_session.sync_dir_tarball(str(boot_root), remote_boot_root)
-            await self._build_host_session.sync_file(str(script_path), remote_script_path)
-            patch_cmd = " ".join(
-                [
-                    "docker run --rm",
-                    f"-v {shlex.quote(remote_image_dir)}:/image",
-                    f"-v {shlex.quote(remote_boot_root)}:/boot-root",
-                    f"-v {shlex.quote(remote_script_path)}:/patch-boot.sh",
-                    shlex.quote(image),
-                    "bash /patch-boot.sh",
-                ]
+        if image:
+            if self.executor is None:
+                raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+            status, _, err = await self.executor.docker_run(
+                image=image,
+                mounts=[
+                    DockerMount(output_path.parent.resolve(), "/image"),
+                    DockerMount(boot_root.resolve(), "/boot-root"),
+                    DockerMount(script_path.resolve(), "/patch-boot.sh", read_only=True),
+                ],
+                args=["bash", "/patch-boot.sh"],
+                workspace="boot-patch",
+                log_command="docker run (buildroot boot partition patch)",
+                stderr_log_tag="stdout",
             )
-            log_command = "docker run (build host Buildroot boot partition patch)"
-        elif image:
-            docker_image_dir = output_path.parent.resolve()
-            docker_boot_root = boot_root.resolve()
-            docker_script_path = script_path.resolve()
-            patch_cmd = " ".join(
-                [
-                    "docker run --rm",
-                    f"-v {shlex.quote(str(docker_image_dir))}:/image",
-                    f"-v {shlex.quote(str(docker_boot_root))}:/boot-root",
-                    f"-v {shlex.quote(str(docker_script_path))}:/patch-boot.sh",
-                    shlex.quote(image),
-                    "bash /patch-boot.sh",
-                ]
-            )
-            log_command = "docker run (buildroot boot partition patch)"
         else:
             patch_cmd = " ".join(
                 [
@@ -1941,15 +1894,13 @@ fi
                 ]
             )
             log_command = "buildroot boot partition patch"
-        status, _, err = await self._run_command(
-            patch_cmd,
-            log_command=log_command,
-            stderr_log_tag="stdout",
-        )
+            status, _, err = await self._run_command(
+                patch_cmd,
+                log_command=log_command,
+                stderr_log_tag="stdout",
+            )
         if status != 0:
             raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")
-        if image and self._build_host_session:
-            await self._build_host_session.download_file(remote_image_path, str(output_path))
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
@@ -2016,15 +1967,10 @@ fi
     async def _ensure_buildroot_image(self) -> str:
         image = self._buildroot_image()
         resolved_image = self._resolved_buildroot_image()
-        project_id = getattr(self.frame, "project_id", None)
-        settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
-        build_environment_provider = selected_build_environment_provider(settings)
-        if build_environment_provider == "modal":
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+        if self.executor.uses_container_images_directly:
             return resolved_image
-        if build_environment_provider not in {"docker", "buildHost"}:
-            raise RuntimeError(
-                "Buildroot SD image generation requires Docker, build host, or Modal sandboxes as the global build environment."
-            )
         if not BUILDROOT_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
                 f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",
@@ -2081,19 +2027,10 @@ fi
                 "Buildroot Dockerfile is missing; expected at backend/tools/buildroot.Dockerfile",
             )
 
-        if self._build_host_session:
-            remote_dir = self._remote_workspace("buildroot-dockerfile")
-            dockerfile_path = remote_dir / BUILDROOT_DOCKERFILE.name
-            await self._build_host_session.ensure_dir(str(remote_dir))
-            await self._build_host_session.write_file(
-                str(dockerfile_path),
-                BUILDROOT_DOCKERFILE.read_text(encoding="utf-8"),
-            )
-            context_dir = str(remote_dir)
-            dockerfile_arg = str(dockerfile_path)
-        else:
-            context_dir = str(BUILDROOT_DOCKERFILE.parent)
-            dockerfile_arg = str(BUILDROOT_DOCKERFILE)
+        context_dir, dockerfile_arg = await self.executor.prepare_docker_build_context(
+            BUILDROOT_DOCKERFILE,
+            "buildroot-dockerfile",
+        )
 
         build_cmd = " ".join(
             [

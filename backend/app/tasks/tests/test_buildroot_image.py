@@ -35,6 +35,8 @@ from app.tasks.setup_json_reset import (
     render_setup_json_reset_script,
     setup_json_reset_file_path,
 )
+from app.utils.build_executor import BuildHostExecutor
+from app.utils.build_host import BuildHostConfig
 from app.utils.cross_compile import CrossCompiler
 
 
@@ -422,12 +424,14 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
         )
 
     async def fake_exec_local_command(*args, **kwargs):
-        command = args[3]
+        command = args[0]
         commands.append(command)
         captured["patch_script"] = (tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh").read_text(
             encoding="utf-8"
         )
         return 0, "", ""
+
+    builder.executor = SimpleNamespace(run=fake_exec_local_command)
 
     async def fake_log(level, message):
         logs.append((level, message))
@@ -441,7 +445,6 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
         "app.tasks.buildroot_image.download_precompiled_buildroot_sd_image",
         fake_download_precompiled_buildroot_sd_image,
     )
-    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
         lambda _path: [
@@ -609,14 +612,14 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
     captured = {}
 
-    async def fake_exec_local_command(*args, **kwargs):
-        captured["command"] = args[3]
+    async def fake_docker_run(**kwargs):
+        captured.update(kwargs)
         return 0, "", ""
 
     async def fake_log(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    builder.executor = SimpleNamespace(docker_run=fake_docker_run)
     monkeypatch.setattr(builder, "_log", fake_log)
 
     await builder._run_buildroot(
@@ -629,21 +632,23 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
         skip_apt_install=True,
     )
 
-    assert "--ulimit nofile=65535:65535" in captured["command"]
+    assert captured["ulimits"] == ["nofile=65535:65535"]
 
 
 @pytest.mark.asyncio
 async def test_buildroot_image_selection_allows_build_host(monkeypatch):
     commands: list[str] = []
 
-    class FakeBuildHostSession:
+    class FakeExecutor:
+        uses_container_images_directly = False
+
         async def run(self, command, **_kwargs):
             commands.append(command)
             return 0, "", ""
 
     frame = SimpleNamespace(id=1, project_id=7)
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
-    builder._build_host_session = FakeBuildHostSession()
+    builder.executor = FakeExecutor()
 
     monkeypatch.setattr(
         "app.tasks.buildroot_image.get_settings_dict",
@@ -682,18 +687,17 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     replaced: list[tuple[int, str]] = []
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
-    async def fake_exec_local_command(*args, **kwargs):
-        command = args[3]
-        commands.append(command)
-        if "compose-partitions.sh" in command:
-            captured["compose_command"] = command
+    async def fake_docker_run(**kwargs):
+        commands.append(kwargs["workspace"])
+        if kwargs["workspace"] == "compose":
+            captured["compose"] = kwargs
             config = temp_dir / "compose" / "frameos-genimage.cfg"
             captured["config"] = config.read_text(encoding="utf-8")
             images_dir = temp_dir / "compose" / "images"
             (images_dir / "frameos.ext4").write_bytes(b"frameos")
             (images_dir / "assets.vfat").write_bytes(b"assets")
-        if "patch-boot.sh" in command:
-            captured["patch_command"] = command
+        if kwargs["workspace"] == "boot-patch":
+            captured["patch"] = kwargs
             captured["patch_script"] = (temp_dir / "compose" / "patch-boot.sh").read_text(encoding="utf-8")
         return 0, "", ""
 
@@ -706,7 +710,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     def fake_shrink_data_partitions(_image_path, partitions, **_kwargs):
         return partitions
 
-    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    builder.executor = SimpleNamespace(docker_run=fake_docker_run)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._partition_size_for_root",
         lambda _root, *, minimum_size: "42M",
@@ -740,12 +744,13 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert "size = 42M" in captured["config"]
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
-    assert "bash /work/compose-partitions.sh" in captured["compose_command"]
-    assert "bash /patch-boot.sh" in captured["patch_command"]
-    assert f"-v {tmp_path / 'release-assets'}:/image" in captured["patch_command"]
-    assert "-v release-assets:/image" not in captured["patch_command"]
-    assert "frameos/frameos-buildroot:test" in captured["compose_command"]
-    assert "frameos/frameos-buildroot:test" in captured["patch_command"]
+    assert captured["compose"]["args"] == ["bash", "/work/compose-partitions.sh"]
+    assert captured["patch"]["args"] == ["bash", "/patch-boot.sh"]
+    patch_mounts = captured["patch"]["mounts"]
+    assert patch_mounts[0].source == (tmp_path / "release-assets").resolve()
+    assert patch_mounts[0].target == "/image"
+    assert captured["compose"]["image"] == "frameos/frameos-buildroot:test"
+    assert captured["patch"]["image"] == "frameos/frameos-buildroot:test"
     assert 'tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -' in (
         temp_dir / "compose" / "compose-partitions.sh"
     ).read_text(encoding="utf-8")
@@ -787,8 +792,10 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
             downloaded_dirs.append((remote_path, local_path))
             local = Path(local_path)
             local.mkdir(parents=True, exist_ok=True)
-            (local / "frameos.ext4").write_bytes(b"frameos")
-            (local / "assets.vfat").write_bytes(b"assets")
+            images = local / "images"
+            images.mkdir(exist_ok=True)
+            (images / "frameos.ext4").write_bytes(b"frameos")
+            (images / "assets.vfat").write_bytes(b"assets")
 
         async def run(self, command, **_kwargs):
             commands.append(command)
@@ -807,8 +814,12 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
             downloaded_files.append((remote_path, local_path))
 
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
-    builder._build_host_session = FakeBuildHostSession()
-    builder._remote_root = PurePosixPath("/tmp/frameos-buildroot-test")
+    executor = BuildHostExecutor(
+        BuildHostConfig(host="builder.local", user="ubuntu", ssh_key="dummy-key")
+    )
+    executor.session = FakeBuildHostSession()
+    executor.remote_root = PurePosixPath("/tmp/frameos-buildroot-test")
+    builder.executor = executor
 
     async def fake_log(*args, **kwargs):
         return None
@@ -839,18 +850,20 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
         image="frameos/frameos-buildroot:test",
     )
 
-    assert "-v /tmp/frameos-buildroot-test/compose:/work" in commands[0]
+    assert "-v /tmp/frameos-buildroot-test/compose/mount-0-compose:/work" in commands[0]
     assert str(temp_dir / "compose") not in commands[0]
-    assert synced_dirs[0] == (str(temp_dir / "compose"), "/tmp/frameos-buildroot-test/compose")
-    assert downloaded_dirs == [
-        ("/tmp/frameos-buildroot-test/compose/images", str(temp_dir / "compose" / "images"))
-    ]
-    assert "-v /tmp/frameos-buildroot-test/boot-patch/image:/image" in commands[1]
-    assert synced_files[0][0] == str(output_image)
-    assert synced_files[0][1].endswith("/boot-patch/image/output.img")
-    assert downloaded_files == [
-        ("/tmp/frameos-buildroot-test/boot-patch/image/output.img", str(output_image))
-    ]
+    assert synced_dirs[0] == (
+        str(temp_dir / "compose"),
+        "/tmp/frameos-buildroot-test/compose/mount-0-compose",
+    )
+    assert (
+        "/tmp/frameos-buildroot-test/compose/mount-0-compose",
+        str(temp_dir / "compose"),
+    ) in downloaded_dirs
+    assert "-v /tmp/frameos-buildroot-test/boot-patch/mount-0-" in commands[1]
+    assert ":/image" in commands[1]
+    assert synced_files[0][0].endswith("patch-boot.sh")
+    assert synced_files[0][1].endswith("/boot-patch/mount-2-patch-boot.sh")
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
 
 
@@ -873,7 +886,7 @@ async def test_cached_base_composer_runs_without_docker_when_image_is_not_requir
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
     async def fake_exec_local_command(*args, **kwargs):
-        command = args[3]
+        command = args[0]
         commands.append(command)
         if "compose-partitions.sh" in command:
             images_dir = temp_dir / "compose" / "images"
@@ -890,7 +903,7 @@ async def test_cached_base_composer_runs_without_docker_when_image_is_not_requir
     def fake_shrink_data_partitions(_image_path, partitions, **_kwargs):
         return partitions
 
-    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    builder.executor = SimpleNamespace(run=fake_exec_local_command)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
         lambda _path: [

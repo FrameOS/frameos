@@ -8,7 +8,7 @@ import shlex
 import shutil
 import tarfile
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from textwrap import dedent, indent
@@ -27,14 +27,14 @@ from app.tasks.prebuilt_deps import (
     fetch_prebuilt_manifest,
     resolve_prebuilt_target,
 )
-from app.utils.build_host import (
-    BuildHostConfig,
-    BuildHostSession,
+from app.utils.build_host import BuildHostConfig
+from app.utils.build_executor import (
+    BuildExecutor,
+    DockerMount,
     build_executor_display_name,
-    create_build_executor_session,
+    create_build_executor,
 )
-from app.utils.modal_sandbox import ModalSandboxConfig, ModalSandboxSession
-from app.utils.local_exec import exec_local_command
+from app.utils.modal_sandbox import ModalSandboxConfig
 
 icon = "🔶"
 
@@ -201,8 +201,7 @@ class CrossCompiler:
         self.prebuilt_timeout = PREBUILT_TIMEOUT
         self.logger = logger
         self.build_host = build_host
-        self._build_host_session: BuildHostSession | ModalSandboxSession | None = None
-        self._remote_root: Path | None = None
+        self.executor: BuildExecutor | None = None
         self.output_name = output_name
         self.compile_script_name = compile_script_name
         self.needs_quickjs = needs_quickjs
@@ -212,24 +211,30 @@ class CrossCompiler:
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
     async def build(self, source_dir: str) -> str:
-        if self.build_host and not isinstance(self.build_host, ModalSandboxConfig):
+        executor = create_build_executor(
+            self.build_host,
+            db=self.db,
+            redis=self.redis,
+            frame=self.frame,
+            logger=self._log,
+            workspace_prefix="frameos-cross-",
+        )
+        if self.build_host:
             await self._log(
                 "stdout",
                 f"{icon} Connecting to {build_executor_display_name(self.build_host)}",
             )
-            async with create_build_executor_session(self.build_host, logger=self._log) as session:
-                self._build_host_session = session
-                self._remote_root = Path(await session.mktemp_dir("frameos-cross-"))
+        async with executor:
+            self.executor = executor
+            if self.build_host:
                 await self._log(
                     "stdout",
                     f"Connected to {build_executor_display_name(self.build_host)} for cross compilation",
                 )
-                try:
-                    return await self._build_with_context(source_dir)
-                finally:
-                    self._build_host_session = None
-                    self._remote_root = None
-        return await self._build_with_context(source_dir)
+            try:
+                return await self._build_with_context(source_dir)
+            finally:
+                self.executor = None
 
     async def _build_with_context(self, source_dir: str) -> str:
         await self._log(
@@ -347,152 +352,27 @@ class CrossCompiler:
 
         image = await self._ensure_toolchain_image()
 
-        if isinstance(self.build_host, ModalSandboxConfig):
-            return await self._run_modal_toolchain_build(build_dir, script_content, image)
-
-        if self._build_host_session:
-            return await self._run_remote_docker_build(build_dir, script_content, image)
-
         script_path.write_text(script_content)
         os.chmod(script_path, 0o755)
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
 
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"--platform {self._platform()}",
-                f"-v {shlex.quote(build_dir)}:/src",
-                f"-v {shlex.quote(str(self.sysroot_dir))}:/sysroot:ro",
-                f"-v {shlex.quote(str(script_path))}:/tmp/frameos-cross/build.sh:ro",
-                "-w /src",
-                shlex.quote(image),
-                "bash /tmp/frameos-cross/build.sh",
-            ]
-        )
-
-        status, _, err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
-            docker_cmd,
+        status, _, err = await self.executor.docker_run(
+            image=image,
+            platform=self._platform(),
+            mounts=[
+                DockerMount(Path(build_dir), "/src"),
+                DockerMount(self.sysroot_dir, "/sysroot", read_only=True),
+                DockerMount(script_path, "/tmp/frameos-cross/build.sh", read_only=True),
+            ],
+            workdir="/src",
+            args=["bash", "/tmp/frameos-cross/build.sh"],
+            workspace="cross-compile",
             log_command="docker run (cross compile)",
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
         return os.path.join(build_dir, self.output_name)
-
-    async def _run_modal_toolchain_build(
-        self, build_dir: str, script_content: str, image: str
-    ) -> str:
-        if not isinstance(self.build_host, ModalSandboxConfig):
-            raise RuntimeError("Modal sandbox configuration unavailable during cross compilation")
-
-        config = replace(self.build_host, image=image, enable_docker=False)
-        await self._log("stdout", f"{icon} Starting Modal cross-toolchain sandbox from {image}")
-        async with ModalSandboxSession(config, logger=self._log) as sandbox:
-            remote_root = Path(await sandbox.mktemp_dir("frameos-cross-"))
-            remote_build_dir = str(remote_root / "src")
-            remote_sysroot_dir = str(remote_root / "sysroot")
-            remote_script_path = str(remote_root / "build.sh")
-
-            build_dir_size = self._dir_size_bytes(Path(build_dir))
-            await self._log(
-                "stdout",
-                f"{icon} Syncing build directory ({self._format_size(build_dir_size)}) to Modal toolchain sandbox",
-            )
-            await sandbox.sync_dir_tarball(build_dir, remote_build_dir)
-            sysroot_size = self._dir_size_bytes(self.sysroot_dir)
-            await self._log(
-                "stdout",
-                f"{icon} Syncing sysroot ({self._format_size(sysroot_size)}) to Modal toolchain sandbox",
-            )
-            await sandbox.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
-            await sandbox.write_file(remote_script_path, script_content, mode=0o755)
-
-            status, _out, err = await sandbox.run(
-                f"cd {shlex.quote(remote_build_dir)} && bash {shlex.quote(remote_script_path)}",
-                log_command="Modal cross-toolchain build",
-            )
-            if status != 0:
-                raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
-
-            local_binary = os.path.join(build_dir, self.output_name)
-            await sandbox.download_file(f"{remote_build_dir}/{self.output_name}", local_binary)
-            status, stdout, _err = await sandbox.run(
-                f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
-                log_command=False,
-                log_output=False,
-            )
-            if status == 0 and stdout:
-                for rel_path in stdout.splitlines():
-                    rel_path = rel_path.strip()
-                    if not rel_path:
-                        continue
-                    local_path = os.path.join(build_dir, rel_path)
-                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                    await sandbox.download_file(f"{remote_build_dir}/{rel_path}", local_path)
-            return local_binary
-
-    async def _run_remote_docker_build(
-        self, build_dir: str, script_content: str, image: str
-    ) -> str:
-        if not self._build_host_session or not self._remote_root:
-            raise RuntimeError("Build host session unavailable during cross compilation")
-
-        host = self._build_host_session
-        remote_build_dir = str(self._remote_root / "src")
-        remote_sysroot_dir = str(self._remote_root / "sysroot")
-        remote_script_path = str(self._remote_root / "build.sh")
-
-        build_dir_size = self._dir_size_bytes(Path(build_dir))
-        await self._log(
-            "stdout",
-            f"{icon} Syncing build directory ({self._format_size(build_dir_size)}) to build host"
-        )
-        await host.sync_dir_tarball(build_dir, remote_build_dir)
-        sysroot_size = self._dir_size_bytes(self.sysroot_dir)
-        await self._log(
-            "stdout",
-            f"{icon} Syncing sysroot ({self._format_size(sysroot_size)}) to build host"
-        )
-        await host.sync_dir_tarball(str(self.sysroot_dir), remote_sysroot_dir)
-        await host.write_file(remote_script_path, script_content, mode=0o755)
-
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"--platform {self._platform()}",
-                f"-v {shlex.quote(remote_build_dir)}:/src",
-                f"-v {shlex.quote(remote_sysroot_dir)}:/sysroot:ro",
-                f"-v {shlex.quote(remote_script_path)}:/tmp/build.sh:ro",
-                "-w /src",
-                shlex.quote(image),
-                "bash /tmp/build.sh",
-            ]
-        )
-
-        status, _, err = await host.run(
-            docker_cmd,
-            log_command="docker run (build host cross compile)",
-        )
-        if status != 0:
-            raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
-
-        local_binary = os.path.join(build_dir, self.output_name)
-        await host.download_file(f"{remote_build_dir}/{self.output_name}", local_binary)
-        status, stdout, _err = await host.run(
-            f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
-            log_command=False,
-            log_output=False,
-        )
-        if status == 0 and stdout:
-            for rel_path in stdout.splitlines():
-                rel_path = rel_path.strip()
-                if not rel_path:
-                    continue
-                local_path = os.path.join(build_dir, rel_path)
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                await host.download_file(f"{remote_build_dir}/{rel_path}", local_path)
-        return local_binary
 
     async def _run_command(
         self,
@@ -501,14 +381,9 @@ class CrossCompiler:
         log_command: str | bool = True,
         log_output: bool = True,
     ) -> tuple[int, str | None, str | None]:
-        if self._build_host_session:
-            return await self._build_host_session.run(
-                command, log_command=log_command, log_output=log_output
-            )
-        return await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
+        return await self.executor.run(
             command,
             log_command=log_command,
             log_output=log_output,
@@ -956,7 +831,9 @@ class CrossCompiler:
     async def _ensure_toolchain_image(self) -> str:
         image = self._toolchain_image()
         resolved_image = self._resolved_toolchain_image()
-        if isinstance(self.build_host, ModalSandboxConfig):
+        if self.executor is None:
+            raise RuntimeError("Build executor unavailable during cross compilation")
+        if self.executor.uses_container_images_directly:
             return resolved_image
         if not TOOLCHAIN_FORCE_LOCAL_BUILD:
             status, _out, _err = await self._run_command(
@@ -1015,20 +892,10 @@ class CrossCompiler:
                 "Cross toolchain Dockerfile is missing; expected at backend/tools/cross-toolchain.Dockerfile",
             )
 
-        if self._build_host_session:
-            if not self._remote_root:
-                raise RuntimeError("Build host workspace missing for toolchain build")
-            remote_dir = self._remote_root / "cross-toolchain"
-            dockerfile_path = remote_dir / Path(dockerfile).name
-            await self._build_host_session.ensure_dir(str(remote_dir))
-            await self._build_host_session.write_file(
-                str(dockerfile_path), Path(dockerfile).read_text()
-            )
-            context_dir = str(remote_dir)
-            dockerfile_arg = str(dockerfile_path)
-        else:
-            context_dir = str(Path(dockerfile).parent)
-            dockerfile_arg = dockerfile
+        context_dir, dockerfile_arg = await self.executor.prepare_docker_build_context(
+            Path(dockerfile),
+            "cross-toolchain",
+        )
 
         build_cmd = " ".join(
             [

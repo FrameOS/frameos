@@ -22,7 +22,8 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_agent import download_precompiled_agent_release
-from app.utils.build_host import build_executor_display_name, get_build_executor_config
+from app.utils.build_host import get_build_executor_config
+from app.utils.build_executor import build_executor_display_name, ensure_build_executor_configured
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, can_cross_compile_target
 from app.utils.versions import current_agent_version, get_versions
 from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
@@ -391,8 +392,7 @@ class AgentDeployer(FrameDeployer):
             )
             return False
 
-        if build_environment_provider in {"buildHost", "modal"} and build_executor is None:
-            raise RuntimeError(f"Selected build environment '{build_environment_provider}' is not configured")
+        ensure_build_executor_configured(build_environment_provider, build_executor)
         if build_executor:
             await self.log("stdout", f"- Cross compiling agent via {build_executor_display_name(build_executor)}")
         else:
