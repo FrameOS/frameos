@@ -2761,20 +2761,10 @@ def _shrink_data_partitions(
     assets_size = assets_image.stat().st_size
     frameos_partition = partitions[2]
     assets_partition = partitions[3]
-    if frameos_size > frameos_partition["size"]:
-        raise RuntimeError(
-            f"{frameos_image.name} is larger than partition 3: {frameos_size} > {frameos_partition['size']}"
-        )
-    if assets_size > assets_partition["size"]:
-        raise RuntimeError(
-            f"{assets_image.name} is larger than partition 4: {assets_size} > {assets_partition['size']}"
-        )
 
     frameos_start = frameos_partition["start"]
     assets_start = _align_up_bytes(frameos_start + frameos_size)
     output_size = assets_start + assets_size
-    if output_size > image_path.stat().st_size:
-        raise RuntimeError(f"Shrunk data partition layout would exceed {image_path.name}")
 
     _set_mbr_partition_geometry(image_path, 3, start=frameos_start, size=frameos_size)
     _set_mbr_partition_geometry(image_path, 4, start=assets_start, size=assets_size)

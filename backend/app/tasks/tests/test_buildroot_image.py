@@ -521,6 +521,38 @@ def test_shrink_data_partitions_rewrites_mbr_and_truncates_image(tmp_path):
     assert image.stat().st_size == shrunk[3]["start"] + shrunk[3]["size"]
 
 
+def test_shrink_data_partitions_can_grow_trailing_data_partitions(tmp_path):
+    image = tmp_path / "base.img"
+    frameos = tmp_path / "frameos.ext4"
+    assets = tmp_path / "assets.vfat"
+    partitions = [
+        (512, 32 * 1024 * 1024),
+        (32 * 1024 * 1024 + 512, 160 * 1024 * 1024),
+        (192 * 1024 * 1024 + 512, 30 * 1024 * 1024),
+        (222 * 1024 * 1024 + 512, 30 * 1024 * 1024),
+    ]
+    _write_test_mbr(image, partitions)
+    with image.open("r+b") as image_file:
+        image_file.truncate(partitions[-1][0] + partitions[-1][1])
+    frameos.write_bytes(b"\0" * (70 * 1024 * 1024))
+    assets.write_bytes(b"\0" * (30 * 1024 * 1024))
+
+    grown = buildroot_image_module._shrink_data_partitions(
+        image,
+        buildroot_image_module._mbr_partitions(image),
+        frameos_image=frameos,
+        assets_image=assets,
+    )
+
+    assert grown[2] == {"start": partitions[2][0], "size": 70 * 1024 * 1024}
+    expected_assets_start = buildroot_image_module._align_up_bytes(partitions[2][0] + 70 * 1024 * 1024)
+    assert grown[3] == {
+        "start": expected_assets_start,
+        "size": 30 * 1024 * 1024,
+    }
+    assert image.stat().st_size == grown[3]["start"] + grown[3]["size"]
+
+
 def test_partition_size_for_root_grows_with_payload_size(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
