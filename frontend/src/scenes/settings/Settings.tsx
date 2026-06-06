@@ -616,15 +616,15 @@ export function Settings() {
                 </H6>
                 <Box className="p-3 space-y-3">
                   <p className="text-sm leading-loose">
-                    Choose the one place where FrameOS is allowed to do server-side source compilation and image
-                    composition. You can override this and force on-frame compilation for each frame individually.
+                    To compile FrameOS from source and to build SD card images, we need access to a Linux shell where we can run commands through Docker.
+                    There are a few options for that.
                   </p>
                   <Group name="buildEnvironment">
                     <Field name="provider" label="Build system">
                       <Select
                         options={[
-                          { value: 'none', label: 'No server-side compilation' },
-                          { value: 'docker', label: 'Docker in privileged mode' },
+                          { value: 'none', label: 'Compile on device' },
+                          { value: 'docker', label: 'Docker (privileged mode)' },
                           { value: 'buildHost', label: 'Build host via SSH' },
                           { value: 'modal', label: 'Modal sandboxes' },
                         ]}
@@ -633,14 +633,9 @@ export function Settings() {
                   </Group>
                   {buildEnvironmentProvider === 'none' ? (
                     <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
-                      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-amber-950">
-                        !
-                      </span>
-                      <span>
-                        Server-side build commands are disabled. Raspberry Pi OS frames compile on the frame itself;
-                        server-only features such as Buildroot SD card image generation and required cross-compilation
-                        are unavailable.
-                      </span>
+                        You can still use prebuilt images and binaries for quick deploys.
+                        FrameOS source cross-compilation on the backend is disabled. 
+                        Raspberry Pi OS frames will compile custom code on device (might be very slow).
                     </div>
                   ) : null}
                   {buildEnvironmentProvider === 'docker' ? (
@@ -648,7 +643,7 @@ export function Settings() {
                       <p>
                         FrameOS will use Docker from the backend host. If this backend runs in a container, the
                         container needs Docker CLI access and a reachable Docker daemon, usually by running privileged
-                        Docker-in-Docker or mounting the host Docker socket.
+                        Docker-in-Docker or mounting the host Docker socket. See the <A href="https://github.com/FrameOS/frameos#running-via-docker-manually" target="_blank" className="frameos-link hover:underline">readme</A> for details.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={systemInfo?.docker?.daemonAvailable ? 'text-emerald-600' : 'text-amber-600'}>
@@ -670,9 +665,7 @@ export function Settings() {
                     <Group name="buildHost">
                       <div className="space-y-2">
                         <p className="text-sm leading-loose">
-                          FrameOS will upload generated sources and sysroot assets via SSH/SCP, run Docker Buildx on the
-                          build host, and download the resulting binary. Install Docker and the Docker Buildx plugin on
-                          that host.
+                          Connect to a host over SSH. Install Docker and the Docker Buildx plugin on that host.
                         </p>
                         <Field name="host" label="Build host address">
                           <TextInput placeholder="builder.example.com" />
