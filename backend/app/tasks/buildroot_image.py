@@ -759,13 +759,21 @@ class BuildrootImageBuilder:
             workspace_prefix="frameos-buildroot-",
         )
         if self.build_executor_config:
+            connection_action = (
+                f"Connecting to {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation"
+                if executor.connects_on_enter
+                else (
+                    f"Using {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation; "
+                    "sandbox will be created when the build command starts"
+                )
+            )
             await self._log(
                 "stdout",
-                f"Connecting to {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation",
+                connection_action,
             )
         async with executor:
             self.executor = executor
-            if self.build_executor_config:
+            if self.build_executor_config and executor.connects_on_enter:
                 await self._log(
                     "stdout",
                     f"Connected to {build_executor_display_name(self.build_executor_config)} for Buildroot SD image generation",

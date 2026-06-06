@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import os
 import re
@@ -240,6 +241,85 @@ async def _call_modal(method, *args, **kwargs):
     return result
 
 
+class _FrameOSModalOutputManager:
+    def __init__(self, base_manager, logger: LogFunc | None) -> None:
+        self._base_manager = base_manager
+        self._logger = logger
+        self._pending: dict[int, str] = {}
+        self.logged_lines = 0
+
+    @property
+    def is_enabled(self) -> bool:
+        return True
+
+    @property
+    def is_terminal(self) -> bool:
+        return False
+
+    @property
+    def _show_image_logs(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str):
+        return getattr(self._base_manager, name)
+
+    def enable_image_logs(self) -> None:
+        return None
+
+    async def put_streaming_log(self, log, prefix: str = "") -> None:  # noqa: ANN001
+        await self._write_log(log, prefix=prefix)
+
+    async def put_fetched_log(self, log, prefix: str = "") -> None:  # noqa: ANN001
+        await self._write_log(log, prefix=prefix)
+
+    async def _write_log(self, log, prefix: str = "") -> None:  # noqa: ANN001
+        if self._logger is None:
+            return
+        fd = int(getattr(log, "file_descriptor", 1) or 1)
+        tag = "stderr" if fd == 2 else "stdout"
+        text = str(getattr(log, "data", "") or "")
+        if prefix:
+            text = prefix + text
+        pending = self._pending.get(fd, "") + text
+        lines = pending.splitlines(keepends=True)
+        self._pending[fd] = ""
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self._pending[fd] = lines.pop()
+        for line in lines:
+            message = line.rstrip("\r\n")
+            if message:
+                self.logged_lines += 1
+                await self._logger(tag, f"Modal image build: {message}")
+
+    async def flush_pending(self) -> None:
+        if self._logger is None:
+            self._pending.clear()
+            return
+        for fd, pending in list(self._pending.items()):
+            message = pending.rstrip("\r\n")
+            if message:
+                tag = "stderr" if fd == 2 else "stdout"
+                self.logged_lines += 1
+                await self._logger(tag, f"Modal image build: {message}")
+        self._pending.clear()
+
+
+@contextlib.contextmanager
+def _modal_output_to_logs(modal, logger: LogFunc | None):  # noqa: ANN001
+    try:
+        from modal.output import OutputManager
+    except Exception:
+        yield None
+        return
+    previous = OutputManager.get()
+    manager = _FrameOSModalOutputManager(previous, logger)
+    OutputManager._set(manager)
+    try:
+        yield manager
+    finally:
+        OutputManager._set(previous)
+
+
 def _is_timeout_error(exc: Exception) -> bool:
     if isinstance(exc, TimeoutError):
         return True
@@ -310,12 +390,26 @@ class ModalSandboxSession:
             "experimental_options": {"enable_docker": True} if self.config.enable_docker else None,
         }
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
-        try:
-            self._sandbox = await _call_modal(modal.Sandbox.create, "sleep", str(self.config.timeout), **kwargs)
-        except Exception as exc:
-            if _is_timeout_error(exc):
-                await self._log_timeout_notice("creating Modal sandbox")
-            raise
+        with _modal_output_to_logs(modal, self._logger) as output_manager:
+            try:
+                self._sandbox = await _call_modal(modal.Sandbox.create, "sleep", str(self.config.timeout), **kwargs)
+            except Exception as exc:
+                if output_manager is not None:
+                    await output_manager.flush_pending()
+                if _is_timeout_error(exc):
+                    await self._log_timeout_notice("creating Modal sandbox")
+                elif output_manager is not None and output_manager.logged_lines == 0:
+                    await self._log(
+                        "stderr",
+                        "Modal sandbox image build failed before Modal returned build-log lines. "
+                        f"app={self.config.app_name}, image={self.config.image}, "
+                        f"region={self.config.region or 'auto'}, cloud={self.config.cloud or 'auto'}. "
+                        "Check the Modal dashboard for the image build record if the SDK error remains generic.",
+                    )
+                raise
+            finally:
+                if output_manager is not None:
+                    await output_manager.flush_pending()
         identity = await self._sandbox_identity()
         await self._log("stdout", self._connection_summary(identity))
 

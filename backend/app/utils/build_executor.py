@@ -37,6 +37,7 @@ class BuildExecutor:
     display_name: str = "local Docker"
     uses_local_filesystem: bool = True
     uses_container_images_directly: bool = False
+    connects_on_enter: bool = False
 
     async def __aenter__(self) -> "BuildExecutor":
         return self
@@ -269,6 +270,7 @@ class LocalBuildExecutor(BuildExecutor):
 
 class BuildHostExecutor(BuildExecutor):
     uses_local_filesystem = False
+    connects_on_enter = True
 
     def __init__(
         self,

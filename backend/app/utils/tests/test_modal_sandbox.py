@@ -1,4 +1,7 @@
+import contextlib
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -6,6 +9,7 @@ from app.utils.modal_sandbox import (
     FRAMEOS_SANDBOX_PATH,
     ModalSandboxConfig,
     ModalSandboxSession,
+    _FrameOSModalOutputManager,
     parse_docker_run_command,
     sandbox_sync_paths_for_command,
 )
@@ -75,6 +79,98 @@ def test_modal_sandbox_connection_summary_includes_resource_details():
     assert "timeout=120s" in summary
     assert "idle_timeout=30s" in summary
     assert "nested_docker=disabled" in summary
+
+
+@pytest.mark.asyncio
+async def test_modal_output_manager_logs_image_build_lines():
+    entries = []
+
+    async def fake_log(level, message):
+        entries.append((level, message))
+
+    manager = _FrameOSModalOutputManager(SimpleNamespace(), fake_log)
+
+    await manager.put_streaming_log(SimpleNamespace(file_descriptor=1, data="step 1\npartial"))
+    await manager.put_streaming_log(SimpleNamespace(file_descriptor=1, data=" done\n"))
+    await manager.put_streaming_log(SimpleNamespace(file_descriptor=2, data="error\n"))
+    await manager.flush_pending()
+
+    assert entries == [
+        ("stdout", "Modal image build: step 1"),
+        ("stdout", "Modal image build: partial done"),
+        ("stderr", "Modal image build: error"),
+    ]
+    assert manager.logged_lines == 3
+
+
+@pytest.mark.asyncio
+async def test_modal_connect_logs_no_image_build_lines_notice(monkeypatch):
+    entries = []
+
+    async def fake_log(level, message):
+        entries.append((level, message))
+
+    class FakeOutputManager:
+        logged_lines = 0
+
+        async def flush_pending(self):
+            return None
+
+    @contextlib.contextmanager
+    def fake_output_to_logs(_modal, _logger):
+        yield FakeOutputManager()
+
+    class FakeClient:
+        @staticmethod
+        def from_credentials(_token_id, _token_secret):
+            return object()
+
+    class FakeApp:
+        @staticmethod
+        def lookup(*_args, **_kwargs):
+            return object()
+
+    class FakeImage:
+        @staticmethod
+        def from_registry(*_args, **_kwargs):
+            return object()
+
+    class FakeSandbox:
+        @staticmethod
+        def create(*_args, **_kwargs):
+            raise RuntimeError("Image build for im-test failed. See build logs for more details.")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "modal",
+        SimpleNamespace(Client=FakeClient, App=FakeApp, Image=FakeImage, Sandbox=FakeSandbox),
+    )
+    monkeypatch.setattr("app.utils.modal_sandbox._modal_output_to_logs", fake_output_to_logs)
+
+    session = ModalSandboxSession(
+        ModalSandboxConfig(
+            enabled=True,
+            token_id="ak-test",
+            token_secret="as-test",
+            app_name="frameos-custom",
+            image="frameos/frameos:custom",
+            region="us-east",
+            cloud="aws",
+        ),
+        logger=fake_log,
+    )
+
+    with pytest.raises(RuntimeError):
+        await session._connect()
+
+    assert entries == [
+        (
+            "stderr",
+            "Modal sandbox image build failed before Modal returned build-log lines. "
+            "app=frameos-custom, image=frameos/frameos:custom, region=us-east, cloud=aws. "
+            "Check the Modal dashboard for the image build record if the SDK error remains generic.",
+        )
+    ]
 
 
 def test_sandbox_sync_paths_for_docker_mounts(tmp_path):

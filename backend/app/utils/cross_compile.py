@@ -220,13 +220,18 @@ class CrossCompiler:
             workspace_prefix="frameos-cross-",
         )
         if self.build_host:
+            connection_action = (
+                f"Connecting to {build_executor_display_name(self.build_host)}"
+                if executor.connects_on_enter
+                else f"Using {build_executor_display_name(self.build_host)}; sandbox will be created when the build command starts"
+            )
             await self._log(
                 "stdout",
-                f"{icon} Connecting to {build_executor_display_name(self.build_host)}",
+                f"{icon} {connection_action}",
             )
         async with executor:
             self.executor = executor
-            if self.build_host:
+            if self.build_host and executor.connects_on_enter:
                 await self._log(
                     "stdout",
                     f"Connected to {build_executor_display_name(self.build_host)} for cross compilation",
