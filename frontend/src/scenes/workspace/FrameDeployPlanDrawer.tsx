@@ -32,6 +32,7 @@ import {
   type DeployRecommendation,
   type SummaryItem,
 } from '../frame/frameLogic'
+import { buildAgentUpgradeNotice, frameosGitHubReleaseUrl, type AgentUpgradeNotice } from '../frame/frameDeployUtils'
 import {
   frameCompilationModeOptions,
   frameCrossCompilationOptions,
@@ -351,6 +352,47 @@ function DeployBuildOptionsSection({
   )
 }
 
+function FrameosReleaseLink({ version }: { version: string }): JSX.Element {
+  return (
+    <a
+      href={frameosGitHubReleaseUrl(version)}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="frameos-link font-semibold underline underline-offset-2 hover:no-underline"
+      title={`View FrameOS ${version} release on GitHub`}
+    >
+      {version}
+    </a>
+  )
+}
+
+function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
+  const frameosVersionChange = change.frameosVersionChange
+  if (!frameosVersionChange) {
+    return <>{change.label}</>
+  }
+
+  if (frameosVersionChange.kind === 'install') {
+    return (
+      <>
+        Install FrameOS <FrameosReleaseLink version={frameosVersionChange.currentVersion} />
+      </>
+    )
+  }
+
+  return (
+    <>
+      FrameOS upgrade{' '}
+      {frameosVersionChange.previousVersion ? (
+        <FrameosReleaseLink version={frameosVersionChange.previousVersion} />
+      ) : (
+        'unknown'
+      )}{' '}
+      -&gt; <FrameosReleaseLink version={frameosVersionChange.currentVersion} />
+    </>
+  )
+}
+
 function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | null {
   if (changes.length === 0) {
     return null
@@ -366,7 +408,9 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
               change.requiresFullDeploy ? 'bg-[color:var(--frameos-color-brass)]' : 'frameos-primary-fill'
             )}
           />
-          <span className="min-w-0 flex-1 truncate text-[color:var(--tool-strong)]">{change.label}</span>
+          <span className="min-w-0 flex-1 truncate text-[color:var(--tool-strong)]">
+            <ChangeLabel change={change} />
+          </span>
           <span className="frame-tool-muted shrink-0 text-xs">{change.requiresFullDeploy ? 'Full' : 'Fast'}</span>
         </div>
       ))}
@@ -459,9 +503,39 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
   )
 }
 
+function agentUpgradeLabel(notice: AgentUpgradeNotice): string {
+  return `${notice.previousVersion ?? 'unknown'} to ${notice.currentVersion}`
+}
+
+function AgentUpgradeIndicator({ notice }: { notice: AgentUpgradeNotice }): JSX.Element {
+  return (
+    <ExclamationCircleIcon
+      className="h-4 w-4 text-amber-500"
+      aria-label={`FrameOS agent ${agentUpgradeLabel(notice)}`}
+    />
+  )
+}
+
+function DeployAgentLabel({ notice }: { notice: AgentUpgradeNotice | null }): JSX.Element {
+  if (!notice) {
+    return <>Deploy agent</>
+  }
+
+  return (
+    <span className="min-w-0">
+      <span>Deploy agent</span>{' '}
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
+        <AgentUpgradeIndicator notice={notice} />
+        <span>{agentUpgradeLabel(notice)}</span>
+      </span>
+    </span>
+  )
+}
+
 function DeployTransportToggle({
   frameId,
   agentConnected,
+  agentUpgradeNotice,
   canDeployAgent,
   canCopyBootstrapScript,
   showRecompileAgent,
@@ -472,6 +546,7 @@ function DeployTransportToggle({
 }: {
   frameId: number
   agentConnected: boolean
+  agentUpgradeNotice: AgentUpgradeNotice | null
   canDeployAgent: boolean
   canCopyBootstrapScript: boolean
   showRecompileAgent: boolean
@@ -489,6 +564,7 @@ function DeployTransportToggle({
   const selectedConnectionUnavailableTitle =
     'The FrameOS agent is not connected. Select SSH or wait for the agent to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
+  const agentUpgradeTitle = agentUpgradeNotice ? `FrameOS agent ${agentUpgradeLabel(agentUpgradeNotice)}` : undefined
 
   return (
     <section className="mb-4">
@@ -559,6 +635,13 @@ function DeployTransportToggle({
             buttonColor="none"
             horizontal
             className="frameos-secondary-button flex h-9 w-9 items-center justify-center rounded-xl !px-0 !py-0 !shadow-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            buttonAdornment={
+              agentUpgradeNotice ? (
+                <span title={agentUpgradeTitle}>
+                  <AgentUpgradeIndicator notice={agentUpgradeNotice} />
+                </span>
+              ) : undefined
+            }
             items={[
               ...(canCopyBootstrapScript
                 ? [
@@ -579,8 +662,10 @@ function DeployTransportToggle({
               ...(canDeployAgent
                 ? [
                     {
-                      label: 'Deploy agent',
-                      title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                      label: <DeployAgentLabel notice={agentUpgradeNotice} />,
+                      title: selectedAgentDisconnected
+                        ? selectedConnectionUnavailableTitle
+                        : agentUpgradeTitle ?? selectedConnectionTitle,
                       disabled: selectedAgentDisconnected,
                       onClick: () => onDeployAgent(false, selectedTransport),
                     },
@@ -945,6 +1030,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
   const showRecompileAgent = import.meta.env?.DEV === true
+  const agentUpgradeNotice = buildAgentUpgradeNotice(frame)
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -1029,6 +1115,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 <DeployTransportToggle
                   frameId={frame.id}
                   agentConnected={agentDeployConnected}
+                  agentUpgradeNotice={agentUpgradeNotice}
                   canDeployAgent={canDeployAgent}
                   canCopyBootstrapScript={canCopyBootstrapScript}
                   showRecompileAgent={showRecompileAgent}

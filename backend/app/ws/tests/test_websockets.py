@@ -182,6 +182,60 @@ def test_agent_ws_unknown_frame(client: TestClient) -> None:
     assert exc.value.reason == "unknown frame"
 
 
+def test_agent_ws_stores_reported_agent_version_and_clears_missing_version(client: TestClient) -> None:
+    db = SessionLocal()
+    try:
+        frame = asyncio.run(new_frame(db, DummyRedis(), "AgentVersionFrame", "frame-agent.local", "localhost"))
+        secret = "agent-secret"
+        frame.agent = {
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "agentSharedSecret": secret,
+            "agentVersion": "2026.1.1",
+        }
+        db.add(frame)
+        db.commit()
+        db.refresh(frame)
+        frame_id = frame.id
+        server_api_key = frame.server_api_key
+    finally:
+        db.close()
+
+    with client.websocket_connect("/ws/agent") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": server_api_key, "agentVersion": "2026.6.11+abc"})
+        challenge = ws.receive_json()
+        ws.send_json({
+            "action": "handshake",
+            "mac": hmac_sha256(secret, f"{server_api_key}{challenge['c']}"),
+        })
+        assert ws.receive_json() == {"action": "handshake/ok"}
+
+    db = SessionLocal()
+    try:
+        updated = db.get(Frame, frame_id)
+        assert updated is not None
+        assert updated.agent["agentVersion"] == "2026.6.11+abc"
+    finally:
+        db.close()
+
+    with client.websocket_connect("/ws/agent") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": server_api_key})
+        challenge = ws.receive_json()
+        ws.send_json({
+            "action": "handshake",
+            "mac": hmac_sha256(secret, f"{server_api_key}{challenge['c']}"),
+        })
+        assert ws.receive_json() == {"action": "handshake/ok"}
+
+    db = SessionLocal()
+    try:
+        updated = db.get(Frame, frame_id)
+        assert updated is not None
+        assert "agentVersion" not in updated.agent
+    finally:
+        db.close()
+
+
 def test_agent_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:
     db = SessionLocal()
     try:

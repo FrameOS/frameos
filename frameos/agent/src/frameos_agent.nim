@@ -659,7 +659,8 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   # --- Step 0: say hello ----------------------------------------------------
   var hello = %*{
     "action": "hello",
-    "serverApiKey": cfg.serverApiKey
+    "serverApiKey": cfg.serverApiKey,
+    "agentVersion": frameosAgentVersion
   }
   await ws.send($hello)
 

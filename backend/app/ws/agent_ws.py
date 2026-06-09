@@ -55,6 +55,44 @@ async def mark_sd_image_booted_if_needed(redis: Redis, frame_id: int) -> None:
     finally:
         db.close()
 
+
+def agent_version_from_hello(hello_msg: dict[str, Any]) -> str | None:
+    version = hello_msg.get("agentVersion")
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+    return None
+
+
+async def store_connected_agent_version(redis: Redis, frame: Frame, agent_version: str | None) -> None:
+    db = SessionLocal()
+    try:
+        stored_frame = db.get(Frame, frame.id)
+        if stored_frame is None:
+            return
+
+        agent = dict(stored_frame.agent or {})
+        if agent_version:
+            agent["agentVersion"] = agent_version
+        else:
+            agent.pop("agentVersion", None)
+
+        if agent == (stored_frame.agent or {}):
+            frame.agent = agent
+            return
+
+        stored_frame.agent = agent
+        db.add(stored_frame)
+        db.commit()
+        frame.agent = agent
+    finally:
+        db.close()
+
+    await publish_message(
+        redis,
+        "update_frame",
+        {"agent": agent, "id": frame.id, "project_id": frame.project_id},
+    )
+
 # ────────────────────────────────────────────────────────────────────────────
 # tiny helpers
 # ────────────────────────────────────────────────────────────────────────────
@@ -391,6 +429,7 @@ async def ws_agent_endpoint(
 
     # STEP 3 – server → handshake/ok  +  start pump
     await ws.send_json({"action": "handshake/ok"})
+    await store_connected_agent_version(redis, frame, agent_version_from_hello(hello_msg))
     send_task = asyncio.create_task(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )

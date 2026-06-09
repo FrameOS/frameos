@@ -9,6 +9,11 @@ import {
 export interface ChangeDetail {
   label: string
   requiresFullDeploy: boolean
+  frameosVersionChange?: {
+    kind: 'install' | 'upgrade'
+    previousVersion?: string | null
+    currentVersion: string
+  }
 }
 
 export interface SummaryItem {
@@ -100,9 +105,16 @@ export interface DeployRecommendation {
   descriptionEmphasis?: string
 }
 
+export interface AgentUpgradeNotice {
+  previousVersion: string | null
+  currentVersion: string
+}
+
 type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
 
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
+export const CURRENT_FRAMEOS_AGENT_VERSION = (versions.agent || 'dev').split('+')[0]
+export const FRAMEOS_GITHUB_RELEASES_URL = 'https://github.com/FrameOS/frameos/releases'
 
 const INKY_BUTTON_DEVICES = new Set([
   'pimoroni.inky_impression',
@@ -357,6 +369,28 @@ function mountpointsSummary(frame?: Partial<FrameType> | null): string | null {
 
 export function normalizeFrameosVersion(version: unknown): string | null {
   return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
+}
+
+export function frameosGitHubReleaseUrl(version: unknown): string {
+  const normalizedVersion = normalizeFrameosVersion(version)
+  if (!normalizedVersion || !parseFrameosVersion(normalizedVersion)) {
+    return FRAMEOS_GITHUB_RELEASES_URL
+  }
+  return `${FRAMEOS_GITHUB_RELEASES_URL}/tag/v${encodeURIComponent(normalizedVersion)}`
+}
+
+export function buildAgentUpgradeNotice(frame?: Partial<FrameType> | null): AgentUpgradeNotice | null {
+  const currentVersion = normalizeFrameosVersion(CURRENT_FRAMEOS_AGENT_VERSION)
+  if (!currentVersion || currentVersion === 'dev' || (frame?.active_connections ?? 0) <= 0) {
+    return null
+  }
+
+  const previousVersion = normalizeFrameosVersion(frame?.agent?.agentVersion)
+  if (previousVersion === currentVersion) {
+    return null
+  }
+
+  return { previousVersion, currentVersion }
 }
 
 function parseFrameosVersion(version: string | null): [number, number, number] | null {

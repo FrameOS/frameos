@@ -115,6 +115,7 @@ export interface FrameType {
     agentRunCommands?: boolean
     agentSharedSecret?: string
     deployWithAgent?: boolean
+    agentVersion?: string | null
   }
   mountpoints?: FrameMountpointsConfig
   error_behavior?: FrameErrorBehavior

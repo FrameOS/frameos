@@ -424,6 +424,11 @@ function computeChangeDetails(
     details.push({
       label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
+      frameosVersionChange: {
+        kind: 'upgrade',
+        previousVersion: previousFrameosVersion,
+        currentVersion: CURRENT_FRAMEOS_VERSION,
+      },
     })
   }
 
@@ -450,6 +455,10 @@ function firstDeployChangeDetails(
     {
       label: `Install FrameOS ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
+      frameosVersionChange: {
+        kind: 'install',
+        currentVersion: CURRENT_FRAMEOS_VERSION,
+      },
     },
   ]
   const device = frame?.device

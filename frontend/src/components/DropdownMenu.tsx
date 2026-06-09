@@ -24,9 +24,16 @@ export interface DropdownMenuProps {
   className?: string
   buttonColor?: ButtonProps['color']
   horizontal?: boolean
+  buttonAdornment?: React.ReactNode
 }
 
-export function DropdownMenu({ items, className, horizontal = true, buttonColor: _buttonColor }: DropdownMenuProps) {
+export function DropdownMenu({
+  items,
+  className,
+  horizontal = true,
+  buttonColor: _buttonColor,
+  buttonAdornment,
+}: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, {
@@ -66,7 +73,7 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
-              'inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm',
+              'relative inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm',
               className
             )}
           >
@@ -77,6 +84,9 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
             ) : (
               <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
             )}
+            {buttonAdornment ? (
+              <span className="pointer-events-none absolute -right-1 -top-1">{buttonAdornment}</span>
+            ) : null}
           </Menu.Button>
           {ReactDOM.createPortal(
             <Transition
@@ -98,7 +108,7 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
                 <div className="py-1">
                   {items.map((item, index) => (
                     <Menu.Item key={index}>
-                      {({ active }) => (
+                      {({ active }) =>
                         item.content ? (
                           <div
                             className={clsx(
@@ -146,7 +156,7 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
                             {item.label}
                           </a>
                         )
-                      )}
+                      }
                     </Menu.Item>
                   ))}
                 </div>
