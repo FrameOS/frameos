@@ -2,7 +2,7 @@
   "images": {
     "frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest": {
       "base_image": "debian:bookworm",
-      "digest": "sha256:8adaf43d57c08ce75a8f94408c5ee142f4d19d51f0a5f2b8db8a0b3687b3f8a9",
+      "digest": "sha256:1fbcb9754009226267c107987f1c8bbb38794c8396a81817d5127262ec238663",
       "tag": "latest",
       "version": "2025.02.13"
     }
