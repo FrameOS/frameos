@@ -10,6 +10,7 @@ class User(Base):
     password = mapped_column(String(128))
 
     organization_memberships = relationship("OrganizationMember", back_populates="user", cascade="all, delete-orphan")
+    cloud_identities = relationship("CloudIdentity", back_populates="user", cascade="all, delete-orphan")
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

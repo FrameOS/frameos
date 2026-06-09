@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 from app import config as app_config
+from app.models.cloud_auth import local_fallback_enabled
 from app.models.user import User
 from app.database import get_db
 from app.redis import get_redis
@@ -152,6 +153,8 @@ async def login(
 ):
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_RUN_MODE")
+    if not local_fallback_enabled(db):
+        raise HTTPException(status_code=401, detail="Local login is disabled. Continue with FrameOS Cloud Auth.")
     email = form_data.username
     password = form_data.password
     ip = request.client.host
@@ -190,6 +193,8 @@ async def login(
 async def signup(request: Request, data: UserSignup, response: Response, db: Session = Depends(get_db)):
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
+    if not local_fallback_enabled(db):
+        raise HTTPException(status_code=401, detail="Local signup is disabled. Continue with FrameOS Cloud Auth.")
 
     # Check if there is already a user registered (one-user system)
     if db.query(User).first() is not None:

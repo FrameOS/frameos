@@ -5,6 +5,25 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 import requests
 
+DEFAULT_FRAMEOS_AUTH_PROVIDER_URL = "https://auth.frameos.net"
+
+
+def normalize_frameos_auth_provider_url(value: str | None, default_provider_url: str = DEFAULT_FRAMEOS_AUTH_PROVIDER_URL) -> dict:
+    normalized = (value or "").strip()
+    if normalized.lower() == "disabled":
+        return {"disabled": True, "provider_url": None}
+
+    provider_url = normalized or default_provider_url
+    parsed = urlparse(provider_url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError("FRAMEOS_AUTH_PROVIDER_URL must be a URL, empty, or disabled")
+
+    path = parsed.path.rstrip("/")
+    return {
+        "disabled": False,
+        "provider_url": parsed._replace(path=path, params="", query="", fragment="").geturl().rstrip("/"),
+    }
+
 def get_bool_env(key: str) -> bool:
     return os.environ.get(key, '0').lower() in ['true', '1', 'yes']
 
@@ -48,6 +67,11 @@ class Config:
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)
+    FRAMEOS_AUTH_PROVIDER = normalize_frameos_auth_provider_url(os.environ.get("FRAMEOS_AUTH_PROVIDER_URL"))
+    FRAMEOS_AUTH_PROVIDER_DISABLED = bool(FRAMEOS_AUTH_PROVIDER["disabled"])
+    FRAMEOS_AUTH_PROVIDER_URL = FRAMEOS_AUTH_PROVIDER["provider_url"]
+    FRAMEOS_AUTH_CLIENT_ID = os.environ.get("FRAMEOS_AUTH_CLIENT_ID", "frameos-backend")
+    FRAMEOS_AUTH_CLIENT_SECRET = os.environ.get("FRAMEOS_AUTH_CLIENT_SECRET", "")
     ingress_path = ''
 
     def __init__(self):

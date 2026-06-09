@@ -233,6 +233,12 @@ body.frameos-workspace-scroll-locked {
   color: var(--frameos-warning-text);
 }
 
+.frameos-warning-surface {
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
+}
+
 .frameos-change-status-button {
   position: relative;
   overflow: hidden;
@@ -1313,6 +1319,111 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .frameos-auth-screen.frameos-theme-dark .auth-button {
   border-color: rgba(255, 255, 255, 0.14);
+}
+
+.frameos-auth-screen .auth-cloud-button {
+  position: relative;
+  overflow: hidden;
+  border-color: rgb(var(--frameos-color-evergreen-rgb) / 0.5);
+  background:
+    radial-gradient(circle at 16% 12%, rgb(var(--frameos-color-moss-rgb) / 0.58), transparent 36%),
+    radial-gradient(circle at 84% 8%, rgb(var(--frameos-color-brass-rgb) / 0.3), transparent 28%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--frameos-color-evergreen) 92%, #0f172a),
+      var(--frameos-color-graphite)
+    );
+  color: #ffffff;
+  box-shadow: 0 18px 36px rgb(var(--frameos-color-evergreen-rgb) / 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.frameos-auth-screen .auth-cloud-button::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: calc(1rem - 1px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 52%);
+  pointer-events: none;
+}
+
+.frameos-auth-screen .auth-cloud-button:hover {
+  transform: translateY(-1px);
+  border-color: rgb(var(--frameos-color-moss-rgb) / 0.56);
+  background:
+    radial-gradient(circle at 16% 12%, rgb(var(--frameos-color-moss-rgb) / 0.66), transparent 36%),
+    radial-gradient(circle at 84% 8%, rgb(var(--frameos-color-brass-rgb) / 0.36), transparent 28%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--frameos-color-evergreen) 96%, #0f172a),
+      color-mix(in srgb, var(--frameos-color-graphite) 88%, var(--frameos-color-evergreen))
+    );
+  box-shadow: 0 22px 44px rgb(var(--frameos-color-evergreen-rgb) / 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.frameos-auth-screen .auth-cloud-button:active {
+  transform: translateY(0);
+}
+
+.frameos-auth-screen .auth-cloud-button:disabled {
+  transform: none;
+}
+
+.frameos-auth-screen .auth-cloud-icon {
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.17);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.frameos-auth-screen .auth-local-divider {
+  margin: 1.25rem 0;
+  color: #64748b;
+}
+
+.frameos-auth-screen .auth-local-divider-line {
+  background: linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.42), transparent);
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-cloud-button {
+  border-color: rgb(var(--frameos-color-evergreen-rgb) / 0.62);
+  background:
+    radial-gradient(circle at 16% 12%, rgb(var(--frameos-color-moss-rgb) / 0.32), transparent 36%),
+    radial-gradient(circle at 84% 8%, rgb(var(--frameos-color-brass-rgb) / 0.24), transparent 28%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--frameos-color-evergreen) 78%, #0f172a),
+      color-mix(in srgb, var(--frameos-color-graphite) 78%, #020617)
+    );
+  color: #f8fafc;
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.34), 0 0 32px rgb(var(--frameos-color-evergreen-rgb) / 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-cloud-button:hover {
+  border-color: rgb(var(--frameos-color-moss-rgb) / 0.48);
+  background:
+    radial-gradient(circle at 16% 12%, rgb(var(--frameos-color-moss-rgb) / 0.4), transparent 36%),
+    radial-gradient(circle at 84% 8%, rgb(var(--frameos-color-brass-rgb) / 0.3), transparent 28%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--frameos-color-evergreen) 86%, #0f172a),
+      color-mix(in srgb, var(--frameos-color-graphite) 68%, #020617)
+    );
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4), 0 0 36px rgb(var(--frameos-color-evergreen-rgb) / 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-cloud-icon {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-local-divider {
+  color: #94a3b8;
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-local-divider-line {
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.34), transparent);
 }
 
 .frameos-scene-grid {

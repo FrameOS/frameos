@@ -57,6 +57,20 @@ else:
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"
 if serve_html:
+    def frameos_app_config(request: Request | None = None) -> dict:
+        app_config = {}
+        if config.HASSIO_RUN_MODE:
+            app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+        header_ingress_path = (
+            normalize_ingress_path(request.headers.get("x-ingress-path"))
+            if request is not None and config.HASSIO_RUN_MODE == "ingress"
+            else ""
+        )
+        ingress_path = header_ingress_path or config.ingress_path
+        if ingress_path:
+            app_config["ingress_path"] = ingress_path
+        return app_config
+
     # only if frontend/dist exists, might not if we're using vite
     if os.path.exists("../frontend/dist"):
         app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
@@ -72,20 +86,6 @@ if serve_html:
             else:
                 raise
 
-        def frameos_app_config(request: Request | None = None) -> dict:
-            app_config = {}
-            if config.HASSIO_RUN_MODE:
-                app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
-            header_ingress_path = (
-                normalize_ingress_path(request.headers.get("x-ingress-path"))
-                if request is not None and config.HASSIO_RUN_MODE == "ingress"
-                else ""
-            )
-            ingress_path = header_ingress_path or config.ingress_path
-            if ingress_path:
-                app_config["ingress_path"] = ingress_path
-            return app_config
-
         def index_html(request: Request | None = None) -> str:
             return index_html_template.replace(
                 '<head>',
@@ -98,7 +98,10 @@ if serve_html:
         index_html_template += "</body></html>"
 
         def index_html(request: Request | None = None) -> str:
-            return index_html_template
+            return index_html_template.replace(
+                "<html>",
+                f"<html><head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config(request))}</script></head>",
+            )
 
     @app.get("/")
     async def read_index(request: Request):

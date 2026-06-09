@@ -11,7 +11,16 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import {
+  ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PencilSquareIcon,
+  PlusIcon,
+  TrashIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
@@ -29,6 +38,8 @@ import { accountLogic } from './accountLogic'
 import versions from '../../../../versions.json'
 import { timezoneOptions } from '../../decorators/timezones'
 import { systemInfoLogic } from './systemInfoLogic'
+import { cloudSettingsLogic } from './cloudSettingsLogic'
+import type { CloudMembership } from '../../types'
 
 type SettingsNavItem = readonly [string, string]
 type SettingsNavSection = {
@@ -40,7 +51,10 @@ type SettingsSectionId = string
 const settingsNavSections: readonly SettingsNavSection[] = [
   {
     label: '',
-    items: [['Account', '#settings-account']],
+    items: [
+      ['Account', '#settings-account'],
+      ['FrameOS Cloud', '#settings-cloud'],
+    ],
   },
   {
     label: 'Settings',
@@ -282,6 +296,335 @@ function IngressAccountSettingsSection(): JSX.Element {
   )
 }
 
+function formatCloudDate(value?: string | null): string {
+  if (!value) {
+    return 'Never'
+  }
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) {
+    return value
+  }
+  return new Date(timestamp).toLocaleString()
+}
+
+function formatCountdown(seconds: number | null): string {
+  if (seconds === null) {
+    return ''
+  }
+  const safeSeconds = Math.max(0, seconds)
+  const minutes = Math.floor(safeSeconds / 60)
+  const remainder = safeSeconds % 60
+  return `${minutes}:${String(remainder).padStart(2, '0')}`
+}
+
+function CloudSettingsSection(): JSX.Element {
+  const {
+    cloudAuthStatus,
+    cloudAuthStatusLoading,
+    backendLinkPolling,
+    cloudNow,
+    manualSetupOpen,
+    pendingLocalFallbackEnabled,
+    verificationQrCodeDataUrl,
+  } = useValues(cloudSettingsLogic)
+  const {
+    beginBackendLink,
+    pollBackendLink,
+    syncBackendLink,
+    rotateBackendToken,
+    disconnectBackendLink,
+    openBackendLinkVerification,
+    setManualSetupOpen,
+    setLocalFallbackEnabled,
+  } = useActions(cloudSettingsLogic)
+  const link = cloudAuthStatus.link
+  const status = cloudAuthStatus.status
+  const connected = status === 'connected'
+  const connecting = status === 'connecting'
+  const revoked = status === 'revoked'
+  const expiresAt = link?.expires_at ? Date.parse(link.expires_at) : null
+  const expiresInSeconds =
+    expiresAt !== null && Number.isFinite(expiresAt) ? Math.ceil((expiresAt - cloudNow) / 1000) : null
+  const expired = !connected && !!link && (link.poll_error === 'expired_token' || (expiresInSeconds ?? 1) <= 0)
+  const activeConnecting = connecting && !expired
+  const verificationUrl = link?.verification_uri_complete ?? link?.verification_uri ?? null
+  const pollError =
+    link?.poll_error && link.poll_error !== 'authorization_pending' && link.poll_error !== 'expired_token'
+      ? link.poll_error
+      : null
+  const localFallbackEnabled = cloudAuthStatus.local_fallback_enabled
+  const fallbackUpdating = pendingLocalFallbackEnabled !== null
+
+  return (
+    <div className="space-y-4">
+      <H6 id="settings-cloud" className="pt-4">
+        FrameOS Cloud
+      </H6>
+      <Box className="settings-cloud-card space-y-4 p-3">
+        {!cloudAuthStatus.provider_enabled ? (
+          <div className="frameos-muted text-sm">FrameOS Cloud Auth is disabled for this backend.</div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="frameos-strong text-sm font-semibold">
+                  {connected
+                    ? 'Connected'
+                    : expired
+                    ? 'Expired'
+                    : connecting
+                    ? 'Connecting'
+                    : revoked
+                    ? 'Revoked'
+                    : 'Disconnected'}
+                </div>
+                <div className="frameos-muted break-all text-xs">{cloudAuthStatus.provider_url}</div>
+              </div>
+              {!connected && !connecting && !expired ? (
+                <Button
+                  size="small"
+                  color="primary"
+                  onClick={beginBackendLink}
+                  disabled={cloudAuthStatusLoading}
+                  className="rounded-lg px-4 py-2"
+                >
+                  Connect
+                </Button>
+              ) : null}
+            </div>
+            {(connecting || expired) && link ? (
+              <div className="frameos-inset space-y-3 rounded-lg border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="frameos-strong text-sm font-semibold">
+                      {expired ? 'Connection request expired' : 'Waiting for FrameOS Cloud'}
+                    </div>
+                    <div className="frameos-muted text-xs">
+                      {expired
+                        ? 'Start a new connection request to link this backend.'
+                        : 'Approve this backend in FrameOS Cloud to finish linking.'}
+                    </div>
+                    {!expired && expiresInSeconds !== null ? (
+                      <div className="frameos-muted text-xs">Expires in {formatCountdown(expiresInSeconds)}</div>
+                    ) : null}
+                  </div>
+                  {activeConnecting && backendLinkPolling ? (
+                    <div className="frameos-muted inline-flex items-center gap-2 text-xs">
+                      <Spinner />
+                      Checking...
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {expired ? (
+                    <>
+                      <Button
+                        size="small"
+                        color="primary"
+                        onClick={beginBackendLink}
+                        disabled={cloudAuthStatusLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <ArrowPathIcon className="h-4 w-4" />
+                        Try again
+                      </Button>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={disconnectBackendLink}
+                        disabled={cloudAuthStatusLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="small"
+                        color="primary"
+                        onClick={() => openBackendLinkVerification(verificationUrl)}
+                        disabled={!verificationUrl || cloudAuthStatusLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                        Open FrameOS Cloud
+                      </Button>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={beginBackendLink}
+                        disabled={cloudAuthStatusLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <ArrowPathIcon className="h-4 w-4" />
+                        Restart
+                      </Button>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={disconnectBackendLink}
+                        disabled={cloudAuthStatusLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {pollError ? <div className="text-sm text-amber-600">{pollError}</div> : null}
+                {link.user_code || verificationUrl ? (
+                  <div className="space-y-3 border-t border-slate-200/70 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setManualSetupOpen(!manualSetupOpen)}
+                      className="frameos-link inline-flex items-center gap-1 text-sm font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      {manualSetupOpen ? (
+                        <ChevronDownIcon className="h-4 w-4" />
+                      ) : (
+                        <ChevronRightIcon className="h-4 w-4" />
+                      )}
+                      Manual setup
+                    </button>
+                    {manualSetupOpen ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {link.user_code ? (
+                            <div>
+                              <Label>User code</Label>
+                              <div className="frameos-strong mt-1 font-mono text-2xl font-bold tracking-normal">
+                                {link.user_code}
+                              </div>
+                            </div>
+                          ) : null}
+                          {expiresInSeconds !== null ? (
+                            <div>
+                              <Label>Expires</Label>
+                              <div className="frameos-strong mt-1 text-sm font-semibold">
+                                {expired ? 'Expired' : formatCountdown(expiresInSeconds)}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                        {verificationUrl ? (
+                          <div className="flex flex-wrap items-start gap-3">
+                            {verificationQrCodeDataUrl ? (
+                              <img
+                                src={verificationQrCodeDataUrl}
+                                alt="FrameOS Cloud verification QR code"
+                                className="h-36 w-36 rounded-lg border border-slate-200 bg-white p-2"
+                              />
+                            ) : null}
+                            <a
+                              href={verificationUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="frameos-link min-w-0 flex-1 break-all text-sm font-semibold hover:underline"
+                            >
+                              {verificationUrl}
+                            </a>
+                          </div>
+                        ) : null}
+                        {!expired ? (
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={pollBackendLink}
+                            disabled={backendLinkPolling || cloudAuthStatusLoading}
+                          >
+                            {backendLinkPolling ? 'Checking...' : 'Check status'}
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {connected && link ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 text-sm @md:grid-cols-2">
+                  <div>
+                    <Label>Cloud organization</Label>
+                    <div className="frameos-strong break-all font-medium">{link.cloud_organization_id || 'Unknown'}</div>
+                  </div>
+                  <div>
+                    <Label>Cloud project</Label>
+                    <div className="frameos-strong break-all font-medium">{link.cloud_project_id || 'All projects'}</div>
+                  </div>
+                  <div>
+                    <Label>Token reference</Label>
+                    <div className="frameos-muted break-all">{link.token_reference || 'Unknown'}</div>
+                  </div>
+                  <div>
+                    <Label>Last grant sync</Label>
+                    <div className="frameos-muted">{formatCloudDate(link.last_grant_sync_at)}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="small" color="secondary" onClick={syncBackendLink}>
+                    Sync now
+                  </Button>
+                  <Button size="small" color="secondary" onClick={rotateBackendToken}>
+                    Rotate token
+                  </Button>
+                  <Button size="small" color="secondary" onClick={disconnectBackendLink}>
+                    Disconnect
+                  </Button>
+                </div>
+                <div className="frameos-inset rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="frameos-strong text-sm font-semibold">Local fallback</div>
+                      <div className="frameos-muted text-xs">
+                        Keep local email/password access available unless a cloud owner/admin session is verified.
+                      </div>
+                    </div>
+                    <Switch
+                      value={localFallbackEnabled}
+                      onChange={(enabled) => setLocalFallbackEnabled(enabled)}
+                      disabled={fallbackUpdating}
+                      label={localFallbackEnabled ? 'Enabled' : 'Disabled'}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Synced member grants</Label>
+                  {cloudAuthStatus.memberships?.length ? (
+                    <div className="space-y-2">
+                      {cloudAuthStatus.memberships.map((membership: CloudMembership) => (
+                        <div
+                          key={`${membership.cloud_account_id}:${membership.cloud_project_id ?? ''}`}
+                          className="frameos-inset flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+                        >
+                          <span className="break-all">{membership.cloud_account_id}</span>
+                          <Tag color={membership.role.toLowerCase() === 'owner' ? 'primary' : 'secondary'}>
+                            {membership.role}
+                          </Tag>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="frameos-muted text-sm">No member grants have been synced yet.</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {revoked ? (
+              <div className="text-sm text-amber-600">
+                The cloud link token was rejected by the provider. Reconnect this backend to resume cloud sync.
+              </div>
+            ) : null}
+          </>
+        )}
+      </Box>
+    </div>
+  )
+}
+
 function SettingsGroupDivider({ label }: { label: string }): JSX.Element {
   return (
     <div className="settings-group-divider" aria-hidden="true">
@@ -455,6 +798,7 @@ export function Settings() {
         </div>
         <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
           {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection onLogout={logout} />}
+          {!isHassioIngress ? <CloudSettingsSection /> : null}
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
