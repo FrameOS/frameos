@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -825,7 +826,7 @@ def test_partition_size_for_root_grows_with_payload_size(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_precompiled_sd_image_rejects_larger_data_partitions(tmp_path, monkeypatch):
+async def test_precompiled_sd_image_accepts_larger_data_partitions(tmp_path, monkeypatch):
     release_image = tmp_path / "release.img"
     output_image = tmp_path / "output.img"
     boot_overlay = tmp_path / "tmp" / "overlay" / "boot"
@@ -842,19 +843,33 @@ async def test_precompiled_sd_image_rejects_larger_data_partitions(tmp_path, mon
         image_file.truncate(partitions[-1][0] + partitions[-1][1])
 
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    patched: dict[str, Any] = {}
 
     async def fake_log(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(builder, "_log", fake_log)
+    async def fake_patch_boot_partition(output_path_arg, partitions_arg, boot_root_arg, *, image):
+        patched["output_path"] = output_path_arg
+        patched["partitions"] = partitions_arg
+        patched["boot_root"] = boot_root_arg
+        patched["image"] = image
 
-    with pytest.raises(RuntimeError, match="larger data partitions"):
-        await builder._compose_sd_image_from_precompiled_release(
-            temp_dir=tmp_path / "tmp",
-            release_image_path=release_image,
-            output_path=output_image,
-            image=None,
-        )
+    monkeypatch.setattr(builder, "_log", fake_log)
+    monkeypatch.setattr(builder, "_patch_boot_partition", fake_patch_boot_partition)
+
+    await builder._compose_sd_image_from_precompiled_release(
+        temp_dir=tmp_path / "tmp",
+        release_image_path=release_image,
+        output_path=output_image,
+        image=None,
+    )
+
+    assert output_image.read_bytes() == release_image.read_bytes()
+    assert patched["output_path"] == output_image
+    assert patched["boot_root"] == tmp_path / "tmp" / "precompiled-compose" / "roots" / "boot"
+    assert patched["image"] is None
+    assert patched["partitions"][2] == {"start": partitions[2][0], "size": partitions[2][1]}
+    assert patched["partitions"][3] == {"start": partitions[3][0], "size": partitions[3][1]}
 
 
 @pytest.mark.asyncio

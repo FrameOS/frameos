@@ -194,8 +194,8 @@ proc mountSambaFstabEntries*(): bool =
   if mountResult.exitCode == 0:
     return true
 
-  echo "FrameOS setup: samba mounts: warning: one or more Samba shares could not be mounted now; startup will continue"
-  echo "FrameOS setup: samba mounts: warning: systemd will retry automounts when the mount paths are accessed"
+  setupLog("FrameOS setup: samba mounts: warning: one or more Samba shares could not be mounted now; startup will continue")
+  setupLog("FrameOS setup: samba mounts: warning: systemd will retry automounts when the mount paths are accessed")
   false
 
 proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
@@ -207,11 +207,11 @@ proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
   if requestedItems.len == 0:
     let applied = applyFrameosFstabBlock(currentFstab, "")
     if applied.changed:
-      echo "FrameOS setup: samba mounts: removing managed fstab entries"
+      setupLog("FrameOS setup: samba mounts: removing managed fstab entries")
       writePrivilegedFile(fstabPath, applied.content)
       discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
     else:
-      echo "FrameOS setup: samba mounts: disabled"
+      setupLog("FrameOS setup: samba mounts: disabled")
     for target in previousTargets:
       discard runSetupCommand(privilegedCommand("umount " & shellQuote(target)), raiseOnError = false)
     deleteCredentialFiles(sambaCredentialsDir)
@@ -231,10 +231,10 @@ proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
 
   let applied = applyFrameosFstabBlock(currentFstab, fstabBlock)
   if applied.changed:
-    echo "FrameOS setup: samba mounts: updating " & fstabPath
+    setupLog("FrameOS setup: samba mounts: updating " & fstabPath)
     writePrivilegedFile(fstabPath, applied.content)
   else:
-    echo "FrameOS setup: samba mounts: fstab already up to date"
+    setupLog("FrameOS setup: samba mounts: fstab already up to date")
 
   discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
   discard mountSambaFstabEntries()

@@ -112,6 +112,27 @@ block test_frameos_service_contents_can_mirror_logs_to_console:
   doAssert service.contains("StandardOutput=journal+console")
   doAssert service.contains("StandardError=journal+console")
 
+block test_write_frame_config_dimensions_persists_detected_size:
+  let path = getTempDir() / ("frameos-dimensions-" & $epochTime().int64 & ".json")
+  writeFile(path, pretty(%*{
+    "name": "HDMI",
+    "device": "framebuffer",
+    "width": 1920,
+    "height": 1080,
+  }, indent = 4) & "\n")
+
+  try:
+    let changed = writeFrameConfigDimensions(path, FrameConfig(width: 1280, height: 720))
+    let payload = parseJson(readFile(path))
+
+    doAssert changed
+    doAssert payload{"width"}.getInt() == 1280
+    doAssert payload{"height"}.getInt() == 720
+    doAssert payload{"device"}.getStr() == "framebuffer"
+  finally:
+    if fileExists(path):
+      removeFile(path)
+
 block test_release_activation_switches_staged_release_current_symlink:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =

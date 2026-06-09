@@ -128,7 +128,7 @@ docker buildx create --name frameos-publish --driver docker-container --use
 
 docker buildx build \
   --builder frameos-publish \
-  --platform linux/amd64,linux/arm64 \
+  --platform linux/amd64,linux/arm64/v8,linux/arm/v7 \
   --build-arg BASE_IMAGE=debian:bookworm \
   --build-arg BUILDROOT_VERSION=2025.02.13 \
   --tag frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest \

@@ -152,7 +152,7 @@ def setup_parts_nim(
                 imports.append(f"import {driver.setup_import_path} as {alias}")
                 imported_aliases.add(alias)
             setup_calls.append(
-                f'addSetupResult(result, runSetupStep("{driver.name}", proc(): SetupResult = {alias}.setup()))'
+                f'addSetupResult(result, runSetupStep("{driver.name}", proc(): SetupResult = {alias}.setup(driverCtx)))'
             )
             names.append(driver.name)
         if driver.lines:
@@ -191,8 +191,9 @@ proc setupDriverNames*(): seq[string] =
 {names_proc}
 
 proc {setup_proc_name}{setup_proc_star}(frameOS: FrameOS): SetupResult =
-  discard frameOS
+  let driverCtx = buildDriverContext(frameOS)
   {setup_body}
+  syncDriverContext(frameOS, driverCtx)
 """
     return imports, code, names_source
 
@@ -400,25 +401,25 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
 
 proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
-  echo "FrameOS setup: shared driver " & spec.name & ": loading " & path
+  setupLog("FrameOS setup: shared driver " & spec.name & ": loading " & path)
   let library = loadLib(path)
   if library.isNil:
-    echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
-    echo "FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path)
-    echo "FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH")
+    setupLog("FrameOS setup: shared driver " & spec.name & ": failed to load " & path)
+    setupLog("FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path))
+    setupLog("FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH"))
     raise newException(OSError, "Unable to load driver library: " & path)
   let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
   if setupProc.isNil:
     raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
-  echo "FrameOS setup: shared driver " & spec.name & ": running setup"
+  setupLog("FrameOS setup: shared driver " & spec.name & ": running setup")
   result.rebootRequired = setupProc(cast[pointer](driverCtx))
   setupLibraries.add(library)
-  echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
+  setupLog("FrameOS setup: shared driver " & spec.name & ": setup complete")
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
-  echo "FrameOS setup: shared driver registry: building context"
+  setupLog("FrameOS setup: shared driver registry: building context")
   let driverCtx = buildDriverContext(frameOS)
-  echo "FrameOS setup: shared driver registry: selected " & $driverSpecs.len & " driver(s)"
+  setupLog("FrameOS setup: shared driver registry: selected " & $driverSpecs.len & " driver(s)")
   for spec in driverSpecs:
     if spec.canSetup:
       let setupSpec = spec
@@ -490,12 +491,12 @@ proc setupDriverNames*(): seq[string] =
   return {setup_names_source}
 
 proc setup*(frameOS: FrameOS): SetupResult =
-  echo "FrameOS setup: shared driver setup: starting"
+  setupLog("FrameOS setup: shared driver setup: starting")
   addSetupResult(result, setupSharedDrivers(frameOS))
-  echo "FrameOS setup: shared driver setup: complete"
-  echo "FrameOS setup: local driver setup: starting"
+  setupLog("FrameOS setup: shared driver setup: complete")
+  setupLog("FrameOS setup: local driver setup: starting")
   addSetupResult(result, setupLocalDrivers(frameOS))
-  echo "FrameOS setup: local driver setup: complete"
+  setupLog("FrameOS setup: local driver setup: complete")
     """
 
     return code

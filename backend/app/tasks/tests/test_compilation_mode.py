@@ -95,6 +95,7 @@ def test_shared_drivers_run_compiled_driver_setup_from_library():
     assert 'canSetup: true, canRender: true' in source
     assert '"frameos_driver_setup"' in source
     assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
+    assert 'setupLog("FrameOS setup: shared driver " & spec.name & ": loading " & path)' in source
     assert "setupProc(cast[pointer](driverCtx))" in source
     assert "setupLibraries.add(library)" in source
     assert "finally:\n    unloadLib(library)" not in source
@@ -136,4 +137,6 @@ def test_static_drivers_setup_uses_generated_driver_list():
     assert "proc setup*(frameOS: FrameOS): SetupResult" in source
     assert 'runSetupStep("inkyPython"' in source
     assert 'runSetupStep("i2c"' in source
+    assert ".setup(driverCtx)" in source
+    assert "syncDriverContext(frameOS, driverCtx)" in source
     assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in source

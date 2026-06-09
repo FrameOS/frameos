@@ -25,6 +25,13 @@ block test_extract_ratios_repeats_provided_ratio_lists:
   doAssert abs(totalWidth - 4.0) < 0.000001
   doAssert abs(totalHeight - 6.0) < 0.000001
 
+block test_extract_ratios_falls_back_when_all_ratios_are_zero:
+  let (widthRatios, heightRatios, totalWidth, totalHeight) = extractRatios("0 0", "0", columns = 2, rows = 2)
+  doAssert widthRatios == @[1.0, 1.0]
+  doAssert heightRatios == @[1.0, 1.0]
+  doAssert totalWidth == 2.0
+  doAssert totalHeight == 2.0
+
 block test_split_dimensions_applies_margins_gaps_and_ratios:
   let config = AppConfig(
     rows: 2,

@@ -1245,6 +1245,45 @@ async def test_stop_frameos_for_release_setup_leaves_agent_running():
 
 
 @pytest.mark.asyncio
+async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_running():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupStopFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupStopFrame"},
+    )
+
+    class MissingServiceDeployer(RecordingDeployer):
+        async def exec_command(self, command: str, **kwargs) -> int:
+            self.commands.append(command)
+            if command == "sudo service frameos stop":
+                return 5
+            if command == "sudo sh -c 'killall frameos 2>/dev/null || true'":
+                return 0
+            return await super().exec_command(command, **kwargs)
+
+    deployer = MissingServiceDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    stopped = await workflow._stop_frameos_for_release_setup()
+
+    assert stopped is False
+    assert "sudo service frameos stop" in deployer.commands
+    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert not any(kind == "stderr" for kind, _message in deployer.logs)
+    assert any("service was not loaded" in message for _kind, message in deployer.logs)
+
+
+@pytest.mark.asyncio
 async def test_run_post_deploy_cleanup_reboots_when_setup_requested_it():
     frame = SimpleNamespace(
         id=10,

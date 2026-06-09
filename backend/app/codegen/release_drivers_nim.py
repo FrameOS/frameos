@@ -250,25 +250,25 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
 
 proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
-  echo "FrameOS setup: shared driver " & spec.name & ": loading " & path
+  setupLog("FrameOS setup: shared driver " & spec.name & ": loading " & path)
   let library = loadLib(path)
   if library.isNil:
-    echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
-    echo "FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path)
-    echo "FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH")
+    setupLog("FrameOS setup: shared driver " & spec.name & ": failed to load " & path)
+    setupLog("FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path))
+    setupLog("FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH"))
     raise newException(OSError, "Unable to load driver library: " & path)
   let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
   if setupProc.isNil:
     raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
-  echo "FrameOS setup: shared driver " & spec.name & ": running setup"
+  setupLog("FrameOS setup: shared driver " & spec.name & ": running setup")
   result.rebootRequired = setupProc(cast[pointer](driverCtx))
   setupLibraries.add(library)
-  echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
+  setupLog("FrameOS setup: shared driver " & spec.name & ": setup complete")
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
   let driverCtx = buildDriverContext(frameOS)
   let specs = driverSpecsFor(frameOS)
-  echo "FrameOS setup: shared driver registry: selected " & $specs.len & " driver(s)"
+  setupLog("FrameOS setup: shared driver registry: selected " & $specs.len & " driver(s)")
   for spec in specs:
     if spec.canSetup:
       let setupSpec = spec

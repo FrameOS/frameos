@@ -57,6 +57,14 @@ proc extractRatios*(widthRatios: string, heightRatios: string, columns: int,
     normalizedHeightRatios[i] = if heightRatios.len > 0: parseFloat(
         heightRatios[i mod heightRatios.len]) else: 1.0
     totalHeightRatio += normalizedHeightRatios[i]
+  if totalWidthRatio == 0.0:
+    for i in 0..(columns-1):
+      normalizedWidthRatios[i] = 1.0
+    totalWidthRatio = columns.toFloat
+  if totalHeightRatio == 0.0:
+    for i in 0..(rows-1):
+      normalizedHeightRatios[i] = 1.0
+    totalHeightRatio = rows.toFloat
   result = (normalizedWidthRatios, normalizedHeightRatios, totalWidthRatio, totalHeightRatio)
 
 proc splitDimensions*(width: int, height: int, appConfig: AppConfig): seq[(int, int)] =

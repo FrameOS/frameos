@@ -146,7 +146,7 @@ proc setupExportScenes(data: JsonNode): JsonNode =
 
 proc installServiceFile(sourcePath, destinationPath: string) =
   if not fileExists(sourcePath):
-    echo "FrameOS setup: service file missing: " & sourcePath
+    setupLog("FrameOS setup: service file missing: " & sourcePath)
     return
   writePrivilegedFile(destinationPath, readFile(sourcePath))
 
@@ -193,17 +193,17 @@ proc ensureSystemdServiceDirectories() =
 
 proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   if not commandExists("systemctl"):
-    echo "FrameOS setup: systemd services: systemctl not found, skipping"
+    setupLog("FrameOS setup: systemd services: systemctl not found, skipping")
     return setupOk()
 
-  echo "FrameOS setup: systemd services: ensuring service directories"
+  setupLog("FrameOS setup: systemd services: ensuring service directories")
   ensureSystemdServiceDirectories()
 
-  echo "FrameOS setup: systemd services: installing frameos.service"
+  setupLog("FrameOS setup: systemd services: installing frameos.service")
   installFrameOSServiceFile(frameOS)
 
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
-    echo "FrameOS setup: systemd services: installing frameos_agent.service"
+    setupLog("FrameOS setup: systemd services: installing frameos_agent.service")
     installServiceFile("/srv/frameos/agent/current/frameos_agent.service", "/etc/systemd/system/frameos_agent.service")
   else:
     discard runSetupCommand(privilegedCommand("systemctl disable frameos_agent.service"), raiseOnError = false)
@@ -216,38 +216,38 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
   if normalizedDir.len == 0:
-    echo "FrameOS setup: release activation: unknown app directory"
+    setupLog("FrameOS setup: release activation: unknown app directory")
     return setupOk()
 
   let appDir = "/" & normalizedDir
   let stateLink = appDir / "state"
 
-  echo "FrameOS setup: release activation: ensuring shared state directory"
+  setupLog("FrameOS setup: release activation: ensuring shared state directory")
   discard runSetupCommand("mkdir -p /srv/frameos/state")
   discard runSetupCommand("rm -rf " & shellQuote(stateLink) & " && ln -s /srv/frameos/state " & shellQuote(stateLink))
 
   if appDir.startsWith("/srv/frameos/releases/release_"):
-    echo "FrameOS setup: release activation: activating " & appDir
+    setupLog("FrameOS setup: release activation: activating " & appDir)
     discard runSetupCommand("rm -rf /srv/frameos/current && ln -s " & shellQuote(appDir) & " /srv/frameos/current")
   else:
-    echo "FrameOS setup: release activation: current app directory is " & appDir
+    setupLog("FrameOS setup: release activation: current app directory is " & appDir)
 
   result = setupOk()
 
 proc setupTimezone*(timeZone: string): SetupResult =
   let normalized = timeZone.strip()
   if normalized.len == 0:
-    echo "FrameOS setup: timezone: none configured"
+    setupLog("FrameOS setup: timezone: none configured")
     return setupOk()
 
   let zoneinfoPath = "/usr/share/zoneinfo" / normalized
   if not fileExists(zoneinfoPath):
-    echo "FrameOS setup: timezone: zoneinfo file not found for " & normalized
+    setupLog("FrameOS setup: timezone: zoneinfo file not found for " & normalized)
     return setupOk()
 
   let current = detectSystemTimeZone()
   if current == normalized:
-    echo "FrameOS setup: timezone: already " & normalized
+    setupLog("FrameOS setup: timezone: already " & normalized)
     return setupOk()
 
   if commandExists("timedatectl"):
@@ -258,14 +258,14 @@ proc setupTimezone*(timeZone: string): SetupResult =
     if timedateResult.exitCode == 0:
       return setupOk()
 
-  echo "FrameOS setup: timezone: setting " & normalized
+  setupLog("FrameOS setup: timezone: setting " & normalized)
   writePrivilegedFile("/etc/timezone", normalized & "\n")
   discard runSetupCommand(privilegedCommand("ln -sfn " & shellQuote(zoneinfoPath) & " /etc/localtime"))
   result = setupOk()
 
 proc startFrameOSSystemdServices*(configPath = "") =
   if not commandExists("systemctl"):
-    echo "FrameOS setup: systemd services: systemctl not found, cannot start services"
+    setupLog("FrameOS setup: systemd services: systemctl not found, cannot start services")
     return
   let frameOS = FrameOS(frameConfig: loadConfig(configPath))
   discard runSetupCommand(privilegedCommand("systemctl start " & systemdServiceNames(frameOS).join(" ")))
@@ -273,26 +273,65 @@ proc startFrameOSSystemdServices*(configPath = "") =
 proc setupAppAptPackages*(): SetupResult =
   setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
 
+proc updateFrameConfigDimensions*(payload: JsonNode, frameConfig: FrameConfig): bool =
+  if payload == nil or payload.kind != JObject or frameConfig == nil or frameConfig.width <= 0 or frameConfig.height <= 0:
+    return false
+
+  if payload{"width"}.getInt(0) == frameConfig.width and payload{"height"}.getInt(0) == frameConfig.height:
+    return false
+
+  payload["width"] = %frameConfig.width
+  payload["height"] = %frameConfig.height
+  true
+
+proc writeFrameConfigDimensions*(configPath: string, frameConfig: FrameConfig): bool =
+  if frameConfig == nil or frameConfig.width <= 0 or frameConfig.height <= 0:
+    setupLog("FrameOS setup: frame config: dimensions not persisted; invalid detected dimensions")
+    return false
+
+  let path = getConfigFilename(configPath)
+  if path.len == 0 or not fileExists(path):
+    setupLog("FrameOS setup: frame config: dimensions not persisted; config file not found")
+    return false
+
+  var payload = readJsonFile(path)
+  if payload == nil or payload.kind != JObject:
+    setupLog("FrameOS setup: frame config: dimensions not persisted; config file is not a JSON object")
+    return false
+
+  if not updateFrameConfigDimensions(payload, frameConfig):
+    setupLog("FrameOS setup: frame config: dimensions already " & $frameConfig.width & "x" & $frameConfig.height)
+    return false
+
+  setupLog("FrameOS setup: frame config: updating " & path & " dimensions to " &
+    $frameConfig.width & "x" & $frameConfig.height)
+  writePrivilegedFile(path, pretty(payload, indent = 4) & "\n")
+  true
+
 proc setupFrameOS*(configPath = ""): SetupResult =
-  echo "FrameOS setup: starting"
+  setupLog("FrameOS setup: starting")
   let frameOS = FrameOS(frameConfig: loadConfig(configPath))
-  echo "FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")"
+  setupLog("FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")")
   if frameOS.frameConfig.mode == "rpios":
     addSetupResult(result, runSetupStep("app apt packages", proc(): SetupResult = setupAppAptPackages()))
     addSetupResult(result, runSetupStep("samba mounts", proc(): SetupResult = setupSambaMounts(frameOS.frameConfig.mountpoints)))
   else:
-    echo "FrameOS setup: app apt packages: skipped for mode " & frameOS.frameConfig.mode
-    echo "FrameOS setup: samba mounts: skipped for mode " & frameOS.frameConfig.mode
+    setupLog("FrameOS setup: app apt packages: skipped for mode " & frameOS.frameConfig.mode)
+    setupLog("FrameOS setup: samba mounts: skipped for mode " & frameOS.frameConfig.mode)
   if frameOS.frameConfig.mode in ["buildroot", "rpios"]:
     addSetupResult(result, runSetupStep("timezone", proc(): SetupResult = setupTimezone(frameOS.frameConfig.timeZone)))
-  echo "FrameOS setup: driver setup: starting"
+  setupLog("FrameOS setup: driver setup: starting")
   addSetupResult(result, drivers.setup(frameOS))
-  echo "FrameOS setup: driver setup: complete"
+  setupLog("FrameOS setup: driver setup: complete")
+  addSetupResult(result, runSetupStep("frame config dimensions", proc(): SetupResult =
+    discard writeFrameConfigDimensions(configPath, frameOS.frameConfig)
+    setupOk()
+  ))
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
-    echo "FrameOS setup: reboot required"
-  echo "FrameOS setup: complete"
+    setupLog("FrameOS setup: reboot required")
+  setupLog("FrameOS setup: complete")
 
 proc writeSetupReleasePayload*(configPath: string) =
   if configPath.len == 0:

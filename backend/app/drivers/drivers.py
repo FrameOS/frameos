@@ -37,6 +37,7 @@ DRIVERS = {
     "frameBuffer": Driver(
         name="frameBuffer",
         import_path="frameBuffer/frameBuffer",
+        setup_import_path="frameBuffer/frameBuffer",
         can_render=True,
         can_turn_on_off=True
     ),

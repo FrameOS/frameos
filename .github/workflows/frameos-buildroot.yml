@@ -27,7 +27,7 @@ on:
       platforms:
         description: "Comma-separated Docker platforms to publish"
         required: false
-        default: linux/amd64,linux/arm64/v8
+        default: linux/amd64,linux/arm64/v8,linux/arm/v7
         type: string
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
           IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || 'latest' }}
           BASE_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_image || '' }}
           BUILDROOT_VERSION_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.buildroot_version || '' }}
-          PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.platforms || 'linux/amd64,linux/arm64/v8' }}
+          PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.platforms || 'linux/amd64,linux/arm64/v8,linux/arm/v7' }}
         run: |
           set -euo pipefail
 
@@ -105,7 +105,7 @@ jobs:
           base_image = os.environ["BASE_IMAGE"]
           version = os.environ["BUILDROOT_VERSION"]
           image_tag = os.environ.get("IMAGE_TAG", "latest").strip() or "latest"
-          platforms = os.environ.get("PLATFORMS", "linux/amd64,linux/arm64/v8").strip() or "linux/amd64,linux/arm64/v8"
+          platforms = os.environ.get("PLATFORMS", "linux/amd64,linux/arm64/v8,linux/arm/v7").strip() or "linux/amd64,linux/arm64/v8,linux/arm/v7"
           image = f"frameos/frameos-buildroot:{sanitize(base_image.replace('/', '_'))}-{sanitize(version)}-{image_tag}"
           metadata_file = Path("/tmp/buildroot-metadata.json")
 

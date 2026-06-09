@@ -1845,12 +1845,9 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             shutil.copy2(release_image_path, output_path)
 
         partitions = _mbr_partitions(output_path)
-        max_frameos_size = _partition_size_bytes(BUILDROOT_FRAMEOS_PARTITION_SIZE)
-        max_assets_size = _partition_size_bytes(BUILDROOT_ASSETS_PARTITION_SIZE)
-        if partitions[2]["size"] > max_frameos_size or partitions[3]["size"] > max_assets_size:
-            raise RuntimeError(
-                "Full precompiled Buildroot SD image uses larger data partitions than the current image layout"
-            )
+        # Full release images already include their FRAMEOS and ASSETS payloads.
+        # Release composition may grow those partitions beyond the minimum
+        # defaults, and this path only patches BOOT files.
         return partitions
 
     async def _patch_boot_partition(

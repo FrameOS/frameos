@@ -943,6 +943,12 @@ class FrameDeployWorkflow:
             ),
         ]
         if statuses[0] != 0:
+            if statuses[0] == 5 and statuses[1] == 0:
+                await self.deployer.log(
+                    "stdout",
+                    "FrameOS service was not loaded before device setup; stopped any matching process and continuing",
+                )
+                return False
             await self.deployer.log(
                 "stderr",
                 f"Could not stop FrameOS service before device setup; continuing with setup anyway (exit code {statuses[0]})",

@@ -12,6 +12,10 @@ type
 var commandRunner: SetupCommandRunner = proc(command: string): SetupCommandResult =
   execCmdEx(command)
 
+proc setupLog*(message: string) =
+  echo message
+  flushFile(stdout)
+
 proc setSetupCommandRunnerForTest*(runner: SetupCommandRunner) =
   commandRunner = runner
 
@@ -41,11 +45,11 @@ proc sudoPrefix(): string =
       "sudo -n "
 
 proc runSetupCommand*(command: string, raiseOnError = true): SetupCommandResult =
-  echo "> " & command
+  setupLog("> " & command)
   result = commandRunner(command)
   let output = result.output.strip()
   if output.len > 0:
-    echo output
+    setupLog(output)
   if raiseOnError and result.exitCode != 0:
     raise newException(OSError, "Command failed with exit code " & $result.exitCode & ": " & command)
 
@@ -98,11 +102,11 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
       missingPackages.add(normalized)
 
   if normalizedPackages.len == 0:
-    echo "FrameOS setup: app apt packages: none required"
+    setupLog("FrameOS setup: app apt packages: none required")
     return setupOk()
 
   if missingPackages.len == 0:
-    echo "FrameOS setup: app apt packages: already installed (" & normalizedPackages.join(", ") & ")"
+    setupLog("FrameOS setup: app apt packages: already installed (" & normalizedPackages.join(", ") & ")")
     return setupOk()
 
   if not commandExists("apt-get"):
@@ -111,12 +115,12 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
       "apt-get not found; required to install app apt packages: " & missingPackages.join(", ")
     )
 
-  echo "FrameOS setup: app apt packages: installing " & missingPackages.join(", ")
+  setupLog("FrameOS setup: app apt packages: installing " & missingPackages.join(", "))
   let packageArgs = missingPackages.mapIt(shellQuote(it)).join(" ")
   let installCommand = privilegedAptCommand("apt-get install -y --no-install-recommends " & packageArgs)
   let installResult = runSetupCommand(installCommand, raiseOnError = false)
   if installResult.exitCode != 0:
-    echo "FrameOS setup: app apt packages: install failed; updating apt and retrying"
+    setupLog("FrameOS setup: app apt packages: install failed; updating apt and retrying")
     discard runSetupCommand(privilegedAptCommand("apt-get update"))
     discard runSetupCommand(installCommand)
 
@@ -209,9 +213,9 @@ proc setupBootConfig*(requestedLines: seq[string], bootConfigPath = ""): SetupRe
   let current = if fileExists(path): readFile(path) else: ""
   let applied = applyBootConfigLines(current, requestedLines)
   if not applied.changed:
-    echo "FrameOS setup: boot config: already up to date (" & path & ")"
+    setupLog("FrameOS setup: boot config: already up to date (" & path & ")")
     return
-  echo "FrameOS setup: boot config: updating " & path
+  setupLog("FrameOS setup: boot config: updating " & path)
   writePrivilegedFile(path, applied.content)
   result.rebootRequired = true
 
@@ -234,13 +238,13 @@ proc setupPythonVendor*(vendorFolder: string) =
   )
 
 proc runSetupStep*(name: string, action: proc(): SetupResult): SetupResult =
-  echo "FrameOS setup: checking " & name
+  setupLog("FrameOS setup: checking " & name)
   try:
     result = action()
     if result.rebootRequired:
-      echo "FrameOS setup: " & name & ": complete (reboot required)"
+      setupLog("FrameOS setup: " & name & ": complete (reboot required)")
     else:
-      echo "FrameOS setup: " & name & ": complete"
+      setupLog("FrameOS setup: " & name & ": complete")
   except CatchableError as e:
-    echo "FrameOS setup: " & name & ": failed: " & e.msg
+    setupLog("FrameOS setup: " & name & ": failed: " & e.msg)
     raise
