@@ -133,6 +133,53 @@ block test_write_frame_config_dimensions_persists_detected_size:
     if fileExists(path):
       removeFile(path)
 
+block test_write_setup_release_payload_updates_agent_frame_config:
+  let tempRoot = getTempDir() / ("frameos-setup-payload-" & $epochTime().int64)
+  let frameosCurrent = tempRoot / "current"
+  let agentCurrent = tempRoot / "agent" / "current"
+  let setupPath = tempRoot / "frameos-setup.json"
+  createDir(frameosCurrent)
+  createDir(agentCurrent)
+  writeFile(agentCurrent / "frame.json", pretty(%*{
+    "serverHost": "localhost",
+    "serverPort": 8989,
+  }, indent = 4) & "\n")
+  writeFile(setupPath, pretty(%*{
+    "serverHost": "backend.frameos.local",
+    "serverPort": 443,
+    "scenes": [
+      {
+        "id": "interpreted-scene",
+        "settings": {"execution": "interpreted"}
+      },
+      {
+        "id": "compiled-scene",
+        "settings": {"execution": "compiled"}
+      }
+    ],
+  }, indent = 4) & "\n")
+
+  try:
+    writeSetupReleasePayload(setupPath, frameosCurrent, agentCurrent)
+
+    let runtimeConfigJson = readFile(frameosCurrent / "frame.json")
+    let agentConfigJson = readFile(agentCurrent / "frame.json")
+    doAssert agentConfigJson == runtimeConfigJson
+    let runtimeConfig = parseJson(runtimeConfigJson)
+    let agentConfig = parseJson(agentConfigJson)
+    let allScenes = parseJson(uncompress(readFile(frameosCurrent / "all_scenes.json.gz"), dataFormat = dfGzip))
+    let interpretedScenes = parseJson(uncompress(readFile(frameosCurrent / "scenes.json.gz"), dataFormat = dfGzip))
+
+    doAssert runtimeConfig{"serverHost"}.getStr() == "backend.frameos.local"
+    doAssert agentConfig{"serverHost"}.getStr() == "backend.frameos.local"
+    doAssert agentConfig{"serverPort"}.getInt() == 443
+    doAssert allScenes.len == 2
+    doAssert interpretedScenes.len == 1
+    doAssert interpretedScenes[0]{"id"}.getStr() == "interpreted-scene"
+  finally:
+    if dirExists(tempRoot):
+      removeDir(tempRoot)
+
 block test_release_activation_switches_staged_release_current_symlink:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =

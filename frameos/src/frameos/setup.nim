@@ -335,13 +335,20 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupLog("FrameOS setup: reboot required")
   setupLog("FrameOS setup: complete")
 
-proc writeSetupReleasePayload*(configPath: string) =
+proc writeSetupReleasePayload*(
+  configPath: string,
+  frameosCurrentDir = "/srv/frameos/current",
+  agentCurrentDir = "/srv/frameos/agent/current",
+) =
   if configPath.len == 0:
     return
 
   let payload = readJsonFile(configPath)
-  writeFile("/srv/frameos/current/frame.json", pretty(payload, indent = 4) & "\n")
+  let frameJson = pretty(payload, indent = 4) & "\n"
+  writeFile(frameosCurrentDir / "frame.json", frameJson)
+  if dirExists(agentCurrentDir):
+    writeFile(agentCurrentDir / "frame.json", frameJson)
 
   let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()
-  writeFile("/srv/frameos/current/all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))
-  writeFile("/srv/frameos/current/scenes.json.gz", compress(pretty(setupExportScenes(payload), indent = 4) & "\n", dataFormat = dfGzip))
+  writeFile(frameosCurrentDir / "all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))
+  writeFile(frameosCurrentDir / "scenes.json.gz", compress(pretty(setupExportScenes(payload), indent = 4) & "\n", dataFormat = dfGzip))

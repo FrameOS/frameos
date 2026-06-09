@@ -94,7 +94,7 @@ elif defined(macosx) or defined(freebsd) or defined(openbsd) or defined(netbsd):
 # Config IO (fails hard if unreadable)
 # ----------------------------------------------------------------------------
 
-proc loadConfig(): FrameConfig =
+proc loadConfig*(): FrameConfig =
   var path = getEnv("FRAMEOS_CONFIG")
   if path == "":
     path = DefaultConfigPath
