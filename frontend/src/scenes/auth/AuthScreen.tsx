@@ -45,7 +45,7 @@ export function AuthScreen({ title, subtitle, children, footer }: AuthScreenProp
           {children}
         </div>
         {footer ? (
-          <div className="frameos-divider border-t border-slate-200/80 bg-slate-50/70 px-6 py-4 text-center text-sm text-slate-500">
+          <div className="frameos-divider auth-footer border-t border-slate-200/80 bg-slate-50/70 px-6 py-4 text-center text-sm text-slate-500">
             {footer}
           </div>
         ) : null}

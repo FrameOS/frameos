@@ -119,6 +119,10 @@ function isFrameRoutePathForFrame(pathname: string, frameId: number): boolean {
   return pathname === urls.frame(frameId)
 }
 
+function isFrameOverviewRoutePathForFrame(pathname: string, search: Record<string, unknown>, frameId: number): boolean {
+  return isFrameRoutePathForFrame(pathname, frameId) && frameToolFromSearch(search) === 'overview'
+}
+
 function isWorkspaceRoutePathForFrame(pathname: string, frameId: number): boolean {
   const scenePath = urls.scenes(frameId)
   const appPath = urls.apps(frameId)
@@ -162,6 +166,12 @@ function drawerPathForFrame(frameId: number): string {
     return pathname
   }
   return urls.frame(frameId)
+}
+
+function shouldOpenScenePreviewInDrawer(frameId: number): boolean {
+  const pathname = router.values.location.pathname
+  const search = router.values.searchParams
+  return isFramesRoutePath(pathname) || isFrameOverviewRoutePathForFrame(pathname, search, frameId)
 }
 
 function drawerUrlForFrame(
@@ -972,7 +982,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         openUtilityPanel: (_, { panel }) => panel,
         openFrameTool: (_, { panel }) => panel,
-        openScenePreview: () => 'state',
         closeUtilityPanel: () => null,
       },
     ],
@@ -1312,6 +1321,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
         router.actions.push(urls.scenes(frameId, sceneId), undefined, workspaceContentNavigationHash())
       },
       openScenePreview: ({ frameId, sceneId }) => {
+        if (shouldOpenScenePreviewInDrawer(frameId)) {
+          actions.openSceneControl(frameId, sceneId)
+          return
+        }
         actions.setRouteSelection(frameId, sceneId)
         reloadFrameStates(frameId)
         router.actions.push(

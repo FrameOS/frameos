@@ -1307,6 +1307,18 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: #7d8593 !important;
 }
 
+.frameos-auth-screen.frameos-theme-dark .auth-footer {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-warning {
+  background: rgba(200, 162, 71, 0.12);
+  border-color: rgba(251, 191, 36, 0.24);
+  color: #fde68a;
+}
+
 .frameos-auth-screen .auth-button {
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
