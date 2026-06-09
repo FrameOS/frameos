@@ -24,6 +24,11 @@ on:
         required: false
         default: ""
         type: string
+      platforms:
+        description: "Comma-separated Docker platforms to publish"
+        required: false
+        default: linux/amd64,linux/arm64/v8
+        type: string
 
 permissions:
   contents: write
@@ -45,6 +50,7 @@ jobs:
           IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || 'latest' }}
           BASE_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_image || '' }}
           BUILDROOT_VERSION_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.buildroot_version || '' }}
+          PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.platforms || 'linux/amd64,linux/arm64/v8' }}
         run: |
           set -euo pipefail
 
@@ -99,6 +105,7 @@ jobs:
           base_image = os.environ["BASE_IMAGE"]
           version = os.environ["BUILDROOT_VERSION"]
           image_tag = os.environ.get("IMAGE_TAG", "latest").strip() or "latest"
+          platforms = os.environ.get("PLATFORMS", "linux/amd64,linux/arm64/v8").strip() or "linux/amd64,linux/arm64/v8"
           image = f"frameos/frameos-buildroot:{sanitize(base_image.replace('/', '_'))}-{sanitize(version)}-{image_tag}"
           metadata_file = Path("/tmp/buildroot-metadata.json")
 
@@ -108,7 +115,7 @@ jobs:
                   "buildx",
                   "build",
                   "--platform",
-                  "linux/amd64",
+                  platforms,
                   "--build-arg",
                   f"BASE_IMAGE={base_image}",
                   "--build-arg",
@@ -124,6 +131,37 @@ jobs:
               ],
               check=True,
           )
+
+          raw_manifest = subprocess.check_output(
+              ["docker", "buildx", "imagetools", "inspect", "--raw", image],
+              text=True,
+          )
+          manifest = json.loads(raw_manifest)
+          published_platforms = set()
+          for descriptor in manifest.get("manifests", []):
+              platform = descriptor.get("platform") or {}
+              os_name = platform.get("os")
+              architecture = platform.get("architecture")
+              variant = platform.get("variant")
+              if os_name and architecture:
+                  published_platforms.add(f"{os_name}/{architecture}")
+                  if variant:
+                      published_platforms.add(f"{os_name}/{architecture}/{variant}")
+          required_platforms = {platform.strip() for platform in platforms.split(",") if platform.strip()}
+
+          def platform_is_published(required: str) -> bool:
+              parts = required.split("/")
+              if required in published_platforms:
+                  return True
+              if len(parts) == 3 and f"{parts[0]}/{parts[1]}" in published_platforms:
+                  return True
+              return False
+
+          missing_platforms = sorted(platform for platform in required_platforms if not platform_is_published(platform))
+          if missing_platforms:
+              raise RuntimeError(
+                  f"Published manifest for {image} is missing platforms: {', '.join(missing_platforms)}"
+              )
 
           metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
           digest = metadata.get("containerimage.digest") or (metadata.get("containerimage.descriptor") or {}).get("digest")
