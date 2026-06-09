@@ -168,6 +168,33 @@ block test_release_activation_does_not_repoint_current_when_running_current_rele
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_first_boot_service_start_is_non_blocking:
+  let path = getTempDir() / ("frameos-start-services-" & $epochTime().int64 & ".json")
+  writeFile(path, pretty(%*{
+    "mode": "buildroot",
+    "device": "framebuffer",
+    "agent": {"agentEnabled": true},
+  }, indent = 4) & "\n")
+
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    startFrameOSSystemdServices(path)
+
+    doAssert commands.anyIt(it.contains("command -v 'systemctl'"))
+    doAssert commands.anyIt(it.contains("systemctl --no-block start frameos.service frameos_agent.service"))
+    doAssert not commands.anyIt(
+      it.contains("systemctl start frameos.service frameos_agent.service") and
+        not it.contains("--no-block")
+    )
+  finally:
+    resetSetupCommandRunnerForTest()
+    if fileExists(path):
+      removeFile(path)
+
 block test_samba_mounts_fstab_block_uses_credentials_and_options:
   let mountpoints = MountpointsConfig(enabled: true, items: @[
     MountpointConfig(

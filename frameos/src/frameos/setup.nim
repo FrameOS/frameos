@@ -268,7 +268,9 @@ proc startFrameOSSystemdServices*(configPath = "") =
     setupLog("FrameOS setup: systemd services: systemctl not found, cannot start services")
     return
   let frameOS = FrameOS(frameConfig: loadConfig(configPath))
-  discard runSetupCommand(privilegedCommand("systemctl start " & systemdServiceNames(frameOS).join(" ")))
+  # First-boot setup runs in a oneshot ordered Before=frameos*. Queue the starts
+  # so systemd can run them after the setup unit exits instead of waiting here.
+  discard runSetupCommand(privilegedCommand("systemctl --no-block start " & systemdServiceNames(frameOS).join(" ")))
 
 proc setupAppAptPackages*(): SetupResult =
   setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
