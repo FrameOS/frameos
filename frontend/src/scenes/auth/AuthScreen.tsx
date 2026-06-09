@@ -28,7 +28,7 @@ export function AuthScreen({ title, subtitle, children, footer }: AuthScreenProp
         type="button"
         title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
         onClick={toggleTheme}
-        className="frameos-icon-button auth-button fixed right-5 top-5 flex h-12 w-12 items-center justify-center rounded-xl bg-white/80 text-slate-500 shadow-lg shadow-slate-300/25 transition hover:bg-white hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-icon-button auth-button fixed right-5 top-5 flex h-12 w-12 items-center justify-center rounded-xl shadow-lg shadow-slate-300/25 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         {theme === 'dark' ? <SunIcon className="h-6 w-6" /> : <MoonIcon className="h-6 w-6" />}
       </button>
@@ -45,7 +45,7 @@ export function AuthScreen({ title, subtitle, children, footer }: AuthScreenProp
           {children}
         </div>
         {footer ? (
-          <div className="frameos-divider border-t border-slate-200/80 bg-slate-50/70 px-6 py-4 text-center text-sm text-slate-500">
+          <div className="frameos-divider frameos-muted border-t px-6 py-4 text-center text-sm">
             {footer}
           </div>
         ) : null}

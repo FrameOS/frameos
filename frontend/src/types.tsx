@@ -705,6 +705,67 @@ export interface FrameOSSettings {
   }
 }
 
+export interface CloudAuthPublicStatus {
+  provider_enabled: boolean
+  provider_url?: string | null
+  status: 'provider_disabled' | 'disconnected' | 'connecting' | 'connected' | 'revoked' | string
+  local_fallback_enabled: boolean
+}
+
+export interface CloudMembership {
+  cloud_account_id: string
+  cloud_organization_id: string
+  cloud_project_id?: string | null
+  role: string
+  local_organization_id?: number | null
+  local_project_id?: number | null
+  updated_at?: string | null
+  synced_at?: string | null
+}
+
+export interface CloudBackendLinkStatus {
+  status: string
+  provider_url: string
+  provider_issuer?: string | null
+  user_code?: string | null
+  verification_uri?: string | null
+  verification_uri_complete?: string | null
+  expires_at?: string | null
+  interval_seconds?: number
+  poll_error?: string | null
+  token_reference?: string | null
+  linked_client_id?: string | null
+  cloud_organization_id?: string | null
+  cloud_project_id?: string | null
+  local_project_id?: number | null
+  local_organization_id?: number | null
+  local_fallback_enabled?: boolean
+  last_inventory_sync_at?: string | null
+  last_grant_sync_at?: string | null
+  revoked_at?: string | null
+}
+
+export interface CloudIdentityStatus {
+  provider_url: string
+  provider_issuer: string
+  provider_subject: string
+  cloud_account_id?: string | null
+  email?: string | null
+  email_verified?: boolean
+  name?: string | null
+  last_login_at?: string | null
+}
+
+export interface CloudAuthStatus extends CloudAuthPublicStatus {
+  link?: CloudBackendLinkStatus | null
+  memberships?: CloudMembership[]
+  current_user_cloud_identities?: CloudIdentityStatus[]
+  inventory_synced?: boolean
+  grants_synced?: boolean
+  errors?: string[]
+  rotated?: boolean
+}
+
 export interface SSHKeyEntry {
   id: string
   name?: string
