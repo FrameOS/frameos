@@ -17,6 +17,7 @@ const
 var logger: Logger
 var lastErrorLock: Lock
 var lastError: string
+initLock(lastErrorLock)
 
 type
   PortalRunHook = proc(cmd: string): (string, int) {.gcsafe, nimcall.}
@@ -40,15 +41,16 @@ var portalNmcliConnectHook: PortalNmcliConnectHook = defaultPortalNmcliConnectHo
 var portalSleepHook: PortalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
 var portalAutoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true
 
-proc getLastError(): string =
+proc getLastError*(): string =
   {.gcsafe.}:
     withLock lastErrorLock:
       return lastError & ""
 
-proc rememberError(msg: string) =
+proc rememberError*(msg: string) =
   {.gcsafe.}:
+    let stripped = strip(msg)
     withLock lastErrorLock:
-      lastError = strip(msg)[0 ..< min(len(msg), 160)] # 160‑char cap
+      lastError = stripped[0 ..< min(stripped.len, 160)] # 160‑char cap
 
 proc isHotspotActive*(frameOS: FrameOS): bool =
   frameOS.network.hotspotStatus == HotspotStatus.enabled

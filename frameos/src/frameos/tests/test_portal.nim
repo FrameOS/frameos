@@ -145,6 +145,14 @@ suite "portal network orchestration":
     resetHookState()
     drainEventChannel()
 
+  test "rememberError strips, caps, and survives surrounding whitespace":
+    rememberError("  padded error message  ")
+    check getLastError() == "padded error message"
+    rememberError("x".repeat(500))
+    check getLastError().len == 160
+    rememberError("")
+    check getLastError() == ""
+
   test "masked and maskedPasswordArgs hide credentials for logging":
     check masked("secret1234") == "se********"
     check masked("a") == "*"
