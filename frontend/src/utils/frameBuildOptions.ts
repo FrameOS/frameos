@@ -18,7 +18,7 @@ export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeO
 
 export const frameCrossCompilationOptions: FrameBuildOption<FrameCrossCompilation>[] = [
   { value: 'auto', label: 'Use global build environment' },
-  { value: 'always', label: 'Require server-side compilation' },
+  { value: 'always', label: 'Always compile on backend (this server)' },
   { value: 'never', label: 'Always compile on device' },
 ]
 

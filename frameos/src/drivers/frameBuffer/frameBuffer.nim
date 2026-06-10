@@ -8,6 +8,7 @@ type ScreenInfo* = object
   width*: uint32
   height*: uint32
   bitsPerPixel*: uint32
+  lineLength*: uint32
   redOffset*: uint32
   redLength*: uint32
   greenOffset*: uint32
@@ -20,6 +21,7 @@ type ScreenInfo* = object
 type Driver* = ref object of FrameOSDriver
   screenInfo*: ScreenInfo
   logger*: DriverLogger
+  sizeMismatchLogged*: bool
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
   if not logger.isNil and not logger.log.isNil:
@@ -38,10 +40,16 @@ proc getScreenInfo(logger: DriverLogger): ScreenInfo =
     var var_info: fb_var_screeninfo
     if ioctl(fd, FBIOGET_VSCREENINFO, addr var_info) != 0:
       raise newException(OSError, &"Unable to read framebuffer screen info from {DEVICE}")
+    # The framebuffer can pad each row beyond xres * bytesPerPixel; writes must honor this stride
+    var fix_info: fb_fix_screeninfo
+    var lineLength = 0'u32
+    if ioctl(fd, FBIOGET_FSCREENINFO, addr fix_info) == 0:
+      lineLength = fix_info.line_length
     result = ScreenInfo(
       width: var_info.xres,
       height: var_info.yres,
       bitsPerPixel: var_info.bits_per_pixel,
+      lineLength: lineLength,
       redOffset: var_info.red.offset,
       redLength: var_info.red.length,
       greenOffset: var_info.green.offset,
@@ -73,6 +81,7 @@ proc configuredScreenInfo(frameOS: DriverContext): ScreenInfo =
     width: configuredWidth,
     height: configuredHeight,
     bitsPerPixel: 32,
+    lineLength: configuredWidth * 4,
     redOffset: 16,
     redLength: 8,
     greenOffset: 8,
@@ -127,42 +136,69 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
 proc render*(self: Driver, image: Image) =
   if self.isNil:
     return
-  let imageData = image.data
   let bitsPerPixel = self.screenInfo.bitsPerPixel
   if self.screenInfo.width == 0 or self.screenInfo.height == 0 or bitsPerPixel == 0:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Invalid framebuffer screen info",
         "screenInfo": self.screenInfo})
     return
-  try:
-    var fb = open(DEVICE, fmWrite, (self.screenInfo.width *
-          self.screenInfo.height * bitsPerPixel div 8).int)
-    if bitsPerPixel == 16:
-      var
-        buffer: seq[uint16] = newSeq[uint16](len(imageData))
-      for i, color in imageData:
-        buffer[i] = ((uint16(color.r) shr 3) shl 11) or ((uint16(
-            color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
-      discard fb.writeBuffer(addr buffer[0], buffer.len * sizeof(uint16))
-    elif bitsPerPixel == 24 or bitsPerPixel == 32:
-      var bytesPerPixel = int(bitsPerPixel shr 3) # 24bpp = 3, 32bpp = 4
-      var buffer: seq[uint8] = newSeq[uint8](len(imageData) * bytesPerPixel)
-      for i, color in imageData:
-        let j = i * bytesPerPixel
-        buffer[j + int(self.screenInfo.redOffset) div 8] = color.r
-        buffer[j + int(self.screenInfo.greenOffset) div 8] = color.g
-        buffer[j + int(self.screenInfo.blueOffset) div 8] = color.b
+  if bitsPerPixel != 16 and bitsPerPixel != 24 and bitsPerPixel != 32:
+    logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+        "error": "Unsupported bits per pixel",
+        "bpp": bitsPerPixel})
+    return
 
-        # Framebuffer could be 32bpp with 0 length alpha (effectively 24bpp)
-        # or 24bpp with 0 length alpha
-        if self.screenInfo.alphaLength > 0:
-          buffer[j + int(self.screenInfo.alphaOffset) div 8] = color.a
-
-      discard fb.writeBytes(buffer, 0, len(buffer))
-    else:
+  let width = self.screenInfo.width.int
+  let height = self.screenInfo.height.int
+  var renderImage = image
+  if image.width != width or image.height != height:
+    if not self.sizeMismatchLogged:
+      self.sizeMismatchLogged = true
       logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-          "error": "Unsupported bits per pixel",
-          "bpp": bitsPerPixel})
+          "warning": "Rendered image does not match framebuffer resolution, scaling to fit",
+          "imageWidth": image.width, "imageHeight": image.height,
+          "screenInfo": self.screenInfo})
+    renderImage = image.resize(width, height)
+  let imageData = renderImage.data
+
+  let bytesPerPixel = int(bitsPerPixel) div 8
+  let rowBytes = width * bytesPerPixel
+  # The framebuffer can pad each row; skip the padding bytes when writing
+  let lineLength = if self.screenInfo.lineLength.int >= rowBytes: self.screenInfo.lineLength.int
+    else: rowBytes
+  try:
+    var buffer: seq[uint8] = newSeq[uint8](lineLength * height)
+    if bitsPerPixel == 16:
+      for y in 0 ..< height:
+        var j = y * lineLength
+        for x in 0 ..< width:
+          let color = imageData[y * width + x]
+          let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(
+              color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
+          buffer[j] = uint8(pixel and 0xff)
+          buffer[j + 1] = uint8(pixel shr 8)
+          j += 2
+    else:
+      let redByte = int(self.screenInfo.redOffset) div 8
+      let greenByte = int(self.screenInfo.greenOffset) div 8
+      let blueByte = int(self.screenInfo.blueOffset) div 8
+      let alphaByte = int(self.screenInfo.alphaOffset) div 8
+      for y in 0 ..< height:
+        var j = y * lineLength
+        for x in 0 ..< width:
+          let color = imageData[y * width + x]
+          buffer[j + redByte] = color.r
+          buffer[j + greenByte] = color.g
+          buffer[j + blueByte] = color.b
+
+          # Framebuffer could be 32bpp with 0 length alpha (effectively 24bpp)
+          # or 24bpp with 0 length alpha
+          if self.screenInfo.alphaLength > 0:
+            buffer[j + alphaByte] = color.a
+          j += bytesPerPixel
+
+    var fb = open(DEVICE, fmWrite, buffer.len)
+    discard fb.writeBuffer(addr buffer[0], buffer.len)
     fb.close()
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
