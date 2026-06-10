@@ -1,9 +1,11 @@
 import { useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowPathIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, MagnifyingGlassPlusIcon } from '@heroicons/react/24/outline'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
+import { urls } from '../urls'
 
 const placeholderRefreshAttempts = new Set<string>()
 
@@ -81,6 +83,27 @@ export function FrameImageRefreshButton({
       )}
     >
       <ArrowPathIcon className="h-4 w-4" />
+    </button>
+  )
+}
+
+export function FrameImagePreviewButton({ frameId, className }: { frameId: number; className?: string }) {
+  return (
+    <button
+      type="button"
+      title="Open preview"
+      aria-label="Open preview"
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        router.actions.push(urls.frame(frameId, 'preview'))
+      }}
+      className={clsx(
+        'absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg bg-white/60 text-slate-500 opacity-70 shadow-sm ring-1 ring-slate-200/70 backdrop-blur transition hover:bg-white/90 hover:text-slate-800 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        className
+      )}
+    >
+      <MagnifyingGlassPlusIcon className="h-4 w-4" />
     </button>
   )
 }

@@ -19,7 +19,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
-import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImage } from '../../components/FrameImage'
 import {
   formatFrameRelativeTime,
   frameHost,
@@ -44,7 +44,7 @@ import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
-import { FrameLiveBadge } from './FrameLiveBadge'
+import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
@@ -528,6 +528,10 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
 function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: boolean }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
+  const openPreview = (): void => {
+    hideForm()
+    openFrameTool(frame.id, 'preview')
+  }
 
   return (
     <div
@@ -538,30 +542,21 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
           : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
       )}
     >
-      <button
-        type="button"
-        onClick={() => {
-          hideForm()
-          openFrameTool(frame.id, 'preview')
-        }}
-        className="flex w-full flex-col text-left focus:outline-none"
-      >
-        <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
-          <FrameImage
-            frameId={frame.id}
-            refreshable={false}
-            objectFit="contain"
-            className="h-full w-full rounded-none"
-          />
-          <FrameLiveBadge frame={frame} className="right-3 top-3" />
-        </div>
-        <div className="px-4 py-3">
-          <div className="frameos-muted text-xs text-slate-500">
-            Last rendered image from {frame.name || frameHost(frame)}
-          </div>
+      <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
+        <button
+          type="button"
+          aria-label="Open preview"
+          onClick={openPreview}
+          className="absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        />
+        <FrameImageOverlayControls frame={frame} />
+      </div>
+      <button type="button" onClick={openPreview} className="block w-full px-4 py-3 text-left focus:outline-none">
+        <div className="frameos-muted text-xs text-slate-500">
+          Last rendered image from {frame.name || frameHost(frame)}
         </div>
       </button>
-      <FrameImageRefreshButton frameId={frame.id} />
     </div>
   )
 }
@@ -682,9 +677,11 @@ function SceneControlPanelContent({
   const { frames } = useValues(framesModel)
   const { closeSceneControl } = useActions(workspaceLogic)
   const frame = frames[sceneControlSelection.frameId]
-  const { sceneId: currentSceneId, uploadedScenes, uploadedScenesLoading } = useValues(
-    controlLogic({ frameId: sceneControlSelection.frameId })
-  )
+  const {
+    sceneId: currentSceneId,
+    uploadedScenes,
+    uploadedScenesLoading,
+  } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
 
   if (!frame) {
     return null
@@ -701,9 +698,7 @@ function SceneControlPanelContent({
               <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                 {frame.name || frameHost(frame)}
               </div>
-              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
-                Active scene
-              </h2>
+              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Active scene</h2>
             </div>
             <button
               type="button"
@@ -762,7 +757,7 @@ function SceneControlPanelContent({
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
-                {selectedSceneIsActive ? <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} /> : null}
+                {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
                 {scene.settings?.execution !== 'interpreted' ? (
                   <div className="absolute left-2 top-10 z-10">
                     <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />

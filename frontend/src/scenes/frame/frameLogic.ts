@@ -542,9 +542,22 @@ function normalizeTimezoneForComparison(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function normalizeAgentForComparison(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  return {
+    agentEnabled: Boolean(source.agentEnabled),
+    agentRunCommands: Boolean(source.agentRunCommands),
+    agentSharedSecret: source.agentSharedSecret ?? '',
+  }
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'image_engine') {
     return value ?? ''
+  }
+
+  if (key === 'agent') {
+    return normalizeAgentForComparison(value)
   }
 
   if (key === 'timezone') {

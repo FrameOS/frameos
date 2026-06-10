@@ -15,7 +15,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
-import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImage } from '../../components/FrameImage'
 import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
@@ -25,7 +25,7 @@ import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
-import { FrameLiveBadge } from './FrameLiveBadge'
+import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
@@ -200,6 +200,9 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
     sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
+  const openLivePreview = (): void => {
+    openLiveSceneControl(frame.id, liveSceneControlId)
+  }
 
   return (
     <div
@@ -211,30 +214,22 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
       )}
       style={previewSizing?.cardStyle ?? { maxWidth: `${framePreviewMaxWidthRem}rem` }}
     >
-      <button
-        type="button"
-        onClick={() => {
-          openLiveSceneControl(frame.id, liveSceneControlId)
-        }}
-        className="block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      <div
+        className={clsx(
+          'frameos-card-media relative flex w-full min-h-0 items-center justify-center bg-slate-100',
+          !previewSizing && 'h-64 max-h-[32rem]'
+        )}
+        style={previewSizing?.imageStyle}
       >
-        <div
-          className={clsx(
-            'frameos-card-media relative flex w-full min-h-0 items-center justify-center bg-slate-100',
-            !previewSizing && 'h-64 max-h-[32rem]'
-          )}
-          style={previewSizing?.imageStyle}
-        >
-          <FrameImage
-            frameId={frame.id}
-            refreshable={false}
-            objectFit="contain"
-            className="h-full w-full rounded-none"
-          />
-          <FrameLiveBadge frame={frame} className="right-3 top-3" />
-        </div>
-      </button>
-      <FrameImageRefreshButton frameId={frame.id} />
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
+        <button
+          type="button"
+          aria-label="Open scene preview"
+          onClick={openLivePreview}
+          className="absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        />
+        <FrameImageOverlayControls frame={frame} />
+      </div>
       <div className="frameos-divider border-t border-slate-200/80 px-3 py-3">
         <div className="min-w-0 text-sm">
           <div className="frameos-strong truncate font-semibold text-slate-800">
@@ -308,7 +303,9 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               </span>
             ) : null}
             {connected ? (
-              <FrameConnectionDot title={healthy ? 'Frame is healthy and agent connected' : 'FrameOS agent connected'} />
+              <FrameConnectionDot
+                title={healthy ? 'Frame is healthy and agent connected' : 'FrameOS agent connected'}
+              />
             ) : healthy ? (
               <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
             ) : null}

@@ -1090,6 +1090,46 @@ async def test_api_frame_new_buildroot_defaults(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_buildroot_accepts_root_password_and_ssh_keys(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-2-w",
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+        "ssh_pass": "secret-root-password",
+        "ssh_keys": ["main", "main", "", "backup"],
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'buildroot'
+    assert frame['ssh_pass'] == 'secret-root-password'
+    assert frame['ssh_keys'] == ["main", "backup"]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_preserves_empty_ssh_key_selection(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-2-w",
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+        "ssh_keys": [],
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    assert response.json()['frame']['ssh_keys'] == []
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client):
     payload = {
         "mode": "buildroot",
@@ -1273,6 +1313,47 @@ async def test_api_frame_buildroot_sd_image_status_allows_precompiled_when_base_
 
     assert response.status_code == 200
     assert response.json()['sdImage']['status'] == 'idle'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_status_marks_inactive_build_failed(async_client, db, redis, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    stale_at = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'building',
+            'requestId': 'request123',
+            'queueJobId': 'buildroot_sd_image:1:request123',
+            'startedAt': stale_at,
+            'lastHeartbeatAt': stale_at,
+        },
+    }
+    db.add(frame)
+    db.commit()
+
+    async def fake_resolve_buildroot_base_entry(*_args, **_kwargs):
+        return None
+
+    async def fake_queue_job_active(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(frames_api, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+    monkeypatch.setattr(buildroot_image_module, "_buildroot_sd_image_queue_job_active", fake_queue_job_active)
+
+    response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    sd_image = response.json()['sdImage']
+    assert sd_image['status'] == 'error'
+    assert 'stopped updating' in sd_image['error']
+    db.expire_all()
+    stored = db.get(Frame, frame.id).buildroot['sdImage']
+    assert stored['status'] == 'error'
+    assert 'completedAt' in stored
 
 
 @pytest.mark.asyncio

@@ -16,14 +16,16 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { Spinner } from '../../components/Spinner'
+import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
 import { buildrootPlatforms, devices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
-import type { FrameType, LogType } from '../../types'
+import type { FrameOSSettings, FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { normalizedTimezone } from '../../utils/timezone'
 import {
   frameLogic,
@@ -139,6 +141,21 @@ function formatDeployPlanLogTimestamp(timestamp: string): string {
     return ''
   }
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function effectiveSshKeyIds(frame: FrameType, frameForm: Partial<FrameType>, settings: FrameOSSettings): string[] {
+  if (frameForm.ssh_keys !== undefined) {
+    return frameForm.ssh_keys ?? []
+  }
+  if (frame.ssh_keys !== undefined && frame.ssh_keys !== null) {
+    return frame.ssh_keys
+  }
+
+  const defaultIds = getDefaultSshKeyIds(settings.ssh_keys)
+  if (defaultIds.length > 0) {
+    return defaultIds
+  }
+  return normalizeSshKeys(settings.ssh_keys).keys.map((key) => key.id)
 }
 
 function deployPlanLogTone(
@@ -386,7 +403,7 @@ function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
       {frameosVersionChange.previousVersion ? (
         <FrameosReleaseLink version={frameosVersionChange.previousVersion} />
       ) : (
-        'unknown'
+        'unreported'
       )}{' '}
       -&gt; <FrameosReleaseLink version={frameosVersionChange.currentVersion} />
     </>
@@ -504,7 +521,7 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
 }
 
 function agentUpgradeLabel(notice: AgentUpgradeNotice): string {
-  return `${notice.previousVersion ?? 'unknown'} to ${notice.currentVersion}`
+  return `${notice.previousVersion ?? 'unreported'} to ${notice.currentVersion}`
 }
 
 function AgentUpgradeIndicator({ notice }: { notice: AgentUpgradeNotice }): JSX.Element {
@@ -753,6 +770,7 @@ function BuildrootSdCardSection({
   defaultTimezone?: string | null
 }): JSX.Element {
   const { setFrameFormValues, touchFrameFormField } = useActions(frameLogic({ frameId: frame.id }))
+  const { savedSettings } = useValues(settingsLogic)
   const network = frameForm.network ?? frame.network ?? {}
   const buildroot = frameForm.buildroot ?? frame.buildroot ?? {}
   const serverHost = frameForm.server_host ?? frame.server_host ?? ''
@@ -760,6 +778,9 @@ function BuildrootSdCardSection({
   const device = frameForm.device ?? frame.device ?? 'web_only'
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
   const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
+  const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
+  const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
+  const selectedSshKeys = new Set(effectiveSshKeyIds(frame, frameForm, savedSettings))
   const updateFrameValue = <K extends keyof FrameType>(field: K, value: FrameType[K]): void => {
     setFrameFormValues({ [field]: value } as Partial<FrameType>)
     touchFrameFormField(String(field))
@@ -858,6 +879,46 @@ function BuildrootSdCardSection({
               ))}
             </select>
           </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide">
+              Root password
+              {!rootPassword ? <span className="ml-1 text-red-500">Empty password is unsafe</span> : null}
+            </span>
+            <TextInput
+              value={rootPassword}
+              onChange={(value) => updateFrameValue('ssh_pass', value)}
+              type="password"
+              placeholder="Root password"
+              autoComplete="new-password"
+            />
+          </label>
+          <div className="space-y-2">
+            <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">SSH keys</div>
+            {sshKeyOptions.length === 0 ? (
+              <div className="text-sm text-slate-500">No SSH keys configured in settings.</div>
+            ) : (
+              <div className="space-y-2 frame-tool-panel">
+                {sshKeyOptions.map((key) => (
+                  <div key={key.id} className="flex min-w-0 items-center gap-2">
+                    <Switch
+                      value={selectedSshKeys.has(key.id)}
+                      onChange={(value) => {
+                        const next = new Set(selectedSshKeys)
+                        if (value) {
+                          next.add(key.id)
+                        } else {
+                          next.delete(key.id)
+                        }
+                        updateFrameValue('ssh_keys', Array.from(next))
+                      }}
+                    />
+                    <div className="min-w-0 flex-1 truncate text-sm text-slate-700">{key.name || key.id}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <label className="block space-y-1">
             <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">WiFi network</span>
             <TextInput
@@ -1054,6 +1115,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         mode: 'buildroot',
         assets_path: '/srv/assets',
         device: frameForm.device ?? frame.device,
+        ssh_pass: frameForm.ssh_pass ?? frame.ssh_pass ?? '',
+        ssh_keys: effectiveSshKeyIds(frame, frameForm, savedSettings),
         server_host: frameForm.server_host ?? frame.server_host,
         server_port: frameForm.server_port ?? frame.server_port,
         timezone: normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone),

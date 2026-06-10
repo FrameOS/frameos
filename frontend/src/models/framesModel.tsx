@@ -95,6 +95,7 @@ function startBrowserDownload(path: string): void {
 }
 
 const pendingSdCardImageDownloads = new Set<number>()
+const sdCardImageStatusPollsInFlight = new Set<number>()
 const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
@@ -116,6 +117,47 @@ function stopSdCardImageProgress(frameId: number): void {
   sdCardImageProgressTimers.delete(frameId)
 }
 
+async function pollSdCardImageStatus(frameId: number, downloadUrl?: string): Promise<void> {
+  if (!pendingSdCardImageDownloads.has(frameId) || sdCardImageStatusPollsInFlight.has(frameId)) {
+    return
+  }
+  sdCardImageStatusPollsInFlight.add(frameId)
+  try {
+    const response = await apiFetch(`/api/frames/${frameId}/buildroot/sd_image`)
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    const sdImage = data?.sdImage as NonNullable<NonNullable<FrameType['buildroot']>['sdImage']> | undefined
+    if (!sdImage || !pendingSdCardImageDownloads.has(frameId)) {
+      return
+    }
+    if (sdImage.status === 'ready') {
+      pendingSdCardImageDownloads.delete(frameId)
+      stopSdCardImageProgress(frameId)
+      startBrowserDownload(sdImage.downloadUrl || downloadUrl || `/api/frames/${frameId}/buildroot/sd_image/download`)
+      framesModel.actions.loadFrame(frameId)
+      longRunningTasksModel.actions.finishTask({
+        frameId,
+        kind: 'buildrootImage',
+        status: 'success',
+        detail: 'SD card image ready',
+      })
+    } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
+      pendingSdCardImageDownloads.delete(frameId)
+      stopSdCardImageProgress(frameId)
+      framesModel.actions.loadFrame(frameId)
+      longRunningTasksModel.actions.taskFailed({
+        frameId,
+        kind: 'buildrootImage',
+        detail: sdImage.error || 'SD card image generation failed',
+      })
+    }
+  } finally {
+    sdCardImageStatusPollsInFlight.delete(frameId)
+  }
+}
+
 function startSdCardImageProgress(frameId: number): void {
   stopSdCardImageProgress(frameId)
   if (typeof window === 'undefined') {
@@ -134,6 +176,7 @@ function startSdCardImageProgress(frameId: number): void {
       progressTotal: null,
       detail: sdCardImageProgressDetail(startedAt),
     })
+    void pollSdCardImageStatus(frameId)
   }
   sdCardImageProgressTimers.set(frameId, window.setInterval(updateProgressDetail, SD_CARD_IMAGE_PROGRESS_INTERVAL_MS))
 }
@@ -454,6 +497,7 @@ export const framesModel = kea<framesModelType>([
           })
           return
         }
+        void pollSdCardImageStatus(id, downloadUrl)
       } catch (error) {
         pendingSdCardImageDownloads.delete(id)
         stopSdCardImageProgress(id)

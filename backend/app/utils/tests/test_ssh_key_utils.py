@@ -123,6 +123,20 @@ def test_select_ssh_keys_for_frame_returns_none_when_selection_is_missing():
     assert select_ssh_keys_for_frame(frame, settings) == []
 
 
+def test_select_ssh_keys_for_frame_respects_empty_selection():
+    settings = {
+        "ssh_keys": {
+            "keys": [
+                {"id": "alpha", "use_for_new_frames": True},
+                {"id": "beta"},
+            ]
+        }
+    }
+    frame = DummyFrame(ssh_keys=[])
+
+    assert select_ssh_keys_for_frame(frame, settings) == []
+
+
 def test_select_ssh_keys_for_frame_returns_all_when_no_defaults():
     settings = {"ssh_keys": {"keys": [{"id": "alpha"}, {"id": "beta"}]}}
     frame = DummyFrame()

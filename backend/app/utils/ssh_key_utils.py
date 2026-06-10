@@ -52,7 +52,7 @@ def ssh_key_map(settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def select_ssh_keys_for_frame(frame, settings: dict[str, Any]) -> list[dict[str, Any]]:
     keys = normalize_ssh_keys(settings)
-    if getattr(frame, "ssh_keys", None):
+    if getattr(frame, "ssh_keys", None) is not None:
         return [key for key in keys if key["id"] in (frame.ssh_keys or [])]
     use_for_new = [key for key in keys if key.get("use_for_new_frames")]
     if use_for_new:

@@ -44,6 +44,7 @@ from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_ve
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_HOSTNAME_FILE,
+    BOOT_ROOT_PASSWORD_FILE,
     BOOT_WIFI_CONNECTION_FILE,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
@@ -74,8 +75,8 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
-BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 15
+BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 16
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
 BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
@@ -163,8 +164,16 @@ BUILDROOT_SKIP_PULL = os.environ.get(
 BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_BUILDROOT_IMAGE_STALE_AFTER_SECONDS", str(6 * 60 * 60))
 )
+# Building jobs heartbeat through progress logs. After two missed progress updates,
+# the UI should surface a real failure instead of waiting indefinitely.
 BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS = int(
-    os.environ.get("FRAMEOS_BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", str(10 * 60))
+    os.environ.get(
+        "FRAMEOS_BUILDROOT_IMAGE_BUILD_INACTIVE_AFTER_SECONDS",
+        os.environ.get("FRAMEOS_BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", str(90)),
+    )
+)
+BUILDROOT_IMAGE_QUEUE_INACTIVE_AFTER_SECONDS = int(
+    os.environ.get("FRAMEOS_BUILDROOT_IMAGE_QUEUE_INACTIVE_AFTER_SECONDS", str(10 * 60))
 )
 BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS = max(1, min(60, BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS // 3))
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
@@ -635,6 +644,40 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
     if sd_image.get("status") == "ready" and isinstance(path, str) and not Path(path).is_file():
         return {**sd_image, "status": "missing", "error": "The generated image file is missing"}
     return sd_image
+
+
+async def refresh_buildroot_sd_image_status(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    current_base_entry: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    sd_image = latest_buildroot_sd_image(frame, current_base_entry)
+    if not sd_image or sd_image.get("status") not in ACTIVE_SD_IMAGE_STATUSES:
+        return sd_image
+    if await _buildroot_sd_image_queue_job_active(redis, sd_image):
+        return sd_image
+
+    checked_at = _utc_now()
+    error = (
+        "SD card image generation stopped updating. "
+        "The worker process probably exited; start the SD card build again."
+    )
+    recovered = {
+        **sd_image,
+        "status": "error",
+        "error": error,
+        "completedAt": checked_at,
+    }
+    await log(
+        db,
+        redis,
+        int(frame.id),
+        "stderr",
+        f"Marking Buildroot SD image generation as failed: {error}",
+    )
+    await _set_sd_image_status(db, redis, frame, recovered)
+    return recovered
 
 
 def can_use_precompiled_buildroot_sd_image(frame: Frame) -> bool:
@@ -1247,6 +1290,7 @@ class BuildrootImageBuilder:
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
+        self._write_boot_root_password(boot_overlay_dir / Path(BOOT_ROOT_PASSWORD_FILE).name)
 
     def _stage_font_assets(self, assets_dir: Path) -> None:
         if getattr(self.frame, "upload_fonts", "") == "none":
@@ -1326,6 +1370,20 @@ class BuildrootImageBuilder:
         authorized_keys.parent.mkdir(parents=True, exist_ok=True)
         authorized_keys.write_text("\n".join(dict.fromkeys(public_keys)) + "\n", encoding="utf-8")
         os.chmod(authorized_keys, 0o600)
+
+    def _write_boot_root_password(self, root_password_file: Path) -> None:
+        password = getattr(self.frame, "ssh_pass", None)
+        if password is None:
+            return
+        password = str(password)
+        if not password:
+            root_password_file.unlink(missing_ok=True)
+            return
+        if "\n" in password or "\r" in password:
+            raise ValueError("Root user password cannot contain line breaks")
+        root_password_file.parent.mkdir(parents=True, exist_ok=True)
+        root_password_file.write_text(password, encoding="utf-8")
+        os.chmod(root_password_file, 0o600)
 
     def _write_boot_wifi_connection(self, path: Path) -> None:
         ssid, password = validate_buildroot_wifi_credentials(self.frame)
@@ -2790,7 +2848,7 @@ async def _buildroot_sd_image_queue_job_active(redis: Redis, sd_image: dict[str,
         status = await Job(job_id, redis).status()
         return status in ACTIVE_ARQ_JOB_STATUSES and not _sd_image_inactive(sd_image)
     except Exception:
-        return not _sd_image_state_stale(sd_image)
+        return not _sd_image_inactive(sd_image)
 
 
 def _sd_image_inactive(sd_image: dict[str, Any]) -> bool:
@@ -2798,7 +2856,13 @@ def _sd_image_inactive(sd_image: dict[str, Any]) -> bool:
     if timestamp is None:
         return True
     age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
-    return age_seconds > BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS
+    return age_seconds > _sd_image_inactive_after_seconds(sd_image)
+
+
+def _sd_image_inactive_after_seconds(sd_image: dict[str, Any]) -> int:
+    if sd_image.get("status") == "queued":
+        return BUILDROOT_IMAGE_QUEUE_INACTIVE_AFTER_SECONDS
+    return BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS
 
 
 def _sd_image_state_stale(sd_image: dict[str, Any]) -> bool:

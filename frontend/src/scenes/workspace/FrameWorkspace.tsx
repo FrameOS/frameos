@@ -15,7 +15,7 @@ import {
   Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
-import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
@@ -23,6 +23,7 @@ import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
@@ -368,10 +369,7 @@ function FrameSelector({
               </optgroup>
             ))}
           </select>
-          <FrameMetricAlertIndicator
-            frame={frame}
-            containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
-          />
+          <FrameMetricAlertIndicator frame={frame} containerClassName="absolute right-7 top-1/2 -translate-y-1/2" />
         </div>
         <FrameActionsMenu
           frame={frame}
@@ -1224,7 +1222,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             style={frameAspectRatio ? { aspectRatio: frameAspectRatio } : undefined}
           >
             <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full" />
-            <FrameImageRefreshButton frameId={frame.id} />
+            <FrameImageOverlayControls frame={frame} />
           </div>
         </div>
       </div>
@@ -1246,14 +1244,7 @@ function FrameToolSurface({
   pageScroll: boolean
 }): JSX.Element {
   if (activeTool === 'overview') {
-    return (
-      <FrameDashboardSurface
-        frame={frame}
-        scenes={scenes}
-        totalScenes={totalScenes}
-        showSceneMenus
-      />
-    )
+    return <FrameDashboardSurface frame={frame} scenes={scenes} totalScenes={totalScenes} showSceneMenus />
   }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
@@ -1291,8 +1282,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const activeTool =
     frameToolDefinitions.find(
       (definition) => definition.panel === (frameToolPanelFromSearchParams(searchParams) ?? utilityPanel)
-    ) ??
-    frameToolDefinitions[0]
+    ) ?? frameToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)

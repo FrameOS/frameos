@@ -34,7 +34,9 @@ from app.tasks.buildroot_image import (
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import (
+    BOOT_ROOT_PASSWORD_FILE,
     DEFAULT_SETUP_JSON_RESET_FILE_PATH,
+    render_setup_json_reset_service,
     render_setup_json_reset_script,
     setup_json_reset_file_path,
 )
@@ -118,6 +120,59 @@ async def test_buildroot_sd_image_queue_job_active_keeps_recent_heartbeat(monkey
     assert active is True
 
 
+@pytest.mark.asyncio
+async def test_buildroot_sd_image_queue_job_active_status_error_uses_heartbeat(monkeypatch):
+    class FakeJob:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def status(self):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(buildroot_image_module, "Job", FakeJob)
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", 60)
+
+    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+    active = await buildroot_image_module._buildroot_sd_image_queue_job_active(
+        None,
+        {
+            "queueJobId": "buildroot_sd_image:1:stale",
+            "status": "building",
+            "startedAt": stale_at,
+            "lastHeartbeatAt": stale_at,
+        },
+    )
+
+    assert active is False
+
+
+@pytest.mark.asyncio
+async def test_buildroot_sd_image_queue_job_active_uses_queue_grace_period(monkeypatch):
+    class FakeJob:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def status(self):
+            return buildroot_image_module.JobStatus.queued
+
+    monkeypatch.setattr(buildroot_image_module, "Job", FakeJob)
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS", 60)
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_IMAGE_QUEUE_INACTIVE_AFTER_SECONDS", 600)
+
+    queued_at = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+    active = await buildroot_image_module._buildroot_sd_image_queue_job_active(
+        None,
+        {
+            "queueJobId": "buildroot_sd_image:1:queued",
+            "status": "queued",
+            "startedAt": queued_at,
+            "queuedAt": queued_at,
+        },
+    )
+
+    assert active is True
+
+
 def test_buildroot_frameos_cross_target_uses_docker_arm64_platform(tmp_path, monkeypatch):
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
 
@@ -154,17 +209,23 @@ def test_buildroot_network_manager_connection_contains_wifi_credentials():
 
 def test_buildroot_firstboot_setup_uses_with_setup_command():
     script = render_setup_json_reset_script("/boot/frameos-setup.json")
+    service = render_setup_json_reset_service("/boot/frameos-setup.json")
 
     assert "/srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
     assert "sudo -E /srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
     assert "LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes" in script
     assert "mount -o remount,rw /" in script
+    assert "root:%s" in script
+    assert "chpasswd" in script
+    assert 'DROPBEAR_ARGS=""' in script
+    assert f"rm -f {BOOT_ROOT_PASSWORD_FILE}" in script
     assert "frameos-setup-reset.log" in script
     assert "leaving $SETUP_FILE in place for retry" in script
     assert "request_reboot()" in script
     assert "systemctl reboot" in script
     assert "Reboot command accepted" in script
     assert "with status 0 (reboot requested)" in script
+    assert "Before=dropbear.service frameos.service frameos_agent.service" in service
     assert "--from-file" not in script
 
 
@@ -1298,6 +1359,46 @@ def test_buildroot_writes_authorized_keys_to_boot_overlay(tmp_path, monkeypatch)
         "ssh-ed25519 AAA-main frameos\n"
     )
     assert oct(authorized_keys.stat().st_mode & 0o777) == "0o600"
+
+
+def test_buildroot_writes_root_password_to_boot_overlay(tmp_path):
+    root_password = tmp_path / "boot" / "frameos-root-password"
+    builder = BuildrootImageBuilder(
+        db=object(),
+        redis=None,
+        frame=SimpleNamespace(id=1, ssh_pass="secret-root-password"),
+    )
+
+    builder._write_boot_root_password(root_password)
+
+    assert root_password.read_text(encoding="utf-8") == "secret-root-password"
+    assert oct(root_password.stat().st_mode & 0o777) == "0o600"
+
+
+def test_buildroot_skips_empty_root_password(tmp_path):
+    root_password = tmp_path / "boot" / "frameos-root-password"
+    root_password.parent.mkdir(parents=True)
+    root_password.write_text("old", encoding="utf-8")
+    builder = BuildrootImageBuilder(
+        db=object(),
+        redis=None,
+        frame=SimpleNamespace(id=1, ssh_pass=""),
+    )
+
+    builder._write_boot_root_password(root_password)
+
+    assert not root_password.exists()
+
+
+def test_buildroot_rejects_root_password_with_line_breaks(tmp_path):
+    builder = BuildrootImageBuilder(
+        db=object(),
+        redis=None,
+        frame=SimpleNamespace(id=1, ssh_pass="bad\npassword"),
+    )
+
+    with pytest.raises(ValueError, match="Root user password"):
+        builder._write_boot_root_password(tmp_path / "frameos-root-password")
 
 
 def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, monkeypatch):

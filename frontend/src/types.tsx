@@ -151,6 +151,8 @@ export interface NewFrameFormType {
   device?: string | null
   timezone?: string | null
   server_host?: string | null
+  ssh_pass?: string | null
+  ssh_keys?: string[]
   platform?: string | null
   agent?: {
     agentEnabled?: boolean

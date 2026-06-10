@@ -13,6 +13,7 @@ SETUP_JSON_RESET_SCRIPT_PATH = f"/usr/local/bin/{SETUP_JSON_RESET_SCRIPT_NAME}"
 BOOT_WIFI_CONNECTION_FILE = "/boot/frameos-wifi.nmconnection"
 BOOT_HOSTNAME_FILE = "/boot/frameos-hostname"
 BOOT_AUTHORIZED_KEYS_FILE = "/boot/frameos-authorized_keys"
+BOOT_ROOT_PASSWORD_FILE = "/boot/frameos-root-password"
 BOOT_SETUP_RESET_LOG_FILE = "/boot/frameos-setup-reset.log"
 
 
@@ -109,6 +110,22 @@ if [ -f {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} ]; then
   fi
 fi
 
+if [ -f {shlex.quote(BOOT_ROOT_PASSWORD_FILE)} ]; then
+  echo "Installing root password from {shlex.quote(BOOT_ROOT_PASSWORD_FILE)}"
+  root_password="$(cat {shlex.quote(BOOT_ROOT_PASSWORD_FILE)})"
+  if [ -n "$root_password" ]; then
+    if printf 'root:%s\\n' "$root_password" | chpasswd; then
+      install -d -m 755 /etc/default
+      printf '%s\\n' 'DROPBEAR_ARGS=""' > /etc/default/dropbear
+      rm -f {shlex.quote(BOOT_ROOT_PASSWORD_FILE)}
+    else
+      echo "Warning: failed to install root password"
+    fi
+  else
+    echo "Warning: root password file is empty"
+  fi
+fi
+
 export FRAMEOS_HOME=/srv/frameos/current
 export LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib
 
@@ -164,7 +181,7 @@ def render_setup_json_reset_service(setup_file_path: str, script_path: str = SET
 Description=FrameOS setup JSON reset
 DefaultDependencies=no
 After=local-fs.target systemd-sysusers.service
-Before=frameos.service frameos_agent.service
+Before=dropbear.service frameos.service frameos_agent.service
 RequiresMountsFor=/boot /srv/frameos
 ConditionPathExists={quoted_setup_file_path}
 

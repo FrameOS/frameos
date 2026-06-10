@@ -127,6 +127,7 @@ from app.tasks.buildroot_image import (
     ensure_buildroot_frame_defaults,
     latest_buildroot_sd_image,
     normalize_buildroot_platform,
+    refresh_buildroot_sd_image_status,
     resolve_buildroot_base_entry,
     start_buildroot_sd_image,
     validate_buildroot_network,
@@ -2406,7 +2407,11 @@ async def api_frame_deploy_event(
 
 
 @api_project.get("/frames/{id:int}/buildroot/sd_image")
-async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get_db)):
+async def api_frame_buildroot_sd_image_status(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
@@ -2424,7 +2429,7 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
         if not can_use_precompiled_buildroot_sd_image(frame):
             raise
     return {
-        "sdImage": latest_buildroot_sd_image(frame, base_entry)
+        "sdImage": await refresh_buildroot_sd_image_status(db, redis, frame, base_entry)
         or {
             "status": "idle",
             "platform": platform,
@@ -2807,7 +2812,11 @@ async def api_frame_new(
             project_id=project_id,
         )
 
-        frame.ssh_keys = default_ssh_key_ids(settings) or None
+        if data.ssh_keys is not None:
+            frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))
+        else:
+            frame.ssh_keys = default_ssh_key_ids(settings) or None
+        frame.ssh_pass = data.ssh_pass
 
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":

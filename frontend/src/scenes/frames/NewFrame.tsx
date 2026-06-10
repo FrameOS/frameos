@@ -16,6 +16,8 @@ import { timezoneOptions } from '../../decorators/timezones'
 import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
 import { Checkbox } from '../../components/Checkbox'
+import { Switch } from '../../components/Switch'
+import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -90,6 +92,14 @@ function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameForm
     wifiSSID: settings.defaults?.wifiSSID ?? '',
     wifiPassword: settings.defaults?.wifiPassword ?? '',
   }
+}
+
+function defaultInstallSshKeyIds(settings: FrameOSSettings): string[] {
+  const defaultIds = getDefaultSshKeyIds(settings.ssh_keys)
+  if (defaultIds.length > 0) {
+    return defaultIds
+  }
+  return normalizeSshKeys(settings.ssh_keys).keys.map((key) => key.id)
 }
 
 function setInstallMethodValues(
@@ -169,6 +179,9 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const installMethod = newFrame.install_method
   const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
+  const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
+  const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
+  const rootPassword = newFrame.ssh_pass ?? ''
 
   const cancel = () => {
     setFile(null)
@@ -440,6 +453,50 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderDeviceOptions()}
             </select>
           </FormField>
+          <FormField
+            label={
+              <span>
+                Root password
+                {!rootPassword ? <span className="ml-1 text-red-500">- Empty password is unsafe</span> : null}
+              </span>
+            }
+          >
+            <input
+              className={textInputClassName()}
+              value={rootPassword}
+              onChange={(event) => setNewFrameValue('ssh_pass', event.target.value)}
+              placeholder="Root password"
+              type="password"
+              autoComplete="new-password"
+            />
+          </FormField>
+          <div className="space-y-2">
+            <div className="frameos-form-label text-sm font-semibold text-slate-700">SSH keys</div>
+            {sshKeyOptions.length === 0 ? (
+              <div className="frameos-form-hint text-sm text-slate-500">No SSH keys configured in settings.</div>
+            ) : (
+              <div className="space-y-2 frame-tool-panel">
+                {sshKeyOptions.map((key) => (
+                  <div key={key.id} className="flex min-w-0 items-center gap-2">
+                    <Switch
+                      value={selectedSshKeys.has(key.id)}
+                      onChange={(value) => {
+                        const next = new Set(selectedSshKeys)
+                        if (value) {
+                          next.add(key.id)
+                        } else {
+                          next.delete(key.id)
+                        }
+                        setNewFrameValue('ssh_keys', Array.from(next))
+                      }}
+                    />
+                    <div className="min-w-0 flex-1 truncate text-sm text-slate-700">{key.name || key.id}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
             <input
               className={textInputClassName()}
@@ -464,7 +521,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             />
           </FormField>
           <Field name="rememberWifi">
-            <Checkbox label="Remember for next time" />
+            <Checkbox label="Remember wifi details for next time" />
           </Field>
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
