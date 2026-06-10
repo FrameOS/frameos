@@ -118,6 +118,9 @@ if [ -f {shlex.quote(BOOT_ROOT_PASSWORD_FILE)} ]; then
       install -d -m 755 /etc/default
       printf '%s\\n' 'DROPBEAR_ARGS=""' > /etc/default/dropbear
       rm -f {shlex.quote(BOOT_ROOT_PASSWORD_FILE)}
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl try-restart dropbear.service || true
+      fi
     else
       echo "Warning: failed to install root password"
     fi

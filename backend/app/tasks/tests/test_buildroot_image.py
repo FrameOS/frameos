@@ -218,6 +218,7 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "root:%s" in script
     assert "chpasswd" in script
     assert 'DROPBEAR_ARGS=""' in script
+    assert "systemctl try-restart dropbear.service" in script
     assert f"rm -f {BOOT_ROOT_PASSWORD_FILE}" in script
     assert "frameos-setup-reset.log" in script
     assert "leaving $SETUP_FILE in place for retry" in script
@@ -310,6 +311,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
     assert 'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="/work/frameos-boot-logo.png"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
+    assert "BR2_PACKAGE_SHADOW=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
     assert "BR2_PACKAGE_UTIL_LINUX=y" in config
