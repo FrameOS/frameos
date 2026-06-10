@@ -1421,6 +1421,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
                     "BR2_PACKAGE_DBUS=y",
                     "BR2_PACKAGE_DROPBEAR=y",
+                    "BR2_PACKAGE_DCRON=y",
                     "BR2_PACKAGE_SHADOW=y",
                     "BR2_PACKAGE_SUDO=y",
                     "BR2_PACKAGE_CA_CERTIFICATES=y",

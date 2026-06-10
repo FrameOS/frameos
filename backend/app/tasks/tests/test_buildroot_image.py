@@ -313,6 +313,8 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_SHADOW=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
+    assert "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y" in config
+    assert "BR2_PACKAGE_DCRON=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
     assert "BR2_PACKAGE_UTIL_LINUX=y" in config
     assert "BR2_PACKAGE_UTIL_LINUX_BINARIES=y" in config
@@ -541,6 +543,11 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     assert service_link.readlink().as_posix() == f"../{BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME}"
     assert script_path.read_text(encoding="utf-8") == render_expand_sd_card_script()
     assert oct(script_path.stat().st_mode & 0o777) == "0o755"
+    multi_user_wants = overlay / "etc" / "systemd" / "system" / "multi-user.target.wants"
+    for service in ("dcron.service", "systemd-timesyncd.service"):
+        link = multi_user_wants / service
+        assert link.is_symlink()
+        assert link.readlink().as_posix() == f"/usr/lib/systemd/system/{service}"
 
 
 def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
