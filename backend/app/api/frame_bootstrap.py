@@ -365,6 +365,16 @@ User=$agent_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
+Type=notify
+TimeoutStartSec=300
+# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+WatchdogSec=900
+# If FrameOS leaks memory, OOM-kill and restart it instead of letting the
+# device swap itself into an unreachable state.
+MemoryHigh=70%
+MemoryMax=80%
+MemorySwapMax=64M
 
 [Install]
 WantedBy=multi-user.target

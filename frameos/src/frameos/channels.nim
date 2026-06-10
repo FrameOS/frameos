@@ -32,6 +32,7 @@ else:
   import json
   import options
   import times
+  import std/atomics
   import frameos/ids
   import frameos/driver_abi
   import frameos/types
@@ -54,16 +55,24 @@ else:
 
   # Log
 
+  # Bounded: if the logger thread stalls (e.g. sending logs over a flaky
+  # network), producers must drop logs instead of growing this queue until
+  # the device swaps itself into an unreachable state.
   var logChannel*: Channel[SerializedLog]
-  logChannel.open()
+  logChannel.open(5000)
 
   var logBroadcastChannel*: Channel[SerializedLog]
   logBroadcastChannel.open(5000)
 
+  # Count of logs dropped because logChannel was full; the logger thread
+  # resets it and reports the total when it catches up.
+  var logsDroppedCounter*: Atomic[int]
+
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     let eventName = if eventPayload.kind == JObject: eventPayload{"event"}.getStr("log") else: "log"
     let payload = SerializedLog(timestamp: epochTime(), event: eventName, line: $eventPayload)
-    logChannel.send(payload)
+    if not logChannel.trySend(payload):
+      atomicInc(logsDroppedCounter)
     discard logBroadcastChannel.trySend(payload)
 
   proc debug*(message: string) =

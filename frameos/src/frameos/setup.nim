@@ -166,7 +166,17 @@ proc frameosServiceContents*(user: string, consoleOutput = false): string =
     "User=" & user & "\n" &
     "WorkingDirectory=/srv/frameos/current\n" &
     "ExecStart=/srv/frameos/current/frameos\n" &
-    "Restart=always\n"
+    "Restart=always\n" &
+    "Type=notify\n" &
+    "TimeoutStartSec=300\n" &
+    # Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+    # tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+    "WatchdogSec=900\n" &
+    # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
+    # device swap itself into an unreachable state.
+    "MemoryHigh=70%\n" &
+    "MemoryMax=80%\n" &
+    "MemorySwapMax=64M\n"
   if consoleOutput:
     result &= "StandardOutput=journal+console\n" &
       "StandardError=journal+console\n"
@@ -212,6 +222,54 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
 
   result = setupOk()
+
+proc setupSystemHardening*(): SetupResult =
+  result = setupOk()
+  if not commandExists("systemctl"):
+    setupLog("FrameOS setup: system hardening: systemctl not found, skipping")
+    return
+
+  # Hardware watchdog: reboot the device if the kernel itself locks up
+  # (e.g. brcmfmac/SDIO wifi firmware wedging the SoC on a Pi Zero 2 W).
+  setupLog("FrameOS setup: system hardening: enabling hardware watchdog")
+  try:
+    discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system.conf.d"),
+      raiseOnError = false)
+    writePrivilegedFile("/etc/systemd/system.conf.d/10-frameos-watchdog.conf",
+      "[Manager]\nRuntimeWatchdogSec=15s\nRebootWatchdogSec=2min\n")
+  except CatchableError as e:
+    setupLog("FrameOS setup: system hardening: hardware watchdog failed: " & e.msg)
+
+  # Wifi power save is a notorious source of dropouts and firmware wedges on
+  # the Pi Zero 2 W's brcmfmac chip.
+  if dirExists("/etc/NetworkManager"):
+    setupLog("FrameOS setup: system hardening: disabling wifi power save")
+    try:
+      discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/NetworkManager/conf.d"),
+        raiseOnError = false)
+      writePrivilegedFile("/etc/NetworkManager/conf.d/wifi-powersave-off.conf",
+        "[connection]\n# 2 = disable wifi power saving\nwifi.powersave = 2\n")
+    except CatchableError as e:
+      setupLog("FrameOS setup: system hardening: wifi power save failed: " & e.msg)
+
+  # The memory clamps in frameos.service need the cgroup memory controller,
+  # which Raspberry Pi OS only enables with these kernel cmdline flags.
+  for cmdlinePath in ["/boot/firmware/cmdline.txt", "/boot/cmdline.txt"]:
+    if not fileExists(cmdlinePath):
+      continue
+    try:
+      let current = readFile(cmdlinePath).strip()
+      if current.len == 0 or "\n" in current:
+        setupLog("FrameOS setup: system hardening: unexpected cmdline format in " & cmdlinePath & ", leaving as is")
+      elif "cgroup_enable=memory" in current:
+        setupLog("FrameOS setup: system hardening: memory cgroup already enabled")
+      else:
+        setupLog("FrameOS setup: system hardening: enabling memory cgroup in " & cmdlinePath)
+        writePrivilegedFile(cmdlinePath, current & " cgroup_enable=memory cgroup_memory=1\n")
+        result.rebootRequired = true
+    except CatchableError as e:
+      setupLog("FrameOS setup: system hardening: could not update " & cmdlinePath & ": " & e.msg)
+    break
 
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
@@ -330,6 +388,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupOk()
   ))
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
+  addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening()))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
     setupLog("FrameOS setup: reboot required")

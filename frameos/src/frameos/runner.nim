@@ -14,6 +14,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/boot_guard
 import frameos/runtime_diagnostics
+import frameos/watchdog
 
 import drivers/drivers as drivers
 
@@ -333,6 +334,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
   var iterations = 0
 
   while true:
+    # Heartbeat for systemd's WatchdogSec: stops when this thread hangs in a
+    # render or event handler, so a wedged runner restarts the service.
+    notifyWatchdog()
     inc iterations
     if maxIterations > 0 and iterations > maxIterations:
       break

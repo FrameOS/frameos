@@ -1,4 +1,4 @@
-import std/[json, options, times, unittest]
+import std/[atomics, json, options, times, unittest]
 
 import ../channels
 import ../types
@@ -67,6 +67,23 @@ suite "frameos channels":
     check okBroadcast
     check broadcastPayload.event == "unit"
     check logJson(broadcastPayload)["event"].getStr() == "unit"
+
+  test "log drops and counts when the channel is full":
+    discard logsDroppedCounter.exchange(0)
+    # Fill the bounded channel to capacity without a consumer.
+    var sent = 0
+    while logChannel.trySend(SerializedLog(timestamp: 1.0, event: "filler", line: "{}")):
+      inc sent
+    check sent > 0
+
+    log(%*{"event": "overflow", "value": 1})
+    check logsDroppedCounter.load() == 1
+
+    drainLogChannels()
+    discard logsDroppedCounter.exchange(0)
+    log(%*{"event": "fits-again"})
+    check logsDroppedCounter.load() == 0
+    drainLogChannels()
 
   test "triggerServerRender uses bounded queue semantics":
     triggerServerRender()
