@@ -1,14 +1,18 @@
-import os, osproc, httpclient, json, strformat, strutils, streams, times, threadpool, locks
+import os, httpclient, json, strformat, strutils, times, threadpool, locks
 import std/monotimes
 import frameos/config
 import frameos/types
 import frameos/scenes
 import frameos/channels
 import frameos/setup_proxy
+import frameos/utils/process
 
 const
   nmHotspotName = "frameos-hotspot"
   nmConnectionName = "frameos-wifi"
+  # nmcli is invoked with --wait 15; anything slower than this is wedged
+  portalCommandTimeoutMs = 60 * 1000
+  clockSyncTimeoutMs = 120 * 1000
 
 var logger: Logger
 var lastErrorLock: Lock
@@ -21,14 +25,13 @@ type
   PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.}
 
 proc defaultPortalRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
-  execCmdEx(cmd)
+  runShellCapture(cmd, timeoutMs = portalCommandTimeoutMs)
 
 proc defaultPortalNmcliConnectHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.} =
-  let p = startProcess("sudo",
-                       args = args,
-                       options = {poUsePath, poStdErrToStdOut})
-  let rc = waitForExit(p) # we know it will finish in <= 15 s
-  (rc: rc, output: p.outputStream.readAll())
+  # nmcli is passed --wait 15, so it should finish well within the timeout
+  let res = runProcessPiped("sudo", args, timeoutMs = portalCommandTimeoutMs,
+                            maxOutputBytes = 1024 * 1024)
+  (rc: res.exitCode, output: res.output & res.errorOutput)
 
 proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.}
 
@@ -244,13 +247,16 @@ proc syncClock*() =
   try:
     # Any systemd host: systemd-timesyncd one-shot
     if fileExists("/run/systemd/system"):
-      discard execShellCmd("sudo systemctl restart systemd-timesyncd.service")
+      discard runShellWithParentStreams("sudo systemctl restart systemd-timesyncd.service",
+                                        timeoutMs = clockSyncTimeoutMs)
     # Classic Debian / Raspberry Pi OS: one‑shot ntpd
     elif findExe("ntpd") != "":
-      discard execShellCmd("sudo ntpd -gq") # exits after first successful poll
+      discard runShellWithParentStreams("sudo ntpd -gq",
+                                        timeoutMs = clockSyncTimeoutMs) # exits after first successful poll
     # BusyBox systems (rare): fall back to sntp
     elif findExe("sntp") != "":
-      discard execShellCmd("sudo sntp -sS pool.ntp.org")
+      discard runShellWithParentStreams("sudo sntp -sS pool.ntp.org",
+                                        timeoutMs = clockSyncTimeoutMs)
   except CatchableError:
     echo "⚠️  Time‑sync failed – will retry later"
 

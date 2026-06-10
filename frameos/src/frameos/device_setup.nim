@@ -1,4 +1,5 @@
-import std/[os, osproc, sequtils, sets, strutils, times]
+import std/[os, sequtils, sets, strutils, times]
+import frameos/utils/process
 
 when not defined(windows):
   import posix
@@ -9,8 +10,11 @@ type
   SetupResult* = object
     rebootRequired*: bool
 
+# Setup commands can legitimately take minutes (apt, raspi-config, pip)
+const setupCommandTimeoutMs = 15 * 60 * 1000
+
 var commandRunner: SetupCommandRunner = proc(command: string): SetupCommandResult =
-  execCmdEx(command)
+  runShellCapture(command, timeoutMs = setupCommandTimeoutMs)
 
 proc setupLog*(message: string) =
   echo message
@@ -21,7 +25,7 @@ proc setSetupCommandRunnerForTest*(runner: SetupCommandRunner) =
 
 proc resetSetupCommandRunnerForTest*() =
   commandRunner = proc(command: string): SetupCommandResult =
-    execCmdEx(command)
+    runShellCapture(command, timeoutMs = setupCommandTimeoutMs)
 
 proc setupOk*(): SetupResult =
   SetupResult(rebootRequired: false)

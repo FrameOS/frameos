@@ -3,7 +3,6 @@ import pixie/fileformats/svg
 import base64
 import json
 import os
-import osproc
 import options
 import sequtils
 import strutils
@@ -162,8 +161,14 @@ proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
   if exiftool == "":
     return none(JsonNode)
   try:
-    let output = execProcess(exiftool, args = @["-j", "-n", path])
-    return parseExifJson(output)
+    let processResult = runProcessPiped(
+      exiftool,
+      @["-j", "-n", path],
+      timeoutMs = ExifToolTimeoutMs,
+      maxOutputBytes = MaxExifOutputBytes
+    )
+    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+      return parseExifJson(processResult.output)
   except CatchableError:
     discard
   return none(JsonNode)

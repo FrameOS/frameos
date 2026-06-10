@@ -3,6 +3,7 @@ import os
 import osproc
 import strformat
 import frameos/types
+import frameos/utils/process
 
 var tlsProxyProcess: Process
 
@@ -10,15 +11,7 @@ proc stopTlsProxy*(logger: Logger = nil) =
   if tlsProxyProcess == nil:
     return
 
-  try:
-    if running(tlsProxyProcess):
-      terminate(tlsProxyProcess)
-      discard waitForExit(tlsProxyProcess, 1500)
-      if running(tlsProxyProcess):
-        kill(tlsProxyProcess)
-        discard waitForExit(tlsProxyProcess, 500)
-  except CatchableError:
-    discard
+  tlsProxyProcess.stopProcess()
 
   try:
     close(tlsProxyProcess)
@@ -107,7 +100,7 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
   })
 
   try:
-    tlsProxyProcess = startProcess(
+    tlsProxyProcess = startProcessSerialized(
       "caddy",
       args = @["run", "--config", caddyfilePath, "--adapter", "caddyfile"],
       options = {poUsePath, poParentStreams}

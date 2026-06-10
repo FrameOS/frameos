@@ -1,7 +1,10 @@
-import zippy, json, os, osproc, times, strutils, net, httpclient
+import zippy, json, os, times, strutils, net, httpclient
 
 import frameos/channels
 import frameos/types
+import frameos/utils/process
+
+const GzipLogTimeoutMs = 10 * 60 * 1000
 
 type
   LoggerThread = ref object
@@ -26,12 +29,13 @@ proc gzipLogFile(path: string) =
   while fileExists(target):
     target = path & "." & $suffix & ".gz"
     suffix += 1
-  let status = if target == path & ".gz":
-    execShellCmd("gzip -f " & quoteShell(path))
+  let command = if target == path & ".gz":
+    "gzip -f " & quoteShell(path)
   else:
-    execShellCmd("gzip -c " & quoteShell(path) & " > " & quoteShell(target))
-  if status != 0:
-    echo "Error gzipping log file: gzip exited with " & $status & " for " & path
+    "gzip -c " & quoteShell(path) & " > " & quoteShell(target)
+  let gzipResult = runShellWithParentStreams(command, timeoutMs = GzipLogTimeoutMs)
+  if gzipResult.exitCode != 0:
+    echo "Error gzipping log file: gzip exited with " & $gzipResult.exitCode & " for " & path
   elif target != path & ".gz":
     try:
       removeFile(path)

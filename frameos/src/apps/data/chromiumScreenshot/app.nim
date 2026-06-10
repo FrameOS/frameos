@@ -3,7 +3,14 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 
-import os, strformat, strutils, random, json, osproc, net, sequtils
+import os, strformat, strutils, random, json, net, sequtils
+import posix except Time
+import frameos/utils/process
+
+const APT_TIMEOUT_MS = 30 * 60 * 1000
+const VENV_TIMEOUT_MS = 30 * 60 * 1000
+const BROWSER_START_TIMEOUT_MS = 60 * 1000
+const PLAYWRIGHT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
 import time
@@ -136,8 +143,7 @@ proc readPidFromFile(path: string): int =
 proc isPidAlive(pid: int): bool =
   if pid <= 0:
     return false
-  let (_, response) = execCmdEx("kill -0 " & $pid)
-  response == 0
+  posix.kill(Pid(pid), 0) == 0
 
 proc tailLog(path: string, maxLines: int = 20): string =
   if not fileExists(path):
@@ -161,32 +167,37 @@ proc isBrowserDebugPortReady(port: int): bool =
     socket.close()
 
 proc ensureSystemDependencies(self: App) =
-  let (_, pythonResponse) = execCmdEx("command -v python3")
-  let (_, chromiumHeadlessShellResponse) = execCmdEx("command -v chromium-headless-shell")
-  let (_, chromiumBrowserResponse) = execCmdEx("command -v chromium-browser")
-  let (_, chromiumResponse) = execCmdEx("command -v chromium")
+  let hasPython = findExe("python3") != ""
+  let hasChromium = findExe("chromium-headless-shell") != "" or
+      findExe("chromium-browser") != "" or findExe("chromium") != ""
 
-  if pythonResponse == 0 and (chromiumHeadlessShellResponse == 0 or chromiumBrowserResponse == 0 or chromiumResponse == 0):
+  if hasPython and hasChromium:
     return
 
   self.log "Installing Browser Snapshot system dependencies..."
-  let updateResponse = execShellCmd("sudo apt-get update")
+  let updateResponse = runShellWithParentStreams("sudo apt-get update",
+      timeoutMs = APT_TIMEOUT_MS).exitCode
   if updateResponse != 0:
     self.logError &"Error running apt-get update (response {updateResponse})"
     return
 
-  let pythonInstallResponse = execShellCmd("sudo apt-get install -y python3 python3-pip python3-venv")
+  let pythonInstallResponse = runShellWithParentStreams(
+      "sudo apt-get install -y python3 python3-pip python3-venv",
+      timeoutMs = APT_TIMEOUT_MS).exitCode
   if pythonInstallResponse != 0:
     self.logError &"Error installing Python dependencies (response {pythonInstallResponse})"
     return
 
-  var chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-headless-shell")
+  var chromiumInstallResponse = runShellWithParentStreams(
+      "sudo apt-get install -y chromium-headless-shell", timeoutMs = APT_TIMEOUT_MS).exitCode
   if chromiumInstallResponse != 0:
     self.log "Package chromium-headless-shell unavailable, retrying with chromium-browser..."
-    chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-browser")
+    chromiumInstallResponse = runShellWithParentStreams(
+        "sudo apt-get install -y chromium-browser", timeoutMs = APT_TIMEOUT_MS).exitCode
   if chromiumInstallResponse != 0:
     self.log "Package chromium-browser unavailable, retrying with chromium..."
-    chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium")
+    chromiumInstallResponse = runShellWithParentStreams(
+        "sudo apt-get install -y chromium", timeoutMs = APT_TIMEOUT_MS).exitCode
 
   if chromiumInstallResponse != 0:
     self.logError &"Error installing Chromium dependencies (response {chromiumInstallResponse})"
@@ -222,13 +233,13 @@ proc ensureVenvExists(self: App): string =
   if not fileExists(venvPython):
     self.log "Virtual environment not found. Creating venv at " & venvPath
     try:
-      discard execShellCmd("python3 -m venv " & venvPath)
+      discard runShellWithParentStreams("python3 -m venv " & venvPath, timeoutMs = VENV_TIMEOUT_MS)
     except OSError as e:
       self.logError &"Error creating venv: {e.msg}"
       return
     self.log "Installing playwright package..."
     try:
-      discard execShellCmd(venvPython & " -m pip install playwright")
+      discard runShellWithParentStreams(venvPython & " -m pip install playwright", timeoutMs = VENV_TIMEOUT_MS)
     except OSError as e:
       self.logError &"Error installing playwright: {e.msg}"
       return
@@ -257,7 +268,9 @@ proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bo
     let chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $width & "," & $height]
     let argString = chromiumArgs.mapIt(shellQuote(it)).join(" ")
     let startCommand = &"nohup {shellQuote(chromiumBinary)} {argString} >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
-    let response = execShellCmd("bash -lc " & shellQuote(startCommand))
+    # the shell backgrounds chromium with nohup and exits right away
+    let response = runShellWithParentStreams("bash -lc " & shellQuote(startCommand),
+        timeoutMs = BROWSER_START_TIMEOUT_MS).exitCode
     if response != 0:
       self.logError &"Error starting background Chromium process (response {response})"
       return false
@@ -283,7 +296,7 @@ proc stopBackgroundBrowser(self: App) =
 
   self.log &"Stopping Chromium PID {chromiumPid} before restart"
 
-  discard execCmdEx("kill " & $chromiumPid)
+  discard posix.kill(Pid(chromiumPid), SIGTERM)
   for _ in 0 ..< 10:
     if not isPidAlive(chromiumPid):
       break
@@ -291,7 +304,7 @@ proc stopBackgroundBrowser(self: App) =
 
   if isPidAlive(chromiumPid):
     self.log &"Chromium PID {chromiumPid} did not exit gracefully, forcing kill"
-    discard execCmdEx("kill -9 " & $chromiumPid)
+    discard posix.kill(Pid(chromiumPid), SIGKILL)
 
   try:
     if fileExists(CHROMIUM_PID_FILE):
@@ -302,9 +315,9 @@ proc stopBackgroundBrowser(self: App) =
 proc pickChromiumBinary(): string =
   let browserCandidates = ["chromium-headless-shell", "chromium-browser", "chromium"]
   for candidate in browserCandidates:
-    let (path, response) = execCmdEx("command -v " & candidate)
-    if response == 0:
-      return path.strip()
+    let path = findExe(candidate)
+    if path != "":
+      return path
   return ""
 
 proc get*(self: App, context: ExecutionContext): Image =
@@ -394,7 +407,7 @@ page.wait_for_timeout(1500)
         sleep(CHROMIUM_STARTUP_SETTLE_MS)
 
       try:
-        let (output, response) = execCmdEx(cmd)
+        let (output, response) = runShellCapture(cmd, timeoutMs = PLAYWRIGHT_COMMAND_TIMEOUT_MS)
         if response == 0:
           completed = true
           break

@@ -1,7 +1,8 @@
 import json
 import base64
 import times
-import std/[os, osproc, strformat, strutils, tables]
+import std/[os, strformat, strutils, tables]
+import frameos/utils/process
 import checksums/md5
 import mummy
 import mummy/routers
@@ -288,8 +289,10 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
   try:
     if not fileExists(thumbPath):
       createDir(parentDir(thumbPath))
-      let cmd = "convert " & quoteShell(fullPath) & " -thumbnail 320x320 " & quoteShell(thumbPath)
-      let (output, exitCode) = execCmdEx(cmd)
+      let res = runProcessPiped("convert", @[fullPath, "-thumbnail", "320x320", thumbPath],
+                                timeoutMs = 60 * 1000, maxOutputBytes = 1024 * 1024)
+      let output = res.output & res.errorOutput
+      let exitCode = res.exitCode
       if exitCode != 0:
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"
