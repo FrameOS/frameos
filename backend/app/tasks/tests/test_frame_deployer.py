@@ -155,6 +155,43 @@ async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.Mo
     return archive_path, commands
 
 
+def test_demangle_nimcache_name() -> None:
+    assert (
+        FrameDeployer._demangle_nimcache_name("@zqeviref@fjnirfuner@frCncre@fQRI_Pbasvt.p")
+        == "drivers/waveshare/ePaper/DEV_Config.c"
+    )
+
+
+def test_copy_external_compile_sources_recovers_compile_pragma_files(tmp_path: Path) -> None:
+    # nim --genScript emits {.compile.} C files as bare basenames and never
+    # copies them into the nimcache; the deployer must recover them (and their
+    # local headers) from the mangled object path on the compile line.
+    source_dir = tmp_path / "frameos"
+    epaper = source_dir / "src" / "drivers" / "waveshare" / "ePaper"
+    epaper.mkdir(parents=True)
+    lib = source_dir / "src" / "lib"
+    lib.mkdir(parents=True)
+    (epaper / "DEV_Config.c").write_text('#include "DEV_Config.h"\n', encoding="utf-8")
+    (epaper / "DEV_Config.h").write_text('#include "Debug.h"\n#include "lgpio.h"\n', encoding="utf-8")
+    (epaper / "Debug.h").write_text("/* debug */\n", encoding="utf-8")
+    (lib / "lgpio.h").write_text("/* lgpio */\n", encoding="utf-8")
+
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    script = build_dir / "compile_frameos.sh"
+    script.write_text(
+        "gcc -c -w -I. -Isrc/lib -I/abs/nim/lib "
+        "-o @zqeviref@fjnirfuner@frCncre@fQRI_Pbasvt.p.o DEV_Config.c\n"
+        "gcc -c -w -I. -o @zsbb.nim.c.o @zsbb.nim.c\n",
+        encoding="utf-8",
+    )
+
+    FrameDeployer._copy_external_compile_sources(str(build_dir), str(script), str(source_dir))
+
+    for name in ("DEV_Config.c", "DEV_Config.h", "Debug.h", "lgpio.h"):
+        assert (build_dir / name).exists(), f"{name} missing from build dir"
+
+
 @pytest.mark.asyncio
 async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     tmp_path: Path,
