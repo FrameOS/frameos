@@ -313,7 +313,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to(f"../{service}")
-    for service in ("NetworkManager.service", "dropbear.service"):
+    for service in ("NetworkManager.service", "dropbear.service", "dcron.service", "systemd-timesyncd.service"):
         link = wants / service
         if link.exists() or link.is_symlink():
             link.unlink()

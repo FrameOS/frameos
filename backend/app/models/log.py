@@ -138,6 +138,10 @@ async def process_log(
         if frame.status != 'ready':
             changes['status'] = 'ready'
         for key in ['width', 'height', 'color']:
+            # Width/height left empty means "autodetect": fill them in from the device's bootup
+            # report, but never overwrite an explicitly configured resolution with a detected one.
+            if key in ('width', 'height') and getattr(frame, key) is not None:
+                continue
             if key in log and log[key] is not None and log[key] != getattr(frame, key):
                 changes[key] = log[key]
             if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):

@@ -113,6 +113,28 @@ async def test_process_log_bootup(mock_pub, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_does_not_override_configured_resolution(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
+    frame.width = 800
+    frame.height = 480
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {
+        "event": "bootup",
+        "config": {
+            "width": 720,
+            "height": 576,
+        },
+    })
+
+    updated = db.get(Frame, frame.id)
+    assert updated.width == 800
+    assert updated.height == 480
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup_does_not_override_stored_timezone(mock_pub, db, redis):
     frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
     frame.timezone = "Europe/Brussels"
