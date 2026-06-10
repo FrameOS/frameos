@@ -13,9 +13,11 @@ TimeoutStartSec=300
 # tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
 WatchdogSec=900
 # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
-# device swap itself into an unreachable state.
-MemoryHigh=70%
-MemoryMax=80%
+# device swap itself into an unreachable state. This static unit (buildroot)
+# uses percentages; rpios installs compute absolute values from MemTotal in
+# setup.nim (frameosServiceContents).
+MemoryHigh=80%
+MemoryMax=90%
 MemorySwapMax=64M
 
 [Install]

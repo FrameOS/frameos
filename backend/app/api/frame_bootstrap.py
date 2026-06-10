@@ -355,6 +355,19 @@ cat > "$work_dir/all_scenes.json" <<'FRAMEOS_ALL_SCENES_JSON'
 {all_scenes_json}FRAMEOS_ALL_SCENES_JSON
 gzip -c "$work_dir/all_scenes.json" > "$frameos_release_dir/all_scenes.json.gz"
 
+# Memory caps for frameos.service: everything except a small OS reserve, so a
+# leak OOM-kills frameos instead of swap-thrashing the device. Computed from
+# MemTotal because percentages cannot express a fixed reserve on 128MB..8GB.
+mem_total_kb=$(awk '/^MemTotal:/ {{print $2}}' /proc/meminfo)
+mem_reserve_kb=$((mem_total_kb / 8))
+if [ "$mem_reserve_kb" -lt 40960 ]; then mem_reserve_kb=40960; fi
+if [ "$mem_reserve_kb" -gt 262144 ]; then mem_reserve_kb=262144; fi
+mem_max_kb=$((mem_total_kb - mem_reserve_kb))
+if [ "$mem_max_kb" -lt 32768 ]; then mem_max_kb=32768; fi
+mem_high_margin_kb=$((mem_max_kb / 16))
+if [ "$mem_high_margin_kb" -lt 16384 ]; then mem_high_margin_kb=16384; fi
+mem_high_kb=$((mem_max_kb - mem_high_margin_kb))
+
 cat > "$frameos_release_dir/frameos.service" <<EOF
 [Unit]
 Description=FrameOS Service
@@ -372,8 +385,8 @@ TimeoutStartSec=300
 WatchdogSec=900
 # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
 # device swap itself into an unreachable state.
-MemoryHigh=70%
-MemoryMax=80%
+MemoryHigh=${{mem_high_kb}}K
+MemoryMax=${{mem_max_kb}}K
 MemorySwapMax=64M
 
 [Install]

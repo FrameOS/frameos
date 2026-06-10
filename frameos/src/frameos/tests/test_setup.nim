@@ -112,6 +112,32 @@ block test_frameos_service_contents_can_mirror_logs_to_console:
   doAssert service.contains("StandardOutput=journal+console")
   doAssert service.contains("StandardError=journal+console")
 
+block test_service_memory_limits_leave_a_fixed_os_reserve:
+  # Unknown total falls back to generous percentages
+  doAssert serviceMemoryLimits(0) == (high: "80%", max: "90%")
+
+  # Pi Zero 2 W class: 416MB usable -> reserve 52MB, cap near the edge
+  let zero2w = serviceMemoryLimits(416 * 1024)
+  doAssert zero2w.max == $(416 * 1024 - 52 * 1024) & "K"
+  doAssert zero2w.high == $(416 * 1024 - 52 * 1024 - (416 * 1024 - 52 * 1024) div 16) & "K"
+
+  # Tiny 128MB-class device: reserve is floored at 40MB
+  doAssert serviceMemoryLimits(128 * 1024).max == $(128 * 1024 - 40 * 1024) & "K"
+
+  # Big device: reserve is capped at 256MB
+  doAssert serviceMemoryLimits(8 * 1024 * 1024).max == $(8 * 1024 * 1024 - 256 * 1024) & "K"
+
+  # Degenerate totals never produce a non-positive cap
+  doAssert serviceMemoryLimits(16 * 1024).max == $(32 * 1024) & "K"
+
+block test_frameos_service_contents_embed_memory_limits:
+  let service = frameosServiceContents("frame-user", memTotalKb = 416 * 1024)
+  doAssert service.contains("MemoryMax=" & $(416 * 1024 - 52 * 1024) & "K")
+  doAssert service.contains("MemoryHigh=")
+  doAssert service.contains("MemorySwapMax=64M")
+  doAssert service.contains("WatchdogSec=900")
+  doAssert service.contains("Type=notify")
+
 block test_write_frame_config_dimensions_persists_detected_size:
   let path = getTempDir() / ("frameos-dimensions-" & $epochTime().int64 & ".json")
   writeFile(path, pretty(%*{
