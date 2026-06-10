@@ -65,10 +65,22 @@ proc pLog(ev: string, extra: JsonNode = %*{}) =
 proc shQuote(s: string): string =
   "'" & s.replace("'", "'\"'\"'") & "'"
 
-proc run(cmd: string): (string, int) {.gcsafe.} =
+proc masked*(s: string; keep: int = 2): string =
+  if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
+
+proc maskedPasswordArgs*(args: seq[string]): seq[string] =
+  ## Copy of args with the value following any "password" argument masked,
+  ## safe to include in logs.
+  result = args
+  for i in 0 ..< max(result.len - 1, 0):
+    if result[i] == "password":
+      result[i + 1] = masked(result[i + 1])
+
+proc run(cmd: string, loggedCmd: string = ""): (string, int) {.gcsafe.} =
   ## Execute a shell command (through /bin/sh -c) and log the result.
+  ## Pass loggedCmd when cmd contains secrets that must not reach the logs.
   let (output, rc) = portalRunHook(cmd)
-  pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
+  pLog("portal:exec", %*{"cmd": (if loggedCmd.len > 0: loggedCmd else: cmd), "rc": rc, "output": output.strip()})
   (output, rc)
 
 proc parseWifiInterfaceFromNmcli(output: string): string =
@@ -150,14 +162,19 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
 
   let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
   let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
-  let hotspotCommand = fmt"sudo nmcli device wifi hotspot ifname {shQuote(wifiDevice)} con-name " &
-                       shQuote(nmHotspotName) & " " &
-                       fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}"
-  if run(hotspotCommand)[1] != 0:
+
+  proc buildHotspotCmd(password: string, withIfname: bool): string =
+    result = "sudo nmcli device wifi hotspot "
+    if withIfname:
+      result &= fmt"ifname {shQuote(wifiDevice)} "
+    result &= fmt"con-name {shQuote(nmHotspotName)} ssid {shQuote(wifiHotspotSsid)} password {shQuote(password)}"
+
+  let maskedHotspotPassword = masked(wifiHotspotPassword)
+  if run(buildHotspotCmd(wifiHotspotPassword, true),
+         loggedCmd = buildHotspotCmd(maskedHotspotPassword, true))[1] != 0:
     pLog("portal:startAp:ifnameRetry", %*{"device": wifiDevice})
-    let fallbackCommand = fmt"sudo nmcli device wifi hotspot con-name {shQuote(nmHotspotName)} " &
-                         fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}"
-    if run(fallbackCommand)[1] != 0:
+    if run(buildHotspotCmd(wifiHotspotPassword, false),
+           loggedCmd = buildHotspotCmd(maskedHotspotPassword, false))[1] != 0:
       frameOS.network.hotspotStatus = HotspotStatus.error
       pLog("portal:startAp:error")
       return
@@ -212,7 +229,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
   let connectResult = portalNmcliConnectHook(sudoArgs)
   rc = connectResult.rc
   output = connectResult.output
-  var loggedCommand = "sudo " & $sudoArgs
+  var loggedCommand = "sudo " & $maskedPasswordArgs(sudoArgs)
 
   if rc != 0:
     nmcliArgs = @[
@@ -225,7 +242,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
     let fallbackResult = portalNmcliConnectHook(fallbackArgs)
     rc = fallbackResult.rc
     output = fallbackResult.output
-    loggedCommand = "sudo " & $fallbackArgs
+    loggedCommand = "sudo " & $maskedPasswordArgs(fallbackArgs)
 
   pLog("portal:exec",
        %*{"cmd": loggedCommand, "rc": rc, "output": output.strip()})
@@ -237,9 +254,6 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} 
     portalSleepHook(5000) # give DHCP etc a moment
 
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
-
-proc masked*(s: string; keep: int = 2): string =
-  if s.len <= keep: "*".repeat(s.len) else: s[0..keep-1] & "*".repeat(s.len - keep)
 
 # Immediately sync the clock so HTTPS certificates validate
 proc syncClock*() =
