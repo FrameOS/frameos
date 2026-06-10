@@ -1,4 +1,4 @@
-import std/[json, locks, net, os, strutils, tables]
+import std/[deques, json, locks, net, os, strutils, tables]
 import mummy
 import mummy/routers
 
@@ -86,8 +86,8 @@ proc configureServerState*(config: FrameConfig, hotspotActive = false) =
   if not recentLogsLockInitialized:
     initLock(globalRecentLogsLock)
     recentLogsLockInitialized = true
-  globalRecentLogs = @[]
-  globalRecentMetrics = @[]
+  globalRecentLogs = initDeque[JsonNode]()
+  globalRecentMetrics = initDeque[JsonNode]()
   globalRecentLogId = 0
   globalFrameConfig = config
   clearAdminSessions()

@@ -2,6 +2,7 @@ import json
 import locks
 import os
 import strutils
+import deques
 import mummy
 import mummy/routers
 from net import Port
@@ -71,8 +72,8 @@ proc initServerGlobals(frameOS: FrameOS) =
   setGlobalAdminSessionSalt(getOrCreateAdminSessionSalt(getConfigFilename()))
   clearAdminSessions()
   initLock(globalRecentLogsLock)
-  globalRecentLogs = @[]
-  globalRecentMetrics = @[]
+  globalRecentLogs = initDeque[JsonNode]()
+  globalRecentMetrics = initDeque[JsonNode]()
   globalRecentLogId = 0
 
 proc newServer*(frameOS: FrameOS): types.Server =
