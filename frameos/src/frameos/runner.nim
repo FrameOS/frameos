@@ -1,5 +1,6 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
+import std/atomics
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
 
@@ -332,6 +333,9 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
   var iterations = 0
+  # Holds the first non-mouseMove event pulled out while coalescing a burst
+  # of queued mouse moves, so ordering is preserved.
+  var pendingEvent = none((Option[SceneId], string, JsonNode))
 
   while true:
     # Heartbeat for systemd's WatchdogSec: stops when this thread hangs in a
@@ -340,7 +344,28 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     inc iterations
     if maxIterations > 0 and iterations > maxIterations:
       break
-    let (success, (sceneId, event, payload)) = eventChannel.tryRecv()
+    var success: bool
+    var msg: (Option[SceneId], string, JsonNode)
+    if pendingEvent.isSome:
+      msg = pendingEvent.get()
+      pendingEvent = none((Option[SceneId], string, JsonNode))
+      success = true
+    else:
+      (success, msg) = eventChannel.tryRecv()
+    var (sceneId, event, payload) = msg
+    if success and event == "mouseMove":
+      # Touch drags queue hundreds of mouse moves while a render blocks this
+      # loop; replaying each one is pointless. Keep only the newest, and stash
+      # the first other event so nothing is reordered or lost.
+      while true:
+        let (nextOk, nextMsg) = eventChannel.tryRecv()
+        if not nextOk:
+          break
+        if nextMsg[1] == "mouseMove":
+          (sceneId, event, payload) = nextMsg
+        else:
+          pendingEvent = some(nextMsg)
+          break
     if success:
       waitTime = 1
       if not event.startsWith("mouse"):
@@ -417,6 +442,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
 
     # after we have processed all queued messages
     if not success:
+      let droppedEvents = eventsDroppedCounter.exchange(0)
+      if droppedEvents > 0:
+        self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
       if self.triggerRenderNext and not self.isRendering:
         self.triggerRender()
         await sleepAsync(1)
