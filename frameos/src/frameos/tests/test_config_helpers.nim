@@ -35,7 +35,7 @@ suite "config helper loaders":
     check config.name == "localhost"
     check config.timeZone.len > 0
 
-  test "loadSchedule currently requires colors key and parses events":
+  test "loadSchedule parses events and tolerates missing or invalid input":
     let eventNode = %*{
       "id": "e1",
       "minute": 5,
@@ -45,13 +45,15 @@ suite "config helper loaders":
       "payload": {"k": "v"}
     }
 
-    let withoutColors = loadSchedule(%*{"events": [eventNode]})
-    check withoutColors.events.len == 0
+    let schedule = loadSchedule(%*{"events": [eventNode]})
+    check schedule.events.len == 1
+    check schedule.events[0].id == "e1"
+    check schedule.events[0].payload{"k"}.getStr() == "v"
 
-    let withColors = loadSchedule(%*{"colors": [], "events": [eventNode]})
-    check withColors.events.len == 1
-    check withColors.events[0].id == "e1"
-    check withColors.events[0].payload{"k"}.getStr() == "v"
+    check loadSchedule(nil).events.len == 0
+    check loadSchedule(%*{}).events.len == 0
+    check loadSchedule(%*{"events": "not-an-array"}).events.len == 0
+    check loadSchedule(%*[1, 2, 3]).events.len == 0
 
   test "loadDeviceConfig trims and filters upload headers":
     let cfg = loadDeviceConfig(%*{
