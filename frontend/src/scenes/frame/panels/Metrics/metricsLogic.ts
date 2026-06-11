@@ -599,7 +599,7 @@ export const metricsLogic = kea<metricsLogicType>([
     requestMetricsSuccess: true,
     requestMetricsFailure: (error: string) => ({ error }),
   }),
-  loaders(({ props }) => ({
+  loaders(({ props, values }) => ({
     metrics: [
       [] as MetricsType[],
       {
@@ -614,6 +614,44 @@ export const metricsLogic = kea<metricsLogicType>([
           } catch (error) {
             console.error(error)
             return []
+          }
+        },
+        // Fetch only the samples newer than our latest timestamp (used on
+        // websocket reconnect) and append them, instead of re-downloading the
+        // whole metrics history every time a flaky connection drops.
+        loadNewMetrics: async () => {
+          const existing = values.metrics
+          if (existing.length === 0) {
+            return existing
+          }
+          let lastTs = existing[0].timestamp
+          let lastMs = parseMetricTimestamp(lastTs)
+          for (const metric of existing) {
+            const ms = parseMetricTimestamp(metric.timestamp)
+            if (ms > lastMs) {
+              lastMs = ms
+              lastTs = metric.timestamp
+            }
+          }
+          try {
+            const response = await apiFetch(
+              `/api/frames/${props.frameId}/metrics/recent?since=${encodeURIComponent(lastTs)}`
+            )
+            if (!response.ok) {
+              throw new Error('Failed to fetch metrics')
+            }
+            const data = await response.json()
+            // Dedup by timestamp: a sample may arrive both live (newLog) and in
+            // this since-query, and the two sources use different id schemes.
+            const seen = new Set(existing.map((metric) => metric.timestamp))
+            const fresh = (data.metrics as MetricsType[]).filter((metric) => !seen.has(metric.timestamp))
+            if (fresh.length === 0) {
+              return existing
+            }
+            return [...existing, ...fresh]
+          } catch (error) {
+            console.error(error)
+            return existing
           }
         },
       },
@@ -701,6 +739,11 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
   })),
   listeners(({ actions, props }) => ({
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      // Samples missed during the outage are fetched incrementally (only those
+      // newer than our latest timestamp), not by reloading the whole history.
+      actions.loadNewMetrics()
+    },
     requestMetrics: async () => {
       try {
         const response = await apiFetch(`/api/frames/${props.frameId}/event/metrics`, {
@@ -777,10 +820,7 @@ export const metricsLogic = kea<metricsLogicType>([
         return Math.max(interval ? interval * GAP_THRESHOLD_MULTIPLIER : 0, MIN_GAP_CONNECTION_MS)
       },
     ],
-    metricsByCategory: [
-      (s) => [s.sortedMetrics],
-      (metrics) => metricsByCategoryFromMetrics(metrics),
-    ],
+    metricsByCategory: [(s) => [s.sortedMetrics], (metrics) => metricsByCategoryFromMetrics(metrics)],
     headerMetricsByCategory: [
       (s) => [s.metricsByCategory, s.headerMetricsTimeRange],
       (metricsByCategory, headerMetricsTimeRange) =>
