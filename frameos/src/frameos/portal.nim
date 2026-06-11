@@ -292,7 +292,7 @@ proc connectToWifi*(frameOS: FrameOS,
           let oldServerHost = frameConfig.serverHost
           let oldServerPort = $frameConfig.serverPort
 
-          if len(serverHost) > 0 and len(serverPort) > 0 and serverHost != oldServerHost or serverPort != oldServerPort:
+          if len(serverHost) > 0 and len(serverPort) > 0 and (serverHost != oldServerHost or serverPort != oldServerPort):
             pLog("portal:connect:updatingConfig",
                  %*{"serverHost": serverHost, "serverPort": serverPort,
                      "oldServerHost": oldServerHost, "oldServerPort": oldServerPort})
