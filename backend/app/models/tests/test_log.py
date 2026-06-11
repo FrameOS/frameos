@@ -216,3 +216,24 @@ async def test_new_log_trimming(mock_pub, db, redis):
     # Pruning trims back down to exactly the limit; the new log survives.
     assert count == LOG_LIMIT_PER_FRAME
     assert db.query(Log).filter_by(frame_id=frame.id).order_by(Log.id.desc()).first().line == "Trigger trim"
+
+
+@pytest.mark.asyncio
+async def test_new_log_commits_before_publishing(db, redis):
+    """new_log must not await while a write transaction is open: the session is
+    sync SQLAlchemy on the event loop, so a task suspended mid-publish would
+    hold the SQLite write lock while other requests block the loop waiting for
+    it ("database is locked" storms in production)."""
+    with patch("app.models.log.publish_message", new_callable=AsyncMock):
+        frame = await new_frame(db, redis, "PublishFrame", "localhost", "server_host")
+
+    tx_open_during_publish = None
+
+    async def record_tx_state(_redis, _event, _payload):
+        nonlocal tx_open_during_publish
+        tx_open_during_publish = db.in_transaction()
+
+    with patch("app.models.log.publish_message", record_tx_state):
+        await new_log(db, redis, frame.id, "webhook", '{"event":"test"}')
+
+    assert tx_open_during_publish is False

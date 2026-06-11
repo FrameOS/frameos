@@ -8,7 +8,7 @@ from .frame import Frame, update_frame
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.timezone import stored_timezone
-from sqlalchemy import Index, Integer, String, DateTime, ForeignKey, Text, event, func
+from sqlalchemy import Index, Integer, String, DateTime, ForeignKey, Text, delete, event, func, select
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
@@ -74,14 +74,16 @@ def maybe_prune_logs(db: Session, project_id: int, frame_id: int, inserts: int =
 
     frame_logs_count = db.query(Log).filter_by(project_id=project_id, frame_id=frame_id).count()
     if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
-        oldest_logs = (db.query(Log)
-                       .filter_by(frame_id=frame_id)
-                       .filter(Log.project_id == project_id)
-                       .order_by(Log.timestamp)
-                       .limit(frame_logs_count - LOG_LIMIT_PER_FRAME)
-                       .all())
-        for old_log in oldest_logs:
-            db.delete(old_log)
+        # One bulk DELETE: loading the excess rows as ORM objects and deleting
+        # them one by one held the write transaction open for the whole sweep,
+        # locking out every other writer.
+        oldest_ids = (
+            select(Log.id)
+            .where(Log.project_id == project_id, Log.frame_id == frame_id)
+            .order_by(Log.timestamp)
+            .limit(frame_logs_count - LOG_LIMIT_PER_FRAME)
+        )
+        db.execute(delete(Log).where(Log.id.in_(oldest_ids)))
 
 
 async def new_log(
@@ -92,7 +94,6 @@ async def new_log(
     line: str,
     timestamp: Optional[datetime] = None,
     ip: Optional[str] = None,
-    commit: bool = True,
 ) -> Log:
     timestamp = timestamp or datetime.utcnow()
     frame = db.get(Frame, frame_id)
@@ -110,13 +111,16 @@ async def new_log(
     db.add(log)
     if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
         frame.last_log_at = timestamp
-    # Make the pending row visible to the prune count and assign its id
-    # without paying a commit per call (autoflush is off).
+    # Make the pending row visible to the prune count and assign its id.
     db.flush()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
-    if commit:
-        maybe_prune_logs(db, frame.project_id, frame_id)
-        db.commit()
+    maybe_prune_logs(db, frame.project_id, frame_id)
+    # Commit before any await. Sessions here run sync SQLAlchemy on the event
+    # loop: awaiting while the flush's write transaction is open suspends this
+    # task with the SQLite write lock held, and any other request that then
+    # blocks on that lock freezes the loop, so the holder never resumes to
+    # commit ("database is locked" storms).
+    db.commit()
 
     await publish_message(redis, "new_log", payload)
     return log
@@ -128,7 +132,6 @@ async def process_log(
     frame: Frame,
     log: dict | list,
     ip: Optional[str] = None,
-    commit: bool = True,
 ):
     if isinstance(log, list):
         timestamp = datetime.utcfromtimestamp(log[0])
@@ -136,7 +139,7 @@ async def process_log(
     else:
         timestamp = datetime.utcnow()
 
-    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip, commit=commit)
+    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 

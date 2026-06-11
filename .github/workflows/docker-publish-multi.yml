@@ -35,7 +35,7 @@ jobs:
         env:
           NEXT_VERSION: ${{ inputs.next_version }}
         run: |
-          args=(--force-project docker --force-project agent)
+          args=(--force-project docker)
           if [ -n "$NEXT_VERSION" ]; then
             args+=(--force-project frameos --next-version "$NEXT_VERSION")
           fi

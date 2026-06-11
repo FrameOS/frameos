@@ -1,7 +1,7 @@
 import uuid
 from datetime import timezone
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import Index, Integer, String, ForeignKey, DateTime, event, func
+from sqlalchemy import Index, Integer, String, ForeignKey, DateTime, delete, event, func, select
 from arq import ArqRedis as Redis
 from app.database import Base
 from app.models.frame import Frame
@@ -62,14 +62,15 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     payload = metric.to_dict()
     if metrics_count > METRICS_RETAINED_PER_FRAME:
         trim_count = metrics_count - METRICS_RETAINED_PER_FRAME
-        oldest_metrics = (db.query(Metrics)
-                          .filter_by(frame_id=frame_id)
-                          .filter(Metrics.project_id == frame.project_id)
-                          .order_by(Metrics.timestamp)
-                          .limit(trim_count)
-                          .all())
-        for old_metric in oldest_metrics:
-            db.delete(old_metric)
+        # One bulk DELETE instead of loading the excess rows as ORM objects;
+        # see maybe_prune_logs for why the long write transaction hurt.
+        oldest_ids = (
+            select(Metrics.id)
+            .where(Metrics.project_id == frame.project_id, Metrics.frame_id == frame_id)
+            .order_by(Metrics.timestamp)
+            .limit(trim_count)
+        )
+        db.execute(delete(Metrics).where(Metrics.id.in_(oldest_ids)))
     db.commit()
 
     await publish_message(redis, "new_metrics", payload)
