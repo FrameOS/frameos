@@ -29,7 +29,6 @@ const LogSendMaxBackoffSeconds = 60.0
 
 var threadInitDone = false
 var thread: Thread[FrameConfig]
-var logFile: File
 
 proc gzipLogFile(path: string) =
   if path.len == 0 or path.endsWith(".gz") or not fileExists(path):
@@ -63,9 +62,14 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, t
       if lastLogFilePath.len > 0 and lastLogFilePath != file:
         gzipLogFile(lastLogFilePath)
       lastLogFilePath = file
-      logFile = open(file, fmAppend)
-      logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
-      logFile.close()
+      # File is not GC-managed: a write failure (ENOSPC) must still close the
+      # handle, or every failing log line leaks an fd until the process hits
+      # the descriptor limit and loses its sockets.
+      let logFile = open(file, fmAppend)
+      try:
+        logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
+      finally:
+        logFile.close()
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 

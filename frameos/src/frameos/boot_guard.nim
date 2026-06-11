@@ -11,15 +11,23 @@ type BootGuardFailureDetails* = object
   sceneName*: Option[string]
   error*: Option[string]
 
+# Cached crash count (-1 = not read yet). clearBootCrashCount runs on every
+# successful render; without the cache that meant a file read + JSON parse
+# per render cycle.
+var cachedCrashCount = -1
+
 proc ensureBootGuardStateDir() =
   createDir(parentDir(BOOT_GUARD_STATE_PATH))
 
 proc loadBootCrashCount*(): int =
+  if cachedCrashCount >= 0:
+    return cachedCrashCount
   try:
     let data = parseJson(readFile(BOOT_GUARD_STATE_PATH))
-    return max(0, data{"crashesWithoutRender"}.getInt())
+    cachedCrashCount = max(0, data{"crashesWithoutRender"}.getInt())
   except JsonParsingError, IOError:
-    return 0
+    cachedCrashCount = 0
+  return cachedCrashCount
 
 proc loadBootGuardFailureDetails*(): BootGuardFailureDetails =
   result = BootGuardFailureDetails(sceneId: none(string), sceneName: none(string), error: none(string))
@@ -41,15 +49,22 @@ proc loadBootGuardFailureDetails*(): BootGuardFailureDetails =
     discard
 
 proc writeBootGuardState(crashCount: int, failureDetails: BootGuardFailureDetails) =
-  ensureBootGuardStateDir()
-  var payload = %*{"crashesWithoutRender": max(0, crashCount)}
-  if failureDetails.sceneId.isSome:
-    payload["sceneId"] = %failureDetails.sceneId.get()
-  if failureDetails.sceneName.isSome:
-    payload["sceneName"] = %failureDetails.sceneName.get()
-  if failureDetails.error.isSome:
-    payload["error"] = %failureDetails.error.get()
-  writeFile(BOOT_GUARD_STATE_PATH, $payload)
+  # A full disk must degrade boot-guard accounting, not crash the process:
+  # this is called from the render loop, where an escaped IOError would
+  # abort the runner thread and put the frame in a crash-restart loop.
+  cachedCrashCount = max(0, crashCount)
+  try:
+    ensureBootGuardStateDir()
+    var payload = %*{"crashesWithoutRender": max(0, crashCount)}
+    if failureDetails.sceneId.isSome:
+      payload["sceneId"] = %failureDetails.sceneId.get()
+    if failureDetails.sceneName.isSome:
+      payload["sceneName"] = %failureDetails.sceneName.get()
+    if failureDetails.error.isSome:
+      payload["error"] = %failureDetails.error.get()
+    writeFile(BOOT_GUARD_STATE_PATH, $payload)
+  except IOError, OSError:
+    echo "Error writing boot guard state: " & getCurrentExceptionMsg()
 
 proc writeBootCrashCount(crashCount: int) =
   writeBootGuardState(crashCount, loadBootGuardFailureDetails())
@@ -82,3 +97,6 @@ proc shouldPersistBootGuardContextForScene*(sceneId: string, successfulScenes: i
 
 proc bootGuardFallbackSceneId*(): string =
   BOOT_GUARD_FALLBACK_SCENE_ID
+
+proc resetBootGuardCacheForTest*() =
+  cachedCrashCount = -1
