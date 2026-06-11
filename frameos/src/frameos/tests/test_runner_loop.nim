@@ -231,7 +231,9 @@ suite "runner loop safety":
       waitFor runnerThread.startRenderLoop(maxCycles = 3)
 
       check countEvent(store, "render:pause") == 1
-      check countEvent(store, "render:done") == 3
+      # Cycles 1 and 2 log render:done; the pause kicks in at the end of
+      # cycle 2, so cycle 3's render:done is suppressed.
+      check countEvent(store, "render:done") == 2
       check not logger.enabled
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
@@ -307,7 +309,7 @@ suite "runner loop safety":
       waitFor runnerThread.startRenderLoop(maxCycles = 1)
 
       check hasEvent(store, "render:sceneChange")
-      check hasEvent(store, "render:done")
+      check not hasEvent(store, "render:done")
       check not logger.enabled
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
