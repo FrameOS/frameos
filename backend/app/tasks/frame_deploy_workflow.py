@@ -6,6 +6,7 @@ from functools import partial
 import os
 import shlex
 from typing import Any
+from uuid import uuid4
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -299,14 +300,35 @@ class FrameDeployWorkflow:
             return await self._plan_full(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         raise ValueError(f"Unsupported deploy mode: {mode}")
 
+    # Matches the arq job_timeout, so a crashed worker can never wedge a
+    # frame's deploys for longer than the job itself could have run.
+    DEPLOY_LOCK_TTL_SECONDS = 21600
+
     async def execute(self, plan: FrameDeployPlan) -> None:
-        if plan.mode == "fast":
-            await self._execute_fast(plan)
-            return
-        if plan.mode == "full":
-            await self._execute_full(plan)
-            return
-        raise ValueError(f"Unsupported deploy mode: {plan.mode}")
+        # The frame.status == "deploying" check is a read-modify-write on a DB
+        # column: two jobs enqueued close together can both pass it and race
+        # on the same remote /srv/frameos. Take a real lock per frame.
+        lock_key = f"frame:deploy:lock:{self.frame.id}"
+        lock_token = uuid4().hex
+        acquired = await self.redis.set(lock_key, lock_token, nx=True, ex=self.DEPLOY_LOCK_TTL_SECONDS)
+        if not acquired:
+            await log(self.db, self.redis, int(self.frame.id), "stderr",
+                      f"{icon} Another deploy is already running for this frame; aborting this one.")
+            raise RuntimeError(f"Deploy already in progress for frame {self.frame.id}")
+        try:
+            if plan.mode == "fast":
+                await self._execute_fast(plan)
+                return
+            if plan.mode == "full":
+                await self._execute_full(plan)
+                return
+            raise ValueError(f"Unsupported deploy mode: {plan.mode}")
+        finally:
+            # Release only our own lock: the TTL may have expired and another
+            # deploy may legitimately hold it now.
+            current = await self.redis.get(lock_key)
+            if current is not None and current.decode(errors="replace") == lock_token:
+                await self.redis.delete(lock_key)
 
     async def _plan_combined(
         self,
