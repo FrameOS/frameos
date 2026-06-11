@@ -1138,18 +1138,24 @@ class FrameDeployWorkflow:
             )
 
     async def _cleanup_release_artifacts(self) -> None:
+        # This runs AFTER the symlink swap, so a spurious failure here would flip
+        # an already-live, healthy deploy to "uninitialized". Never raise on
+        # cleanup, and use `xargs -r` so an empty candidate list (the common case
+        # of <=10 release dirs) doesn't run `rm -rf` with no args and exit 1.
         await self.deployer.exec_command(
             "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
-            "ls -dt1 build_* | tail -n +11 | xargs rm -rf; "
+            "ls -dt1 build_* | tail -n +11 | xargs -r rm -rf; "
             "fi",
             raise_on_error=False,
         )
         await self.deployer.exec_command(
-            "mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf"
+            "mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs -r rm -rf",
+            raise_on_error=False,
         )
         await self.deployer.exec_command(
             "cd /srv/frameos/releases && "
-            "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf"
+            "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs -r rm -rf",
+            raise_on_error=False,
         )
 
     @staticmethod
