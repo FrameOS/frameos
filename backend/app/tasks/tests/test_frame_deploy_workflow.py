@@ -298,6 +298,210 @@ async def test_full_plan_supports_buildroot_without_remote_apt(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_full_plan_buildroot_default_uses_precompiled_without_build_environment(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured_kwargs: list[dict] = []
+
+    class BuildrootDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            return "buildroot"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "2025.02.13"
+
+        async def get_total_memory_mb(self) -> int:
+            return 512
+
+    class BuildrootPrecompiledBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            captured_kwargs.append(kwargs)
+            return FrameBinaryPlan(
+                build_id="build12345678",
+                target=TargetMetadata(arch="aarch64", distro="buildroot", version="2025.02.13"),
+                compilation_mode="precompiled",
+                allow_cross_compile=kwargs["allow_cross_compile"],
+                force_cross_compile=kwargs["force_cross_compile"],
+                cross_compile_supported=True,
+                build_host_configured=False,
+                will_attempt_cross_compile=False,
+                prebuilt_entry=None,
+                prebuilt_target="debian-bookworm-arm64",
+                requested_compilation_mode="precompiled",
+                allow_on_device_fallback=kwargs["allow_on_device_fallback"],
+                will_attempt_precompiled=True,
+                precompiled_release_url="https://example.test/frameos.tar.gz",
+            )
+
+    frame = SimpleNamespace(
+        id=31,
+        name="BuildrootPrecompiled",
+        mode="buildroot",
+        ssh_keys=[],
+        buildroot={},
+        rpios={"crossCompilation": "never"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 31, "name": "BuildrootPrecompiled", "mode": "buildroot"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.get_settings_dict",
+        lambda _db, project_id=None: {"buildEnvironment": {"provider": "none"}},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=BuildrootDeployer(),
+        temp_dir="",
+        binary_builder=BuildrootPrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert captured_kwargs == [
+        {
+            "allow_cross_compile": False,
+            "force_cross_compile": False,
+            "allow_on_device_fallback": False,
+            "compilation_mode": "precompiled",
+        }
+    ]
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.binary_plan.will_attempt_precompiled is True
+    assert plan.full_deploy.binary_plan.prebuilt_target == "debian-bookworm-arm64"
+    assert plan.full_deploy.package_plans == []
+    assert plan.full_deploy.remote_build_fallback_package_plans == []
+
+
+@pytest.mark.asyncio
+async def test_full_plan_buildroot_source_fallback_requires_build_environment(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class BuildrootDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            return "buildroot"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "2025.02.13"
+
+        async def get_total_memory_mb(self) -> int:
+            return 512
+
+    class BuildrootSourceFallbackBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            return FrameBinaryPlan(
+                build_id="build12345678",
+                target=TargetMetadata(arch="aarch64", distro="buildroot", version="2025.02.13"),
+                compilation_mode="shared-scenes",
+                allow_cross_compile=kwargs["allow_cross_compile"],
+                force_cross_compile=kwargs["force_cross_compile"],
+                cross_compile_supported=True,
+                build_host_configured=False,
+                will_attempt_cross_compile=False,
+                prebuilt_entry=None,
+                prebuilt_target="debian-bookworm-arm64",
+                requested_compilation_mode="precompiled",
+                allow_on_device_fallback=kwargs["allow_on_device_fallback"],
+                will_attempt_precompiled=False,
+                precompiled_skip_reason="1 compiled scene is configured",
+            )
+
+    frame = SimpleNamespace(
+        id=32,
+        name="BuildrootCompiledScene",
+        mode="buildroot",
+        ssh_keys=[],
+        buildroot={},
+        rpios={"crossCompilation": "never"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 32, "name": "BuildrootCompiledScene", "mode": "buildroot"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.get_settings_dict",
+        lambda _db, project_id=None: {"buildEnvironment": {"provider": "none"}},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=BuildrootDeployer(),
+        temp_dir="",
+        binary_builder=BuildrootSourceFallbackBinaryBuilder(),
+    )
+
+    with pytest.raises(RuntimeError, match="Buildroot deploys can use a precompiled FrameOS release only"):
+        await workflow.plan("full")
+
+
+@pytest.mark.asyncio
+async def test_full_plan_buildroot_explicit_source_build_requires_build_environment(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class BuildrootDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            return "buildroot"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "2025.02.13"
+
+        async def get_total_memory_mb(self) -> int:
+            return 512
+
+    frame = SimpleNamespace(
+        id=33,
+        name="BuildrootStatic",
+        mode="buildroot",
+        ssh_keys=[],
+        buildroot={"compilationMode": "static"},
+        rpios={"crossCompilation": "never"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 33, "name": "BuildrootStatic", "mode": "buildroot"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.get_settings_dict",
+        lambda _db, project_id=None: {"buildEnvironment": {"provider": "none"}},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=BuildrootDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    with pytest.raises(RuntimeError, match="Buildroot source deploys require Docker"):
+        await workflow.plan("full")
+
+
+@pytest.mark.asyncio
 async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypatch: pytest.MonkeyPatch):
     captured_kwargs: list[dict] = []
 

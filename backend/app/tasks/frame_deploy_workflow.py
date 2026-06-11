@@ -420,28 +420,55 @@ class FrameDeployWorkflow:
         settings = _get_frame_settings(self.db, self.frame)
         build_environment_provider = selected_build_environment_provider(settings)
         compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
+        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
+        buildroot_precompiled_requested = is_buildroot and compilation_mode == COMPILATION_MODE_PRECOMPILED
         cross_compilation_setting = (
-            "always" if is_buildroot else (compile_settings.get("crossCompilation") or "auto").lower()
+            "auto"
+            if buildroot_precompiled_requested
+            else "always"
+            if is_buildroot
+            else (compile_settings.get("crossCompilation") or "auto").lower()
         )
         if cross_compilation_setting not in {"auto", "always", "never"}:
             cross_compilation_setting = "auto"
-        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
 
-        if build_environment_provider == "none" and (is_buildroot or cross_compilation_setting == "always"):
+        if build_environment_provider == "none" and cross_compilation_setting == "always":
+            if is_buildroot:
+                raise RuntimeError(
+                    "Server-side compilation is disabled in global settings. Buildroot source deploys require Docker, "
+                    "a build host, or Modal sandboxes because Buildroot targets cannot compile on device."
+                )
             raise RuntimeError(
                 "Server-side compilation is disabled in global settings. Choose Docker, build host, or Modal "
                 "sandboxes as the build environment, or set this frame to always compile on device."
             )
 
         allow_cross_compile = cross_compilation_setting != "never" and build_environment_provider != "none"
-        force_cross_compile = is_buildroot or cross_compilation_setting == "always"
-        allow_on_device_fallback = build_environment_provider == "none" or cross_compilation_setting == "never"
+        force_cross_compile = (
+            is_buildroot and not buildroot_precompiled_requested
+        ) or cross_compilation_setting == "always"
+        allow_on_device_fallback = (
+            False if is_buildroot else build_environment_provider == "none" or cross_compilation_setting == "never"
+        )
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
             allow_on_device_fallback=allow_on_device_fallback,
             compilation_mode=compilation_mode,
         )
+        if is_buildroot and not binary_plan.will_attempt_precompiled:
+            binary_plan.force_cross_compile = True
+            if not binary_plan.cross_compile_supported:
+                raise RuntimeError(
+                    "Buildroot source deploys require cross-compilation, but this target architecture is not supported."
+                )
+            if build_environment_provider == "none":
+                raise RuntimeError(
+                    "Server-side compilation is disabled in global settings. Buildroot deploys can use a "
+                    "precompiled FrameOS release only when no compiled scenes are configured and a matching "
+                    "release binary exists. Choose Docker, build host, or Modal sandboxes as the build environment, "
+                    "or remove compiled scenes and use precompiled binaries."
+                )
 
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
