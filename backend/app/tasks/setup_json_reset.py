@@ -35,6 +35,7 @@ set -eu
 
 SETUP_FILE={quoted_setup_file_path}
 LOG_FILE={quoted_log_file_path}
+STATUS_FILE=/tmp/frameos-setup-reset.status
 
 request_reboot() {{
   sync || true
@@ -62,11 +63,7 @@ request_reboot() {{
   return 1
 }}
 
-if [ ! -f "$SETUP_FILE" ]; then
-  exit 0
-fi
-
-{{
+run_setup() {{
 echo "FrameOS first-boot setup started at $(date -Iseconds 2>/dev/null || date)"
 echo "Setup file: $SETUP_FILE"
 echo "User id: $(id -u)"
@@ -155,7 +152,10 @@ esac
 done_path="$(dirname "$SETUP_FILE")/setup-done-${{timestamp}}${{done_suffix}}"
 if [ "$setup_status" -eq 0 ] || [ "$setup_status" -eq 2 ]; then
   echo "FrameOS setup finished with status $setup_status; moving setup file to $done_path"
-  mv -f "$SETUP_FILE" "$done_path"
+  if ! mv -f "$SETUP_FILE" "$done_path"; then
+    echo "Error: failed to move setup file to $done_path; setup would re-run on every boot"
+    return 1
+  fi
 else
   echo "FrameOS setup failed with status $setup_status; leaving $SETUP_FILE in place for retry"
 fi
@@ -165,15 +165,31 @@ if [ "$setup_status" -eq 2 ]; then
   if request_reboot; then
     echo "Reboot command accepted"
     echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) with status 0 (reboot requested)"
-    exit 0
+    return 0
   fi
   echo "FrameOS setup requested reboot, but no reboot command succeeded"
-  exit 1
+  return 1
 fi
 
 echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) with status $setup_status"
-exit "$setup_status"
-}} >> "$LOG_FILE" 2>&1
+return "$setup_status"
+}}
+
+if [ ! -f "$SETUP_FILE" ]; then
+  exit 0
+fi
+
+# Stream everything to stdout so it reaches the boot console and journal
+# (the service runs with StandardOutput=journal+console), while tee keeps
+# the persistent copy on /boot. The pipe hides run_setup's exit status, so
+# it is passed out-of-band through a status file.
+rm -f "$STATUS_FILE"
+{{
+  setup_rc=0
+  run_setup 2>&1 || setup_rc=$?
+  echo "$setup_rc" > "$STATUS_FILE"
+}} | tee -a "$LOG_FILE"
+exit "$(cat "$STATUS_FILE" 2>/dev/null || echo 1)"
 """
 
 
