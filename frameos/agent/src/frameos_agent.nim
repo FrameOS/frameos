@@ -84,6 +84,9 @@ var currentUpload: UploadSession
 var terminalSessions = initTable[string, TerminalSession]()
 
 when defined(linux):
+  # forkpty lives in libutil on glibc < 2.34; newer glibc and musl ship an
+  # empty libutil stub, so linking it unconditionally is safe everywhere.
+  {.passL: "-lutil".}
   proc forkpty(amaster: ptr cint; name: cstring; termp: pointer; winp: ptr WinSize): Pid {.
     importc, header: "<pty.h>", sideEffect.}
 elif defined(macosx) or defined(freebsd) or defined(openbsd) or defined(netbsd):
