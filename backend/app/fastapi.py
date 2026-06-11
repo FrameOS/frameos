@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(redis_listener())
     yield
     await app.state.http_client.aclose()
+    from app.redis import close_shared_redis
+    await close_shared_redis()
     task.cancel()
     try:
         await task
