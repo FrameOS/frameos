@@ -493,22 +493,27 @@ def _frame_image_placeholder(frame: Frame) -> bytes:
     return render_line_of_text_png("no image", width, height)
 
 
-def _frame_image_placeholder_response(frame: Frame) -> Response:
+async def _frame_image_placeholder_response(frame: Frame) -> Response:
+    # PIL rendering is CPU-bound; keep it off the event loop.
+    content = await asyncio.get_running_loop().run_in_executor(None, _frame_image_placeholder, frame)
     return Response(
-        content=_frame_image_placeholder(frame),
+        content=content,
         media_type="image/png",
         headers=FRAME_IMAGE_PLACEHOLDER_HEADERS,
     )
 
 
-def _frame_image_error_response(frame: Frame, detail: str, status_code: int | None = None) -> Response:
+async def _frame_image_error_response(frame: Frame, detail: str, status_code: int | None = None) -> Response:
     width, height = _frame_image_dimensions(frame)
     headers = {
         "x-frameos-image-state": "error",
         **({"x-frameos-image-error-status": str(status_code)} if status_code else {}),
     }
+    content = await asyncio.get_running_loop().run_in_executor(
+        None, render_line_of_text_png, detail or "image error", width, height
+    )
     return Response(
-        content=render_line_of_text_png(detail or "image error", width, height),
+        content=content,
         media_type="image/png",
         headers=headers,
     )
@@ -1528,7 +1533,10 @@ async def api_frame_get_asset(
     thumb = request.query_params.get("thumb") == "1"
 
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
-    if not full_path.startswith(os.path.normpath(assets_path)):
+    # Trailing separator so "/srv/assets-other" can't pass as "/srv/assets",
+    # matching the upload endpoints.
+    normalized_assets_path = os.path.normpath(assets_path)
+    if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
     if thumb:
@@ -1726,7 +1734,7 @@ async def api_frame_get_image(
         if last_image:
             return Response(content=last_image, media_type="image/png")
         else:
-            return _frame_image_placeholder_response(frame)
+            return await _frame_image_placeholder_response(frame)
 
     frame_image_lock = _get_frame_image_lock(id)
     waited_for_lock = frame_image_lock.locked()
@@ -1734,7 +1742,7 @@ async def api_frame_get_image(
         cached = await _wait_for_cached_frame_image(redis, cache_key)
         if cached:
             return Response(content=cached, media_type="image/png")
-        return _frame_image_placeholder_response(frame)
+        return await _frame_image_placeholder_response(frame)
 
     async with frame_image_lock:
         cached = await _get_cached_frame_image(redis, cache_key)
@@ -1750,7 +1758,7 @@ async def api_frame_get_image(
             cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
                 return Response(content=cached, media_type="image/png")
-            return _frame_image_placeholder_response(frame)
+            return await _frame_image_placeholder_response(frame)
 
         # Use shared semaphore and client
         status = 0
@@ -1768,27 +1776,35 @@ async def api_frame_get_image(
                     if encoded_scene_id:
                         scene_id = encoded_scene_id.decode("utf-8")
                 if scene_id:
-                    # dimensions (best‑effort – don’t crash if Pillow missing)
-                    width = height = None
-                    try:
-                        from PIL import Image
-
-                        img = Image.open(io.BytesIO(body))
-                        width, height = img.width, img.height
-                    except Exception:
-                        pass
-
-                    # upsert into SceneImage
                     from app.models.scene_image import SceneImage
                     from app.api.scene_images import _generate_thumbnail
 
+                    # Decoding and thumbnailing a full frame image is CPU-bound
+                    # PIL work; keep it off the event loop.
+                    def _decode_and_thumbnail():
+                        # dimensions (best‑effort – don’t crash if Pillow missing)
+                        width = height = None
+                        try:
+                            from PIL import Image
+
+                            img = Image.open(io.BytesIO(body))
+                            width, height = img.width, img.height
+                        except Exception:
+                            pass
+                        thumb, t_width, t_height = _generate_thumbnail(body)
+                        return width, height, thumb, t_width, t_height
+
+                    width, height, thumb, t_width, t_height = await asyncio.get_running_loop().run_in_executor(
+                        None, _decode_and_thumbnail
+                    )
+
+                    # upsert into SceneImage
                     now = datetime.utcnow()
                     img_row = (
                         db.query(SceneImage)
                         .filter_by(project_id=frame.project_id, frame_id=id, scene_id=scene_id)
                         .first()
                     )
-                    thumb, t_width, t_height = _generate_thumbnail(body)
                     if img_row:
                         img_row.image = body
                         img_row.timestamp = now
@@ -1838,7 +1854,7 @@ async def api_frame_get_image(
                     "stderr",
                     f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
                 )
-                return _frame_image_error_response(frame, "Unable to fetch image", status)
+                return await _frame_image_error_response(frame, "Unable to fetch image", status)
 
         except httpx.ReadTimeout:
             if cached:
@@ -1850,7 +1866,7 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: request timeout",
             )
-            return _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
+            return await _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
         except HTTPException as exc:
             if cached:
                 return Response(content=cached, media_type="image/png")
@@ -1861,7 +1877,7 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: {exc.status_code}: {exc.detail}",
             )
-            return _frame_image_error_response(frame, str(exc.detail), exc.status_code)
+            return await _frame_image_error_response(frame, str(exc.detail), exc.status_code)
         except Exception as e:
             if cached:
                 return Response(content=cached, media_type="image/png")
@@ -1872,7 +1888,7 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: {str(e)}",
             )
-            return _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
+            return await _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
@@ -2187,7 +2203,10 @@ async def api_frame_assets_mkdir(
 
     assets_path = frame.assets_path or "/srv/assets"
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
-    if not full_path.startswith(os.path.normpath(assets_path)):
+    # Trailing separator so "/srv/assets-other" can't pass as "/srv/assets",
+    # matching the upload endpoints.
+    normalized_assets_path = os.path.normpath(assets_path)
+    if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
     await make_dir(db, redis, frame, full_path)
@@ -2210,7 +2229,10 @@ async def api_frame_assets_delete(
 
     assets_path = frame.assets_path or "/srv/assets"
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
-    if not full_path.startswith(os.path.normpath(assets_path)):
+    # Trailing separator so "/srv/assets-other" can't pass as "/srv/assets",
+    # matching the upload endpoints.
+    normalized_assets_path = os.path.normpath(assets_path)
+    if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
     await delete_path(db, redis, frame, full_path)

@@ -12,6 +12,11 @@ import ../api
 import ../state
 import ./common
 
+# mummy buffers whole responses in RAM, and assets can include multi-hundred
+# MB videos: serving one of those would blow straight through MemoryMax and
+# OOM-kill the service. Refuse anything bigger than this.
+const MaxAssetDownloadBytes* = 50 * 1024 * 1024
+
 proc contentTypeForAsset*(path: string): string =
   if path.endsWith(".css"):
     "text/css"
@@ -275,6 +280,12 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
 
   if not thumb:
     var headers: mummy.HttpHeaders
+    let fileSize = getFileSize(fullPath)
+    if fileSize > MaxAssetDownloadBytes:
+      headers["Content-Type"] = "application/json"
+      return (Http413, headers, $(%*{
+        "detail": &"Asset is {fileSize} bytes; downloads over this endpoint are capped at {MaxAssetDownloadBytes} bytes"
+      }))
     headers["Content-Type"] = contentTypeForFilePath(fullPath)
     return (Http200, headers, readFile(fullPath))
 
