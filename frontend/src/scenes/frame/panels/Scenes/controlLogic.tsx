@@ -123,6 +123,14 @@ export const controlLogic = kea<controlLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      // The active scene / state record is event-sourced from newLog, so a
+      // scene change during the outage would go unnoticed. Resync once -- this
+      // is a single small state snapshot, not a bulk download.
+      if (!values.stateRecordLoading) {
+        actions.sync()
+      }
+    },
     setCurrentScene: async ({ sceneId }) => {
       const scene =
         values.frameForm.scenes?.find((item) => item.id === sceneId) ??
