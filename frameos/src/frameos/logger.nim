@@ -1,9 +1,10 @@
-import zippy, json, os, times, strutils, net, posix
+import zippy, json, os, times, strutils, net
 import std/atomics
 
 import frameos/channels
 import frameos/types
 import frameos/utils/process
+from frameos/utils/http_client import setSocketSendRecvTimeouts
 
 const GzipLogTimeoutMs = 10 * 60 * 1000
 
@@ -83,14 +84,6 @@ proc logsRequestBody*(logs: seq[SerializedLog]): string =
     result.addLogPayload(logPayload)
   result.add("]}")
 
-proc setSendRecvTimeouts(socket: Socket, ms: int) =
-  ## Bounds everything HttpClient's `timeout` does not: the TLS handshake and
-  ## blocking sends, which otherwise ride TCP retransmission for many minutes
-  ## when the network goes flaky mid-connection.
-  var tv = Timeval(tv_sec: posix.Time(ms div 1000), tv_usec: Suseconds((ms mod 1000) * 1000))
-  discard setsockopt(socket.getFd(), SOL_SOCKET, SO_RCVTIMEO, addr tv, SockLen(sizeof(tv)))
-  discard setsockopt(socket.getFd(), SOL_SOCKET, SO_SNDTIMEO, addr tv, SockLen(sizeof(tv)))
-
 proc getSslContext(self: LoggerThread): SslContext =
   if self.sslContext == nil:
     self.sslContext = newContext()
@@ -105,7 +98,7 @@ proc postLogs(self: LoggerThread, body: string): int =
   var socket = newSocket()
   try:
     socket.connect(self.host, Port(self.port), timeout = LogSendConnectTimeoutMs)
-    socket.setSendRecvTimeouts(LogSendIoTimeoutMs)
+    socket.setSocketSendRecvTimeouts(LogSendIoTimeoutMs)
     if self.useTls:
       self.getSslContext().wrapConnectedSocket(socket, handshakeAsClient, self.host)
     let request = "POST /api/log HTTP/1.1\r\n" &
