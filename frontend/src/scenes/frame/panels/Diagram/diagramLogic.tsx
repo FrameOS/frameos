@@ -29,6 +29,7 @@ import {
   AppConfig,
   AppConfigField,
   AppNodeData,
+  Area,
   CodeNodeData,
   DiagramNode,
   DispatchNodeData,
@@ -37,10 +38,12 @@ import {
   FrameScene,
   FrameSceneSettings,
   MarkdownField,
+  Panel,
   SceneApp,
   StateNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeSceneGraph } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
@@ -1348,7 +1351,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  afterMount(({ actions, values, cache }) => {
+  afterMount(({ actions, values, cache, props }) => {
     window.setTimeout(actions.fitDiagramView, 10)
     window.setTimeout(actions.fitDiagramView, 100)
     cache.ignoreHistory = false
@@ -1356,6 +1359,20 @@ export const diagramLogic = kea<diagramLogicType>([
     cache.pendingHistorySnapshot = null
     cache.hasAutoArranged = false
     actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+
+    // Every open scene tab mounts this logic (the tab title reads from it),
+    // so a global shortcut must only act in the scene that is actually shown —
+    // otherwise Cmd+V pastes into every open scene at once.
+    const isVisibleDiagram = (): boolean => {
+      const mountedPanels = panelsLogic.findMounted({ frameId: props.frameId })
+      if (!mountedPanels) {
+        return true
+      }
+      const { panels, fullScreenPanel } = mountedPanels.values
+      const areaPanels = fullScreenPanel ? [fullScreenPanel] : panels[Area.TopLeft] ?? []
+      const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
+      return activePanel?.panel === Panel.Diagram && activePanel?.metadata?.sceneId === props.sceneId
+    }
 
     cache.keydownHandler = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
@@ -1365,17 +1382,17 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       const key = event.key.toLowerCase()
-      if ((event.metaKey || event.ctrlKey) && key === 'c') {
+      if (!['c', 'v', 'z'].includes(key) || !(event.metaKey || event.ctrlKey) || !isVisibleDiagram()) {
+        return
+      }
+      if (key === 'c') {
         event.preventDefault()
         actions.copySelectedNodes()
         return
       }
-      if ((event.metaKey || event.ctrlKey) && key === 'v') {
+      if (key === 'v') {
         event.preventDefault()
         actions.pasteFromClipboard()
-        return
-      }
-      if (!event.metaKey || key !== 'z') {
         return
       }
       event.preventDefault()
