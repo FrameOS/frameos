@@ -272,7 +272,22 @@ proc wirelessInterfaces(): seq[string] =
   except CatchableError:
     discard
 
-proc setupSystemHardening*(): SetupResult =
+proc cgroupIndicatesAgentService*(cgroupContent: string): bool =
+  for line in cgroupContent.splitLines():
+    if "frameos_agent.service" in line:
+      return true
+  false
+
+proc runningUnderFrameosAgent*(): bool =
+  ## Deploys can run "frameos setup" through the agent's websocket connection;
+  ## the spawned process (and its sudo children) stays in the agent's cgroup.
+  try:
+    result = fileExists("/proc/self/cgroup") and
+      cgroupIndicatesAgentService(readFile("/proc/self/cgroup"))
+  except CatchableError:
+    result = false
+
+proc setupSystemHardening*(liveApply = true): SetupResult =
   result = setupOk()
   if not commandExists("systemctl"):
     setupLog("FrameOS setup: system hardening: systemctl not found, skipping")
@@ -291,8 +306,12 @@ proc setupSystemHardening*(): SetupResult =
       discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system.conf.d"),
         raiseOnError = false)
       writePrivilegedFile(watchdogConfPath, watchdogConf)
-      # Apply without a reboot; PID 1 re-executes in place.
-      discard runSetupCommand(privilegedCommand("systemctl daemon-reexec"), raiseOnError = false)
+      if liveApply:
+        # Apply without a reboot; PID 1 re-executes in place.
+        discard runSetupCommand(privilegedCommand("systemctl daemon-reexec"), raiseOnError = false)
+      else:
+        setupLog("FrameOS setup: system hardening: deferring systemd daemon-reexec; " &
+          "the watchdog config applies at the next reboot")
     else:
       setupLog("FrameOS setup: system hardening: hardware watchdog already enabled")
   except CatchableError as e:
@@ -310,14 +329,20 @@ proc setupSystemHardening*(): SetupResult =
         discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/NetworkManager/conf.d"),
           raiseOnError = false)
         writePrivilegedFile(powersaveConfPath, powersaveConf)
-        # reload (unlike restart) re-reads config without dropping connections
-        discard runSetupCommand(privilegedCommand("systemctl reload NetworkManager"), raiseOnError = false)
+        if liveApply:
+          # reload (unlike restart) re-reads config without dropping connections
+          discard runSetupCommand(privilegedCommand("systemctl reload NetworkManager"), raiseOnError = false)
+        else:
+          setupLog("FrameOS setup: system hardening: deferring NetworkManager reload; " &
+            "the power save config applies at the next reboot")
       else:
         setupLog("FrameOS setup: system hardening: wifi power save already disabled in NetworkManager")
     except CatchableError as e:
       setupLog("FrameOS setup: system hardening: wifi power save failed: " & e.msg)
 
-  if commandExists("iw"):
+  if not liveApply:
+    setupLog("FrameOS setup: system hardening: deferring live wifi power_save changes")
+  elif commandExists("iw"):
     for interfaceName in wirelessInterfaces():
       setupLog("FrameOS setup: system hardening: power_save off for " & interfaceName)
       discard runSetupCommand(
@@ -460,7 +485,14 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupOk()
   ))
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
-  addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening()))
+  # When setup runs as a child of the agent (deploys over the agent websocket),
+  # live-applying network/systemd changes can drop the very connection the
+  # deploy is running on. Write the configs but defer their activation.
+  let liveApply = not runningUnderFrameosAgent()
+  if not liveApply:
+    setupLog("FrameOS setup: running inside frameos_agent.service; deferring live system changes " &
+      "to keep the agent connection alive")
+  addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
     setupLog("FrameOS setup: reboot required")
