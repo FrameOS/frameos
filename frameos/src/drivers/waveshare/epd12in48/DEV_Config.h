@@ -37,6 +37,12 @@
 #define LFLAGS 0
 #define NUM_MAXBUF  4
 
+// Upper bound on how long to wait for a busy pin to release (matches ePaper/).
+// A wedged 12.48" panel must not hang the render thread forever.
+#ifndef EPD_12IN48_BUSY_TIMEOUT_MS
+#define EPD_12IN48_BUSY_TIMEOUT_MS 120000
+#endif
+
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
