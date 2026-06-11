@@ -57,6 +57,38 @@ def _phase(name: str) -> Iterator[None]:
 
 
 class NullRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, bytes] = {}
+
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        *_args: Any,
+        nx: bool = False,
+        ex: int | None = None,
+        **_kwargs: Any,
+    ) -> bool:
+        del ex
+        if nx and key in self.values:
+            return False
+        if isinstance(value, bytes):
+            self.values[key] = value
+        else:
+            self.values[key] = str(value).encode("utf-8")
+        return True
+
+    async def get(self, key: str, *_args: Any, **_kwargs: Any) -> bytes | None:
+        return self.values.get(key)
+
+    async def delete(self, *keys: str, **_kwargs: Any) -> int:
+        deleted = 0
+        for key in keys:
+            if key in self.values:
+                deleted += 1
+                del self.values[key]
+        return deleted
+
     async def publish(self, channel: str, payload: Any, *_args: Any, **_kwargs: Any) -> None:
         if channel != "broadcast_channel":
             return
