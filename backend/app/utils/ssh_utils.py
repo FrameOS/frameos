@@ -115,14 +115,19 @@ async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyn
                     # await log(db, redis, frame.id, "stdinfo", "Reusing existing SSH connection")
                     return pc.ssh
 
-        # No idle connections or no list at all -> create new one
-        new_ssh = await _create_new_connection(db, redis, frame)
-        pc = PooledConnection(new_ssh)
-        pc.mark_in_use()
+    # No idle connection available. Establish the new connection WITHOUT holding
+    # the global pool lock: _create_new_connection can block for the full connect
+    # timeout on an unreachable frame, and holding the lock there would stall all
+    # SSH activity to every other frame. A concurrent caller may create a second
+    # connection for the same key in the meantime, which the pool tolerates.
+    new_ssh = await _create_new_connection(db, redis, frame)
+    pc = PooledConnection(new_ssh)
+    pc.mark_in_use()
 
+    async with _pool_lock:
         _ssh_pool.setdefault(pool_key, []).append(pc)
 
-        return new_ssh
+    return new_ssh
 
 
 async def remove_ssh_connection(db, redis, ssh: asyncssh.SSHClientConnection, frame: Frame):
