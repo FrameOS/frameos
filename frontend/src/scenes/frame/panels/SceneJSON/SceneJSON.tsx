@@ -62,17 +62,3 @@ export function SceneJSON({ sceneId }: SceneJSONProps) {
     </div>
   )
 }
-
-SceneJSON.PanelTitle = function SceneJSONPanelTitle({ sceneId }: SceneJSONProps) {
-  const { frameId } = useValues(frameLogic)
-  const sceneJSONLogicProps: SceneJSONLogicProps = { frameId, sceneId }
-  const { hasChanges, hasError, sceneName } = useValues(sceneJSONLogic(sceneJSONLogicProps))
-
-  return (
-    <>
-      {hasChanges ? '* ' : ''}
-      {hasError ? '! ' : ''}
-      Source: {sceneName}
-    </>
-  )
-}

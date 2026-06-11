@@ -5,7 +5,7 @@ import { appsModel, categoryLabels } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { AppConfig, AppNodeData, SceneApp } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
 
 export const INLINE_CODE_NODE_KEYWORD = '__frameos_inline_code_node__'
@@ -31,7 +31,7 @@ export const appsLogic = kea<appsLogicType>([
       ['apps as allApps'],
       frameLogic({ frameId }),
       ['frameForm'],
-      panelsLogic({ frameId }),
+      frameEditorsLogic({ frameId }),
       ['selectedSceneId'],
     ],
   })),

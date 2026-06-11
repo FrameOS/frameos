@@ -14,7 +14,7 @@ import { stateFieldAccess } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import copy from 'copy-to-clipboard'
 import { TextArea } from '../../../../components/TextArea'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 
@@ -45,7 +45,7 @@ function JavaScriptStateHelp({ codeClassName }: { codeClassName?: string }): JSX
 
 export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | null } = {}): JSX.Element {
   const { frameId } = useValues(frameLogic)
-  const { selectedSceneId } = useValues(panelsLogic({ frameId }))
+  const { selectedSceneId } = useValues(frameEditorsLogic({ frameId }))
   const sceneId = sceneIdOverride ?? selectedSceneId
   const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
@@ -344,8 +344,4 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
       </Group>
     </Form>
   )
-}
-
-SceneState.PanelTitle = function SceneStatePanelTitle() {
-  return <>State variables</>
 }

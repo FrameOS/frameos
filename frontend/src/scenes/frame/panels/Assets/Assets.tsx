@@ -9,7 +9,6 @@ import {
   type AssetStats,
   type DiskStats,
 } from './assetsLogic'
-import { panelsLogic } from '../panelsLogic'
 import { DocumentIcon, EyeIcon, EyeSlashIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
@@ -573,7 +572,6 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const assetsLogicProps = { frameId: frame.id }
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
-  const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders } = useValues(
     assetsLogic(assetsLogicProps)
   )
@@ -584,9 +582,9 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const showSyncAction = !isInFrameAdminMode()
 
+  // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
     syncAssets()
-    openLogs()
   }
 
   const createImageScene = async (path: string): Promise<void> => {

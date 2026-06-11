@@ -597,47 +597,6 @@ export interface FrameEvent {
   canListen?: boolean
 }
 
-export enum Area {
-  TopLeft = 'TopLeft',
-  TopRight = 'TopRight',
-  BottomLeft = 'BottomLeft',
-  BottomRight = 'BottomRight',
-}
-
-export enum Panel {
-  Action = 'Action',
-  Apps = 'Apps',
-  Asset = 'Asset',
-  Assets = 'Assets',
-  Chat = 'Chat',
-  Debug = 'Debug',
-  Diagram = 'Diagram',
-  EditApp = 'EditApp',
-  Events = 'Events',
-  FrameSettings = 'FrameSettings',
-  Image = 'Image',
-  Logs = 'Logs',
-  Metrics = 'Metrics',
-  Ping = 'Ping',
-  SceneJSON = 'SceneJSON',
-  Scenes = 'Scenes',
-  SceneSource = 'SceneSource',
-  SceneState = 'SceneState',
-  Schedule = 'Schedule',
-  Templates = 'Templates',
-  Terminal = 'Terminal',
-}
-
-export type PanelWithMetadata = {
-  panel: Panel
-  key?: string
-  title?: string
-  active?: boolean
-  hidden?: boolean
-  metadata?: Record<string, any>
-  closable?: boolean
-}
-
 export interface FrameOSSettings {
   defaults?: {
     timezone?: string

@@ -1,6 +1,6 @@
 import { afterMount, kea, key, path, props } from 'kea'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import type { workspaceChatDrawerLogicType } from './workspaceChatDrawerLogicType'
 
 export interface WorkspaceChatDrawerLogicProps {
@@ -17,10 +17,10 @@ export const workspaceChatDrawerLogic = kea<workspaceChatDrawerLogicType>([
     const chat = chatLogic({ frameId: props.frameId, sceneId: props.sceneId ?? null }).actions
 
     if (props.sceneId && props.nodeId) {
-      panelsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
+      frameEditorsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
       chat.ensureChatForApp(props.sceneId, props.nodeId)
     } else if (props.sceneId) {
-      panelsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
+      frameEditorsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
       chat.ensureChatForScene(props.sceneId)
     } else {
       chat.ensureFrameChat()

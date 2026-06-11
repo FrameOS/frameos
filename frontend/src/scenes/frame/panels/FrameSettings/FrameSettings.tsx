@@ -26,7 +26,7 @@ import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
-import { panelsLogic } from '../panelsLogic'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { FrameErrorBehaviorMode, FrameMountpointConfig, FrameType, Palette } from '../../../../types'
@@ -168,7 +168,8 @@ export function FrameSettings({
   const { buildCacheLoading, buildZipLoading, cSourceZipLoading, binaryZipLoading } = useValues(
     frameSettingsLogic({ frameId })
   )
-  const { openLogs } = useActions(panelsLogic({ frameId }))
+  const { openFrameTool } = useActions(workspaceLogic)
+  const openLogs = () => openFrameTool(frameId, 'logs')
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
@@ -1913,17 +1914,6 @@ export function FrameSettings({
           </Group>
         </div>
       </Form>
-    </div>
-  )
-}
-
-FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
-  const { frame, frameForm } = useValues(frameLogic)
-
-  return (
-    <div className="flex items-center gap-1">
-      <span>Settings</span>
-      <CertificateTriangle frame={frame} frameForm={frameForm} />
     </div>
   )
 }

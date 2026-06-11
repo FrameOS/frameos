@@ -1,11 +1,11 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, Panel, SceneNodeData } from '../../../../types'
+import { FrameScene, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
@@ -60,8 +60,8 @@ export const scenesLogic = kea<scenesLogicType>([
     actions: [
       frameLogic({ frameId }),
       ['applyTemplate', 'sendEvent'],
-      panelsLogic({ frameId }),
-      ['editScene', 'closePanel'],
+      frameEditorsLogic({ frameId }),
+      ['editScene', 'closeSceneEditors'],
       controlLogic({ frameId }),
       ['sync as syncActiveScene'],
     ],
@@ -771,7 +771,7 @@ export const scenesLogic = kea<scenesLogicType>([
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: values.scenes.filter((s) => s.id !== sceneId),
       })
-      actions.closePanel({ panel: Panel.Diagram, key: sceneId })
+      actions.closeSceneEditors([sceneId])
     },
     deleteSelectedScenes: () => {
       const selectedIds = Array.from(values.selectedSceneIds)
@@ -782,7 +782,7 @@ export const scenesLogic = kea<scenesLogicType>([
         scenes: values.scenes.filter((scene) => !values.selectedSceneIds.has(scene.id)),
       })
       selectedIds.forEach((sceneId) => {
-        actions.closePanel({ panel: Panel.Diagram, key: sceneId })
+        actions.closeSceneEditors([sceneId])
       })
       actions.clearSceneSelection()
     },

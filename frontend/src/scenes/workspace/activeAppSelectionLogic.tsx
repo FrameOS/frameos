@@ -1,6 +1,6 @@
 import { afterMount, kea, key, path, props } from 'kea'
 import { AppNodeData } from '../../types'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 import type { activeAppSelectionLogicType } from './activeAppSelectionLogicType'
@@ -18,7 +18,7 @@ export const activeAppSelectionLogic = kea<activeAppSelectionLogicType>([
   key((props) => `${props.frameId}:${props.sceneId}:${props.nodeId}`),
   afterMount(({ props }) => {
     workspaceLogic.actions.setRouteSelection(props.frameId, props.sceneId)
-    const panelActions = panelsLogic({ frameId: props.frameId }).actions
+    const panelActions = frameEditorsLogic({ frameId: props.frameId }).actions
     panelActions.selectScene(props.sceneId)
     panelActions.editApp(props.sceneId, props.nodeId, props.nodeData)
   }),

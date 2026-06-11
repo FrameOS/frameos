@@ -2,9 +2,8 @@ import { useActions, useValues } from 'kea'
 import { editAppLogic, EditAppLogicProps } from './editAppLogic'
 import { Button } from '../../../../components/Button'
 import Editor from '@monaco-editor/react'
-import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { useEffect, useRef, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
@@ -16,7 +15,9 @@ import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface EditAppProps {
-  panel?: PanelWithMetadata
+  // When set, keeps editAppLogic mounted until the editor is closed via
+  // frameEditorsLogic.closeEditor/closeSceneEditors
+  editorKey?: string
   sceneId: string
   nodeId: string
   showFileList?: boolean
@@ -179,10 +180,10 @@ export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListP
   )
 }
 
-export function EditApp({ panel, sceneId, nodeId, showFileList = true, compactWarnings = false }: EditAppProps) {
+export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compactWarnings = false }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
-  const { persistUntilClosed } = useActions(panelsLogic)
+  const { persistUntilClosed } = useActions(frameEditorsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
@@ -207,10 +208,10 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true, compactWa
   const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
 
   useEffect(() => {
-    if (panel) {
-      persistUntilClosed(panel, logic)
+    if (editorKey) {
+      persistUntilClosed(editorKey, logic)
     }
-  }, [panel])
+  }, [editorKey])
 
   useEffect(() => {
     if (monaco && editor && activeFile) {
@@ -287,22 +288,6 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true, compactWa
           />
         </div>
       </div>
-    </div>
-  )
-}
-EditApp.PanelTitle = function EditAppPanelTitle({ panel, sceneId, nodeId }: EditAppProps) {
-  const { frameId } = useValues(frameLogic)
-  const logicProps: EditAppLogicProps = {
-    frameId,
-    sceneId,
-    nodeId,
-  }
-  const { hasChanges, configJson, savedKeyword, title } = useValues(editAppLogic(logicProps))
-
-  return (
-    <div title={nodeId}>
-      {hasChanges ? '* ' : ''}
-      {title}
     </div>
   )
 }

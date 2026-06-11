@@ -36,7 +36,7 @@ import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLog
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -456,7 +456,7 @@ export function TemplateDrawer(): JSX.Element | null {
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
-        <BindLogic logic={panelsLogic} props={frameLogicProps}>
+        <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
             <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
               <div className="min-w-0">
@@ -722,7 +722,7 @@ function SceneControlPanelContent({
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
-        <BindLogic logic={panelsLogic} props={frameLogicProps}>
+        <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
             <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
               <div className="min-w-0">

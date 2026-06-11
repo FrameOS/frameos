@@ -1,5 +1,5 @@
 import { afterMount, kea, key, path, props } from 'kea'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 import type { appsWorkspaceLogicType } from './appsWorkspaceLogicType'
@@ -47,7 +47,7 @@ export const appsWorkspaceLogic = kea<appsWorkspaceLogicType>([
     workspaceLogic.actions.setRouteSelection(frameId, sceneId)
 
     if (frameId && sceneId) {
-      panelsLogic({ frameId }).actions.selectScene(sceneId)
+      frameEditorsLogic({ frameId }).actions.selectScene(sceneId)
     }
   }),
 ])

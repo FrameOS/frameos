@@ -3,14 +3,14 @@ import { frameLogic } from '../../frameLogic'
 import { sceneSourceLogic } from './sceneSourceLogic'
 import { Spinner } from '../../../../components/Spinner'
 import Editor, { Monaco } from '@monaco-editor/react'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { useEffect, useState } from 'react'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 export function SceneSource() {
   const { frame } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
-  const { selectedSceneId } = useValues(panelsLogic({ frameId: frame.id }))
+  const { selectedSceneId } = useValues(frameEditorsLogic({ frameId: frame.id }))
   const { sceneSource, sceneSourceLoading, modelMarkers } = useValues(
     sceneSourceLogic({ frameId: frame.id, sceneId: selectedSceneId })
   )

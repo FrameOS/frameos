@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 import { chatLogic } from './chatLogic'
 import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { Button } from '../../../../components/Button'
@@ -12,13 +12,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { Area, Panel } from '../../../../types'
 import { ChevronLeftIcon } from '@heroicons/react/24/solid'
 import { urls } from '../../../../urls'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
-  const { selectedSceneId, panels } = useValues(panelsLogic({ frameId }))
+  const { selectedSceneId } = useValues(frameEditorsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
   const {
     messages,
@@ -53,7 +52,7 @@ export function Chat() {
     createChat,
     loadMoreChats,
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
-  const { setPanel, editApp } = useActions(panelsLogic({ frameId }))
+  const { editApp } = useActions(frameEditorsLogic({ frameId }))
   const { focusScene } = useActions(scenesLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -65,10 +64,6 @@ export function Chat() {
   const missingBackendApiKey = !hasBackendApiKey
 
   const focusSceneById = (sceneId: string) => {
-    const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
-    if (scenesPanel) {
-      setPanel(Area.TopLeft, scenesPanel)
-    }
     focusScene(sceneId)
     router.actions.push(urls.scenes(frameId, sceneId))
   }

@@ -7,7 +7,7 @@ import { TextInput } from '../../../../components/TextInput'
 import React from 'react'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { AppConfig } from '../../../../types'
 import { appTag } from '../../../../utils/sceneApps'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
@@ -19,7 +19,7 @@ export function Apps() {
   const logic = appsLogic({ frameId })
   const { appsByCategory, search, visibleSceneApps, sceneAppUsageCounts } = useValues(logic)
   const { setSearch, deleteUnusedSceneApp } = useActions(logic)
-  const { scenesOpen } = useValues(panelsLogic({ frameId }))
+  const { scenesOpen } = useValues(frameEditorsLogic({ frameId }))
   const onDragStart = (event: any, keyword: string) => {
     const dragData = keyword === INLINE_CODE_NODE_KEYWORD ? { type: 'code', keyword: '' } : { type: 'app', keyword }
     event.dataTransfer.setData('application/reactflow', JSON.stringify(dragData))

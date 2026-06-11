@@ -34,7 +34,7 @@ import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { frameLogic } from '../frame/frameLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
@@ -212,7 +212,7 @@ function WorkspaceChatDrawer({
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
-        <BindLogic logic={panelsLogic} props={frameLogicProps}>
+        <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
               <div className="min-w-0">

@@ -9,7 +9,7 @@ import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { urls } from '../../../../urls'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
@@ -35,7 +35,7 @@ const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
   const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp } = useActions(diagramLogic)
-  const { editApp } = useActions(panelsLogic)
+  const { editApp } = useActions(frameEditorsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
     node,
