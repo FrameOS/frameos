@@ -202,6 +202,56 @@ async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db,
 
 
 @pytest.mark.asyncio
+async def test_api_frame_cancel_deploy_and_force_deploy(async_client, db, redis, monkeypatch):
+    import importlib
+
+    import app.tasks as tasks_package
+
+    deploy_frame_module = importlib.import_module("app.tasks.deploy_frame")
+
+    frame = await new_frame(
+        db,
+        redis,
+        name="CancelDeployFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
+
+    calls: list[tuple[str, int]] = []
+
+    async def fake_cancel_active_deploy(_db, _redis, target_frame):
+        calls.append(("cancel", target_frame.id))
+        return {"abortedJob": True, "clearedLock": True, "resetStatus": False}
+
+    async def fake_deploy_frame(id, _redis, **kwargs):
+        calls.append(("deploy", id))
+
+    monkeypatch.setattr(deploy_frame_module, "cancel_active_deploy", fake_cancel_active_deploy)
+    monkeypatch.setattr(tasks_package, "deploy_frame", fake_deploy_frame)
+
+    cancel_response = await async_client.post(f'/api/frames/{frame.id}/cancel_deploy')
+    assert cancel_response.status_code == 200
+    assert cancel_response.json() == {
+        "message": "Success",
+        "abortedJob": True,
+        "clearedLock": True,
+        "resetStatus": False,
+    }
+
+    plain_response = await async_client.post(f'/api/frames/{frame.id}/deploy')
+    forced_response = await async_client.post(f'/api/frames/{frame.id}/deploy?force=true')
+    assert plain_response.status_code == 200
+    assert forced_response.status_code == 200
+    assert calls == [
+        ("cancel", frame.id),
+        ("deploy", frame.id),
+        ("cancel", frame.id),
+        ("deploy", frame.id),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
     frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
     frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)

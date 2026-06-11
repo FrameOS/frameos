@@ -188,6 +188,7 @@ export const framesModel = kea<framesModelType>([
     addFrame: (frame: FrameType) => ({ frame }),
     loadFrame: (id: number) => ({ id }),
     deployFrame: (id: number, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
+    cancelDeploy: (id: number) => ({ id }),
     stopFrame: (id: number) => ({ id }),
     restartFrame: (id: number) => ({ id }),
     rebootFrame: (id: number) => ({ id }),
@@ -404,6 +405,17 @@ export const framesModel = kea<framesModelType>([
         })
         throw error
       }
+    },
+    cancelDeploy: async ({ id }) => {
+      const response = await apiFetch(`/api/frames/${id}/cancel_deploy`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to cancel deploy')
+      }
+      longRunningTasksModel.actions.taskFailed({
+        frameId: id,
+        kind: 'deploy',
+        detail: 'Deploy cancelled',
+      })
     },
     stopFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })

@@ -9,7 +9,7 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed
 from app.tasks.utils import get_fresh_frame
-from app.tasks.deploy_frame import deploy_task_log_line
+from app.tasks.deploy_frame import clear_active_deploy_job, deploy_task_log_line, register_active_deploy_job
 
 
 async def fast_deploy_frame(id: int, redis: Redis, *, task_id: str | None = None) -> str | None:
@@ -24,6 +24,7 @@ async def fast_deploy_frame(id: int, redis: Redis, *, task_id: str | None = None
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = None) -> None:
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
+    job_id: str | None = ctx.get("job_id")
 
     frame = get_fresh_frame(db, id)
     if not frame:
@@ -39,6 +40,7 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
         temp_dir="",
     )
 
+    await register_active_deploy_job(redis, id, job_id)
     try:
         plan = await workflow.plan("fast")
         if task_id:
@@ -53,3 +55,5 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
         # Re-raise so arq records the job as failed (status already reset to
         # "uninitialized" by the workflow before it raised).
         raise
+    finally:
+        await clear_active_deploy_job(redis, id, job_id)

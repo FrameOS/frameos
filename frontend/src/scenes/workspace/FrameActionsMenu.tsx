@@ -6,6 +6,7 @@ import {
   ArrowPathIcon,
   ArrowUturnLeftIcon,
   CommandLineIcon,
+  NoSymbolIcon,
   PencilSquareIcon,
   PowerIcon,
   RocketLaunchIcon,
@@ -35,6 +36,7 @@ export function FrameActionsMenu({
   buttonColor = 'none',
 }: FrameActionsMenuProps): JSX.Element {
   const {
+    cancelDeploy,
     deleteFrame,
     deployAgent,
     rebootFrame,
@@ -72,6 +74,17 @@ export function FrameActionsMenu({
           onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
           icon: <RocketLaunchIcon className="h-5 w-5" />,
         },
+        ...(frame.status === 'deploying'
+          ? [
+              {
+                label: 'Cancel deploy',
+                title: 'Abort the running deploy and clear the deploy lock',
+                confirm: `Cancel the deploy in progress for "${frameName}"?`,
+                onClick: () => cancelDeploy(frame.id),
+                icon: <NoSymbolIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
         {
           label: 'Build SD card',
           title: 'Build or download a flashable SD card image',

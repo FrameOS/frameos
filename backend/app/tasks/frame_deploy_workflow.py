@@ -57,6 +57,14 @@ REMOTE_BUILD_FEATURE_CFLAGS = {
     "amd64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
     "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
 }
+def deploy_lock_key(frame_id: int) -> str:
+    return f"frame:deploy:lock:{frame_id}"
+
+
+def active_deploy_job_key(frame_id: int) -> str:
+    return f"frame:deploy:job:{frame_id}"
+
+
 def _deploy_uses_agent(frame: Frame) -> bool:
     agent = getattr(frame, "agent", None)
     if not isinstance(agent, dict):
@@ -308,12 +316,13 @@ class FrameDeployWorkflow:
         # The frame.status == "deploying" check is a read-modify-write on a DB
         # column: two jobs enqueued close together can both pass it and race
         # on the same remote /srv/frameos. Take a real lock per frame.
-        lock_key = f"frame:deploy:lock:{self.frame.id}"
+        lock_key = deploy_lock_key(int(self.frame.id))
         lock_token = uuid4().hex
         acquired = await self.redis.set(lock_key, lock_token, nx=True, ex=self.DEPLOY_LOCK_TTL_SECONDS)
         if not acquired:
             await log(self.db, self.redis, int(self.frame.id), "stderr",
-                      f"{icon} Another deploy is already running for this frame; aborting this one.")
+                      f"{icon} Another deploy is already running for this frame; aborting this one. "
+                      "If it is stuck, use \"Cancel deploy\" in the frame menu to clear it.")
             raise RuntimeError(f"Deploy already in progress for frame {self.frame.id}")
         try:
             if plan.mode == "fast":

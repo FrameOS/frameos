@@ -2430,6 +2430,7 @@ async def api_frame_stop_event(
 async def api_frame_deploy_event(
     id: int,
     task_id: str | None = Query(None),
+    force: bool = Query(False),
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
 ):
@@ -2437,9 +2438,28 @@ async def api_frame_deploy_event(
     deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import deploy_frame
+        from app.tasks.deploy_frame import cancel_active_deploy
 
+        if force:
+            await cancel_active_deploy(db, redis, frame)
         await deploy_frame(frame.id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_project.post("/frames/{id:int}/cancel_deploy")
+async def api_frame_cancel_deploy(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
+    try:
+        from app.tasks.deploy_frame import cancel_active_deploy
+
+        result = await cancel_active_deploy(db, redis, frame)
+        return {"message": "Success", **result}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -2654,14 +2674,18 @@ async def api_frame_deploy_plan_preview(
 async def api_frame_fast_deploy_event(
     id: int,
     task_id: str | None = Query(None),
+    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    _project_frame(db, id)
+    frame = _project_frame(db, id) or _not_found()
     deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import fast_deploy_frame
+        from app.tasks.deploy_frame import cancel_active_deploy
 
+        if force:
+            await cancel_active_deploy(db, redis, frame)
         await fast_deploy_frame(id, redis, task_id=deploy_task_id)
         return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:

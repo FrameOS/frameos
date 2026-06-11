@@ -1076,7 +1076,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
-  const { downloadSdCardImage, loadFrame } = useActions(framesModel)
+  const { cancelDeploy, downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
@@ -1257,6 +1257,16 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             </button>
           ) : (
             <>
+              {frame.status === 'deploying' ? (
+                <button
+                  type="button"
+                  title="Abort the running deploy and clear the deploy lock, so a new deploy can start"
+                  onClick={() => cancelDeploy(frame.id)}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                >
+                  Cancel stuck deploy
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={closeDrawer}
