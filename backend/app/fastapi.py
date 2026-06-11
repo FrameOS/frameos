@@ -29,6 +29,10 @@ async def lifespan(app: FastAPI):
     yield
     await app.state.http_client.aclose()
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)

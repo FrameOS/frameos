@@ -107,22 +107,38 @@ class ConnectionManager:
 manager = ConnectionManager() # Local clients
 
 async def redis_listener():
-    redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
-    try:
-        pubsub = redis_sub.pubsub()
-        await pubsub.subscribe("broadcast_channel")
+    # Reconnect forever: a dropped Redis connection must not permanently kill
+    # cross-instance websocket broadcasts. Only an explicit cancel stops us.
+    backoff = 1.0
+    while True:
+        redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
+        try:
+            pubsub = redis_sub.pubsub()
+            await pubsub.subscribe("broadcast_channel")
+            backoff = 1.0  # reset once a subscription is established
 
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                try:
-                    parsed = json.loads(message["data"])
-                    # Only broadcast if not from this instance
-                    if parsed.get("instance_id") != config.INSTANCE_ID:
-                        await manager.broadcast(message["data"])
-                except json.JSONDecodeError:
-                    pass
-    finally:
-        await redis_sub.close()
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        parsed = json.loads(message["data"])
+                        # Only broadcast if not from this instance
+                        if parsed.get("instance_id") != config.INSTANCE_ID:
+                            await manager.broadcast(message["data"])
+                    except json.JSONDecodeError:
+                        pass
+        except asyncio.CancelledError:
+            await redis_sub.close()
+            raise
+        except Exception as e:
+            print(f"redis_listener connection error, reconnecting in {backoff:.0f}s: {e}")
+        finally:
+            try:
+                await redis_sub.close()
+            except Exception:
+                pass
+
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 30.0)
 
 async def publish_message(redis: Redis, event: str, data: dict):
     msg = {"event": event, "data": data, "instance_id": config.INSTANCE_ID}
