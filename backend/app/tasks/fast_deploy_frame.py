@@ -50,3 +50,6 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
         if task_id:
             await log(db, redis, id, "stderr", deploy_task_log_line(task_id, "failed", str(exc)))
         await log(db, redis, id, "stderr", str(exc))
+        # Re-raise so arq records the job as failed (status already reset to
+        # "uninitialized" by the workflow before it raised).
+        raise

@@ -61,3 +61,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
         if task_id:
             await log(db, redis, int(frame.id), type="stderr", line=deploy_task_log_line(task_id, "failed", str(exc)))
         await log(db, redis, int(frame.id), type="stderr", line=str(exc))
+        # Re-raise so arq records the job as failed. The workflow already reset
+        # frame.status to "uninitialized" before raising, so this leaves no
+        # stuck state but lets job-status consumers see the failure.
+        raise
