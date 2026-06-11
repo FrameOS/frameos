@@ -509,6 +509,12 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      // Frame state is event-sourced over the websocket; anything that
+      // happened while disconnected (backend deploys drop the socket at
+      // exactly the moment statuses change) was missed, so refetch.
+      actions.loadFrames()
+    },
     [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
       const sdImage = frame.buildroot?.sdImage
       if (!sdImage || !pendingSdCardImageDownloads.has(frame.id)) {
