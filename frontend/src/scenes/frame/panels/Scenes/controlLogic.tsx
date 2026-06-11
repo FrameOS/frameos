@@ -167,6 +167,12 @@ export const controlLogic = kea<controlLogicType>([
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
+      // Only react to logs for THIS frame; otherwise a scene change on another
+      // frame would overwrite this frame's active scene and trigger a redundant
+      // sync() per mounted controlLogic.
+      if (log.frame_id !== props.frameId) {
+        return
+      }
       try {
         const { event, sceneId } = JSON.parse(log.line)
         if (event === 'render:sceneChange') {
