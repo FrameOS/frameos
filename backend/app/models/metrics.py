@@ -1,7 +1,7 @@
 import uuid
 from datetime import timezone
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import Integer, String, ForeignKey, DateTime, event, func
+from sqlalchemy import Index, Integer, String, ForeignKey, DateTime, event, func
 from arq import ArqRedis as Redis
 from app.database import Base
 from app.models.frame import Frame
@@ -13,6 +13,9 @@ METRICS_RETAINED_PER_FRAME = 11000
 
 class Metrics(Base):
     __tablename__ = 'metrics'
+    __table_args__ = (
+        Index('ix_metrics_frame_id_timestamp', 'frame_id', 'timestamp'),
+    )
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
@@ -52,7 +55,9 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
 
     metric = Metrics(project_id=frame.project_id, frame_id=frame_id, metrics=metrics)
     db.add(metric)
-    db.commit()
+    # Flush so the count below sees the pending row; commit once at the end
+    # instead of once before and once after the prune.
+    db.flush()
     metrics_count = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=frame_id).count()
     payload = metric.to_dict()
     if metrics_count > METRICS_RETAINED_PER_FRAME:

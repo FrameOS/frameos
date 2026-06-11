@@ -207,6 +207,12 @@ async def test_new_log_trimming(mock_pub, db, redis):
         ]
     )
     db.commit()
+    # The prune count runs only every PRUNE_CHECK_EVERY inserts; reset the
+    # throttle so this insert performs the check.
+    from app.models.log import _inserts_since_prune_check
+    _inserts_since_prune_check.clear()
     await new_log(db, redis, frame.id, "info", "Trigger trim")
     count = db.query(Log).filter_by(frame_id=frame.id).count()
-    assert count == LOG_LIMIT_PER_FRAME + 1
+    # Pruning trims back down to exactly the limit; the new log survives.
+    assert count == LOG_LIMIT_PER_FRAME
+    assert db.query(Log).filter_by(frame_id=frame.id).order_by(Log.id.desc()).first().line == "Trigger trim"

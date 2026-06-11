@@ -8,12 +8,18 @@ from .frame import Frame, update_frame
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.timezone import stored_timezone
-from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, event, func
+from sqlalchemy import Index, Integer, String, DateTime, ForeignKey, Text, event, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
 LOG_LIMIT_PER_FRAME = 10000
+# Run the count+prune query only every N inserts per frame (per process).
+# Frames stream logs continuously; counting on every insert dominated
+# ingestion cost before the (frame_id, timestamp) index existed.
+PRUNE_CHECK_EVERY = 100
 FRAME_ACTIVITY_LOG_TYPES = ("webhook",)
+
+_inserts_since_prune_check: dict[int, int] = {}
 
 
 def is_frame_activity_log(type: str, _line: str) -> bool:
@@ -21,6 +27,9 @@ def is_frame_activity_log(type: str, _line: str) -> bool:
 
 class Log(Base):
     __tablename__ = 'log'
+    __table_args__ = (
+        Index('ix_log_frame_id_timestamp', 'frame_id', 'timestamp'),
+    )
     id = mapped_column(Integer, primary_key=True)
     project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
@@ -53,6 +62,28 @@ def _set_log_project_id(_mapper, connection, target: Log):
     target.project_id = project_id
 
 
+def maybe_prune_logs(db: Session, project_id: int, frame_id: int, inserts: int = 1) -> None:
+    """Trim a frame's logs back to LOG_LIMIT_PER_FRAME, checking the count only
+    every PRUNE_CHECK_EVERY inserts (and on the first insert this process sees
+    for the frame). Leaves the deletes pending; the caller commits."""
+    since_check = _inserts_since_prune_check.get(frame_id)
+    if since_check is not None and since_check + inserts < PRUNE_CHECK_EVERY:
+        _inserts_since_prune_check[frame_id] = since_check + inserts
+        return
+    _inserts_since_prune_check[frame_id] = 0
+
+    frame_logs_count = db.query(Log).filter_by(project_id=project_id, frame_id=frame_id).count()
+    if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
+        oldest_logs = (db.query(Log)
+                       .filter_by(frame_id=frame_id)
+                       .filter(Log.project_id == project_id)
+                       .order_by(Log.timestamp)
+                       .limit(frame_logs_count - LOG_LIMIT_PER_FRAME)
+                       .all())
+        for old_log in oldest_logs:
+            db.delete(old_log)
+
+
 async def new_log(
     db: Session,
     redis: Redis,
@@ -61,6 +92,7 @@ async def new_log(
     line: str,
     timestamp: Optional[datetime] = None,
     ip: Optional[str] = None,
+    commit: bool = True,
 ) -> Log:
     timestamp = timestamp or datetime.utcnow()
     frame = db.get(Frame, frame_id)
@@ -78,19 +110,13 @@ async def new_log(
     db.add(log)
     if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
         frame.last_log_at = timestamp
-    db.commit()
-    frame_logs_count = db.query(Log).filter_by(project_id=frame.project_id, frame_id=frame_id).count()
+    # Make the pending row visible to the prune count and assign its id
+    # without paying a commit per call (autoflush is off).
+    db.flush()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
-    if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
-        oldest_logs = (db.query(Log)
-                       .filter_by(frame_id=frame_id)
-                       .filter(Log.project_id == frame.project_id)
-                       .order_by(Log.timestamp)
-                       .limit(100)
-                       .all())
-        for old_log in oldest_logs:
-            db.delete(old_log)
-    db.commit()
+    if commit:
+        maybe_prune_logs(db, frame.project_id, frame_id)
+        db.commit()
 
     await publish_message(redis, "new_log", payload)
     return log
@@ -102,6 +128,7 @@ async def process_log(
     frame: Frame,
     log: dict | list,
     ip: Optional[str] = None,
+    commit: bool = True,
 ):
     if isinstance(log, list):
         timestamp = datetime.utcfromtimestamp(log[0])
@@ -109,7 +136,7 @@ async def process_log(
     else:
         timestamp = datetime.utcnow()
 
-    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip)
+    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip, commit=commit)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 

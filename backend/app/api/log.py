@@ -4,7 +4,7 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.frame import Frame
-from app.models.log import process_log
+from app.models.log import maybe_prune_logs, process_log
 from app.schemas.log import LogRequest, LogResponse
 from app.utils.request_ip import extract_client_ip
 from app.redis import get_redis
@@ -40,7 +40,11 @@ async def post_api_log(
         await process_log(db, redis, frame, data.log, ip=client_ip)
 
     if data.logs:
+        # Devices ship logs in batches of up to 1000; commit and prune once
+        # per request instead of once per line.
         for log in data.logs:
-            await process_log(db, redis, frame, log, ip=client_ip)
+            await process_log(db, redis, frame, log, ip=client_ip, commit=False)
+        maybe_prune_logs(db, frame.project_id, frame.id, inserts=len(data.logs))
+        db.commit()
 
     return LogResponse(message="OK")
