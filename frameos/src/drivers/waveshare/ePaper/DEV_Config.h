@@ -86,6 +86,11 @@ void DEV_SPI_WriteByte(UBYTE Value);
 void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len);
 void DEV_Delay_ms(UDOUBLE xms);
 
+// Upper bound for busy-pin waits. A full e-paper refresh takes ~30s;
+// anything past this means a wedged controller, and spinning forever
+// hangs the caller's render thread.
+#define EPD_BUSY_TIMEOUT_MS 120000
+
 void DEV_SPI_SendData(UBYTE Reg);
 void DEV_SPI_SendnData(UBYTE *Reg);
 UBYTE DEV_SPI_ReadData();

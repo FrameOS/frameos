@@ -6,6 +6,7 @@ from functools import partial
 import os
 import shlex
 from typing import Any
+from uuid import uuid4
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
@@ -299,14 +300,35 @@ class FrameDeployWorkflow:
             return await self._plan_full(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         raise ValueError(f"Unsupported deploy mode: {mode}")
 
+    # Matches the arq job_timeout, so a crashed worker can never wedge a
+    # frame's deploys for longer than the job itself could have run.
+    DEPLOY_LOCK_TTL_SECONDS = 21600
+
     async def execute(self, plan: FrameDeployPlan) -> None:
-        if plan.mode == "fast":
-            await self._execute_fast(plan)
-            return
-        if plan.mode == "full":
-            await self._execute_full(plan)
-            return
-        raise ValueError(f"Unsupported deploy mode: {plan.mode}")
+        # The frame.status == "deploying" check is a read-modify-write on a DB
+        # column: two jobs enqueued close together can both pass it and race
+        # on the same remote /srv/frameos. Take a real lock per frame.
+        lock_key = f"frame:deploy:lock:{self.frame.id}"
+        lock_token = uuid4().hex
+        acquired = await self.redis.set(lock_key, lock_token, nx=True, ex=self.DEPLOY_LOCK_TTL_SECONDS)
+        if not acquired:
+            await log(self.db, self.redis, int(self.frame.id), "stderr",
+                      f"{icon} Another deploy is already running for this frame; aborting this one.")
+            raise RuntimeError(f"Deploy already in progress for frame {self.frame.id}")
+        try:
+            if plan.mode == "fast":
+                await self._execute_fast(plan)
+                return
+            if plan.mode == "full":
+                await self._execute_full(plan)
+                return
+            raise ValueError(f"Unsupported deploy mode: {plan.mode}")
+        finally:
+            # Release only our own lock: the TTL may have expired and another
+            # deploy may legitimately hold it now.
+            current = await self.redis.get(lock_key)
+            if current is not None and current.decode(errors="replace") == lock_token:
+                await self.redis.delete(lock_key)
 
     async def _plan_combined(
         self,
@@ -398,28 +420,55 @@ class FrameDeployWorkflow:
         settings = _get_frame_settings(self.db, self.frame)
         build_environment_provider = selected_build_environment_provider(settings)
         compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
+        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
+        buildroot_precompiled_requested = is_buildroot and compilation_mode == COMPILATION_MODE_PRECOMPILED
         cross_compilation_setting = (
-            "always" if is_buildroot else (compile_settings.get("crossCompilation") or "auto").lower()
+            "auto"
+            if buildroot_precompiled_requested
+            else "always"
+            if is_buildroot
+            else (compile_settings.get("crossCompilation") or "auto").lower()
         )
         if cross_compilation_setting not in {"auto", "always", "never"}:
             cross_compilation_setting = "auto"
-        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
 
-        if build_environment_provider == "none" and (is_buildroot or cross_compilation_setting == "always"):
+        if build_environment_provider == "none" and cross_compilation_setting == "always":
+            if is_buildroot:
+                raise RuntimeError(
+                    "Server-side compilation is disabled in global settings. Buildroot source deploys require Docker, "
+                    "a build host, or Modal sandboxes because Buildroot targets cannot compile on device."
+                )
             raise RuntimeError(
                 "Server-side compilation is disabled in global settings. Choose Docker, build host, or Modal "
                 "sandboxes as the build environment, or set this frame to always compile on device."
             )
 
         allow_cross_compile = cross_compilation_setting != "never" and build_environment_provider != "none"
-        force_cross_compile = is_buildroot or cross_compilation_setting == "always"
-        allow_on_device_fallback = build_environment_provider == "none" or cross_compilation_setting == "never"
+        force_cross_compile = (
+            is_buildroot and not buildroot_precompiled_requested
+        ) or cross_compilation_setting == "always"
+        allow_on_device_fallback = (
+            False if is_buildroot else build_environment_provider == "none" or cross_compilation_setting == "never"
+        )
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
             allow_on_device_fallback=allow_on_device_fallback,
             compilation_mode=compilation_mode,
         )
+        if is_buildroot and not binary_plan.will_attempt_precompiled:
+            binary_plan.force_cross_compile = True
+            if not binary_plan.cross_compile_supported:
+                raise RuntimeError(
+                    "Buildroot source deploys require cross-compilation, but this target architecture is not supported."
+                )
+            if build_environment_provider == "none":
+                raise RuntimeError(
+                    "Server-side compilation is disabled in global settings. Buildroot deploys can use a "
+                    "precompiled FrameOS release only when no compiled scenes are configured and a matching "
+                    "release binary exists. Choose Docker, build host, or Modal sandboxes as the build environment, "
+                    "or remove compiled scenes and use precompiled binaries."
+                )
 
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
@@ -1089,18 +1138,24 @@ class FrameDeployWorkflow:
             )
 
     async def _cleanup_release_artifacts(self) -> None:
+        # This runs AFTER the symlink swap, so a spurious failure here would flip
+        # an already-live, healthy deploy to "uninitialized". Never raise on
+        # cleanup, and use `xargs -r` so an empty candidate list (the common case
+        # of <=10 release dirs) doesn't run `rm -rf` with no args and exit 1.
         await self.deployer.exec_command(
             "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
-            "ls -dt1 build_* | tail -n +11 | xargs rm -rf; "
+            "ls -dt1 build_* | tail -n +11 | xargs -r rm -rf; "
             "fi",
             raise_on_error=False,
         )
         await self.deployer.exec_command(
-            "mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf"
+            "mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs -r rm -rf",
+            raise_on_error=False,
         )
         await self.deployer.exec_command(
             "cd /srv/frameos/releases && "
-            "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf"
+            "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs -r rm -rf",
+            raise_on_error=False,
         )
 
     @staticmethod

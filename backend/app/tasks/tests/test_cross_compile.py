@@ -56,6 +56,10 @@ def test_resolve_prebuilt_target_maps_ubuntu_26_04_arm64():
     assert resolve_prebuilt_target("ubuntu", "26.04", "aarch64") == "ubuntu-26.04-arm64"
 
 
+def test_resolve_prebuilt_target_maps_buildroot_pi_zero_2w_to_release_artifact():
+    assert resolve_prebuilt_target("buildroot", "2025.02.13", "aarch64") == "debian-bookworm-arm64"
+
+
 def test_cross_compiler_uses_buildroot_toolchain_base_for_buildroot_release(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
     compiler = CrossCompiler(

@@ -354,6 +354,7 @@ class FrameBinaryBuilder:
                     target_override=plan.target,
                     logger=self._log,
                     build_host=build_executor,
+                    compilation_mode=plan.compilation_mode,
                 )
             except Exception as exc:
                 error_message = str(exc)

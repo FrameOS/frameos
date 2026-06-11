@@ -12,10 +12,12 @@ proc restoreBootGuardState() =
     writeFile(bootGuardPath, existingState)
   elif fileExists(bootGuardPath):
     removeFile(bootGuardPath)
+  resetBootGuardCacheForTest()
 
 proc resetBootGuardState() =
   if fileExists(bootGuardPath):
     removeFile(bootGuardPath)
+  resetBootGuardCacheForTest()
 
 try:
   block test_boot_guard_counting:

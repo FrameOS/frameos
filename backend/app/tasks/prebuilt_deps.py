@@ -111,6 +111,13 @@ def _normalize_ubuntu_release(version: str) -> str | None:
     return None
 
 
+def _normalize_buildroot_release(version: str) -> str | None:
+    # Buildroot release images are composed from the Debian Bookworm ARM64
+    # precompiled FrameOS artifact. The detected Buildroot version is the OS
+    # buildroot version, not a binary artifact target version.
+    return "bookworm" if (version or "").strip() else None
+
+
 def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
     distro_input = (distro or "").lower()
     distro_key = {
@@ -131,6 +138,9 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
             release_key = release
     elif distro_key == "ubuntu":
         release_key = _normalize_ubuntu_release(version)
+    elif distro_key == "buildroot":
+        distro_key = "debian"
+        release_key = _normalize_buildroot_release(version)
     if not release_key:
         return None
 

@@ -52,15 +52,28 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
   for ev in matched:
     sendEvent(ev.event, ev.payload)
 
+proc minuteKey(dt: DateTime): int64 =
+  dt.toTime().toUnix() div 60
+
 proc start*(self: Scheduler) =
+  # NTP step corrections (routine on RTC-less Pis) can replay or repeat a
+  # wall-clock minute. Track the last fired minute so events never fire twice;
+  # a step backwards of more than two minutes is accepted as a clock
+  # correction and scheduling resumes from the new time.
+  var lastFiredMinute = int64.low
   while true:
     let dt = now()
-    self.handleSchedule(dt)
+    let minute = minuteKey(dt)
+    if minute > lastFiredMinute or minute < lastFiredMinute - 2:
+      self.handleSchedule(dt)
+      lastFiredMinute = minute
     # Sleep until next minute
     let now2 = now()
     if now2.minute == dt.minute:
       let secondsToSleep = 60 - now2.second
       sleep(secondsToSleep * 1000)
+    else:
+      sleep(200) # the clock moved mid-iteration; re-check soon without spinning
 
 proc createThreadRunner(frameOS: FrameOS) {.thread.} =
   var scheduler = Scheduler(

@@ -78,8 +78,14 @@ parameter:
 void EPD_7IN5B_HD_WaitUntilIdle(void)
 {
     Debug("e-Paper busy\r\n");
+    UDOUBLE busy_wait_ms = 0;
     while(DEV_Digital_Read(EPD_BUSY_PIN)){
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            break;
+        }
         DEV_Delay_ms(10);
+        busy_wait_ms += 10;
     }
     DEV_Delay_ms(200);      
     Debug("e-Paper busy release\r\n");

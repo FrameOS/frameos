@@ -509,6 +509,12 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      // Frame state is event-sourced over the websocket; anything that
+      // happened while disconnected (backend deploys drop the socket at
+      // exactly the moment statuses change) was missed, so refetch.
+      actions.loadFrames()
+    },
     [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
       const sdImage = frame.buildroot?.sdImage
       if (!sdImage || !pendingSdCardImageDownloads.has(frame.id)) {
@@ -570,7 +576,14 @@ export const framesModel = kea<framesModelType>([
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
       if (log.type === 'webhook') {
-        const parsed = JSON.parse(log.line)
+        let parsed: any
+        try {
+          parsed = JSON.parse(log.line)
+        } catch {
+          // A malformed webhook line must not throw out of the listener (which
+          // would skip the rest of the newLog listener chain for this action).
+          return
+        }
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
           entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }

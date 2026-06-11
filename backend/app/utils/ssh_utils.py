@@ -115,14 +115,19 @@ async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyn
                     # await log(db, redis, frame.id, "stdinfo", "Reusing existing SSH connection")
                     return pc.ssh
 
-        # No idle connections or no list at all -> create new one
-        new_ssh = await _create_new_connection(db, redis, frame)
-        pc = PooledConnection(new_ssh)
-        pc.mark_in_use()
+    # No idle connection available. Establish the new connection WITHOUT holding
+    # the global pool lock: _create_new_connection can block for the full connect
+    # timeout on an unreachable frame, and holding the lock there would stall all
+    # SSH activity to every other frame. A concurrent caller may create a second
+    # connection for the same key in the meantime, which the pool tolerates.
+    new_ssh = await _create_new_connection(db, redis, frame)
+    pc = PooledConnection(new_ssh)
+    pc.mark_in_use()
 
+    async with _pool_lock:
         _ssh_pool.setdefault(pool_key, []).append(pc)
 
-        return new_ssh
+    return new_ssh
 
 
 async def remove_ssh_connection(db, redis, ssh: asyncssh.SSHClientConnection, frame: Frame):
@@ -210,7 +215,11 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
             username=username,
             password=password if password else None,
             client_keys=client_keys if not password else None,
-            known_hosts=None
+            known_hosts=None,
+            # A powered-off frame must not hang the caller on the OS TCP
+            # timeout (minutes) — arq worker slots and API requests wait on this.
+            connect_timeout=30,
+            login_timeout=30,
         )
         await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
         return ssh
@@ -227,13 +236,16 @@ async def exec_command(
     output: Optional[list[str]] = None,
     log_output: bool = True,
     log_command: bool | str = True,
-    raise_on_error: bool = True
+    raise_on_error: bool = True,
+    timeout: int = 300,
 ) -> int:
     """
     Execute a command on the remote host using an existing SSH connection.
     Stream stdout and stderr lines as they arrive, optionally storing them
     into 'output' and logging them in the database.
-    Returns the process exit status.
+    Returns the process exit status. Kills the remote process and raises if
+    it runs longer than `timeout` seconds, so a hung command can't pin the
+    pooled SSH connection (and the API request waiting on it) forever.
     """
 
     if log_command:
@@ -254,9 +266,15 @@ async def exec_command(
             _stream_lines(db, redis, frame, process.stderr, "stderr", log_output, stderr_buffer, combined_buffer)
         )
 
-        await asyncio.gather(stdout_task, stderr_task)
+        try:
+            response = await asyncio.wait_for(process.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            stdout_task.cancel()
+            stderr_task.cancel()
+            raise Exception(f"Command '{command}' timed out after {timeout}s")
 
-        response = await process.wait()
+        await asyncio.gather(stdout_task, stderr_task)
         exit_status = response.exit_status or 0
 
         # Capture combined stdout if needed

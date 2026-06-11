@@ -32,6 +32,7 @@ else:
   import json
   import options
   import times
+  import std/atomics
   import frameos/ids
   import frameos/driver_abi
   import frameos/types
@@ -41,29 +42,47 @@ else:
 
   # Event
 
+  # Bounded: the runner drains this on a single thread that can be busy for
+  # the full duration of an e-ink render or a slow event handler. Producers
+  # (touch input, HTTP routes, scheduler) must drop instead of growing the
+  # queue without limit; the runner reports drops once it catches up.
   var eventChannel*: Channel[(Option[SceneId], string, JsonNode)]
-  eventChannel.open()
+  eventChannel.open(1000)
+
+  # Count of events dropped because eventChannel was full; the runner
+  # resets it and reports the total when it catches up.
+  var eventsDroppedCounter*: Atomic[int]
 
   # Send an event to the current scene
   proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
-    eventChannel.send((none(SceneId), event, payload))
+    if not eventChannel.trySend((none(SceneId), event, payload)):
+      atomicInc(eventsDroppedCounter)
 
   # Send an event to a specific scene
   proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
-    eventChannel.send((scene, event, payload))
+    if not eventChannel.trySend((scene, event, payload)):
+      atomicInc(eventsDroppedCounter)
 
   # Log
 
+  # Bounded: if the logger thread stalls (e.g. sending logs over a flaky
+  # network), producers must drop logs instead of growing this queue until
+  # the device swaps itself into an unreachable state.
   var logChannel*: Channel[SerializedLog]
-  logChannel.open()
+  logChannel.open(5000)
 
   var logBroadcastChannel*: Channel[SerializedLog]
   logBroadcastChannel.open(5000)
 
+  # Count of logs dropped because logChannel was full; the logger thread
+  # resets it and reports the total when it catches up.
+  var logsDroppedCounter*: Atomic[int]
+
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     let eventName = if eventPayload.kind == JObject: eventPayload{"event"}.getStr("log") else: "log"
     let payload = SerializedLog(timestamp: epochTime(), event: eventName, line: $eventPayload)
-    logChannel.send(payload)
+    if not logChannel.trySend(payload):
+      atomicInc(logsDroppedCounter)
     discard logBroadcastChannel.trySend(payload)
 
   proc debug*(message: string) =

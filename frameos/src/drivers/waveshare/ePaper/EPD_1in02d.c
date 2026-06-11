@@ -159,11 +159,18 @@ function :	Wait until the busy_pin goes LOW
 void EPD_1IN02_WaitUntilIdle(void)
 {
 	unsigned char busy;
+	UDOUBLE busy_wait_ms = 0;
 	do
 	{
+		if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+			Debug("e-Paper busy timeout\r\n");
+			break;
+		}
 		EPD_1IN02_SendCommand(0x71);
 		busy = DEV_Digital_Read(EPD_BUSY_PIN);
 		busy =!(busy & 0x01);        
+		DEV_Delay_ms(1);
+		busy_wait_ms += 1;
 	}
 	while(busy);
 	DEV_Delay_ms(800);                       

@@ -1,4 +1,4 @@
-import std/[json, options, times, unittest]
+import std/[atomics, json, options, times, unittest]
 
 import ../channels
 import ../types
@@ -51,6 +51,22 @@ suite "frameos channels":
     check direct[1] == "jump"
     check direct[2]["target"].getStr() == "x"
 
+  test "sendEvent drops and counts when the channel is full":
+    discard eventsDroppedCounter.exchange(0)
+    var sent = 0
+    while eventChannel.trySend((none(SceneId), "filler", %*{})):
+      inc sent
+    check sent > 0
+
+    sendEvent("overflow", %*{"value": 1})
+    check eventsDroppedCounter.load() == 1
+
+    drainEventChannel()
+    discard eventsDroppedCounter.exchange(0)
+    sendEvent("fits-again", %*{})
+    check eventsDroppedCounter.load() == 0
+    drainEventChannel()
+
   test "log writes to main channel and broadcast channel":
     let before = epochTime()
     log(%*{"event": "unit", "value": 42})
@@ -67,6 +83,23 @@ suite "frameos channels":
     check okBroadcast
     check broadcastPayload.event == "unit"
     check logJson(broadcastPayload)["event"].getStr() == "unit"
+
+  test "log drops and counts when the channel is full":
+    discard logsDroppedCounter.exchange(0)
+    # Fill the bounded channel to capacity without a consumer.
+    var sent = 0
+    while logChannel.trySend(SerializedLog(timestamp: 1.0, event: "filler", line: "{}")):
+      inc sent
+    check sent > 0
+
+    log(%*{"event": "overflow", "value": 1})
+    check logsDroppedCounter.load() == 1
+
+    drainLogChannels()
+    discard logsDroppedCounter.exchange(0)
+    log(%*{"event": "fits-again"})
+    check logsDroppedCounter.load() == 0
+    drainLogChannels()
 
   test "triggerServerRender uses bounded queue semantics":
     triggerServerRender()

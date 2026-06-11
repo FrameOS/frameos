@@ -78,9 +78,15 @@ parameter:
 static void EPD_5in84_ReadBusy(void)
 {
 	Debug("e-Paper busy\r\n");
+	UDOUBLE busy_wait_ms = 0;
 	do {
+		if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+			Debug("e-Paper busy timeout\r\n");
+			break;
+		}
 		EPD_5in84_SendCommand(0x71);
 		DEV_Delay_ms(10);    
+		busy_wait_ms += 10;
 	}
 	while(!DEV_Digital_Read(EPD_BUSY_PIN));   
 	Debug("e-Paper busy release\r\n");

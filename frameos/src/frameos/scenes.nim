@@ -2,6 +2,7 @@ import json, pixie, times, options, strformat, strutils, locks, tables, sequtils
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes as systemScenesRegistry
+import frameos/channels
 import frameos/types
 import frameos/interpreter
 import frameos/js_runtime/runtime
@@ -469,6 +470,20 @@ when defined(testing):
 
 proc loadPersistedState*(sceneId: SceneId): JsonNode
 
+# State persistence runs from the render loop; a full SD card must degrade to
+# in-memory state, not crash the runner thread. Log failures at most once a
+# minute to avoid flooding the log pipeline at one failed write per render.
+var lastPersistFailureLoggedAt: float = 0.0
+
+proc persistStateFile(path: string, contents: string) =
+  try:
+    writeFile(path, contents)
+  except IOError, OSError:
+    let now = epochTime()
+    if now - lastPersistFailureLoggedAt > 60.0:
+      lastPersistFailureLoggedAt = now
+      log(%*{"event": "scene:persist:error", "path": path, "error": getCurrentExceptionMsg()})
+
 proc updateLastPersistedState*(self: FrameScene) =
   let sceneExport = findExportedScene(self.id)
   if sceneExport.isNone:
@@ -494,7 +509,7 @@ proc updateLastPersistedState*(self: FrameScene) =
   if hasChanges:
     let statePath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json"
     if persistedState.len > 0:
-      writeFile(statePath, $persistedState)
+      persistStateFile(statePath, $persistedState)
     else:
       try:
         if fileExists(statePath):
@@ -505,7 +520,7 @@ proc updateLastPersistedState*(self: FrameScene) =
   if not systemScenes.hasKey(self.id):
     # Persist the sceneId to know where to come back to. Do not persist system scenes.
     if lastPersistedSceneId.isNone() or lastPersistedSceneId.get() != self.id:
-      writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json", $(%*{"sceneId": self.id.string}))
+      persistStateFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json", $(%*{"sceneId": self.id.string}))
       lastPersistedSceneId = some(self.id)
 
 proc loadPersistedState*(sceneId: SceneId): JsonNode =

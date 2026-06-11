@@ -1,8 +1,15 @@
-import pixie, json, linuxfb, posix, strformat, osproc
+import pixie, json, linuxfb, posix, strformat
 import frameos/device_setup
 import frameos/driver_context
+import frameos/utils/process
 
 const DEVICE = "/dev/fb0"
+# vcgencmd talks to the VideoCore mailbox and can hang in uninterruptible
+# sleep when the GPU firmware is wedged; never wait for it without a bound.
+const DISPLAY_COMMAND_TIMEOUT_MS = 10 * 1000
+
+proc runDisplayCommand(command: string): int =
+  runShellWithParentStreams(command, timeoutMs = DISPLAY_COMMAND_TIMEOUT_MS).exitCode
 
 type ScreenInfo* = object
   width*: uint32
@@ -28,9 +35,9 @@ proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
     logger.log(payload)
 
 proc tryToDisableCursorBlinking() =
-  let status = execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
+  let status = runDisplayCommand("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
   if status != 0:
-    discard execCmd("sudo sh -c 'setterm -cursor off > /dev/tty0'")
+    discard runDisplayCommand("sudo sh -c 'setterm -cursor off > /dev/tty0'")
 
 proc getScreenInfo(logger: DriverLogger): ScreenInfo =
   let fd = open(DEVICE, O_RDWR)
@@ -206,18 +213,18 @@ proc render*(self: Driver, image: Image) =
 
 proc turnOn*(self: Driver) =
   try:
-    let response = execCmd("vcgencmd display_power 1")
+    let response = runDisplayCommand("vcgencmd display_power 1")
     if response != 0:
-      discard execCmd("sudo sh -c 'echo 0 > /sys/class/graphics/fb0/blank'")
+      discard runDisplayCommand("sudo sh -c 'echo 0 > /sys/class/graphics/fb0/blank'")
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display on"})
 
 proc turnOff*(self: Driver) =
   try:
-    let response = execCmd("vcgencmd display_power 0")
+    let response = runDisplayCommand("vcgencmd display_power 0")
     if response != 0:
-      discard execCmd("sudo sh -c 'echo 1 > /sys/class/graphics/fb0/blank'")
+      discard runDisplayCommand("sudo sh -c 'echo 1 > /sys/class/graphics/fb0/blank'")
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display off"})

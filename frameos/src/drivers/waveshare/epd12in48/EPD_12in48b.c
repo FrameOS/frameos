@@ -531,11 +531,20 @@ parameter:
 static void EPD_M1_ReadBusy(void)
 {
     UBYTE busy;
+    UDOUBLE busy_wait_ms = 0;
     do {
         EPD_M1_SendCommand(0x71);
         busy = DEV_Digital_Read(EPD_M1_BUSY_PIN);
         busy =!(busy & 0x01);
-    } while(0);
+        if (busy) {
+            if (busy_wait_ms >= EPD_12IN48_BUSY_TIMEOUT_MS) {
+                Debug("e-Paper busy timeout\r\n");
+                break;
+            }
+            DEV_Delay_ms(5);
+            busy_wait_ms += 5;
+        }
+    } while(busy);
     Debug("M1 Busy free\r\n");
     DEV_Delay_ms(200);
     
@@ -543,10 +552,19 @@ static void EPD_M1_ReadBusy(void)
 static void EPD_M2_ReadBusy(void)
 {
     UBYTE busy;
+    UDOUBLE busy_wait_ms = 0;
     do {
         EPD_M2_SendCommand(0x71);
         busy = DEV_Digital_Read(EPD_M2_BUSY_PIN);
         busy =!(busy & 0x01);
+        if (busy) {
+            if (busy_wait_ms >= EPD_12IN48_BUSY_TIMEOUT_MS) {
+                Debug("e-Paper busy timeout\r\n");
+                break;
+            }
+            DEV_Delay_ms(5);
+            busy_wait_ms += 5;
+        }
     } while(busy);
     Debug("M2 Busy free\r\n");
     DEV_Delay_ms(200);
@@ -554,10 +572,19 @@ static void EPD_M2_ReadBusy(void)
 static void EPD_S1_ReadBusy(void)
 {
     UBYTE busy;
+    UDOUBLE busy_wait_ms = 0;
     do {
         EPD_S1_SendCommand(0x71);
         busy = DEV_Digital_Read(EPD_S1_BUSY_PIN);
         busy =!(busy & 0x01);
+        if (busy) {
+            if (busy_wait_ms >= EPD_12IN48_BUSY_TIMEOUT_MS) {
+                Debug("e-Paper busy timeout\r\n");
+                break;
+            }
+            DEV_Delay_ms(5);
+            busy_wait_ms += 5;
+        }
     } while(busy);
     Debug("S1 Busy free\r\n");
     DEV_Delay_ms(200);
@@ -565,10 +592,19 @@ static void EPD_S1_ReadBusy(void)
 static void EPD_S2_ReadBusy(void)
 {
     UBYTE busy;
+    UDOUBLE busy_wait_ms = 0;
     do {
         EPD_S2_SendCommand(0x71);
         busy = DEV_Digital_Read(EPD_S2_BUSY_PIN);
         busy =!(busy & 0x01);
+        if (busy) {
+            if (busy_wait_ms >= EPD_12IN48_BUSY_TIMEOUT_MS) {
+                Debug("e-Paper busy timeout\r\n");
+                break;
+            }
+            DEV_Delay_ms(5);
+            busy_wait_ms += 5;
+        }
     } while(busy);
     Debug("S2 Busy free\r\n");
     DEV_Delay_ms(200);

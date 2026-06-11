@@ -157,7 +157,34 @@ proc frameosServiceUser*(): string =
       return user
   result = "root"
 
-proc frameosServiceContents*(user: string, consoleOutput = false): string =
+proc systemMemoryTotalKb*(): int =
+  try:
+    for line in readFile("/proc/meminfo").splitLines():
+      if line.startsWith("MemTotal:"):
+        let parts = line.splitWhitespace()
+        if parts.len >= 2:
+          return parseInt(parts[1])
+  except CatchableError:
+    discard
+  0
+
+proc serviceMemoryLimits*(memTotalKb: int): tuple[high, max: string] =
+  ## FrameOS (and its child processes: ffmpeg, convert, chromium) may use all
+  ## memory except what the OS needs to stay reachable. Real frames have hit
+  ## 60% of RAM in normal operation, so the cap sits near the edge; it exists
+  ## to catch runaway leaks, not to budget normal use. Percentages can't
+  ## express a fixed OS reserve across 128MB..8GB devices, so compute
+  ## absolute values from MemTotal.
+  if memTotalKb <= 0:
+    # /proc/meminfo unavailable (non-Linux); leave a generous percentage cap
+    return (high: "80%", max: "90%")
+  let reserveKb = clamp(memTotalKb div 8, 40 * 1024, 256 * 1024)
+  let maxKb = max(memTotalKb - reserveKb, 32 * 1024)
+  let highKb = maxKb - max(maxKb div 16, 16 * 1024)
+  (high: $highKb & "K", max: $maxKb & "K")
+
+proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -1): string =
+  let memoryLimits = serviceMemoryLimits(if memTotalKb == -1: systemMemoryTotalKb() else: memTotalKb)
   result = "[Unit]\n" &
     "Description=FrameOS Service\n" &
     "After=network.target\n" &
@@ -166,7 +193,17 @@ proc frameosServiceContents*(user: string, consoleOutput = false): string =
     "User=" & user & "\n" &
     "WorkingDirectory=/srv/frameos/current\n" &
     "ExecStart=/srv/frameos/current/frameos\n" &
-    "Restart=always\n"
+    "Restart=always\n" &
+    "Type=notify\n" &
+    "TimeoutStartSec=300\n" &
+    # Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+    # tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+    "WatchdogSec=900\n" &
+    # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
+    # device swap itself into an unreachable state.
+    "MemoryHigh=" & memoryLimits.high & "\n" &
+    "MemoryMax=" & memoryLimits.max & "\n" &
+    "MemorySwapMax=64M\n"
   if consoleOutput:
     result &= "StandardOutput=journal+console\n" &
       "StandardError=journal+console\n"
@@ -212,6 +249,99 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
 
   result = setupOk()
+
+proc privilegedFileNeedsUpdate(path, content: string): bool =
+  try:
+    result = not fileExists(path) or readFile(path) != content
+  except CatchableError:
+    result = true
+
+proc deviceNodeExists(path: string): bool =
+  # fileExists() is false for device nodes; stat via getFileInfo instead
+  try:
+    discard getFileInfo(path)
+    true
+  except CatchableError:
+    false
+
+proc wirelessInterfaces(): seq[string] =
+  try:
+    for kind, path in walkDir("/sys/class/net"):
+      if dirExists(path / "wireless"):
+        result.add(lastPathPart(path))
+  except CatchableError:
+    discard
+
+proc setupSystemHardening*(): SetupResult =
+  result = setupOk()
+  if not commandExists("systemctl"):
+    setupLog("FrameOS setup: system hardening: systemctl not found, skipping")
+    return
+
+  # Hardware watchdog: reboot the device if the kernel itself locks up
+  # (e.g. brcmfmac/SDIO wifi firmware wedging the SoC on a Pi Zero 2 W).
+  try:
+    if not deviceNodeExists("/dev/watchdog"):
+      setupLog("FrameOS setup: system hardening: /dev/watchdog missing; " &
+        "the hardware watchdog config will only take effect once the watchdog driver is available")
+    const watchdogConfPath = "/etc/systemd/system.conf.d/10-frameos-watchdog.conf"
+    const watchdogConf = "[Manager]\nRuntimeWatchdogSec=15s\nRebootWatchdogSec=2min\n"
+    if privilegedFileNeedsUpdate(watchdogConfPath, watchdogConf):
+      setupLog("FrameOS setup: system hardening: enabling hardware watchdog")
+      discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system.conf.d"),
+        raiseOnError = false)
+      writePrivilegedFile(watchdogConfPath, watchdogConf)
+      # Apply without a reboot; PID 1 re-executes in place.
+      discard runSetupCommand(privilegedCommand("systemctl daemon-reexec"), raiseOnError = false)
+    else:
+      setupLog("FrameOS setup: system hardening: hardware watchdog already enabled")
+  except CatchableError as e:
+    setupLog("FrameOS setup: system hardening: hardware watchdog failed: " & e.msg)
+
+  # Wifi power save is a notorious source of dropouts and firmware wedges on
+  # the Pi Zero 2 W's brcmfmac chip. Persist the NetworkManager setting and
+  # also switch it off on the running interfaces right away.
+  if dirExists("/etc/NetworkManager"):
+    try:
+      const powersaveConfPath = "/etc/NetworkManager/conf.d/wifi-powersave-off.conf"
+      const powersaveConf = "[connection]\n# 2 = disable wifi power saving\nwifi.powersave = 2\n"
+      if privilegedFileNeedsUpdate(powersaveConfPath, powersaveConf):
+        setupLog("FrameOS setup: system hardening: disabling wifi power save")
+        discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/NetworkManager/conf.d"),
+          raiseOnError = false)
+        writePrivilegedFile(powersaveConfPath, powersaveConf)
+        # reload (unlike restart) re-reads config without dropping connections
+        discard runSetupCommand(privilegedCommand("systemctl reload NetworkManager"), raiseOnError = false)
+      else:
+        setupLog("FrameOS setup: system hardening: wifi power save already disabled in NetworkManager")
+    except CatchableError as e:
+      setupLog("FrameOS setup: system hardening: wifi power save failed: " & e.msg)
+
+  if commandExists("iw"):
+    for interfaceName in wirelessInterfaces():
+      setupLog("FrameOS setup: system hardening: power_save off for " & interfaceName)
+      discard runSetupCommand(
+        privilegedCommand("iw dev " & shellQuote(interfaceName) & " set power_save off"),
+        raiseOnError = false)
+
+  # The memory clamps in frameos.service need the cgroup memory controller,
+  # which Raspberry Pi OS only enables with these kernel cmdline flags.
+  for cmdlinePath in ["/boot/firmware/cmdline.txt", "/boot/cmdline.txt"]:
+    if not fileExists(cmdlinePath):
+      continue
+    try:
+      let current = readFile(cmdlinePath).strip()
+      if current.len == 0 or "\n" in current:
+        setupLog("FrameOS setup: system hardening: unexpected cmdline format in " & cmdlinePath & ", leaving as is")
+      elif "cgroup_enable=memory" in current:
+        setupLog("FrameOS setup: system hardening: memory cgroup already enabled")
+      else:
+        setupLog("FrameOS setup: system hardening: enabling memory cgroup in " & cmdlinePath)
+        writePrivilegedFile(cmdlinePath, current & " cgroup_enable=memory cgroup_memory=1\n")
+        result.rebootRequired = true
+    except CatchableError as e:
+      setupLog("FrameOS setup: system hardening: could not update " & cmdlinePath & ": " & e.msg)
+    break
 
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
@@ -330,6 +460,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupOk()
   ))
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
+  addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening()))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
     setupLog("FrameOS setup: reboot required")

@@ -16,6 +16,7 @@ import frameos/tls_proxy
 import frameos/setup_proxy
 import frameos/boot_guard
 import frameos/utils/image
+import frameos/watchdog
 import lib/tz
 when not defined(windows):
   import posix
@@ -204,5 +205,8 @@ proc start*(self: FrameOS) {.async.} =
     stopTlsProxy(self.logger)
 
 proc startFrameOS*() {.async.} =
+  # Tell systemd (Type=notify) we are up before any slow driver or scene
+  # init; the runner loop takes over with WATCHDOG=1 heartbeats from here.
+  notifyReady()
   var frameOS = newFrameOS()
   await frameOS.start()

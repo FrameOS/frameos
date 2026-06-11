@@ -1702,7 +1702,7 @@ export const frameLogic = kea<frameLogicType>([
       })
     },
   })),
-  afterMount(({ actions, values, cache }) => {
+  afterMount(({ actions, values, cache, props }) => {
     const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
@@ -1712,6 +1712,15 @@ export const frameLogic = kea<frameLogicType>([
     cache.keydownHandler = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       if (!(event.metaKey || event.ctrlKey) || key !== 's') {
+        return
+      }
+      // frameLogic is mounted per frame card on the dashboard, so without this
+      // guard Cmd+S would save EVERY frame at once. Only save when this frame's
+      // editor (frames/scenes/apps view) is the one actually being viewed.
+      const pathname = router.values.location.pathname
+      const editorPaths = [urls.frame(props.frameId), urls.scenes(props.frameId), urls.apps(props.frameId)]
+      const isThisFrameVisible = editorPaths.some((p) => pathname === p || pathname.startsWith(p + '/'))
+      if (!isThisFrameVisible) {
         return
       }
       event.preventDefault()

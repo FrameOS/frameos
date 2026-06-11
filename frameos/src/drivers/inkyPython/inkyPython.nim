@@ -1,10 +1,16 @@
-import osproc, os, streams, pixie, json, options, strutils, strformat, locks
+import osproc, os, streams, pixie, json, options, strutils, strformat, locks, times
 import frameos/driver_context
 import frameos/device_setup
 import frameos/utils/dither
 import frameos/utils/image
+import frameos/utils/process
 import drivers/i2c/i2c as i2cSetupDriver
 import drivers/spi/spi as spiSetupDriver
+
+const HandshakePollMs = 100
+const HandshakeMaxPolls = 100             # ~10s for the python helper to report in
+const WriteImageTimeoutMs = 60 * 1000     # streaming the image into run.py's stdin
+const RunExitTimeoutSeconds = 300.0       # full e-ink refresh, generously bounded
 
 type ScreenInfo* = object
   width*: int
@@ -50,10 +56,10 @@ proc safeLog*(logger: DriverLogger, message: string): JsonNode =
 proc safeStartProcess*(cmd: string; args: seq[string] = @[];
                        wdir: string; logger: DriverLogger): Option[Process] =
   try:
-    result = some startProcess(
-      workingDir = wdir,
-      command = cmd,
+    result = some startProcessSerialized(
+      cmd,
       args = args,
+      workingDir = wdir,
       options = {poStdErrToStdOut}
     )
   except OSError as e:
@@ -117,12 +123,11 @@ proc init*(frameOS: DriverContext): Driver =
     return # leave screenInfo width/height = 0 ➜ renderer will noop
 
   let process = pOpt.get()
-  let pOut = process.outputStream()
-  var line = ""
+  var reader = initProcessOutputReader(process)
   var i = 0
   block toploop:
-    while process.running:
-      while pOut.readLine(line):
+    while true:
+      for line in reader.readAvailableLines():
         let json = frameOS.logger.safeLog(line)
         if json{"inky"}.getBool(false):
           if json{"width"}.getInt(-1) > 0 and json{"height"}.getInt(-1) > 0:
@@ -135,13 +140,16 @@ proc init*(frameOS: DriverContext): Driver =
         if json{"error"}.getStr() != "": # block until we get error
           # TODO: abort driver init
           break toploop
-      sleep(100)
+      if not process.running and reader.eof:
+        break toploop
+      sleep(HandshakePollMs)
       i += 1
-      if i > 100:
+      if i > HandshakeMaxPolls:
         discard frameOS.logger.safeLog("Looped for 10s! Breaking!")
           # TODO: abort driver init
         break toploop
 
+  process.stopProcess()
   process.close()
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -157,8 +165,10 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
       addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs"])))
 
 proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
-  let exitCode = process.waitForExit()
-  if exitCode != 0:
+  let exitCode = process.peekExitCode()
+  if exitCode == -1:
+    discard logger.safeLog(fmt"{context}: process still running after stop attempt")
+  elif exitCode != 0:
     discard logger.safeLog(fmt"{context} exited with status {exitCode}")
 
 proc render*(self: Driver, image: Image) =
@@ -201,63 +211,75 @@ proc render*(self: Driver, image: Image) =
     return
 
   let process = pOpt.get()
-  let pOut = process.outputStream()
-  let pIn = process.inputStream()
-  var line = ""
+  var reader = initProcessOutputReader(process)
   if self.debug:
     discard self.logger.safeLog("Executing")
 
   var i = 0
   var error = false
   block toploop:
-    while process.running:
-      while pOut.readLine(line):
+    while true:
+      for line in reader.readAvailableLines():
         let json = self.logger.safeLog(line)
         if json{"inky"}.getBool(false): # block until we get inky=true
           break toploop
         if json{"error"}.getStr() != "": # block until we get error
           error = true
           break toploop
-      sleep(100)
+      if not process.running and reader.eof:
+        error = true
+        break toploop
+      sleep(HandshakePollMs)
       i += 1
-      if i > 100:
+      if i > HandshakeMaxPolls:
         discard self.logger.safeLog("Looped for 10s! Breaking!")
         error = true
         break toploop
 
   if error:
     try:
-      pIn.close()
-    except:
+      process.inputStream().close()
+    except CatchableError:
       discard
-    if process.running:
-      try:
-        process.terminate()
-      except OSError:
-        discard
+    process.stopProcess()
     logProcessExit(self.logger, process, "inkyPython-run (handshake)")
     process.close()
     return
 
+  let skipped_warning = "Busy Wait: Held high. Waiting for "
+
+  template drainLogLines() =
+    for line in reader.readAvailableLines():
+      if self.debug or not (skipped_warning in line):
+        discard self.logger.safeLog(line)
+
   if self.debug:
     discard self.logger.safeLog("Writing output")
-  for x in imageData:
-    pIn.write x
+  # Stream the image into run.py while draining its output: a blind blocking
+  # write deadlocks as soon as the child fills the merged stdout/stderr pipe.
+  # This also closes stdin, which run.py needs to see before it renders.
+  let writeResult = process.writeInputDrainingOutput(imageData, reader, timeoutMs = WriteImageTimeoutMs)
+  drainLogLines()
+  if writeResult.timedOut or not writeResult.inputWritten:
+    discard self.logger.safeLog(
+      if writeResult.timedOut: "Timed out writing image data to run.py. Stopping process."
+      else: "run.py stopped reading image data. Stopping process.")
+    process.stopProcess()
+    logProcessExit(self.logger, process, "inkyPython-run (write)")
+    process.close()
+    return
   if self.debug:
     discard self.logger.safeLog("Wrote output")
 
-  pIn.flush
-  pIn.close() # NOTE **Essential** - This prevents hanging/freezing when reading stdout below
-
-  let skipped_warning = "Busy Wait: Held high. Waiting for "
-
-  while process.running:
-    while pOut.readLine(line):
-      if self.debug or not (skipped_warning in line):
-        discard self.logger.safeLog(line)
-    sleep(100)
-  while pOut.readLine(line):
-    discard self.logger.safeLog(line)
+  let waitDeadline = epochTime() + RunExitTimeoutSeconds
+  while process.running and epochTime() < waitDeadline:
+    drainLogLines()
+    sleep(HandshakePollMs)
+  drainLogLines()
+  if process.running:
+    discard self.logger.safeLog("run.py did not exit within " & $int(RunExitTimeoutSeconds) &
+      "s. Stopping process.")
+    process.stopProcess()
 
   logProcessExit(self.logger, process, "inkyPython-run")
   process.close()

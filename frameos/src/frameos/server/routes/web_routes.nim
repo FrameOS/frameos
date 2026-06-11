@@ -263,8 +263,12 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       return
     try:
       {.gcsafe.}:
-        let newConfig = loadConfig()
-        updateFrameConfigFrom(globalFrameOS.frameConfig, newConfig)
+        # Parse the config here only to validate it (and 500 on a broken
+        # frame.json). The shared FrameConfig is mutated exclusively by the
+        # runner thread's "reload" handler: reassigning ~35 ref fields of an
+        # object other threads are reading is a use-after-free waiting to
+        # happen under ORC.
+        discard loadConfig()
         clearAdminSessions()
       sendEvent("reload", %*{})
       jsonResponse(request, Http200, %*{"status": "ok"})

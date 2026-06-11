@@ -1,7 +1,8 @@
 import json
 import base64
 import times
-import std/[os, osproc, strformat, strutils, tables]
+import std/[os, strformat, strutils, tables]
+import frameos/utils/process
 import checksums/md5
 import mummy
 import mummy/routers
@@ -10,6 +11,11 @@ import ../auth
 import ../api
 import ../state
 import ./common
+
+# mummy buffers whole responses in RAM, and assets can include multi-hundred
+# MB videos: serving one of those would blow straight through MemoryMax and
+# OOM-kill the service. Refuse anything bigger than this.
+const MaxAssetDownloadBytes* = 50 * 1024 * 1024
 
 proc contentTypeForAsset*(path: string): string =
   if path.endsWith(".css"):
@@ -274,6 +280,12 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
 
   if not thumb:
     var headers: mummy.HttpHeaders
+    let fileSize = getFileSize(fullPath)
+    if fileSize > MaxAssetDownloadBytes:
+      headers["Content-Type"] = "application/json"
+      return (Http413, headers, $(%*{
+        "detail": &"Asset is {fileSize} bytes; downloads over this endpoint are capped at {MaxAssetDownloadBytes} bytes"
+      }))
     headers["Content-Type"] = contentTypeForFilePath(fullPath)
     return (Http200, headers, readFile(fullPath))
 
@@ -288,8 +300,10 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
   try:
     if not fileExists(thumbPath):
       createDir(parentDir(thumbPath))
-      let cmd = "convert " & quoteShell(fullPath) & " -thumbnail 320x320 " & quoteShell(thumbPath)
-      let (output, exitCode) = execCmdEx(cmd)
+      let res = runProcessPiped("convert", @[fullPath, "-thumbnail", "320x320", thumbPath],
+                                timeoutMs = 60 * 1000, maxOutputBytes = 1024 * 1024)
+      let output = res.output & res.errorOutput
+      let exitCode = res.exitCode
       if exitCode != 0:
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"

@@ -1,5 +1,6 @@
 import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
+import std/atomics
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
 
@@ -14,6 +15,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/boot_guard
 import frameos/runtime_diagnostics
+import frameos/watchdog
 
 import drivers/drivers as drivers
 
@@ -163,137 +165,155 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
 
   while true:
-    timer = getMonoTime()
-    self.isRendering = true
-    if self.forceSceneReload:
-      lastSceneId = "".SceneId
-      self.forceSceneReload = false
-    var sceneId = self.currentSceneId
-    var exportedScene = findExportedScene(sceneId)
-    if exportedScene.isNone:
-      sceneId = getFirstSceneId()
-      exportedScene = findExportedScene(sceneId)
-    if exportedScene.isNone:
-      self.logSignal(%*{"event": "render:error:scene:missing", "sceneId": sceneId.string})
-      self.isRendering = false
-      await sleepAsync(RENDER_SLEEP_SLICE_MS)
-      continue
-    if sceneId != self.currentSceneId:
-      self.currentSceneId = sceneId
-    if lastSceneId != sceneId:
-      var sceneInitialized = true
-      self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
-      # Persist the active scene context early in boot, then stop writing it
-      # after a few successful renders to reduce SD card writes.
-      if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):
-        updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
-      if self.scenes.hasKey(sceneId):
-        currentScene = self.scenes[sceneId]
-      else:
-        try:
-          currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-          self.scenes[sceneId] = currentScene
-          currentScene.updateLastPublicState()
-        except Exception as e:
-          sceneInitialized = false
-          currentScene = initSceneInitErrorScene(sceneId, self.frameConfig, self.logger, $e.msg)
-          exportedScene = some(sceneInitErrorExport())
-          self.logSignal(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
-
-      if sceneInitialized:
-        lastSceneId = sceneId
-      else:
-        lastSceneId = "".SceneId
-      setLastPublicSceneId(sceneId)
-
-    currentScene.isRendering = true
-    self.triggerRenderNext = false # used to debounce render events received while rendering
-
-    let interval = currentScene.refreshInterval
-    let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene.get(), currentScene)
-    reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
-    clearBootCrashCount()
-    successfulSceneRenders += 1
-    if interval < 1:
-      let now = getMonoTime()
-      if now >= nextServerRenderAt:
-        nextServerRenderAt = nextServerRenderAt + serverRenderDelay
-        if nextServerRenderAt < now:
-          nextServerRenderAt = now + serverRenderDelay
-        triggerServerRender()
-    else:
-      triggerServerRender()
-
-    driverTimer = getMonoTime()
-    markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
-      clearNode = true)
     try:
-      # TODO: render the driver part in another thread
-      drivers.render(lastRotatedImage)
-      let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
-      self.logger.log(%*{"event": "render:driver",
-        "device": self.frameConfig.device, "ms": driverElapsedMs})
-      if self.frameConfig.device.startsWith("pimoroni.inky") and driverElapsedMs < INKY_FAST_RENDER_THRESHOLD_MS:
-        self.logger.log(%*{"event": "render:driver:warning",
-          "device": self.frameConfig.device,
-          "ms": driverElapsedMs,
-          "message": "Driver render finished suspiciously fast; check Inky driver logs for errors."})
-    except Exception as e:
-      self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
-    markRuntimeDone()
-
-    if interval < 1 or (nextSleep > 0 and nextSleep < interval):
-      let now = getMonoTime()
-      let elapsedSeconds = durationToSeconds(now - timer)
-      if elapsedSeconds < FAST_SCENE_CUTOFF_SECONDS:
-        fastSceneCount += 1
-        # Two fast scenes in a row
-        if fastSceneCount == 2:
-          # TODO: capture logs per _scene_ and log if slow
-          self.logger.log(%*{"event": "render:pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
-          self.logger.disable()
-          fastSceneResumeAt = some(now + initDuration(seconds = 10))
-        elif fastSceneResumeAt.isSome and now > fastSceneResumeAt.get():
-          fastSceneCount = 0
-          fastSceneResumeAt = none(MonoTime)
-          self.logger.enable()
-      else:
+      timer = getMonoTime()
+      self.isRendering = true
+      # Re-enable scene render logs once the fast-render pause window elapses,
+      # regardless of which render path this iteration takes. Otherwise switching
+      # to a slow scene after a fast burst (when the block below is skipped) would
+      # leave the logger disabled forever, silently dropping all scene/app logs.
+      if fastSceneResumeAt.isSome and getMonoTime() > fastSceneResumeAt.get():
         fastSceneCount = 0
         fastSceneResumeAt = none(MonoTime)
         self.logger.enable()
+      if self.forceSceneReload:
+        lastSceneId = "".SceneId
+        self.forceSceneReload = false
+      var sceneId = self.currentSceneId
+      var exportedScene = findExportedScene(sceneId)
+      if exportedScene.isNone:
+        sceneId = getFirstSceneId()
+        exportedScene = findExportedScene(sceneId)
+      if exportedScene.isNone:
+        self.logSignal(%*{"event": "render:error:scene:missing", "sceneId": sceneId.string})
+        self.isRendering = false
+        await sleepAsync(RENDER_SLEEP_SLICE_MS)
+        continue
+      if sceneId != self.currentSceneId:
+        self.currentSceneId = sceneId
+      if lastSceneId != sceneId:
+        var sceneInitialized = true
+        self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
+        # Persist the active scene context early in boot, then stop writing it
+        # after a few successful renders to reduce SD card writes.
+        if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):
+          updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
+        if self.scenes.hasKey(sceneId):
+          currentScene = self.scenes[sceneId]
+        else:
+          try:
+            currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+            self.scenes[sceneId] = currentScene
+            currentScene.updateLastPublicState()
+          except Exception as e:
+            sceneInitialized = false
+            currentScene = initSceneInitErrorScene(sceneId, self.frameConfig, self.logger, $e.msg)
+            exportedScene = some(sceneInitErrorExport())
+            self.logSignal(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-    # Gives a chance for the gathered events to be collected
-    await sleepAsync(0.001)
-    self.isRendering = false
-    currentScene.isRendering = false
+        if sceneInitialized:
+          lastSceneId = sceneId
+        else:
+          lastSceneId = "".SceneId
+        setLastPublicSceneId(sceneId)
 
-    if epochTime() > currentScene.lastPublicStateUpdate + 1.0:
-      currentScene.updateLastPublicState()
+      currentScene.isRendering = true
+      self.triggerRenderNext = false # used to debounce render events received while rendering
 
-    if epochTime() > currentScene.lastPersistedStateUpdate + 1.0:
-      currentScene.updateLastPersistedState()
+      let interval = currentScene.refreshInterval
+      let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene.get(), currentScene)
+      reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
+      clearBootCrashCount()
+      successfulSceneRenders += 1
+      if interval < 1:
+        let now = getMonoTime()
+        if now >= nextServerRenderAt:
+          nextServerRenderAt = nextServerRenderAt + serverRenderDelay
+          if nextServerRenderAt < now:
+            nextServerRenderAt = now + serverRenderDelay
+          triggerServerRender()
+      else:
+        triggerServerRender()
 
-    # While we were rendering an event to trigger a render was dispatched
-    if self.triggerRenderNext:
-      self.triggerRenderNext = false
-      continue
+      driverTimer = getMonoTime()
+      markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
+        clearNode = true)
+      try:
+        # TODO: render the driver part in another thread
+        drivers.render(lastRotatedImage)
+        let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
+        self.logger.log(%*{"event": "render:driver",
+          "device": self.frameConfig.device, "ms": driverElapsedMs})
+        if self.frameConfig.device.startsWith("pimoroni.inky") and driverElapsedMs < INKY_FAST_RENDER_THRESHOLD_MS:
+          self.logger.log(%*{"event": "render:driver:warning",
+            "device": self.frameConfig.device,
+            "ms": driverElapsedMs,
+            "message": "Driver render finished suspiciously fast; check Inky driver logs for errors."})
+      except Exception as e:
+        self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+      markRuntimeDone()
 
-    inc cycles
-    if maxCycles > 0 and cycles >= maxCycles:
-      break
+      if interval < 1 or (nextSleep > 0 and nextSleep < interval):
+        let now = getMonoTime()
+        let elapsedSeconds = durationToSeconds(now - timer)
+        if elapsedSeconds < FAST_SCENE_CUTOFF_SECONDS:
+          fastSceneCount += 1
+          # Two fast scenes in a row
+          if fastSceneCount == 2:
+            # TODO: capture logs per _scene_ and log if slow
+            self.logger.log(%*{"event": "render:pause", "message": "Rendering fast. Pausing all scene render logs for 10 seconds."})
+            self.logger.disable()
+            fastSceneResumeAt = some(now + initDuration(seconds = 10))
+          elif fastSceneResumeAt.isSome and now > fastSceneResumeAt.get():
+            fastSceneCount = 0
+            fastSceneResumeAt = none(MonoTime)
+            self.logger.enable()
+        else:
+          fastSceneCount = 0
+          fastSceneResumeAt = none(MonoTime)
+          self.logger.enable()
 
-    # If no sleep duration provided by the scene, calculate based on the interval
-    sleepDuration = if nextSleep >= 0: nextSleep * 1000
-                    else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
-    self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
+      # Gives a chance for the gathered events to be collected
+      await sleepAsync(0.001)
+      self.isRendering = false
+      currentScene.isRendering = false
 
-    var remainingSleepMs = sleepDuration
-    while remainingSleepMs > 0:
+      if epochTime() > currentScene.lastPublicStateUpdate + 1.0:
+        currentScene.updateLastPublicState()
+
+      if epochTime() > currentScene.lastPersistedStateUpdate + 1.0:
+        currentScene.updateLastPersistedState()
+
+      # While we were rendering an event to trigger a render was dispatched
       if self.triggerRenderNext:
+        self.triggerRenderNext = false
+        continue
+
+      inc cycles
+      if maxCycles > 0 and cycles >= maxCycles:
         break
-      let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
-      await sleepAsync(nextSleepMs)
-      remainingSleepMs -= nextSleepMs
+
+      # If no sleep duration provided by the scene, calculate based on the interval
+      sleepDuration = if nextSleep >= 0: nextSleep * 1000
+                      else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
+      self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
+
+      var remainingSleepMs = sleepDuration
+      while remainingSleepMs > 0:
+        if self.triggerRenderNext:
+          break
+        let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
+        await sleepAsync(nextSleepMs)
+        remainingSleepMs -= nextSleepMs
+    except Exception as e:
+      # Never let one escaped exception kill the render thread (and with it
+      # the whole process under systemd). Log, reset state, and back off.
+      self.isRendering = false
+      try:
+        self.logSignal(%*{"event": "render:error:loop", "error": $e.msg, "stacktrace": e.getStackTrace()})
+      except Exception:
+        discard
+      await sleepAsync(RENDER_SLEEP_SLICE_MS)
 
 proc triggerRender*(self: RunnerThread): void =
   self.triggerRenderNext = true
@@ -331,12 +351,39 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
   var iterations = 0
+  # Holds the first non-mouseMove event pulled out while coalescing a burst
+  # of queued mouse moves, so ordering is preserved.
+  var pendingEvent = none((Option[SceneId], string, JsonNode))
 
   while true:
+    # Heartbeat for systemd's WatchdogSec: stops when this thread hangs in a
+    # render or event handler, so a wedged runner restarts the service.
+    notifyWatchdog()
     inc iterations
     if maxIterations > 0 and iterations > maxIterations:
       break
-    let (success, (sceneId, event, payload)) = eventChannel.tryRecv()
+    var success: bool
+    var msg: (Option[SceneId], string, JsonNode)
+    if pendingEvent.isSome:
+      msg = pendingEvent.get()
+      pendingEvent = none((Option[SceneId], string, JsonNode))
+      success = true
+    else:
+      (success, msg) = eventChannel.tryRecv()
+    var (sceneId, event, payload) = msg
+    if success and event == "mouseMove":
+      # Touch drags queue hundreds of mouse moves while a render blocks this
+      # loop; replaying each one is pointless. Keep only the newest, and stash
+      # the first other event so nothing is reordered or lost.
+      while true:
+        let (nextOk, nextMsg) = eventChannel.tryRecv()
+        if not nextOk:
+          break
+        if nextMsg[1] == "mouseMove":
+          (sceneId, event, payload) = nextMsg
+        else:
+          pendingEvent = some(nextMsg)
+          break
     if success:
       waitTime = 1
       if not event.startsWith("mouse"):
@@ -413,6 +460,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
 
     # after we have processed all queued messages
     if not success:
+      let droppedEvents = eventsDroppedCounter.exchange(0)
+      if droppedEvents > 0:
+        self.logSignal(%*{"event": "events:dropped", "count": droppedEvents})
       if self.triggerRenderNext and not self.isRendering:
         self.triggerRender()
         await sleepAsync(1)

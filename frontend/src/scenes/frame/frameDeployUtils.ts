@@ -261,29 +261,28 @@ function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: Depl
   if (plan?.full_deploy?.binary?.will_attempt_precompiled !== undefined) {
     return plan.full_deploy.binary.will_attempt_precompiled === true
   }
+  const compilationMode = frameCompilationMode(frame)
   if (frame?.mode === 'buildroot') {
-    return false
+    return compilationMode === 'precompiled' && !precompiledSkipReason(frame)
   }
 
-  const compilationMode = frameCompilationMode(frame)
   const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
 }
 
 function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
-  if (frame?.mode === 'buildroot') {
-    return 'Build the configured Buildroot target'
-  }
-
-  const compilationMode = normalizeFrameCompilationMode(frame?.rpios?.compilationMode)
-  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
+  const isBuildroot = frame?.mode === 'buildroot'
+  const compilationMode = frameCompilationMode(frame)
+  const crossCompilation = isBuildroot ? 'auto' : normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   const skipReason = precompiledSkipReason(frame)
-  const crossCompileText =
-    crossCompilation === 'never'
-      ? 'Build on device'
-      : crossCompilation === 'always'
-      ? 'Cross-compile'
-      : 'Use the global build environment'
+  let crossCompileText = 'Use the global build environment'
+  if (isBuildroot) {
+    crossCompileText = 'Cross-compile for Buildroot'
+  } else if (crossCompilation === 'never') {
+    crossCompileText = 'Build on device'
+  } else if (crossCompilation === 'always') {
+    crossCompileText = 'Cross-compile'
+  }
 
   if (compilationMode === 'precompiled') {
     if (crossCompilation === 'always') {
@@ -302,8 +301,9 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 }
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
+  const isBuildroot = frame?.mode === 'buildroot'
   const compilationMode = frameCompilationMode(frame)
-  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
+  const crossCompilation = isBuildroot ? 'auto' : normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   if (compilationMode === 'shared') {
     return 'Shared libraries deployed next to the FrameOS binary'
   }

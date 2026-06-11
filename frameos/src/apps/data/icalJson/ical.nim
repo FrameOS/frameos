@@ -327,6 +327,45 @@ proc parseDateString(self: var ParsedCalendar, event: var VEvent, value: string)
   else:
     return parseICalDateTime(value, timeZone)
 
+proc parseICalDuration*(value: string): float =
+  ## Parse an RFC 5545 DURATION (e.g. "PT1H30M", "P1D", "-PT15M", "P2W") into
+  ## seconds. Raises ValueError on malformed input so the caller can skip the
+  ## event instead of silently using a zero-length range.
+  var s = value.strip()
+  if s.len == 0:
+    raise newException(ValueError, "Empty DURATION")
+  var sign = 1.0
+  if s[0] == '+':
+    s = s[1 .. ^1]
+  elif s[0] == '-':
+    sign = -1.0
+    s = s[1 .. ^1]
+  if s.len == 0 or s[0] != 'P':
+    raise newException(ValueError, "Invalid DURATION: " & value)
+  s = s[1 .. ^1]
+  var total = 0.0
+  var num = ""
+  for ch in s:
+    if ch == 'T':
+      continue
+    elif ch.isDigit:
+      num.add(ch)
+    else:
+      if num.len == 0:
+        raise newException(ValueError, "Invalid DURATION: " & value)
+      let n = parseInt(num).float
+      num = ""
+      case ch
+      of 'W': total += n * 604800.0
+      of 'D': total += n * 86400.0
+      of 'H': total += n * 3600.0
+      of 'M': total += n * 60.0
+      of 'S': total += n
+      else: raise newException(ValueError, "Invalid DURATION unit in: " & value)
+  if num.len != 0:
+    raise newException(ValueError, "Trailing number in DURATION: " & value)
+  return sign * total
+
 proc processCurrentFields*(self: var ParsedCalendar) =
   var event = VEvent()
 
@@ -356,7 +395,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
   if self.currentFields.hasKey("DURATION"):
-    assert(false, "DURATION is not supported")
+    event.endTs = (event.startTs.float + parseICalDuration(getFirstValue("DURATION"))).Timestamp
 
   if self.currentFields.hasKey("DTSTAMP"):
     event.dtStamp = parseICalDateTime(getFirstValue("DTSTAMP"), "UTC")
@@ -383,7 +422,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         of "YEARLY":
           rrule.freq = yearly
         else:
-          assert(false, "Unknown RRULE freq: " & keyValue[1])
+          raise newException(ValueError, "Unknown RRULE freq: " & keyValue[1])
       of "INTERVAL":
         rrule.interval = keyValue[1].parseInt()
       of "COUNT":
@@ -391,14 +430,16 @@ proc processCurrentFields*(self: var ParsedCalendar) =
       of "UNTIL":
         rrule.until = parseICalDateTime(keyValue[1], self.timeZone)
       of "BYSECOND":
-        assert(false, "BYSECOND is not supported")
+        raise newException(ValueError, "BYSECOND is not supported")
       of "BYMINUTE":
-        assert(false, "BYMINUTE is not supported")
+        raise newException(ValueError, "BYMINUTE is not supported")
       of "BYHOUR":
-        assert(false, "BYHOUR is not supported")
+        raise newException(ValueError, "BYHOUR is not supported")
       of "BYDAY":
         # "1SU"
         for day in keyValue[1].split(','):
+          if day.len < 2:
+            continue
           let weekDay = day[^2..^1]
           let dayNum = if day.len > 2: day[0..(day.len - weekDay.len - 1)].parseInt() else: 0
           case weekDay.toUpper():
@@ -422,7 +463,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         for month in keyValue[1].split(','):
           rrule.byMonth.add(month.parseInt())
       of "BYSETPOS":
-        assert(false, "BYSETPOS is not supported")
+        raise newException(ValueError, "BYSETPOS is not supported")
       of "WKST":
         case keyValue[1].toUpper()
         of "SU": rrule.weekStart = RRuleDay.su
@@ -538,9 +579,11 @@ proc processLine*(self: var ParsedCalendar, line: string) =
     try:
       self.processCurrentFields()
     except CatchableError as e:
-      echo "Error processing event: " & e.msg
+      # Skip this single malformed/unsupported event rather than failing the
+      # whole calendar fetch. The event is only appended at the end of
+      # processCurrentFields, so a raise leaves no partial event behind.
+      echo "Error processing event, skipping: " & e.msg
       echo self.currentFields
-      raise
   elif line.startsWith("BEGIN:VCALENDAR"):
     self.inVCalendar = true
   elif line.startsWith("END:VCALENDAR"):
@@ -931,9 +974,14 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
-      if not event.exDates.contains(currentTs) and currentTs <= endTs and newEndTs >= startTs:
-        self.addMatchedEvent(currentTs, event)
+      # COUNT must be consumed from DTSTART, not just by occurrences that land in
+      # the query window — otherwise an expired COUNT series recurs forever in
+      # any future window. Count every generated occurrence (EXDATE'd ones are
+      # excluded here, matching existing behaviour); only the add is windowed.
+      if not event.exDates.contains(currentTs):
         counter += 1
+        if currentTs <= endTs and newEndTs >= startTs:
+          self.addMatchedEvent(currentTs, event)
 
     # Need to loop over every day to handle BYDAY, BYMONTH, BYMONTHDAY, etc.
     else:
@@ -944,10 +992,11 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
             currentTs < intervalEnd and
             currentTs < endTs:
 
-        if currentCal.matchesRRule(rrule) and currentTs <= endTs and newEndTs >= startTs and
-            not event.exDates.contains(currentTs):
-          self.addMatchedEvent(currentTs, event)
+        if currentCal.matchesRRule(rrule) and not event.exDates.contains(currentTs):
+          # Consume COUNT from DTSTART (see note above); only the add is windowed.
           counter += 1
+          if currentTs <= endTs and newEndTs >= startTs:
+            self.addMatchedEvent(currentTs, event)
 
         currentCal.add(TimeScale.Day, 1)
         currentCal.fixDST(timeZone)

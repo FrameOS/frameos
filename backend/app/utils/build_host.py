@@ -101,6 +101,8 @@ class BuildHostSession:
             username=self.config.user,
             client_keys=client_keys or None,
             known_hosts=None,
+            connect_timeout=30,
+            login_timeout=30,
         )
 
     async def _log(self, level: str, message: str) -> None:

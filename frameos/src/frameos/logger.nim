@@ -1,22 +1,34 @@
-import zippy, json, os, osproc, times, strutils, net, httpclient
+import zippy, json, os, times, strutils, net
+import std/atomics
 
 import frameos/channels
 import frameos/types
+import frameos/utils/process
+from frameos/utils/http_client import setSocketSendRecvTimeouts
+
+const GzipLogTimeoutMs = 10 * 60 * 1000
 
 type
   LoggerThread = ref object
     frameConfig: FrameConfig
-    client: HttpClient
-    url: string
+    host: string
+    port: int
+    useTls: bool
+    sslContext: SslContext
     logs: seq[SerializedLog]
     lastSendAt: float
+    retryBackoff: float
+    nextSendAllowedAt: float
     lastLogFilePath: string
 
 const LOG_FLUSH_SECONDS = 1.0
+const MaxBufferedLogs = 1000
+const LogSendConnectTimeoutMs = 5000
+const LogSendIoTimeoutMs = 10_000
+const LogSendMaxBackoffSeconds = 60.0
 
 var threadInitDone = false
 var thread: Thread[FrameConfig]
-var logFile: File
 
 proc gzipLogFile(path: string) =
   if path.len == 0 or path.endsWith(".gz") or not fileExists(path):
@@ -26,12 +38,13 @@ proc gzipLogFile(path: string) =
   while fileExists(target):
     target = path & "." & $suffix & ".gz"
     suffix += 1
-  let status = if target == path & ".gz":
-    execShellCmd("gzip -f " & quoteShell(path))
+  let command = if target == path & ".gz":
+    "gzip -f " & quoteShell(path)
   else:
-    execShellCmd("gzip -c " & quoteShell(path) & " > " & quoteShell(target))
-  if status != 0:
-    echo "Error gzipping log file: gzip exited with " & $status & " for " & path
+    "gzip -c " & quoteShell(path) & " > " & quoteShell(target)
+  let gzipResult = runShellWithParentStreams(command, timeoutMs = GzipLogTimeoutMs)
+  if gzipResult.exitCode != 0:
+    echo "Error gzipping log file: gzip exited with " & $gzipResult.exitCode & " for " & path
   elif target != path & ".gz":
     try:
       removeFile(path)
@@ -49,9 +62,14 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, t
       if lastLogFilePath.len > 0 and lastLogFilePath != file:
         gzipLogFile(lastLogFilePath)
       lastLogFilePath = file
-      logFile = open(file, fmAppend)
-      logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
-      logFile.close()
+      # File is not GC-managed: a write failure (ENOSPC) must still close the
+      # handle, or every failing log line leaks an fd until the process hits
+      # the descriptor limit and loses its sockets.
+      let logFile = open(file, fmAppend)
+      try:
+        logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
+      finally:
+        logFile.close()
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 
@@ -70,40 +88,82 @@ proc logsRequestBody*(logs: seq[SerializedLog]): string =
     result.addLogPayload(logPayload)
   result.add("]}")
 
+proc getSslContext(self: LoggerThread): SslContext =
+  if self.sslContext == nil:
+    self.sslContext = newContext()
+  self.sslContext
+
+proc postLogs(self: LoggerThread, body: string): int =
+  ## Minimal HTTP POST with hard time bounds on connect, TLS handshake, send
+  ## and the status read. Nim's HttpClient only applies its timeout to
+  ## response reads; its connect/TLS/send phases block without limit, which
+  ## let a flaky network park this thread while the log channel filled up.
+  ## (DNS resolution inside connect() remains bounded only by the resolver.)
+  var socket = newSocket()
+  try:
+    socket.connect(self.host, Port(self.port), timeout = LogSendConnectTimeoutMs)
+    socket.setSocketSendRecvTimeouts(LogSendIoTimeoutMs)
+    if self.useTls:
+      self.getSslContext().wrapConnectedSocket(socket, handshakeAsClient, self.host)
+    let request = "POST /api/log HTTP/1.1\r\n" &
+      "Host: " & self.host & ":" & $self.port & "\r\n" &
+      "Authorization: Bearer " & self.frameConfig.serverApiKey & "\r\n" &
+      "Content-Type: application/json\r\n" &
+      "Content-Encoding: gzip\r\n" &
+      "Content-Length: " & $body.len & "\r\n" &
+      "Connection: close\r\n\r\n"
+    socket.send(request & body)
+    let statusLine = socket.recvLine(timeout = LogSendIoTimeoutMs)
+    let parts = statusLine.splitWhitespace()
+    if parts.len >= 2:
+      result = parseInt(parts[1])
+  finally:
+    socket.close()
+
+proc registerSendFailure(self: LoggerThread) =
+  self.retryBackoff = clamp(self.retryBackoff * 2, 2.0, LogSendMaxBackoffSeconds)
+  self.nextSendAllowedAt = epochTime() + self.retryBackoff
+
 proc processQueue(self: LoggerThread): int =
+  # Keep the local buffer bounded even while sends are gated by backoff.
+  if self.logs.len > MaxBufferedLogs:
+    atomicInc(logsDroppedCounter, self.logs.len - MaxBufferedLogs)
+    self.logs = self.logs[(self.logs.len - MaxBufferedLogs) .. ^1]
+
+  let now = epochTime()
   let logCount = self.logs.len
-  if logCount > 1000 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
-    # make a copy, just in case some thread from somewhere adds new entries
-    var newLogs = self.logs
-    self.logs = @[]
+  if logCount == 0 or now < self.nextSendAllowedAt:
+    return 0
+  if logCount < MaxBufferedLogs and self.lastSendAt + LOG_FLUSH_SECONDS >= now:
+    return 0
 
-    if newLogs.len == 0:
-      return 0
+  # make a copy, just in case some thread from somewhere adds new entries
+  var newLogs = self.logs
+  self.logs = @[]
 
-    if not self.frameConfig.serverSendLogs:
-      return newLogs.len
-
-    if newLogs.len > 1000:
-      newLogs = newLogs[(newLogs.len - 1000) .. (newLogs.len - 1)]
-
-    var client = newHttpClient(timeout = 1000)
-    try:
-      client.headers = newHttpHeaders([
-          ("Authorization", "Bearer " & self.frameConfig.serverApiKey),
-          ("Content-Type", "application/json"),
-          ("Content-Encoding", "gzip")
-      ])
-      let body = logsRequestBody(newLogs)
-      let response = client.request(self.url, httpMethod = HttpPost, body = compress(body))
-      self.lastSendAt = epochTime()
-      if response.code != Http200:
-        echo "Error sending logs: HTTP " & $response.status
-    except CatchableError as e:
-      echo "Error sending logs: " & $e.msg
-    finally:
-      client.close()
-
+  if not self.frameConfig.serverSendLogs:
     return newLogs.len
+
+  let dropped = logsDroppedCounter.exchange(0)
+  if dropped > 0:
+    let droppedLine = $(%*{"event": "logger:dropped", "count": dropped})
+    echo droppedLine
+    newLogs.add(SerializedLog(timestamp: now, event: "logger:dropped", line: droppedLine))
+
+  self.lastSendAt = now
+  try:
+    let response = self.postLogs(compress(logsRequestBody(newLogs)))
+    if response == 200:
+      self.retryBackoff = 0.0
+      self.nextSendAllowedAt = 0.0
+    else:
+      echo "Error sending logs: HTTP " & $response
+      self.registerSendFailure()
+  except CatchableError as e:
+    echo "Error sending logs: " & $e.msg
+    self.registerSendFailure()
+
+  return newLogs.len
 
 
 proc run(self: LoggerThread) =
@@ -126,11 +186,11 @@ proc run(self: LoggerThread) =
         run += 2
 
 proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
-  let protocol = if frameConfig.serverPort mod 1000 == 443: "https" else: "http"
-  let url = protocol & "://" & frameConfig.serverHost & ":" & $frameConfig.serverPort & "/api/log"
   var loggerThread = LoggerThread(
     frameConfig: frameConfig,
-    url: url,
+    host: frameConfig.serverHost,
+    port: frameConfig.serverPort,
+    useTls: frameConfig.serverPort mod 1000 == 443,
     logs: @[],
     lastSendAt: 0.0,
     lastLogFilePath: "",

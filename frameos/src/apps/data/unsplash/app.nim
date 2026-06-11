@@ -48,6 +48,9 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.frameConfig.debug:
       self.log(&"API request: {url}")
     var client = newHttpClient(timeout = 60000)
+    # Close on every exit path: a request that raises (timeout, DNS, TLS — the
+    # common case on flaky networks) must not leak the socket and SSL context.
+    defer: client.close()
     client.limitHttpResponse(self.maxHttpResponseBytes(), 60)
     client.headers = newHttpHeaders([
         ("Authorization", "Client-ID " & apiKey),
@@ -56,7 +59,6 @@ proc get*(self: App, context: ExecutionContext): Image =
     ])
     let response = client.request(url, httpMethod = HttpGet)
     requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
-    defer: client.close()
 
     if response.code != Http200:
       try:

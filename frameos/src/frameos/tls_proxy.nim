@@ -1,24 +1,33 @@
 import json
+import locks
 import os
 import osproc
 import strformat
 import frameos/types
+import frameos/utils/process
+
+# Guards the process handle and desired-state flags: the monitor thread,
+# the main thread (start/stop on boot/shutdown) and the runner ("reload")
+# all touch them.
+var tlsProxyLock: Lock
+initLock(tlsProxyLock)
 
 var tlsProxyProcess: Process
+var tlsProxyDesired = false
+var monitorThread: Thread[void]
+var monitorStarted = false
+var monitorConfig: FrameConfig
+var monitorLogger: Logger
 
-proc stopTlsProxy*(logger: Logger = nil) =
+const
+  TlsProxyMonitorIntervalMs = 10_000
+  TlsProxyRestartMinIntervalMs = 30_000
+
+proc stopTlsProxyLocked(logger: Logger) =
   if tlsProxyProcess == nil:
     return
 
-  try:
-    if running(tlsProxyProcess):
-      terminate(tlsProxyProcess)
-      discard waitForExit(tlsProxyProcess, 1500)
-      if running(tlsProxyProcess):
-        kill(tlsProxyProcess)
-        discard waitForExit(tlsProxyProcess, 500)
-  except CatchableError:
-    discard
+  tlsProxyProcess.stopProcess()
 
   try:
     close(tlsProxyProcess)
@@ -33,8 +42,8 @@ proc stopTlsProxy*(logger: Logger = nil) =
       "message": "Stopped Caddy TLS proxy",
     })
 
-proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
-  stopTlsProxy(logger)
+proc startTlsProxyLocked(frameConfig: FrameConfig, logger: Logger) =
+  stopTlsProxyLocked(logger)
 
   if not frameConfig.httpsProxy.enable:
     return
@@ -107,7 +116,7 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
   })
 
   try:
-    tlsProxyProcess = startProcess(
+    tlsProxyProcess = startProcessSerialized(
       "caddy",
       args = @["run", "--config", caddyfilePath, "--adapter", "caddyfile"],
       options = {poUsePath, poParentStreams}
@@ -118,3 +127,48 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
       "message": "Failed to start Caddy TLS proxy",
       "error": error.msg,
     })
+
+proc monitorLoop() {.thread.} =
+  ## If caddy dies on its own, HTTPS access used to stay dead until the next
+  ## full service restart. Reap the corpse and restart it, at most once per
+  ## TlsProxyRestartMinIntervalMs.
+  while true:
+    sleep(TlsProxyMonitorIntervalMs)
+    {.gcsafe.}:
+      withLock tlsProxyLock:
+        if not tlsProxyDesired or tlsProxyProcess == nil:
+          continue
+        var alive = true
+        try:
+          alive = tlsProxyProcess.running()
+        except CatchableError:
+          alive = false
+        if alive:
+          continue
+        if monitorLogger != nil:
+          monitorLogger.log(%*{
+            "event": "tls:crashed",
+            "message": "Caddy TLS proxy exited unexpectedly, restarting",
+          })
+        try:
+          close(tlsProxyProcess)
+        except CatchableError:
+          discard
+        tlsProxyProcess = nil
+        startTlsProxyLocked(monitorConfig, monitorLogger)
+      sleep(TlsProxyRestartMinIntervalMs - TlsProxyMonitorIntervalMs)
+
+proc stopTlsProxy*(logger: Logger = nil) =
+  withLock tlsProxyLock:
+    tlsProxyDesired = false
+    stopTlsProxyLocked(logger)
+
+proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
+  withLock tlsProxyLock:
+    monitorConfig = frameConfig
+    monitorLogger = logger
+    tlsProxyDesired = frameConfig.httpsProxy.enable
+    startTlsProxyLocked(frameConfig, logger)
+    if tlsProxyDesired and not monitorStarted:
+      monitorStarted = true
+      createThread(monitorThread, monitorLoop)

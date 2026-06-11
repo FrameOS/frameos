@@ -1,4 +1,4 @@
-import { actions, afterMount, kea, path } from 'kea'
+import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
 import { AiSceneLogType, FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
@@ -22,6 +22,10 @@ export const socketLogic = kea<socketLogicType>([
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
     frameRendered: (frameId: number) => ({ frameId }),
+    // Fired when the socket reopens after a drop. All frame state is
+    // event-sourced over this socket, so listeners must refetch anything
+    // they may have missed while disconnected.
+    socketReconnected: true,
   }),
   afterMount(({ actions, cache }) => {
     const frameControlMode = isFrameControlMode()
@@ -30,11 +34,19 @@ export const socketLogic = kea<socketLogicType>([
       !!(window as any).FRAMEOS_APP_CONFIG &&
       (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/control'))
 
+    cache.reconnectAttempts = 0
+    cache.everDisconnected = false
+    cache.unmounted = false
+
     function openConnection() {
       const wsPath = isFrameOSAdmin ? '/ws/admin' : '/ws'
       cache.ws = new WebSocket(`${getBasePath()}${wsPath}`)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
+        cache.openedAt = Date.now()
+        if (cache.everDisconnected) {
+          actions.socketReconnected()
+        }
       }
 
       cache.ws.onmessage = function (event: any) {
@@ -87,16 +99,37 @@ export const socketLogic = kea<socketLogicType>([
       }
 
       cache.ws.onclose = function (event: any) {
-        console.log('🔴 WebSocket connection closed. Reconnecting...', event)
-        if (event.code === 1000) {
-          // For some reason Home Assistant Ingress closes the connection after 40 seconds. If that happens, reopen.
-          window.setTimeout(openConnection, 0)
-        } else {
-          window.setTimeout(openConnection, 1000)
+        if (cache.unmounted) {
+          return
         }
+        cache.everDisconnected = true
+        const uptimeMs = cache.openedAt ? Date.now() - cache.openedAt : 0
+        cache.openedAt = null
+        if (uptimeMs > 5000) {
+          // The previous connection was healthy; start the backoff over.
+          cache.reconnectAttempts = 0
+        }
+        const attempt = cache.reconnectAttempts++
+        // Home Assistant Ingress closes healthy connections with code 1000
+        // after ~40s: reconnect immediately. Anything else backs off
+        // exponentially so a down backend isn't hammered once a second.
+        const delayMs = event.code === 1000 && attempt === 0 ? 0 : Math.min(1000 * 2 ** attempt, 30000)
+        console.log(`🔴 WebSocket connection closed. Reconnecting in ${delayMs}ms...`, event)
+        cache.reconnectTimeout = window.setTimeout(openConnection, delayMs)
       }
     }
 
     openConnection()
+  }),
+  beforeUnmount(({ cache }) => {
+    cache.unmounted = true
+    if (cache.reconnectTimeout) {
+      window.clearTimeout(cache.reconnectTimeout)
+      cache.reconnectTimeout = null
+    }
+    if (cache.ws) {
+      cache.ws.close()
+      cache.ws = null
+    }
   }),
 ])

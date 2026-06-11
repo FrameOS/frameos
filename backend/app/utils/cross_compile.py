@@ -183,6 +183,7 @@ class CrossCompiler:
         output_name: str = "frameos",
         compile_script_name: str = "compile_frameos.sh",
         needs_quickjs: bool = True,
+        compilation_mode: str | None = None,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -210,6 +211,7 @@ class CrossCompiler:
         self.output_name = output_name
         self.compile_script_name = compile_script_name
         self.needs_quickjs = needs_quickjs
+        self.compilation_mode = compilation_mode
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
@@ -444,10 +446,14 @@ class CrossCompiler:
     async def _generate_c_sources(self, source_dir: str) -> Path:
         build_dir = self.temp_dir / f"build_{self.deployer.build_id}"
         build_dir.mkdir(parents=True, exist_ok=True)
+        # compilation_mode must match the mode the source tree was modified
+        # for; falling back to the default here silently skips e.g. the
+        # waveshare C support files of a static build.
         await self.deployer.create_local_build_archive(
             str(build_dir),
             source_dir,
             self.target.arch,
+            compilation_mode=self.compilation_mode,
         )
         return build_dir
 
@@ -1064,6 +1070,7 @@ async def build_binary_with_cross_toolchain(
     target_override: TargetMetadata | None = None,
     logger: LogFunc | None = None,
     build_host: BuildHostConfig | ModalSandboxConfig | None = None,
+    compilation_mode: str | None = None,
 ) -> str:
     arch: str | None
     distro: str | None
@@ -1131,6 +1138,7 @@ async def build_binary_with_cross_toolchain(
         prebuilt_target=resolved_target,
         logger=logger,
         build_host=build_host,
+        compilation_mode=compilation_mode,
     )
     return await compiler.build(source_dir)
 

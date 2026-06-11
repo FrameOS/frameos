@@ -9,6 +9,12 @@ import frameos/channels
 
 type Driver* = ref object of FrameOSDriver
 
+type DevState = object
+  path: string
+  evdev: ptr libevdev
+  lastX, lastY: int
+  hasX, hasY, moved: bool
+
 var thread: Thread[void]
 
 proc getListener*(device: string): Option[ptr libevdev] =
@@ -20,6 +26,7 @@ proc getListener*(device: string): Option[ptr libevdev] =
 
   let ret = libevdev_new_from_fd(fd, addr evdev)
   if ret < 0:
+    discard close(fd)
     raise newException(Exception, &"could not create libevdev device for {device}")
 
   if libevdev_has_event_type(evdev, EV_REL):
@@ -29,21 +36,33 @@ proc getListener*(device: string): Option[ptr libevdev] =
   elif libevdev_has_event_type(evdev, EV_ABS):
     return some(evdev)
   else:
+    libevdev_free(evdev)
     discard close(fd)
     return none(ptr libevdev)
 
+proc closeDevice(evdev: ptr libevdev) =
+  let fd = libevdev_get_fd(evdev)
+  libevdev_free(evdev)
+  if fd >= 0:
+    discard close(fd)
+
 proc startThread*() {.thread.} =
   try:
-    var openDevices: seq[(string, ptr libevdev)] = @[]
+    var openDevices: seq[DevState] = @[]
     for device in walkPattern("/dev/input/event*"):
-      let listener = getListener(device)
-      if listener.isNone:
-        log(%*{"event": "driver:evdev",
-          "device": device, "type": "unknown"})
-      else:
+      # One unreadable or malformed device must not disable the others.
+      try:
+        let listener = getListener(device)
+        if listener.isNone:
+          log(%*{"event": "driver:evdev",
+            "device": device, "type": "unknown"})
+        else:
+          log(%*{"event": "driver:evdev", "device": device,
+              "listening": true})
+          openDevices.add(DevState(path: device, evdev: listener.get()))
+      except Exception as e:
         log(%*{"event": "driver:evdev", "device": device,
-            "listening": true})
-        openDevices.add((device, listener.get()))
+            "error": e.msg})
 
     if openDevices.len == 0:
       raise newException(Exception, &"No devices found")
@@ -53,22 +72,47 @@ proc startThread*() {.thread.} =
               if openDevices.len > 1: "s" else: "")})
 
     var foundSome = false
-    var otherValue = -1
     while true:
       foundSome = false
-      for (device, evdev) in openDevices:
+      var deadDevices: seq[int] = @[]
+      for deviceIndex in 0 ..< openDevices.len:
+        let device = openDevices[deviceIndex].path
+        let evdev = openDevices[deviceIndex].evdev
         block nextdevice:
           # read all events for one device before going to the next
           while true:
             var ev: input_event
-            let rc = libevdev_next_event(evdev, cuint(
+            var rc = libevdev_next_event(evdev, cuint(
                 LIBEVDEV_READ_FLAG_NORMAL), addr ev)
             if rc == -EAGAIN:
+              break nextdevice
+            if rc == cint(LIBEVDEV_READ_STATUS_SYNC):
+              # SYN_DROPPED: drain the sync delta and resume normal reads.
+              while rc == cint(LIBEVDEV_READ_STATUS_SYNC):
+                rc = libevdev_next_event(evdev, cuint(
+                    LIBEVDEV_READ_FLAG_SYNC), addr ev)
+              break nextdevice
+            if rc != cint(LIBEVDEV_READ_STATUS_SUCCESS) and rc != -EAGAIN:
+              # Any other error (-ENODEV after unplug, etc.) is permanent for
+              # this device; previously this spun forever at 100% CPU and
+              # starved all other input devices.
+              log(%*{"event": "driver:evdev", "device": device,
+                  "error": &"read error {rc}, closing device"})
+              deadDevices.add(deviceIndex)
               break nextdevice
             if rc == cint(LIBEVDEV_READ_STATUS_SUCCESS):
               foundSome = true
               if ev.ev_type == EV_SYN:
-                otherValue = -1
+                # Emit one mouseMove per input frame, using the latest absolute
+                # X/Y for THIS device. Tracking per-device coordinates (keyed on
+                # ABS_X/ABS_Y) avoids mixing pressure/multitouch axes or another
+                # device's values into the position.
+                if openDevices[deviceIndex].moved and
+                    openDevices[deviceIndex].hasX and openDevices[deviceIndex].hasY:
+                  sendEvent("mouseMove", %*{
+                    "x": openDevices[deviceIndex].lastX,
+                    "y": openDevices[deviceIndex].lastY})
+                openDevices[deviceIndex].moved = false
                 continue
               if ev.ev_type == EV_MSC:
                 continue
@@ -100,13 +144,14 @@ proc startThread*() {.thread.} =
                       "code": ev.code
                     })
               elif ev.ev_type == EV_ABS:
-                if otherValue == -1:
-                  otherValue = ev.value
-                else:
-                  if ev.code == ABS_X:
-                    sendEvent("mouseMove", %*{"x": ev.value, "y": otherValue})
-                  elif ev.code == ABS_Y:
-                    sendEvent("mouseMove", %*{"x": otherValue, "y": ev.value})
+                if ev.code == ABS_X:
+                  openDevices[deviceIndex].lastX = ev.value
+                  openDevices[deviceIndex].hasX = true
+                  openDevices[deviceIndex].moved = true
+                elif ev.code == ABS_Y:
+                  openDevices[deviceIndex].lastY = ev.value
+                  openDevices[deviceIndex].hasY = true
+                  openDevices[deviceIndex].moved = true
               else:
                 log(%*{"event": "event:unknown",
                     "eventName": $libevdev_event_type_get_name(ev.ev_type),
@@ -117,6 +162,14 @@ proc startThread*() {.thread.} =
                     "code": ev.code,
                     "value": ev.value,
                 })
+      for removeIndex in countdown(deadDevices.len - 1, 0):
+        let index = deadDevices[removeIndex]
+        closeDevice(openDevices[index].evdev)
+        openDevices.delete(index)
+      if openDevices.len == 0:
+        log(%*{"event": "driver:evdev",
+            "error": "All input devices gone, stopping evdev driver"})
+        return
       if not foundSome:
         sleep(10) # give the cpu some air
 

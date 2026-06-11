@@ -79,8 +79,14 @@ parameter:
 static void EPD_2IN7B_V2_ReadBusy(void)
 {
     Debug("e-Paper busy\r\n");
+    UDOUBLE busy_wait_ms = 0;
     while(DEV_Digital_Read(EPD_BUSY_PIN) == 1) {      //1: busy, 0: idle
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            break;
+        }
         DEV_Delay_ms(10);
+        busy_wait_ms += 10;
     }    
     Debug("e-Paper busy release\r\n");
 }

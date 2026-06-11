@@ -2,6 +2,7 @@ import json
 import times
 import strutils
 import locks
+import deques
 import mummy
 import assets/frame_web as frameWebAssets
 import frameos/types
@@ -11,8 +12,8 @@ var globalFrameConfig*: FrameConfig
 var globalRunner*: RunnerControl
 var globalAdminSessionSalt*: cstring
 var globalAdminConnectionsState*: ConnectionsState
-var globalRecentLogs*: seq[JsonNode] = @[]
-var globalRecentMetrics*: seq[JsonNode] = @[]
+var globalRecentLogs*: Deque[JsonNode]
+var globalRecentMetrics*: Deque[JsonNode]
 var globalRecentLogsLock*: Lock
 var globalRecentLogId* = 0
 
@@ -23,7 +24,10 @@ let frameWebIndexHtml* =
     frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 const MAX_RECENT_LOGS* = 5000
-const MAX_RECENT_METRICS* = MAX_RECENT_LOGS * 10
+# Metrics are sampled about once a minute and only feed the admin UI charts;
+# parsed JsonNodes are kept in RAM for the life of the process, so keep this
+# small (500 entries covers ~8 hours).
+const MAX_RECENT_METRICS* = 500
 const FRAME_API_ID* = 1
 
 proc initConnectionsState*(): ConnectionsState =
@@ -111,21 +115,25 @@ proc metricsEntryFromLog(logEntry: JsonNode): JsonNode =
 proc storeUiLog*(logEntry: JsonNode) =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
-      globalRecentLogs.add(logEntry)
-      if globalRecentLogs.len > MAX_RECENT_LOGS:
-        globalRecentLogs = globalRecentLogs[(globalRecentLogs.len - MAX_RECENT_LOGS) .. (globalRecentLogs.len - 1)]
+      globalRecentLogs.addLast(logEntry)
+      while globalRecentLogs.len > MAX_RECENT_LOGS:
+        discard globalRecentLogs.popFirst()
       let metricEntry = metricsEntryFromLog(logEntry)
       if metricEntry != nil:
-        globalRecentMetrics.add(metricEntry)
-        if globalRecentMetrics.len > MAX_RECENT_METRICS:
-          globalRecentMetrics = globalRecentMetrics[(globalRecentMetrics.len - MAX_RECENT_METRICS) .. (globalRecentMetrics.len - 1)]
+        globalRecentMetrics.addLast(metricEntry)
+        while globalRecentMetrics.len > MAX_RECENT_METRICS:
+          discard globalRecentMetrics.popFirst()
 
 proc getUiLogs*(): JsonNode =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
-      return %*globalRecentLogs
+      result = newJArray()
+      for entry in globalRecentLogs:
+        result.add(entry)
 
 proc getUiMetrics*(): JsonNode =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
-      return %*globalRecentMetrics
+      result = newJArray()
+      for entry in globalRecentMetrics:
+        result.add(entry)

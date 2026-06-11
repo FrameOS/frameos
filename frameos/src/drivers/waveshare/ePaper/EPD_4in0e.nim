@@ -47,6 +47,10 @@ const
   EPD_4IN0E_HEIGHT* = 600
   busyLogLoopInterval = 100
   busyLogMinIntervalMs = 1000.0
+  # A full refresh takes ~30s; anything past this means a wedged controller
+  # or a loose ribbon cable. Give up instead of hanging the render thread
+  # forever.
+  busyWaitTimeoutMs = 120_000.0
 
 ## ********************************
 ## Color Index
@@ -157,10 +161,15 @@ proc epd4in0eReadBusyH() =
     observedLow = true
     lowStartTime = some(getMonoTime())
 
+  var timedOut = false
   while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == UBYTE(0):
     if not observedLow:
       observedLow = true
       lowStartTime = some(getMonoTime())
+
+    if durationToMilliseconds(getMonoTime() - startTime) >= busyWaitTimeoutMs:
+      timedOut = true
+      break
 
     DEV_Delay_ms(UDOUBLE(10))
     inc loopCount
@@ -201,7 +210,7 @@ proc epd4in0eReadBusyH() =
     "waitedForLowMs": waitForLowMs,
     "waitedForHighMs": waitForHighMs,
     "timedOutWaitingForLow": false,
-    "timedOutWaitingForHigh": false,
+    "timedOutWaitingForHigh": timedOut,
     "pins": finalPins
   })
 

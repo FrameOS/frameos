@@ -59,6 +59,10 @@ const
   EPD_4IN01F_HEIGHT* = 400
   busyLogLoopInterval = 20
   busyLogMinIntervalMs = 1000.0
+  # A full refresh takes ~30s; anything past this means a wedged controller
+  # or a loose ribbon cable. Give up instead of hanging the render thread
+  # forever.
+  busyWaitTimeoutMs = 120_000.0
 
 type
   UByteArray = UncheckedArray[UBYTE]
@@ -151,7 +155,11 @@ proc epd4in01fWaitBusy(action: string, busyState: UBYTE, stage: string) =
     "pins": capturePinStates()
   })
 
+  var timedOut = false
   while DEV_Digital_Read(UWORD(EPD_BUSY_PIN)) == busyState:
+    if durationToMilliseconds(getMonoTime() - startTime) >= busyWaitTimeoutMs:
+      timedOut = true
+      break
     DEV_Delay_ms(UDOUBLE(50))
     inc loopCount
 
@@ -173,6 +181,7 @@ proc epd4in01fWaitBusy(action: string, busyState: UBYTE, stage: string) =
     "loops": loopCount,
     "finalState": DEV_Digital_Read(UWORD(EPD_BUSY_PIN)).int,
     "busyState": busyState.int,
+    "timedOut": timedOut,
     "pins": capturePinStates()
   })
 

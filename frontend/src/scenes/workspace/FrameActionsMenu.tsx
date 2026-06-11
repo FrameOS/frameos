@@ -62,7 +62,7 @@ export function FrameActionsMenu({
           icon: <PencilSquareIcon className="h-5 w-5" />,
         },
         {
-          label: 'Render now',
+          label: 'Re-render',
           title: 'Render frame now',
           onClick: () => renderFrame(frame.id),
           icon: <PlayIcon className="h-5 w-5" />,

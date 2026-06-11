@@ -12,7 +12,7 @@ from app.codegen.drivers_nim import (
     COMPILATION_MODE_SHARED_SCENES,
     compilation_mode_uses_shared_libraries,
 )
-from app.codegen.utils import sanitize_nim_string, natural_keys
+from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment
 from app.utils.js_apps import find_js_app_source_key
 
 def get_events_schema() -> list[dict]:
@@ -937,7 +937,7 @@ class SceneWriter:
 
                         if event_payload_pairs:
                             self.run_node_lines += [
-                                f"of {node_integer}.NodeId: # {event}",
+                                f"of {node_integer}.NodeId: # {nim_comment(event)}",
                                 f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{'}",
                                 *[f"    {('    ' + newline).join(x)}," for x in event_payload_pairs],
                                 "  })",
@@ -945,7 +945,7 @@ class SceneWriter:
                             ]
                         else:
                             self.run_node_lines += [
-                                f"of {node_integer}.NodeId: # {event}",
+                                f"of {node_integer}.NodeId: # {nim_comment(event)}",
                                 f"  sendEvent(\"{sanitize_nim_string(event)}\", %*{'{}'})",
                                 f"  nextNode = {-1 if next_node_id is None else self.node_id_to_integer(next_node_id)}.NodeId",
                             ]
@@ -1025,7 +1025,7 @@ class SceneWriter:
 
                 next_node_id = self.next_nodes.get(node_id, None)
                 self.run_node_lines += [
-                    f"of {node_integer}.NodeId: # {event}",
+                    f"of {node_integer}.NodeId: # {nim_comment(scene_id)}",
                 ]
 
                 if len(scene.get("fields", [])) > 0:

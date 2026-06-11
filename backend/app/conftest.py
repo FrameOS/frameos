@@ -61,6 +61,10 @@ def setup_and_teardown_db():
 
     # Create all tables before each test
     Base.metadata.create_all(bind=engine)
+    # Frame ids repeat across tests (fresh tables each time), so reset the
+    # per-process log-prune throttle to keep tests order-independent.
+    from app.models.log import _inserts_since_prune_check
+    _inserts_since_prune_check.clear()
     yield
     # Drop all tables after each test
     Base.metadata.drop_all(bind=engine)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import codecs
 import hashlib
 import json
 import math
@@ -32,6 +33,7 @@ from app.codegen.drivers_nim import (
     COMPILATION_MODE_SHARED,
     COMPILATION_MODE_SHARED_SCENES,
     compiled_drivers,
+    compilation_mode_uses_shared_drivers,
     compilation_mode_uses_shared_libraries,
     driver_library_filename,
     normalize_compilation_mode,
@@ -713,6 +715,101 @@ $(OBJECTS): pre-build
         waveshare = drivers.get("waveshare")
         self._copy_waveshare_driver_build_files(source_dir, destination_dir, waveshare)
 
+    @staticmethod
+    def _demangle_nimcache_name(name: str) -> str:
+        """Decode a nimcache object name back to its source path, mirroring the
+        decoding in tools/nimc.Makefile: '@f' -> '/', drop '@z', '@m' -> '-',
+        then rot13."""
+        name = name.replace("@f", "/").replace("@z", "").replace("@m", "-")
+        return codecs.decode(name, "rot13")
+
+    @staticmethod
+    def _copy_external_compile_sources(build_dir: str, script_path: str, source_dir: str = "") -> None:
+        """Safety net for Nim {.compile.} C files (e.g. waveshare DEV_Config.c).
+
+        `nim --genScript` references such files as bare basenames; it never
+        copies them into the nimcache. Our Makefiles compile `*.c` found in
+        the build dir, so any referenced external C file (and the local
+        headers it includes) must be copied in, or the final link dies with
+        cryptic undefined-symbol errors. The file's true relative path is
+        recoverable from the mangled object name on the same compile line.
+        """
+        try:
+            with open(script_path, "r", encoding="utf-8", errors="ignore") as fp:
+                script = fp.read()
+        except OSError:
+            return
+
+        def resolve_dirs(tokens: list[str]) -> list[str]:
+            dirs = []
+            for token in tokens:
+                if token.startswith("-I") and len(token) > 2:
+                    path = token[2:]
+                    if not os.path.isabs(path) and source_dir:
+                        path = os.path.join(source_dir, path)
+                    dirs.append(path)
+            return dirs
+
+        for line in script.splitlines():
+            if ".c" not in line:
+                continue
+            try:
+                tokens = shlex.split(line)
+            except ValueError:
+                continue
+            include_dirs = resolve_dirs(tokens)
+            object_name = ""
+            for index, token in enumerate(tokens):
+                if token == "-o" and index + 1 < len(tokens):
+                    object_name = tokens[index + 1]
+            for index, token in enumerate(tokens):
+                if index > 0 and tokens[index - 1] == "-o":
+                    continue
+                if not token.endswith(".c") or "/" in token or os.sep in token or token.startswith("@"):
+                    continue
+                if os.path.exists(os.path.join(build_dir, token)):
+                    continue
+                candidates = []
+                if object_name:
+                    relative = FrameDeployer._demangle_nimcache_name(
+                        os.path.basename(object_name).removesuffix(".o"))
+                    if relative.endswith(".c") and os.path.basename(relative) == token:
+                        roots = [os.path.join(source_dir, "src"), source_dir] if source_dir else []
+                        candidates += [os.path.join(root, relative) for root in roots + include_dirs]
+                candidates += [os.path.join(inc, token) for inc in include_dirs]
+                for candidate in candidates:
+                    if os.path.exists(candidate):
+                        search_dirs = [os.path.dirname(candidate), *include_dirs]
+                        FrameDeployer._copy_c_source_with_local_headers(candidate, build_dir, search_dirs)
+                        break
+
+    @staticmethod
+    def _copy_c_source_with_local_headers(c_path: str, build_dir: str, include_dirs: list[str]) -> None:
+        search_dirs = [os.path.dirname(c_path), *include_dirs]
+        pending = [c_path]
+        seen: set[str] = set()
+        while pending:
+            path = pending.pop()
+            real = os.path.realpath(path)
+            if real in seen or not os.path.exists(path):
+                continue
+            seen.add(real)
+            destination = os.path.join(build_dir, os.path.basename(path))
+            if not os.path.exists(destination):
+                shutil.copy(path, destination)
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as fp:
+                    content = fp.read()
+            except OSError:
+                continue
+            for included in re.findall(r'#\s*include\s+"([^"]+)"', content):
+                name = os.path.basename(included)
+                for directory in search_dirs:
+                    candidate = os.path.join(directory, name)
+                    if os.path.exists(candidate):
+                        pending.append(candidate)
+                        break
+
     def _copy_waveshare_driver_build_files(
         self,
         source_dir: str,
@@ -823,10 +920,15 @@ $(OBJECTS): pre-build
         compilation_mode = normalize_compilation_mode(compilation_mode)
         driver_make_dirs: list[str] = []
         scene_make_dirs: list[str] = []
-        if compilation_mode == COMPILATION_MODE_STATIC:
+        # Whenever drivers are linked into the main binary (static AND
+        # shared-scenes), the Waveshare C support sources must sit next to the
+        # generated C, or the final link fails with undefined DEV_*/EPD_*
+        # symbols: nim --genScript does not copy {.compile.} files anywhere.
+        if not compilation_mode_uses_shared_drivers(compilation_mode):
             self._copy_waveshare_build_files(source_dir, build_dir, drivers)
 
         script_path = self._find_compile_script(build_dir, "compile_frameos.sh")
+        self._copy_external_compile_sources(build_dir, script_path, source_dir)
         linker_flags, compiler_flags = self._extract_compile_flags(script_path, "frameos")
         main_driver_linker_flags = (
             self._driver_linker_flags(drivers)
@@ -863,6 +965,7 @@ $(OBJECTS): pre-build
                     self._copy_waveshare_driver_build_files(source_dir, driver_dir, driver)
 
                 driver_script_path = self._find_compile_script(driver_dir)
+                self._copy_external_compile_sources(driver_dir, driver_script_path, source_dir)
                 driver_linker_flags, driver_compiler_flags = self._extract_compile_flags(
                     driver_script_path, output_name
                 )
