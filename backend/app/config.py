@@ -41,7 +41,7 @@ def normalize_ingress_path(value: str | None) -> str:
 class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
-    SECRET_KEY = os.environ.get('SECRET_KEY')
+    SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_urlsafe(32)
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
