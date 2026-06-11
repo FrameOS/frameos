@@ -35,6 +35,9 @@ proc get*(self: App, context: ExecutionContext): Image =
     return self.error(context, "Please provide an OpenAI API key in the settings.")
 
   var client = newHttpClient(timeout = 300000) # 5 min timeout
+  # Close on every exit path: a request that raises (timeout, DNS, TLS — the
+  # common case on flaky networks) must not leak the socket and SSL context.
+  defer: client.close()
   client.limitHttpResponse(self.maxHttpResponseBytes(), 300)
   client.headers = newHttpHeaders([
       ("Authorization", "Bearer " & apiKey),
@@ -85,7 +88,6 @@ proc get*(self: App, context: ExecutionContext): Image =
     let response = client.request("https://api.openai.com/v1/images/generations",
         httpMethod = HttpPost, body = $body)
     requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
-    defer: client.close()
     if response.code != Http200:
       try:
         let json = parseJson(response.body)

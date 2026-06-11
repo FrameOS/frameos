@@ -341,6 +341,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     let screenshotFile = fmt"/tmp/frameos_screenshot_{rand(1000000)}_{rand(1000000)}.png"
     let scriptFile = fmt"/tmp/frameos_playwright_script_{rand(1000000)}.py"
 
+    # Remove the temp files on every exit path, not just success: a scene
+    # stuck on a failing URL re-renders for months, and /tmp is RAM-backed.
+    defer:
+      try: removeFile(scriptFile)
+      except OSError: discard
+      try: removeFile(screenshotFile)
+      except OSError: discard
+
     self.log &"Capturing URL `{self.appConfig.url}` at {width}x{height} in {screenshotFile}"
 
     if fileExists(screenshotFile):
@@ -433,17 +441,9 @@ page.wait_for_timeout(1500)
         return context.image
       return renderError(width, height, "Playwright command failed")
 
-    # Clean up the temporary script file
-    try: removeFile(scriptFile)
-    except OSError as e:
-      self.logError &"Error removing temporary playwright script: {e.msg}"
-
     if fileExists(screenshotFile):
       let screenshotImage = readImage(screenshotFile)
       self.log &"Loaded screenshot from {screenshotFile}. Size: {screenshotImage.width}x{screenshotImage.height}"
-      try: removeFile(screenshotFile)
-      except OSError as e:
-        self.logError &"Error removing screenshot file: {e.msg}"
       return screenshotImage
     else:
       self.logError "No screenshot file was found after running playwright script."
