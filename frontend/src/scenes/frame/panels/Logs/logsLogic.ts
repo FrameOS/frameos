@@ -71,8 +71,9 @@ export const logsLogic = kea<logsLogicType>([
     downloadFullLog: true,
     setFullLogDownloading: (downloading: boolean) => ({ downloading }),
     setLogSearch: (search: string) => ({ search }),
+    appendLog: (log: LogType) => ({ log }),
   }),
-  loaders(({ props }) => ({
+  loaders(({ props, values }) => ({
     logs: [
       [] as LogType[],
       {
@@ -89,13 +90,42 @@ export const logsLogic = kea<logsLogicType>([
             return []
           }
         },
+        // Fetch only the lines newer than what we already have (used on
+        // websocket reconnect) and append them, instead of re-downloading the
+        // whole buffer every time a flaky connection drops. Falls back to a
+        // full load if we have nothing yet.
+        loadNewLogs: async () => {
+          const existing = values.logs
+          const maxId = existing.reduce((max, log) => (log.id > max ? log.id : max), 0)
+          if (!maxId) {
+            return existing
+          }
+          try {
+            const response = await apiFetch(`/api/frames/${props.frameId}/logs?after_id=${maxId}`)
+            if (!response.ok) {
+              throw new Error('Failed to fetch logs')
+            }
+            const data = await response.json()
+            const newLogs = (data.logs as LogType[]).filter((log) => log.id > maxId)
+            if (newLogs.length === 0) {
+              return existing
+            }
+            return [...existing, ...newLogs].slice(-MAX_LOG_LINES)
+          } catch (error) {
+            console.error(error)
+            return existing
+          }
+        },
       },
     ],
   })),
-  reducers(({ props }) => ({
+  reducers(() => ({
     logs: {
-      [socketLogic.actionTypes.newLog]: (state, { log }) =>
-        log.frame_id === props.frameId ? [...state, log].slice(-MAX_LOG_LINES) : state,
+      // Live lines stream in via the appendLog listener below (a local action)
+      // rather than keying this reducer on socketLogic's external newLog action,
+      // which would conflict with the socketReconnected listener under
+      // kea-typegen and break this reducer's typing.
+      appendLog: (state, { log }) => [...state, log].slice(-MAX_LOG_LINES),
     },
     fullLogDownloading: [
       false,
@@ -136,11 +166,18 @@ export const logsLogic = kea<logsLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    [socketLogic.actionTypes.newLog]: ({ log }) => {
+      if (log.frame_id === props.frameId) {
+        actions.appendLog(log)
+      }
+    },
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      // Lines missed during the outage are fetched incrementally (only rows
+      // newer than our latest id), not by re-downloading the whole buffer.
+      actions.loadNewLogs()
+    },
     downloadLog: () => {
-      downloadTextFile(
-        values.logs.map(formatLogLine).join('\n'),
-        timestampedLogFileName(props.frameId, 'logs')
-      )
+      downloadTextFile(values.logs.map(formatLogLine).join('\n'), timestampedLogFileName(props.frameId, 'logs'))
     },
     downloadFullLog: async () => {
       actions.setFullLogDownloading(true)
