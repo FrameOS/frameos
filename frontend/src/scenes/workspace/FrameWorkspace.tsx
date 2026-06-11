@@ -32,7 +32,7 @@ import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
 import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
@@ -1387,7 +1387,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
-      <BindLogic logic={panelsLogic} props={frameLogicProps}>
+      <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
         <FrameosShell
           mode="frame"
           title="Frame"

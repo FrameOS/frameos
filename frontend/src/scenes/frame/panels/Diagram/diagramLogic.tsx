@@ -29,7 +29,6 @@ import {
   AppConfig,
   AppConfigField,
   AppNodeData,
-  Area,
   CodeNodeData,
   DiagramNode,
   DispatchNodeData,
@@ -38,12 +37,11 @@ import {
   FrameScene,
   FrameSceneSettings,
   MarkdownField,
-  Panel,
   SceneApp,
   StateNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { arrangeSceneGraph } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
@@ -1364,14 +1362,12 @@ export const diagramLogic = kea<diagramLogicType>([
     // so a global shortcut must only act in the scene that is actually shown —
     // otherwise Cmd+V pastes into every open scene at once.
     const isVisibleDiagram = (): boolean => {
-      const mountedPanels = panelsLogic.findMounted({ frameId: props.frameId })
-      if (!mountedPanels) {
+      const mountedEditors = frameEditorsLogic.findMounted({ frameId: props.frameId })
+      if (!mountedEditors) {
         return true
       }
-      const { panels, fullScreenPanel } = mountedPanels.values
-      const areaPanels = fullScreenPanel ? [fullScreenPanel] : panels[Area.TopLeft] ?? []
-      const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
-      return activePanel?.panel === Panel.Diagram && activePanel?.metadata?.sceneId === props.sceneId
+      const activeEditor = mountedEditors.values.activeEditor
+      return activeEditor?.kind === 'diagram' && activeEditor.sceneId === props.sceneId
     }
 
     cache.keydownHandler = (event: KeyboardEvent) => {

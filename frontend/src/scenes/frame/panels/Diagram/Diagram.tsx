@@ -537,15 +537,3 @@ export function Diagram({ sceneId, showToolbar }: DiagramProps) {
     </ReactFlowProvider>
   )
 }
-Diagram.PanelTitle = function DiagramPanelTitle({ sceneId }: DiagramProps) {
-  const { frameId } = useValues(frameLogic)
-  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
-  const { hasChanges, sceneName } = useValues(diagramLogic(diagramLogicProps))
-
-  return (
-    <>
-      {hasChanges ? '* ' : ''}
-      {sceneName}
-    </>
-  )
-}

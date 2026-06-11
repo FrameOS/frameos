@@ -161,7 +161,3 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     </Form>
   )
 }
-
-SceneSettings.PanelTitle = function SceneSettingsPanelTitle() {
-  return <>Scene Settings</>
-}

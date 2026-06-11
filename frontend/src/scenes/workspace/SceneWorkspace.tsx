@@ -28,7 +28,7 @@ import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
 import { buildDiagramNodeTreeItems, diagramLogic, type DiagramNodeTreeItem } from '../frame/panels/Diagram/diagramLogic'
 import { Apps } from '../frame/panels/Apps/Apps'
@@ -834,7 +834,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
-      <BindLogic logic={panelsLogic} props={frameLogicProps}>
+      <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
         <FrameosShell
           mode="scenes"
           title="Scenes"

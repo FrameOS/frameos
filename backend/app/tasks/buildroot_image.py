@@ -1211,11 +1211,12 @@ class BuildrootImageBuilder:
                 mtime=0,
             )
         )
+        # No console_output: frameos draws to the framebuffer on the same VT,
+        # so mirroring its logs to tty1 would scribble over the rendered image.
         self._write_service(
             REPO_ROOT / "frameos" / "frameos.service",
             release_dir / "frameos.service",
             user="root",
-            console_output=True,
             environment={
                 "FRAMEOS_HOME": "/srv/frameos/current",
                 "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
@@ -1232,7 +1233,6 @@ class BuildrootImageBuilder:
             REPO_ROOT / "frameos" / "agent" / "frameos_agent.service",
             agent_release_dir / "frameos_agent.service",
             user="root",
-            console_output=True,
             environment={
                 "FRAMEOS_HOME": "/srv/frameos/current",
                 "LD_LIBRARY_PATH": "/usr/lib:/usr/local/lib",
@@ -2575,6 +2575,14 @@ if [ -e "$marker" ]; then
   exit 0
 fi
 
+# The log only lands on disk, so mirror progress messages to the boot console
+# (tty1) too: a partition move can take minutes and the frame would otherwise
+# look stuck on a blank screen.
+notice() {
+  echo "$@"
+  echo "$@" > /dev/console 2>/dev/null || true
+}
+
 sector_size="${FRAMEOS_EXPAND_SECTOR_SIZE:-512}"
 align_sectors=$((1024 * 1024 / sector_size))
 align_offset=0
@@ -2630,6 +2638,7 @@ move_partition_data() {
   if [ "$old_start" -eq "$new_start" ]; then
     return 0
   fi
+  notice "FrameOS: moving $name partition data ($sectors sectors), please wait..."
   echo "Moving $name data: $old_start -> $new_start ($sectors sectors)"
   chunk_sectors=$((4 * 1024 * 1024 / sector_size))
   if [ "$chunk_sectors" -lt 1 ]; then
@@ -2778,6 +2787,7 @@ if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$layout_changed" -eq 0 ]; the
   exit 0
 fi
 
+notice "FrameOS: expanding SD card partitions on first boot. This can take a few minutes - do not power off."
 echo "Expanding $disk from $current_end to $disk_sectors sectors"
 echo "New root start/size: $p2_start/$target_root_size sectors"
 echo "New FRAMEOS start/size: $frameos_start/$target_frameos_size sectors"
@@ -2804,15 +2814,18 @@ sfdisk --no-reread --force "$disk" < "$layout"
 rm -f "$layout"
 
 if ! partx -u "$disk"; then
+  notice "FrameOS: rebooting to finish SD card partition expansion..."
   echo "Could not update in-kernel partition table; rebooting and retrying before local mounts"
   systemctl reboot --no-block || reboot || true
   exit 0
 fi
 
+notice "FrameOS: resizing filesystems..."
 resize2fs "$root_dev"
 resize2fs "$frameos_dev"
 mkfs.vfat -n ASSETS "$assets_dev"
 date -u > "$marker" 2>/dev/null || true
+notice "FrameOS: SD card partition expansion complete, continuing boot."
 """
 
 

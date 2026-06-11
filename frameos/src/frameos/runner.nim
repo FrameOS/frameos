@@ -148,7 +148,9 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   self.lastRenderAt = epochTime()
   let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
   markRuntimeCheckpoint("scene:done", currentSceneId = scene.id.string, clearNode = true)
-  self.logSignal(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
+  # Uses logger.log (not logSignal) so render:done respects the fast-render
+  # log pause; it's the highest-frequency event and would otherwise flood logs.
+  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})

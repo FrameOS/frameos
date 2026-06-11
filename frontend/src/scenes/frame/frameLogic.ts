@@ -1106,7 +1106,6 @@ export const frameLogic = kea<frameLogicType>([
       openDrawer: openDrawer ?? false,
     }),
     deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
-    closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
     generateFrameAdminCredentials: true,

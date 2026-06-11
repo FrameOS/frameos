@@ -335,9 +335,6 @@ importers:
       react-popper:
         specifier: ^2.3.0
         version: 2.3.0(@popperjs/core@2.11.8)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
-      react-resizable-panels:
-        specifier: 2.1.7
-        version: 2.1.7(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
       react-syntax-highlighter:
         specifier: ^16.1.1
         version: 16.1.1(react@18.2.0)

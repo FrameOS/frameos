@@ -3,7 +3,7 @@ import { subscriptions } from 'kea-subscriptions'
 import { v4 as uuidv4 } from 'uuid'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic, type FrameEditor } from '../../frameEditorsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import type {
@@ -15,9 +15,7 @@ import type {
   DiagramNode,
   FrameType,
   FrameScene,
-  PanelWithMetadata,
 } from '../../../../types'
-import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
@@ -123,12 +121,12 @@ export const chatLogic = kea<chatLogicType>([
     values: [
       frameLogic(props),
       ['frame', 'frameForm', 'scenes'],
-      panelsLogic(props),
-      ['selectedScenePanelId', 'panels', 'scenesOpen', 'activeEditAppPanel'],
+      frameEditorsLogic(props),
+      ['activeSceneEditorId', 'scenesOpen', 'activeEditApp'],
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
-    actions: [frameLogic(props), ['updateScene'], panelsLogic(props), ['openChat']],
+    actions: [frameLogic(props), ['updateScene']],
   })),
   actions({
     setInput: (input: string) => ({ input }),
@@ -410,29 +408,20 @@ export const chatLogic = kea<chatLogicType>([
   }),
   selectors({
     selectedScene: [
-      (s: any) => [s.scenes, s.selectedScenePanelId, s.panels],
-      (scenes: FrameScene[], selectedScenePanelId: string | null, panels: Record<Area, PanelWithMetadata[]>) => {
-        const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
-        if (activeTopLeftPanel === Panel.Scenes) {
-          return null
-        }
-        return scenes?.find((scene: FrameScene) => scene.id === selectedScenePanelId) ?? null
-      },
+      (s: any) => [s.scenes, s.activeSceneEditorId],
+      (scenes: FrameScene[], activeSceneEditorId: string | null) =>
+        scenes?.find((scene: FrameScene) => scene.id === activeSceneEditorId) ?? null,
     ],
     activeEditAppContext: [
-      (s: any) => [s.activeEditAppPanel],
-      (activeEditAppPanel: PanelWithMetadata | null) => {
-        if (!activeEditAppPanel?.metadata) {
-          return null
-        }
-        const metadata = activeEditAppPanel.metadata as { sceneId?: string; nodeId?: string; nodeData?: AppNodeData }
-        if (!metadata.sceneId || !metadata.nodeId) {
+      (s: any) => [s.activeEditApp],
+      (activeEditApp: FrameEditor | null) => {
+        if (!activeEditApp?.sceneId || !activeEditApp?.nodeId) {
           return null
         }
         return {
-          sceneId: metadata.sceneId,
-          nodeId: metadata.nodeId,
-          nodeData: metadata.nodeData ?? null,
+          sceneId: activeEditApp.sceneId,
+          nodeId: activeEditApp.nodeId,
+          nodeData: activeEditApp.nodeData ?? null,
         }
       },
     ],
@@ -441,8 +430,8 @@ export const chatLogic = kea<chatLogicType>([
       (chats: ChatSummary[], activeChatId: string | null) => chats.find((chat) => chat.id === activeChatId) ?? null,
     ],
     chatSceneId: [
-      (s: any) => [s.activeChat, s.selectedScenePanelId],
-      (activeChat: ChatSummary | null, selectedScenePanelId: string | null): string | null => {
+      (s: any) => [s.activeChat, s.activeSceneEditorId],
+      (activeChat: ChatSummary | null, activeSceneEditorId: string | null): string | null => {
         if (activeChat) {
           const contextType = getChatContextType(activeChat)
           if (contextType === 'scene') {
@@ -450,7 +439,7 @@ export const chatLogic = kea<chatLogicType>([
           }
           return null
         }
-        return selectedScenePanelId ?? null
+        return activeSceneEditorId ?? null
       },
     ],
     chatContextType: [
@@ -704,7 +693,6 @@ export const chatLogic = kea<chatLogicType>([
       actions.selectChat(chat.id)
     },
     startNewChatWithMessage: async ({ content, sceneId }) => {
-      actions.openChat()
       if (sceneId !== undefined) {
         const chat = buildLocalChat(props.frameId, 'scene', sceneId ?? null)
         actions.createChatSuccess(chat)
@@ -1086,7 +1074,7 @@ export const chatLogic = kea<chatLogicType>([
     }
   }),
   subscriptions(({ actions, values }) => ({
-    selectedScenePanelId: (sceneId: string | null) => {
+    activeSceneEditorId: (sceneId: string | null) => {
       if (!sceneId) {
         return
       }
@@ -1095,25 +1083,21 @@ export const chatLogic = kea<chatLogicType>([
       }
       actions.ensureChatForScene(sceneId)
     },
-    activeEditAppPanel: (panel: PanelWithMetadata | null) => {
-      if (!panel?.metadata) {
+    activeEditApp: (editor: FrameEditor | null) => {
+      if (!editor?.sceneId || !editor?.nodeId) {
         return
       }
-      const metadata = panel.metadata as { sceneId?: string; nodeId?: string }
-      if (!metadata.sceneId || !metadata.nodeId) {
-        return
-      }
-      actions.ensureChatForApp(metadata.sceneId, metadata.nodeId)
+      actions.ensureChatForApp(editor.sceneId, editor.nodeId)
     },
     chats: (chats: ChatSummary[]) => {
-      if (!values.selectedScenePanelId) {
+      if (!values.activeSceneEditorId) {
         return
       }
       if (values.scenesOpen || values.activeEditAppContext) {
         return
       }
       const matchingChat = chats.find(
-        (chat) => getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.selectedScenePanelId
+        (chat) => getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.activeSceneEditorId
       )
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)

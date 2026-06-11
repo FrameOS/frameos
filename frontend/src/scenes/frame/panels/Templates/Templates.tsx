@@ -15,7 +15,6 @@ import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
-import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
@@ -53,7 +52,6 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
     search,
     installedTemplatesByName,
   } = useValues(templatesLogic({ frameId }))
-  const { disableFullscreenPanel } = useActions(panelsLogic({ frameId }))
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
   return (
@@ -160,7 +158,6 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                     } else {
                       applyTemplate(template)
                     }
-                    disableFullscreenPanel()
                   }}
                   editTemplate={editLocalTemplate}
                   installedTemplatesByName={installedTemplatesByName}
@@ -233,7 +230,6 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                           persistOnInstall,
                           persistOnInstall && openInstalledSceneDrawer
                         )
-                        disableFullscreenPanel()
                       }}
                       installedTemplatesByName={installedTemplatesByName}
                       templateDragData={{
@@ -307,8 +303,4 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
       )}
     </div>
   )
-}
-
-Templates.PanelTitle = function TemplatesPanelTitle() {
-  return <>Available scenes</>
 }

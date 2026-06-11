@@ -12,6 +12,22 @@ export interface LogsLogicProps {
 }
 const MAX_LOG_LINES = 50000
 
+// Duplicate lines appear when a REST load (initial mount — e.g. the deploy
+// drawer mounting this logic mid-deploy — or the reconnect catch-up) races
+// the live websocket stream: a line already in the fetched response is
+// appended again when its socket event arrives moments later. Ids are
+// monotonically increasing, so scanning a short tail is enough to dedup.
+const DEDUP_TAIL_LINES = 500
+function hasLogId(logs: LogType[], id: number): boolean {
+  const end = Math.max(0, logs.length - DEDUP_TAIL_LINES)
+  for (let index = logs.length - 1; index >= end; index--) {
+    if (logs[index].id === id) {
+      return true
+    }
+  }
+  return false
+}
+
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -84,10 +100,15 @@ export const logsLogic = kea<logsLogicType>([
               throw new Error('Failed to fetch logs')
             }
             const data = await response.json()
-            return data.logs as LogType[]
+            const fetched = data.logs as LogType[]
+            // Live lines may have streamed in over the websocket while the
+            // fetch was in flight; keep them instead of clobbering, dedup by id.
+            const fetchedIds = new Set(fetched.map((log) => log.id))
+            const streamedDuringFetch = values.logs.filter((log) => !fetchedIds.has(log.id))
+            return [...fetched, ...streamedDuringFetch].slice(-MAX_LOG_LINES)
           } catch (error) {
             console.error(error)
-            return []
+            return values.logs
           }
         },
         // Fetch only the lines newer than what we already have (used on
@@ -95,10 +116,9 @@ export const logsLogic = kea<logsLogicType>([
         // whole buffer every time a flaky connection drops. Falls back to a
         // full load if we have nothing yet.
         loadNewLogs: async () => {
-          const existing = values.logs
-          const maxId = existing.reduce((max, log) => (log.id > max ? log.id : max), 0)
+          const maxId = values.logs.reduce((max, log) => (log.id > max ? log.id : max), 0)
           if (!maxId) {
-            return existing
+            return values.logs
           }
           try {
             const response = await apiFetch(`/api/frames/${props.frameId}/logs?after_id=${maxId}`)
@@ -106,14 +126,18 @@ export const logsLogic = kea<logsLogicType>([
               throw new Error('Failed to fetch logs')
             }
             const data = await response.json()
-            const newLogs = (data.logs as LogType[]).filter((log) => log.id > maxId)
+            // Re-read state after the await: live lines may have been appended
+            // while the fetch was in flight, and may overlap with the response.
+            const current = values.logs
+            const knownIds = new Set(current.map((log) => log.id))
+            const newLogs = (data.logs as LogType[]).filter((log) => log.id > maxId && !knownIds.has(log.id))
             if (newLogs.length === 0) {
-              return existing
+              return current
             }
-            return [...existing, ...newLogs].slice(-MAX_LOG_LINES)
+            return [...current, ...newLogs].slice(-MAX_LOG_LINES)
           } catch (error) {
             console.error(error)
-            return existing
+            return values.logs
           }
         },
       },
@@ -125,7 +149,7 @@ export const logsLogic = kea<logsLogicType>([
       // rather than keying this reducer on socketLogic's external newLog action,
       // which would conflict with the socketReconnected listener under
       // kea-typegen and break this reducer's typing.
-      appendLog: (state, { log }) => [...state, log].slice(-MAX_LOG_LINES),
+      appendLog: (state, { log }) => (hasLogId(state, log.id) ? state : [...state, log].slice(-MAX_LOG_LINES)),
     },
     fullLogDownloading: [
       false,

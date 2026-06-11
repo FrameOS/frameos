@@ -10,14 +10,14 @@ import { appsModel, categoryLabels } from '../../models/appsModel'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
-import { Panel, type AppConfig, type AppNodeData, type DiagramNode, type FrameScene, type FrameType } from '../../types'
+import { type AppConfig, type AppNodeData, type DiagramNode, type FrameScene, type FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
 import { appsWorkspaceLogic, SYSTEM_APPS_ROUTE_TOKEN } from './appsWorkspaceLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
-import { panelsLogic } from '../frame/panels/panelsLogic'
+import { editAppEditorKey, frameEditorsLogic } from '../frame/frameEditorsLogic'
 import {
   appSourceEditorLanguage,
   configureAppSourceEditor,
@@ -705,25 +705,17 @@ function AppsEditorSurface({
     return <AppsEmptyState title="No app selected" detail="Choose an app from the left panel." />
   }
 
-  const appPanel = {
-    panel: Panel.EditApp,
-    key: `${scene.id}.${app.nodeId}`,
-    title: app.nodeData.name || app.nodeData.keyword || app.nodeId,
-    active: true,
-    hidden: false,
-    closable: true,
-    metadata: {
-      sceneId: scene.id,
-      nodeId: app.nodeId,
-      nodeData: app.nodeData,
-    },
-  }
-
   return (
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
       <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
-        <EditApp panel={appPanel} sceneId={scene.id} nodeId={app.nodeId} showFileList={false} compactWarnings />
+        <EditApp
+          editorKey={editAppEditorKey(scene.id, app.nodeId)}
+          sceneId={scene.id}
+          nodeId={app.nodeId}
+          showFileList={false}
+          compactWarnings
+        />
       </div>
     </>
   )
@@ -785,7 +777,7 @@ function AppsWorkspaceFrame({
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
-      <BindLogic logic={panelsLogic} props={frameLogicProps}>
+      <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
         <FrameosShell
           mode="apps"
           title="Apps"

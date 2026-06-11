@@ -4,6 +4,7 @@ from typing import Literal, Tuple
 import asyncio
 import base64
 import json
+import time
 import uuid
 import asyncssh
 import gzip
@@ -38,6 +39,10 @@ __all__ = [
 
 CHUNK_SIZE   = 2* 1024 * 1024  # 2 Mib
 CHUNK_ZLEVEL = 6               # good compromise
+
+UPLOAD_PROGRESS_INTERVAL_SECONDS = 30  # how often to log upload progress
+SCP_STALL_TIMEOUT_SECONDS = 90         # abort the transfer when no bytes move for this long
+SCP_MAX_ATTEMPTS = 3
 
 RemoteTransport = Literal["auto", "agent", "ssh"]
 
@@ -145,12 +150,19 @@ async def _file_write_via_agent(
             raise RuntimeError(reply.get("error", "agent error"))
 
 async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
+    size = len(data)
+    last_report = time.monotonic()
     await file_write_open_on_frame(frame.id, remote_path,
                                    meta={"compression": "zlib"}, redis=redis)
     for off in range(0, len(data), CHUNK_SIZE):
         raw  = data[off:off+CHUNK_SIZE]
         comp = zlib.compress(raw, CHUNK_ZLEVEL)
         await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+        if time.monotonic() - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
+            last_report = time.monotonic()
+            sent = min(off + CHUNK_SIZE, size)
+            await log(db, redis, frame.id, "stdout",
+                      f"> upload progress: {print_size(sent)} / {print_size(size)}")
     await file_write_close_on_frame(frame.id, redis=redis)
 
 # ---------------------------------------------------------------------------#
@@ -212,6 +224,61 @@ def print_size(size: int) -> str:
     size //= 1024
     return f"{size} GiB"
 
+async def _scp_with_progress(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    ssh: asyncssh.SSHClientConnection,
+    local_path: str,
+    remote_path: str,
+    size: int,
+) -> None:
+    """
+    Run one scp transfer, logging progress every UPLOAD_PROGRESS_INTERVAL_SECONDS
+    and raising TimeoutError when no bytes move for SCP_STALL_TIMEOUT_SECONDS.
+    """
+    progress = {"sent": 0, "at": time.monotonic()}
+
+    def _on_progress(_srcpath, _dstpath, bytes_sent, _total_bytes):
+        if bytes_sent > progress["sent"]:
+            progress["sent"] = bytes_sent
+            progress["at"] = time.monotonic()
+
+    scp_task = asyncio.ensure_future(asyncssh.scp(
+        local_path,
+        (ssh, shlex.quote(remote_path)),
+        recurse=False,
+        progress_handler=_on_progress,
+    ))
+    last_report = time.monotonic()
+    try:
+        while True:
+            done, _ = await asyncio.wait({scp_task}, timeout=1.0)
+            if done:
+                scp_task.result()
+                return
+            now = time.monotonic()
+            if now - progress["at"] >= SCP_STALL_TIMEOUT_SECONDS:
+                raise TimeoutError(
+                    f"scp upload stalled: no progress for {SCP_STALL_TIMEOUT_SECONDS}s "
+                    f"({print_size(progress['sent'])} / {print_size(size)} sent)"
+                )
+            if now - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
+                last_report = now
+                percent = progress["sent"] * 100 // size if size else 100
+                await log(db, redis, frame.id, "stdout",
+                          f"> scp progress: {print_size(progress['sent'])} / {print_size(size)} ({percent}%)")
+    finally:
+        if not scp_task.done():
+            scp_task.cancel()
+            try:
+                await scp_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+
+
 async def upload_file(
     db: Session,
     redis: Redis,
@@ -246,21 +313,35 @@ async def upload_file(
             )
             raise
 
-    ssh = await get_ssh_connection(db, redis, frame)
-    try:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(data)
-            tmp_path = tmp.name
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
 
-        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)})")
-        await asyncssh.scp(
-            tmp_path,
-            (ssh, shlex.quote(remote_path)),
-            recurse=False,
-        )
+    try:
+        last_error: Exception | None = None
+        for attempt in range(1, SCP_MAX_ATTEMPTS + 1):
+            ssh = await get_ssh_connection(db, redis, frame)
+            broken = False
+            try:
+                suffix = f" (attempt {attempt}/{SCP_MAX_ATTEMPTS})" if attempt > 1 else ""
+                await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)}){suffix}")
+                await _scp_with_progress(db, redis, frame, ssh, tmp_path, remote_path, size)
+                return
+            except (TimeoutError, asyncssh.Error, OSError) as e:
+                last_error = e
+                broken = True
+                await log(db, redis, frame.id, "stderr", f"> scp upload failed: {e}")
+            finally:
+                if broken:
+                    # A stalled or failed transfer usually means a dead TCP
+                    # connection; close it so the pool can't hand it out again.
+                    ssh.abort()
+                await remove_ssh_connection(db, redis, ssh, frame)
+        raise RuntimeError(
+            f"scp upload of {remote_path} failed after {SCP_MAX_ATTEMPTS} attempts"
+        ) from last_error
     finally:
         os.remove(tmp_path)
-        await remove_ssh_connection(db, redis, ssh, frame)
 
 
 async def delete_path(

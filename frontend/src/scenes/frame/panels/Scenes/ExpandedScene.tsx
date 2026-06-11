@@ -4,7 +4,7 @@ import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import { FrameScene } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
@@ -29,7 +29,7 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true, 
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
-  const { editScene } = useActions(panelsLogic)
+  const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = fields.length
 
   const currentState = states[sceneId] ?? {}

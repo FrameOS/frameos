@@ -3,7 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
-import { panelsLogic } from '../panelsLogic'
+import { frameEditorsLogic } from '../../frameEditorsLogic'
 import {
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
@@ -39,7 +39,7 @@ export function SceneDropDown({
   navigation = 'panels',
 }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON } = useActions(panelsLogic)
+  const { editScene, editSceneJSON } = useActions(frameEditorsLogic)
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
