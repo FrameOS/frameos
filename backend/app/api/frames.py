@@ -1654,10 +1654,26 @@ async def api_frame_get(
 
 
 @api_project.get("/frames/{id:int}/logs", response_model=FrameLogsResponse)
-async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
+async def api_frame_get_logs(
+    id: int,
+    after_id: Optional[int] = Query(None, ge=0),
+    db: Session = Depends(get_db),
+):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if after_id is not None:
+        # Incremental fetch: only rows newer than what the client already has.
+        # Used on websocket reconnect so a flaky connection doesn't re-download
+        # the whole buffer every time. Ascending so callers can append directly.
+        rows = (
+            db.query(Log)
+            .filter(Log.project_id == frame.project_id, Log.frame_id == id, Log.id > after_id)
+            .order_by(Log.id.asc())
+            .limit(1000)
+            .all()
+        )
+        return {"logs": [log_entry.to_dict() for log_entry in rows]}
     latest_logs = (
         db.query(Log)
         .filter_by(project_id=frame.project_id, frame_id=id)

@@ -393,6 +393,19 @@ async def test_api_frame_logs_full_download_includes_all_persisted_logs(async_cl
     assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
     full_lines = full_response.text.splitlines()
     assert len(full_lines) == 1002
+
+    # Incremental fetch returns only rows newer than after_id, ascending.
+    midpoint = capped_logs[500]['id']
+    incremental = await async_client.get(f'/api/frames/{frame.id}/logs?after_id={midpoint}')
+    assert incremental.status_code == 200
+    new_logs = incremental.json()['logs']
+    assert all(log['id'] > midpoint for log in new_logs)
+    assert new_logs == sorted(new_logs, key=lambda log: log['id'])
+    # Nothing newer than the most recent id.
+    newest = capped_logs[-1]['id']
+    empty = await async_client.get(f'/api/frames/{frame.id}/logs?after_id={newest}')
+    assert empty.status_code == 200
+    assert empty.json()['logs'] == []
     assert full_lines[0].endswith('(stdout) line 0')
     assert full_lines[-1].endswith('(stdout) line 1001')
 
