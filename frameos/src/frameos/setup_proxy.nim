@@ -1,33 +1,30 @@
 import net
 import os
 import osproc
-import posix
 import strformat
-import times
 import frameos/types
 import frameos/utils/process
 
-var setupProxyPid: int = 0
+var setupProxyProcess: Process = nil
 var setupProxyActivePort: int = 0
 
 proc setupProxyPort*(): int =
   setupProxyActivePort
 
 proc stopSetupProxy*() =
-  if setupProxyPid <= 0:
+  ## Stops caddy via the Process handle: signalling a stored PID could hit an
+  ## unrelated process after PID reuse, and never reaping the child left a
+  ## zombie behind every hotspot start/stop cycle.
+  if setupProxyProcess == nil:
     setupProxyActivePort = 0
     return
 
-  discard posix.kill(Pid(setupProxyPid), SIGTERM)
-
-  let waitUntil = epochTime() + 1.5
-  while epochTime() < waitUntil:
-    if posix.kill(Pid(setupProxyPid), 0) != 0:
-      break
-    sleep(100)
-
-  discard posix.kill(Pid(setupProxyPid), SIGKILL)
-  setupProxyPid = 0
+  setupProxyProcess.stopProcess()
+  try:
+    close(setupProxyProcess)
+  except CatchableError:
+    discard
+  setupProxyProcess = nil
   setupProxyActivePort = 0
 
 proc findFreePort(startPort: int): int =
@@ -81,7 +78,7 @@ proc startSetupProxy*(frameConfig: FrameConfig) =
     return
 
   try:
-    let processHandle = startProcessSerialized(
+    setupProxyProcess = startProcessSerialized(
       "caddy",
       args = @[
         "run",
@@ -92,9 +89,7 @@ proc startSetupProxy*(frameConfig: FrameConfig) =
       ],
       options = {poUsePath, poParentStreams}
     )
-    setupProxyPid = processHandle.processID.int
-    close(processHandle)
     setupProxyActivePort = proxyPort
   except CatchableError:
-    setupProxyPid = 0
+    setupProxyProcess = nil
     setupProxyActivePort = 0
