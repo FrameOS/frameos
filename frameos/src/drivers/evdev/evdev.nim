@@ -9,6 +9,12 @@ import frameos/channels
 
 type Driver* = ref object of FrameOSDriver
 
+type DevState = object
+  path: string
+  evdev: ptr libevdev
+  lastX, lastY: int
+  hasX, hasY, moved: bool
+
 var thread: Thread[void]
 
 proc getListener*(device: string): Option[ptr libevdev] =
@@ -42,7 +48,7 @@ proc closeDevice(evdev: ptr libevdev) =
 
 proc startThread*() {.thread.} =
   try:
-    var openDevices: seq[(string, ptr libevdev)] = @[]
+    var openDevices: seq[DevState] = @[]
     for device in walkPattern("/dev/input/event*"):
       # One unreadable or malformed device must not disable the others.
       try:
@@ -53,7 +59,7 @@ proc startThread*() {.thread.} =
         else:
           log(%*{"event": "driver:evdev", "device": device,
               "listening": true})
-          openDevices.add((device, listener.get()))
+          openDevices.add(DevState(path: device, evdev: listener.get()))
       except Exception as e:
         log(%*{"event": "driver:evdev", "device": device,
             "error": e.msg})
@@ -66,12 +72,12 @@ proc startThread*() {.thread.} =
               if openDevices.len > 1: "s" else: "")})
 
     var foundSome = false
-    var otherValue = -1
     while true:
       foundSome = false
       var deadDevices: seq[int] = @[]
       for deviceIndex in 0 ..< openDevices.len:
-        let (device, evdev) = openDevices[deviceIndex]
+        let device = openDevices[deviceIndex].path
+        let evdev = openDevices[deviceIndex].evdev
         block nextdevice:
           # read all events for one device before going to the next
           while true:
@@ -97,7 +103,16 @@ proc startThread*() {.thread.} =
             if rc == cint(LIBEVDEV_READ_STATUS_SUCCESS):
               foundSome = true
               if ev.ev_type == EV_SYN:
-                otherValue = -1
+                # Emit one mouseMove per input frame, using the latest absolute
+                # X/Y for THIS device. Tracking per-device coordinates (keyed on
+                # ABS_X/ABS_Y) avoids mixing pressure/multitouch axes or another
+                # device's values into the position.
+                if openDevices[deviceIndex].moved and
+                    openDevices[deviceIndex].hasX and openDevices[deviceIndex].hasY:
+                  sendEvent("mouseMove", %*{
+                    "x": openDevices[deviceIndex].lastX,
+                    "y": openDevices[deviceIndex].lastY})
+                openDevices[deviceIndex].moved = false
                 continue
               if ev.ev_type == EV_MSC:
                 continue
@@ -129,13 +144,14 @@ proc startThread*() {.thread.} =
                       "code": ev.code
                     })
               elif ev.ev_type == EV_ABS:
-                if otherValue == -1:
-                  otherValue = ev.value
-                else:
-                  if ev.code == ABS_X:
-                    sendEvent("mouseMove", %*{"x": ev.value, "y": otherValue})
-                  elif ev.code == ABS_Y:
-                    sendEvent("mouseMove", %*{"x": otherValue, "y": ev.value})
+                if ev.code == ABS_X:
+                  openDevices[deviceIndex].lastX = ev.value
+                  openDevices[deviceIndex].hasX = true
+                  openDevices[deviceIndex].moved = true
+                elif ev.code == ABS_Y:
+                  openDevices[deviceIndex].lastY = ev.value
+                  openDevices[deviceIndex].hasY = true
+                  openDevices[deviceIndex].moved = true
               else:
                 log(%*{"event": "event:unknown",
                     "eventName": $libevdev_event_type_get_name(ev.ev_type),
@@ -148,7 +164,7 @@ proc startThread*() {.thread.} =
                 })
       for removeIndex in countdown(deadDevices.len - 1, 0):
         let index = deadDevices[removeIndex]
-        closeDevice(openDevices[index][1])
+        closeDevice(openDevices[index].evdev)
         openDevices.delete(index)
       if openDevices.len == 0:
         log(%*{"event": "driver:evdev",
