@@ -76,14 +76,30 @@ function:
 static void EPD_5IN65F_BusyHigh(void)// If BUSYN=0 then waiting
 {
 	Debug("BusyHigh \r\n");
-    while(!(DEV_Digital_Read(EPD_BUSY_PIN)));
+    UDOUBLE busy_wait_ms = 0;
+    while(!(DEV_Digital_Read(EPD_BUSY_PIN))) {
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            break;
+        }
+        DEV_Delay_ms(1);
+        busy_wait_ms += 1;
+    }
 	Debug("BusyHigh Release \r\n");
 }
 
 static void EPD_5IN65F_BusyLow(void)// If BUSYN=1 then waiting
 {
 	Debug("BusyLow \r\n");
-    while(DEV_Digital_Read(EPD_BUSY_PIN));
+    UDOUBLE busy_wait_ms = 0;
+    while(DEV_Digital_Read(EPD_BUSY_PIN)) {
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            break;
+        }
+        DEV_Delay_ms(1);
+        busy_wait_ms += 1;
+    }
 	Debug("BusyLow Release \r\n");
 }
 

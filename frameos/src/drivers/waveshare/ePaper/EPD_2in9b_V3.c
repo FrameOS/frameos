@@ -79,11 +79,18 @@ void EPD_2IN9B_V3_ReadBusy(void)
 {
     Debug("e-Paper busy\r\n");
     UBYTE busy;
+	UDOUBLE busy_wait_ms = 0;
 	do
 	{
+		if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+			Debug("e-Paper busy timeout\r\n");
+			break;
+		}
 		EPD_2IN9B_V3_SendCommand(0x71);
 		busy = DEV_Digital_Read(EPD_BUSY_PIN);
 		busy =!(busy & 0x01);        
+		DEV_Delay_ms(1);
+		busy_wait_ms += 1;
 	}
 	while(busy); 
     Debug("e-Paper busy release\r\n");

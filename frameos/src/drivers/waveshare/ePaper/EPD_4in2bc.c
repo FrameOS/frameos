@@ -131,8 +131,14 @@ parameter:
 void EPD_4IN2BC_ReadBusy(void)
 {
     Debug("e-Paper busy\r\n");
+    UDOUBLE busy_wait_ms = 0;
     while(DEV_Digital_Read(EPD_BUSY_PIN) == 0) {      //0: busy, 1: idle
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            break;
+        }
         DEV_Delay_ms(100);
+        busy_wait_ms += 100;
     }
     Debug("e-Paper busy release\r\n");
 }

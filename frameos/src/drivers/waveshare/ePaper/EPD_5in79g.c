@@ -80,10 +80,16 @@ void EPD_5in79g_ReadBus(void)
 {
     Debug("e-Paper busy\r\n");
 	UBYTE busy;
+	UDOUBLE busy_wait_ms = 0;
 	do
 	{
+		if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+			Debug("e-Paper busy timeout\r\n");
+			break;
+		}
 		busy = DEV_Digital_Read(EPD_BUSY_PIN);
         DEV_Delay_ms(10);   
+        busy_wait_ms += 10;
 	}
 	while(!busy);   
 	DEV_Delay_ms(200);     
