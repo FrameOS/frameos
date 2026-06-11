@@ -161,26 +161,34 @@ class AgentDeployer(FrameDeployer):
                         distro=distro,
                         distro_version=distro_version,
                     )
-                    await self._setup_agent_service()
 
-                    # 3. Upload *frame.json* for this release
-                    await self._upload_frame_json(f"{self._release_dir()}/frame.json")
-                    await self._verify_staged_release()
+                    # Installing the unit file and "systemctl enable" write to
+                    # /etc, which sits on a read-only root on Buildroot frames.
+                    root_remounted_rw = await self._remount_root_rw_if_needed()
+                    try:
+                        await self._setup_agent_service()
 
-                    if self.remote_transport == "agent":
-                        await self._verify_agent_transport("before switching release")
+                        # 3. Upload *frame.json* for this release
+                        await self._upload_frame_json(f"{self._release_dir()}/frame.json")
+                        await self._verify_staged_release()
 
-                    # 4. Atomically switch *current* → new release + housekeeping
-                    previous_agent_process = await self._agent_service_process_signature()
-                    await self._switch_current_release()
+                        if self.remote_transport == "agent":
+                            await self._verify_agent_transport("before switching release")
 
-                    # Enable + start service
-                    if self.remote_transport == "agent":
-                        await self._restart_agent_service_via_agent()
-                        await self._wait_for_agent_release(previous_agent_process)
-                    else:
-                        await self.restart_service("frameos_agent")
-                        await self._wait_for_agent_release(previous_agent_process)
+                        # 4. Atomically switch *current* → new release + housekeeping
+                        previous_agent_process = await self._agent_service_process_signature()
+                        await self._switch_current_release()
+
+                        # Enable + start service
+                        if self.remote_transport == "agent":
+                            await self._restart_agent_service_via_agent()
+                            await self._wait_for_agent_release(previous_agent_process)
+                        else:
+                            await self.restart_service("frameos_agent")
+                            await self._wait_for_agent_release(previous_agent_process)
+                    finally:
+                        if root_remounted_rw:
+                            await self._remount_root_ro()
 
                     await self._cleanup_old_builds()
                     await self.log(
@@ -504,6 +512,30 @@ class AgentDeployer(FrameDeployer):
                 f"Could not install agent source-build dependencies ({package_list}). "
                 "Install them on the device or deploy a precompiled agent release instead."
             )
+
+    async def _remount_root_rw_if_needed(self) -> bool:
+        status = await self.exec_command(
+            "awk '$2 == \"/\" { split($4, opts, \",\"); for (i in opts) if (opts[i] == \"ro\") found=1 } END { exit found ? 0 : 1 }' /proc/mounts",
+            raise_on_error=False,
+            log_output=False,
+            log_command=False,
+        )
+        if status != 0:
+            return False
+
+        await self.log("stdout", "- Root filesystem is read-only; remounting read-write to install the agent service")
+        await self.exec_command(self._sudo_system_command("mount -o remount,rw /"))
+        return True
+
+    async def _remount_root_ro(self) -> None:
+        await self.log("stdout", "- Restoring root filesystem to read-only")
+        await self.exec_command(self._sudo_system_command("sync"), raise_on_error=False)
+        status = await self.exec_command(
+            self._sudo_system_command("mount -o remount,ro /"),
+            raise_on_error=False,
+        )
+        if status != 0:
+            await self.log("stderr", "Failed to remount root filesystem read-only; it stays read-write until reboot")
 
     def _sudo_system_command(self, command: str) -> str:
         inner = f"set -eu; export DEBIAN_FRONTEND=noninteractive; {command}"

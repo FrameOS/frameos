@@ -82,7 +82,7 @@ class FakeRedis:
 
 
 class RunFlowAgentDeployer(AgentDeployer):
-    def __init__(self, tmp_path: Path, *, transport: str) -> None:
+    def __init__(self, tmp_path: Path, *, transport: str, root_readonly: bool = False) -> None:
         super().__init__(
             db=None,
             redis=None,
@@ -98,6 +98,7 @@ class RunFlowAgentDeployer(AgentDeployer):
         )
         self.events: list[str] = []
         self.logs: list[tuple[str, str]] = []
+        self.root_readonly = root_readonly
         self.wait_previous_process_signature: str | None = None
 
     async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
@@ -146,6 +147,13 @@ class RunFlowAgentDeployer(AgentDeployer):
 
     async def _cleanup_old_builds(self) -> None:  # type: ignore[override]
         self.events.append("cleanup_old_builds")
+
+    async def _remount_root_rw_if_needed(self) -> bool:  # type: ignore[override]
+        self.events.append("remount_rw_check")
+        return self.root_readonly
+
+    async def _remount_root_ro(self) -> None:  # type: ignore[override]
+        self.events.append("remount_ro")
 
 
 @pytest.mark.asyncio
@@ -331,6 +339,51 @@ async def test_deploy_agent_agent_transport_restarts_and_waits_for_staged_releas
     assert deployer.events.index("capture_agent_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_via_agent") < deployer.events.index("wait_for_agent_release")
     assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_remounts_readonly_root_around_service_install(tmp_path: Path):
+    deployer = RunFlowAgentDeployer(tmp_path, transport="ssh", root_readonly=True)
+
+    await deployer.run()
+
+    assert deployer.events.index("remount_rw_check") < deployer.events.index("setup_service")
+    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("remount_ro")
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_leaves_writable_root_alone(tmp_path: Path):
+    deployer = RunFlowAgentDeployer(tmp_path, transport="ssh")
+
+    await deployer.run()
+
+    assert "remount_rw_check" in deployer.events
+    assert "remount_ro" not in deployer.events
+
+
+@pytest.mark.asyncio
+async def test_remount_root_rw_detects_readonly_root(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+
+    # The awk check exits 0 when "/" is mounted read-only (FakeAgentDeployer default)
+    assert await deployer._remount_root_rw_if_needed() is True
+    assert any("mount -o remount,rw /" in command for command in deployer.commands)
+
+    deployer.commands.clear()
+    deployer.command_statuses = [("/proc/mounts", 1)]
+    assert await deployer._remount_root_rw_if_needed() is False
+    assert not any("remount,rw" in command for command in deployer.commands)
+
+
+@pytest.mark.asyncio
+async def test_remount_root_ro_does_not_raise_on_failure(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.command_statuses = [("remount,ro", 1)]
+
+    await deployer._remount_root_ro()
+
+    assert any("mount -o remount,ro /" in command for command in deployer.commands)
+    assert any("stays read-write" in message for _level, message in deployer.logs)
 
 
 @pytest.mark.asyncio

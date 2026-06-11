@@ -47,7 +47,6 @@ export function FrameActionsMenu({
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
-  const canDeployAgent = agentConfigured && (frame.mode ?? 'rpios') === 'rpios'
 
   return (
     <DropdownMenu
@@ -107,7 +106,7 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        ...(canDeployAgent
+        ...(agentConfigured
           ? [
               {
                 label: 'Deploy agent',

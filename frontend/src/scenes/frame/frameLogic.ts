@@ -1529,9 +1529,6 @@ export const frameLogic = kea<frameLogicType>([
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
-        if ((frameForm?.mode || frame?.mode || 'rpios') === 'buildroot') {
-          return false
-        }
         const agent = frameForm?.agent ?? frame?.agent
         return isAgentDeployConfigured(agent)
       },
