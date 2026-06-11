@@ -24,6 +24,18 @@ if is_sqlite:
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
+
+    # WAL silently falls back to another journal mode on filesystems that
+    # don't support it; surface that in the logs instead of guessing later.
+    try:
+        with engine.connect() as _conn:
+            _journal_mode = _conn.exec_driver_sql("PRAGMA journal_mode").scalar()
+        if _journal_mode != "wal":
+            print(f"🔴 SQLite journal_mode is {_journal_mode!r} (expected 'wal'); "
+                  "concurrent writes may fail with 'database is locked'")
+    except Exception as e:
+        print(f"🔴 Could not verify SQLite journal mode: {e}")
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
