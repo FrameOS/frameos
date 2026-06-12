@@ -22,6 +22,7 @@ import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { secureToken } from '../../utils/secureToken'
 import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
@@ -554,6 +555,10 @@ function normalizeAgentForComparison(value: unknown): Record<string, unknown> {
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'image_engine') {
     return value ?? ''
+  }
+
+  if (key === 'error_behavior') {
+    return normalizeFrameErrorBehavior(value as FrameErrorBehavior | null | undefined)
   }
 
   if (key === 'agent') {
@@ -1111,6 +1116,9 @@ export const frameLogic = kea<frameLogicType>([
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
+    checkConfigDrift: true,
+    setConfigDrift: (fields: string[]) => ({ fields }),
+    pullConfigFromFrame: true,
     showDeployPlanModal: true,
     hideDeployPlanModal: true,
     setDeployDrawerView: (view: DeployDrawerView) => ({ view }),
@@ -1235,6 +1243,22 @@ export const frameLogic = kea<frameLogicType>([
         hideDeployPlanModal: () => 'main',
       },
     ],
+    // Fields where the frame's own frame.json (edited through its on-device
+    // admin) differs from the backend's record. null = not checked yet.
+    configDrift: [
+      null as string[] | null,
+      {
+        setConfigDrift: (_, { fields }) => fields,
+        pullConfigFromFrame: () => null,
+      },
+    ],
+    configDriftChecking: [
+      false,
+      {
+        checkConfigDrift: () => true,
+        setConfigDrift: () => false,
+      },
+    ],
   }),
   listeners(({ asyncActions, actions, values }) => ({
     resetUnsavedChanges: () => {
@@ -1322,6 +1346,32 @@ export const frameLogic = kea<frameLogicType>([
           },
         })
       }
+    },
+    checkConfigDrift: async (_, breakpoint) => {
+      if (isFrameControlMode()) {
+        actions.setConfigDrift([])
+        return
+      }
+      try {
+        const response = await apiFetch(`/api/frames/${values.frameId}/config_drift`)
+        breakpoint()
+        if (!response.ok) {
+          actions.setConfigDrift([])
+          return
+        }
+        const data = await response.json()
+        actions.setConfigDrift(Array.isArray(data.fields) ? data.fields : [])
+      } catch (error) {
+        actions.setConfigDrift([])
+      }
+    },
+    pullConfigFromFrame: async () => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/pull_config`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to pull config from frame')
+      }
+      framesModel.actions.loadFrame(values.frameId)
+      actions.setConfigDrift([])
     },
     loadDeployPlans: async () => {
       const currentFrameForm = {
@@ -1533,6 +1583,7 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
     agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
+    hasConfigDrift: [(s) => [s.configDrift], (configDrift): boolean => (configDrift?.length ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -1547,7 +1598,12 @@ export const frameLogic = kea<frameLogicType>([
   })),
   listeners(({ asyncActions, actions, values, props }) => ({
     saveFrame: () => actions.submitFrameForm(),
-    submitFrameFormSuccess: () => {
+    submitFrameFormSuccess: async () => {
+      if (isFrameControlMode()) {
+        // The frame applies a saved config through the runner's async reload;
+        // give it a moment so the refetch doesn't return the old values.
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
       framesModel.actions.loadFrame(props.frameId)
     },
     saveAndDeployFrame: async () => {

@@ -20,6 +20,7 @@ import { Field } from '../../../../components/Field'
 import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
+import { DeviceBackendPanel } from './DeviceBackendPanel'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
@@ -531,13 +532,21 @@ export function FrameSettings({
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />
           </Field>
-          {!hideDeploymentMode ? (
+          {!hideDeploymentMode && !inFrameAdminMode ? (
             <Field name="mode" label="Deployment mode">
-              <Select name="mode" options={modes} disabled={inFrameAdminMode} />
+              <Select name="mode" options={modes} />
             </Field>
           ) : null}
-          <Field name="device" label="Display driver">
-            <Select name="device" options={devices} />
+          <Field
+            name="device"
+            label="Display driver"
+            tooltip={
+              inFrameAdminMode
+                ? 'Display drivers are compiled into the FrameOS binary; change this from the backend and redeploy.'
+                : undefined
+            }
+          >
+            <Select name="device" options={devices} disabled={inFrameAdminMode} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
@@ -611,7 +620,7 @@ export function FrameSettings({
               </Group>
             </div>
           ) : null}
-          {isBuildrootMode ? (
+          {isBuildrootMode && !inFrameAdminMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
                 <Select name="buildroot.platform" options={buildrootPlatforms} />
@@ -976,6 +985,7 @@ export function FrameSettings({
               <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
             )}
           </Field>
+          {inFrameAdminMode ? <DeviceBackendPanel frame={frame} /> : null}
         </div>
 
         <H6 id="frame-http-api-section">
@@ -1051,10 +1061,16 @@ export function FrameSettings({
           </Field>
         </div>
 
-        <H6 id="frame-settings-admin">Frame admin panel (BETA)</H6>
+        <H6 id="frame-settings-admin">Frame admin panel</H6>
         <p className="pl-2 @md:pl-8 text-sm text-gray-500">
-          Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
-          beta: you can't save any changes.{' '}
+          {inFrameAdminMode ? (
+            <>This interface. Saving changes here writes them straight to the frame's own configuration.</>
+          ) : (
+            <>
+              Hosted on the frame at <code>/admin</code>. It manages the frame directly, even without a backend, and
+              saves changes to the frame's own configuration.
+            </>
+          )}
         </p>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
@@ -1101,97 +1117,110 @@ export function FrameSettings({
             </>
           ) : null}
         </div>
-        <H6 id="frame-http-proxy-section">
-          HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="https_proxy.enable"
-            label="HTTPS proxy via Caddy"
-            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
-          >
-            {({ value, onChange }) => (
-              <Switch
+        {inFrameAdminMode ? null : (
+          <>
+            <H6 id="frame-http-proxy-section">
+              HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
                 name="https_proxy.enable"
-                value={value}
-                onChange={(enableTls) => {
-                  if (enableTls) {
-                    verifyTlsCertificates()
-                  }
-                  onChange(enableTls)
-                }}
-                fullWidth
-              />
-            )}
-          </Field>
-          {tlsEnabled ? (
-            <>
-              <Field
-                name="https_proxy.port"
-                label="HTTPS port"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>The port Caddy listens on for HTTPS connections.</p>
-                    <p>It's best if this ends with *443.</p>
-                  </div>
-                }
+                label="HTTPS proxy via Caddy"
+                tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
               >
-                <NumberTextInput name="https_proxy.port" placeholder="8443" />
-              </Field>
-              <Field
-                name="https_proxy.expose_only_port"
-                label="Expose only HTTPS port"
-                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
-              >
-                <Switch name="https_proxy.expose_only_port" fullWidth />
-              </Field>
-              <Field
-                name="https_proxy.certs.client_ca"
-                label="HTTPS backend CA certificate"
-                labelRight={
-                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
-                    Regenerate
-                  </Button>
-                }
-                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
-                hint={getCertificateHint(
-                  'Root CA certificate',
-                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
-                    frame.https_proxy?.client_ca_cert_not_valid_after
+                {({ value, onChange }) => (
+                  <Switch
+                    name="https_proxy.enable"
+                    value={value}
+                    onChange={(enableTls) => {
+                      if (enableTls) {
+                        verifyTlsCertificates()
+                      }
+                      onChange(enableTls)
+                    }}
+                    fullWidth
+                  />
                 )}
-              >
-                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
-              <Field
-                name="https_proxy.certs.server"
-                label="HTTPS frame certificate"
-                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
-                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
-                hint={getCertificateHint(
-                  'Server certificate',
-                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
-                )}
-              >
-                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
+              {tlsEnabled ? (
+                <>
+                  <Field
+                    name="https_proxy.port"
+                    label="HTTPS port"
+                    tooltip={
+                      <div className="space-y-2">
+                        <p>The port Caddy listens on for HTTPS connections.</p>
+                        <p>It's best if this ends with *443.</p>
+                      </div>
+                    }
+                  >
+                    <NumberTextInput name="https_proxy.port" placeholder="8443" />
+                  </Field>
+                  <Field
+                    name="https_proxy.expose_only_port"
+                    label="Expose only HTTPS port"
+                    tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+                  >
+                    <Switch name="https_proxy.expose_only_port" fullWidth />
+                  </Field>
+                  <Field
+                    name="https_proxy.certs.client_ca"
+                    label="HTTPS backend CA certificate"
+                    labelRight={
+                      <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                    secret={
+                      !frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca
+                    }
+                    hint={getCertificateHint(
+                      'Root CA certificate',
+                      frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                        frame.https_proxy?.client_ca_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
+                  <Field
+                    name="https_proxy.certs.server"
+                    label="HTTPS frame certificate"
+                    tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+                    secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
+                    hint={getCertificateHint(
+                      'Server certificate',
+                      frameForm.https_proxy?.server_cert_not_valid_after ??
+                        frame.https_proxy?.server_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
 
-              <Field
-                name="https_proxy.certs.server_key"
-                label={<div>HTTPS frame private key</div>}
-                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
-                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
-              >
-                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
-              </Field>
-            </>
-          ) : null}
-        </div>
+                  <Field
+                    name="https_proxy.certs.server_key"
+                    label={<div>HTTPS frame private key</div>}
+                    tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+                    secret={
+                      !frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key
+                    }
+                  >
+                    <TextArea
+                      name="https_proxy.certs.server_key"
+                      rows={4}
+                      placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+          </>
+        )}
 
         <H6 id="frame-settings-network">Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="network">
-            {mode === 'buildroot' ? (
+            {mode === 'buildroot' && !inFrameAdminMode ? (
               <>
                 <Field name="wifiSSID" label="WiFi network">
                   <TextInput name="wifiSSID" placeholder="Home WiFi" autoComplete="off" />
@@ -1301,77 +1330,85 @@ export function FrameSettings({
           </Group>
         </div>
 
-        <H6 id="frame-settings-mountpoints" className="flex items-center gap-2">
-          Mountpoints
-          <Button size="small" color="secondary" onClick={addMountpoint} className="flex items-center gap-1">
-            <PlusIcon className="w-4 h-4" />
-            Add mountpoint
-          </Button>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Group name="mountpoints">
-            <Field
-              name="enabled"
-              label="Samba mounts"
-              tooltip="FrameOS installs CIFS support, manages its fstab block, and mounts these shares during setup."
-            >
-              <Switch name="enabled" fullWidth />
-            </Field>
-            {frameForm.mountpoints?.enabled ? (
-              <div className="space-y-4">
-                {mountpointItems.length === 0 ? (
-                  <div className="text-sm text-gray-500">No mountpoints configured.</div>
-                ) : null}
-                {mountpointItems.map((mountpoint, index) => (
-                  <Group key={index} name={`items.${index}`}>
-                    <div className="space-y-2 border-l border-gray-700 pl-3">
-                      <Field
-                        name="source"
-                        label="SMB share"
-                        labelRight={
-                          <Button
-                            color="secondary"
-                            size="small"
-                            className="flex items-center gap-1"
-                            onClick={() => removeMountpoint(index)}
+        {inFrameAdminMode ? null : (
+          <>
+            <H6 id="frame-settings-mountpoints" className="flex items-center gap-2">
+              Mountpoints
+              <Button size="small" color="secondary" onClick={addMountpoint} className="flex items-center gap-1">
+                <PlusIcon className="w-4 h-4" />
+                Add mountpoint
+              </Button>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="mountpoints">
+                <Field
+                  name="enabled"
+                  label="Samba mounts"
+                  tooltip="FrameOS installs CIFS support, manages its fstab block, and mounts these shares during setup."
+                >
+                  <Switch name="enabled" fullWidth />
+                </Field>
+                {frameForm.mountpoints?.enabled ? (
+                  <div className="space-y-4">
+                    {mountpointItems.length === 0 ? (
+                      <div className="text-sm text-gray-500">No mountpoints configured.</div>
+                    ) : null}
+                    {mountpointItems.map((mountpoint, index) => (
+                      <Group key={index} name={`items.${index}`}>
+                        <div className="space-y-2 border-l border-gray-700 pl-3">
+                          <Field
+                            name="source"
+                            label="SMB share"
+                            labelRight={
+                              <Button
+                                color="secondary"
+                                size="small"
+                                className="flex items-center gap-1"
+                                onClick={() => removeMountpoint(index)}
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                                Remove
+                              </Button>
+                            }
                           >
-                            <TrashIcon className="w-4 h-4" />
-                            Remove
-                          </Button>
-                        }
-                      >
-                        <TextInput name="source" placeholder="//server/share" />
-                      </Field>
-                      <Field name="target" label="Mount path">
-                        <TextInput name="target" placeholder="/mnt/share" />
-                      </Field>
-                      <Field name="enabled" label="Enabled">
-                        {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} fullWidth />}
-                      </Field>
-                      <Field name="username" label="Username">
-                        <TextInput name="username" placeholder="guest" />
-                      </Field>
-                      <Field name="password" label="Password">
-                        <TextInput
-                          name="password"
-                          onClick={() => touchFrameFormField(`mountpoints.items.${index}.password`)}
-                          type={frameFormTouches[`mountpoints.items.${index}.password`] ? 'text' : 'password'}
-                          placeholder="guest access if empty"
-                        />
-                      </Field>
-                      <Field name="domain" label="Domain">
-                        <TextInput name="domain" placeholder="optional" />
-                      </Field>
-                      <Field name="options" label="Options" tooltip="Additional comma-separated mount.cifs options.">
-                        <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
-                      </Field>
-                    </div>
-                  </Group>
-                ))}
-              </div>
-            ) : null}
-          </Group>
-        </div>
+                            <TextInput name="source" placeholder="//server/share" />
+                          </Field>
+                          <Field name="target" label="Mount path">
+                            <TextInput name="target" placeholder="/mnt/share" />
+                          </Field>
+                          <Field name="enabled" label="Enabled">
+                            {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} fullWidth />}
+                          </Field>
+                          <Field name="username" label="Username">
+                            <TextInput name="username" placeholder="guest" />
+                          </Field>
+                          <Field name="password" label="Password">
+                            <TextInput
+                              name="password"
+                              onClick={() => touchFrameFormField(`mountpoints.items.${index}.password`)}
+                              type={frameFormTouches[`mountpoints.items.${index}.password`] ? 'text' : 'password'}
+                              placeholder="guest access if empty"
+                            />
+                          </Field>
+                          <Field name="domain" label="Domain">
+                            <TextInput name="domain" placeholder="optional" />
+                          </Field>
+                          <Field
+                            name="options"
+                            label="Options"
+                            tooltip="Additional comma-separated mount.cifs options."
+                          >
+                            <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
+                          </Field>
+                        </div>
+                      </Group>
+                    ))}
+                  </div>
+                ) : null}
+              </Group>
+            </div>
+          </>
+        )}
 
         <H6 id="frame-settings-defaults">Defaults</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
@@ -1877,42 +1914,46 @@ export function FrameSettings({
             />
           </Field>
         </div>
-        <H6 id="frame-settings-reboot">Reboot</H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Group name="reboot">
-            <Field name="enabled" label="Automatic reboot">
-              <Select
-                name="enabled"
-                options={[
-                  { value: 'false', label: 'Disabled' },
-                  { value: 'true', label: 'Enabled' },
-                ]}
-              />
-            </Field>
-            {String(frameForm.reboot?.enabled) === 'true' && (
-              <>
-                <Field name="crontab" label="Reboot time">
+        {inFrameAdminMode ? null : (
+          <>
+            <H6 id="frame-settings-reboot">Reboot</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="reboot">
+                <Field name="enabled" label="Automatic reboot">
                   <Select
-                    name="crontab"
-                    options={[...Array(24).keys()].map((hour) => ({
-                      value: `0 ${hour} * * *`,
-                      label: `${hour.toString().padStart(2, '0')}:00`,
-                    }))}
-                  />
-                </Field>
-                <Field name="type" label="What to reboot">
-                  <Select
-                    name="type"
+                    name="enabled"
                     options={[
-                      { value: 'frameos', label: 'FrameOS' },
-                      { value: 'raspberry', label: 'System reboot' },
+                      { value: 'false', label: 'Disabled' },
+                      { value: 'true', label: 'Enabled' },
                     ]}
                   />
                 </Field>
-              </>
-            )}
-          </Group>
-        </div>
+                {String(frameForm.reboot?.enabled) === 'true' && (
+                  <>
+                    <Field name="crontab" label="Reboot time">
+                      <Select
+                        name="crontab"
+                        options={[...Array(24).keys()].map((hour) => ({
+                          value: `0 ${hour} * * *`,
+                          label: `${hour.toString().padStart(2, '0')}:00`,
+                        }))}
+                      />
+                    </Field>
+                    <Field name="type" label="What to reboot">
+                      <Select
+                        name="type"
+                        options={[
+                          { value: 'frameos', label: 'FrameOS' },
+                          { value: 'raspberry', label: 'System reboot' },
+                        ]}
+                      />
+                    </Field>
+                  </>
+                )}
+              </Group>
+            </div>
+          </>
+        )}
       </Form>
     </div>
   )

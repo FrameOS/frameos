@@ -674,6 +674,132 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     frame_json['settings'] = final_settings
     return frame_json
 
+
+# Keys the on-device admin can edit in the frame's own frame.json, mapped back
+# onto the Frame model: (frame.json camelCase key, model column). Used to pull
+# a self-updated config from a device into the backend.
+DEVICE_EDITABLE_FRAME_JSON_FIELDS: list[tuple[str, str]] = [
+    ("name", "name"),
+    ("frameAccess", "frame_access"),
+    ("frameAccessKey", "frame_access_key"),
+    ("width", "width"),
+    ("height", "height"),
+    ("rotate", "rotate"),
+    ("flip", "flip"),
+    ("scalingMode", "scaling_mode"),
+    ("imageEngine", "image_engine"),
+    ("interval", "interval"),
+    ("metricsInterval", "metrics_interval"),
+    ("maxHttpResponseBytes", "max_http_response_bytes"),
+    ("backgroundColor", "background_color"),
+    ("debug", "debug"),
+    ("logToFile", "log_to_file"),
+    ("assetsPath", "assets_path"),
+    ("saveAssets", "save_assets"),
+    ("timeZone", "timezone"),
+    ("schedule", "schedule"),
+    ("gpioButtons", "gpio_buttons"),
+    ("palette", "palette"),
+    ("network", "network"),
+    ("serverHost", "server_host"),
+    ("serverPort", "server_port"),
+    ("serverApiKey", "server_api_key"),
+    ("serverSendLogs", "server_send_logs"),
+]
+
+
+def _device_control_code_to_model(control_code: dict) -> dict:
+    # The model stores control_code values as strings (see get_frame_json).
+    return {
+        "enabled": "true" if control_code.get("enabled") else "false",
+        "position": str(control_code.get("position", "top-right")),
+        "size": str(control_code.get("size", "2")),
+        "padding": str(control_code.get("padding", "1")),
+        "offsetX": str(control_code.get("offsetX", "0")),
+        "offsetY": str(control_code.get("offsetY", "0")),
+        "qrCodeColor": str(control_code.get("qrCodeColor", "#000000")),
+        "backgroundColor": str(control_code.get("backgroundColor", "#ffffff")),
+    }
+
+
+def _device_error_behavior_to_model(error_behavior: dict) -> dict:
+    return normalize_error_behavior({
+        "mode": error_behavior.get("mode"),
+        "retry_seconds": error_behavior.get("retrySeconds"),
+        "silent_retry_seconds": error_behavior.get("silentRetrySeconds"),
+        "silent_retry_forever": error_behavior.get("silentRetryForever"),
+        "silent_window_minutes": error_behavior.get("silentWindowMinutes"),
+        "show_error_retry_seconds": error_behavior.get("showErrorRetrySeconds"),
+    })
+
+
+def device_frame_json_changes(frame: Frame, device_json: dict) -> dict:
+    """Returns {model_field: new_value} for fields where a device's frame.json
+    differs from the backend's record. Only device-editable fields are
+    considered; anything that needs a rebuild/redeploy is ignored."""
+    changes: dict = {}
+    for json_key, field in DEVICE_EDITABLE_FRAME_JSON_FIELDS:
+        if json_key not in device_json:
+            continue
+        new_value = device_json[json_key]
+        if new_value != getattr(frame, field):
+            changes[field] = new_value
+
+    if "frameAdminAuth" in device_json:
+        new_auth = normalize_frame_admin_auth(device_json["frameAdminAuth"])
+        if new_auth != normalize_frame_admin_auth(frame.frame_admin_auth):
+            changes["frame_admin_auth"] = new_auth
+
+    if "controlCode" in device_json and isinstance(device_json["controlCode"], dict):
+        new_control_code = _device_control_code_to_model(device_json["controlCode"])
+        if new_control_code != _device_control_code_to_model(
+            {**(frame.control_code or {}), "enabled": (frame.control_code or {}).get("enabled") == "true"}
+        ):
+            changes["control_code"] = new_control_code
+
+    if "errorBehavior" in device_json and isinstance(device_json["errorBehavior"], dict):
+        new_error_behavior = _device_error_behavior_to_model(device_json["errorBehavior"])
+        if new_error_behavior != normalize_error_behavior(frame.error_behavior):
+            changes["error_behavior"] = new_error_behavior
+
+    if "timeZoneUpdates" in device_json and isinstance(device_json["timeZoneUpdates"], dict):
+        new_updater = compact_timezone_updater({
+            "enabled": device_json["timeZoneUpdates"].get("enabled", True),
+            "hour": device_json["timeZoneUpdates"].get("hour"),
+            "url": device_json["timeZoneUpdates"].get("url"),
+        })
+        if resolve_timezone_updater(new_updater) != resolve_timezone_updater(frame.timezone_updater):
+            changes["timezone_updater"] = new_updater
+
+    if "agent" in device_json and isinstance(device_json["agent"], dict):
+        device_agent = device_json["agent"]
+        merged_agent = {
+            **(frame.agent or {}),
+            "agentEnabled": bool(device_agent.get("agentEnabled", False)),
+            "agentRunCommands": bool(device_agent.get("agentRunCommands", False)),
+            "agentSharedSecret": device_agent.get("agentSharedSecret", ""),
+        }
+        if merged_agent != (frame.agent or {}):
+            changes["agent"] = merged_agent
+
+    return changes
+
+
+def apply_device_frame_json(frame: Frame, device_json: dict) -> list[str]:
+    """Applies a device's self-edited frame.json onto the Frame model.
+    Returns the list of changed model fields. Also folds the changes into
+    last_successful_deploy: the device's running config IS the deployed
+    state, so pulling must not surface phantom "undeployed changes"."""
+    changes = device_frame_json_changes(frame, device_json)
+    for field, value in changes.items():
+        setattr(frame, field, value)
+
+    if changes and isinstance(frame.last_successful_deploy, dict):
+        frame.last_successful_deploy = {**frame.last_successful_deploy, **changes}
+
+    return sorted(changes.keys())
+
+
 def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
     interpreted_scenes = []
     for scene in frame.scenes:

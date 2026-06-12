@@ -1,4 +1,5 @@
 import { getBasePath } from './getBasePath'
+import { isFrameControlMode } from './frameControlMode'
 
 type ProjectResponse = { id: number }
 type ProjectsListResponse = { projects: ProjectResponse[] }
@@ -73,6 +74,11 @@ export async function getCurrentProjectId(): Promise<number> {
 }
 
 export function isProjectScopedApiPath(path: string): boolean {
+  // The on-device admin talks to the frame's own HTTP server, which has no
+  // concept of projects: every /api path is served unscoped.
+  if (isFrameControlMode()) {
+    return false
+  }
   if (!path.startsWith('/api/') || path.startsWith('/api/projects/')) {
     return false
   }
@@ -125,7 +131,7 @@ export async function projectApiPath(path: string): Promise<string> {
 }
 
 export async function projectWebSocketPath(path: string): Promise<string> {
-  if (!path.startsWith('/ws/terminal/')) {
+  if (isFrameControlMode() || !path.startsWith('/ws/terminal/')) {
     return path
   }
   const projectId = await getCurrentProjectId()

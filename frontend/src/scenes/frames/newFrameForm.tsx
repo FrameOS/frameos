@@ -103,6 +103,8 @@ export const newFrameForm = kea<newFrameFormType>([
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
     frameCreated: (frameId: number, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
+    generateAdoptionCode: true,
+    setAdoptionCode: (code: string | null, error: string | null) => ({ code, error }),
   }),
   reducers({
     file: [
@@ -118,7 +120,43 @@ export const newFrameForm = kea<newFrameFormType>([
         hideForm: () => false,
       },
     ],
+    adoptionCode: [
+      null as string | null,
+      {
+        generateAdoptionCode: () => null,
+        setAdoptionCode: (_, { code }) => code,
+        hideForm: () => null,
+      },
+    ],
+    adoptionCodeError: [
+      null as string | null,
+      {
+        generateAdoptionCode: () => null,
+        setAdoptionCode: (_, { error }) => error,
+      },
+    ],
+    adoptionCodeLoading: [
+      false,
+      {
+        generateAdoptionCode: () => true,
+        setAdoptionCode: () => false,
+      },
+    ],
   }),
+  listeners(({ actions }) => ({
+    generateAdoptionCode: async () => {
+      try {
+        const response = await apiFetch('/api/frames/adoption_code', { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to generate an adoption code')
+        }
+        const data = await response.json()
+        actions.setAdoptionCode(data.code, null)
+      } catch (error) {
+        actions.setAdoptionCode(null, error instanceof Error ? error.message : 'Failed to generate an adoption code')
+      }
+    },
+  })),
   forms(({ actions }) => ({
     newFrame: {
       defaults: {

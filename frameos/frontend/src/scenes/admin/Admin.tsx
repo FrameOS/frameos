@@ -3,6 +3,8 @@ import { useMountedLogic, useValues } from 'kea'
 import { appsModel } from '../../../../../frontend/src/models/appsModel'
 import { entityImagesModel } from '../../../../../frontend/src/models/entityImagesModel'
 import { framesModel } from '../../../../../frontend/src/models/framesModel'
+import { longRunningTasksModel } from '../../../../../frontend/src/models/longRunningTasksModel'
+import { LongRunningTaskToasts } from '../../../../../frontend/src/components/LongRunningTaskToasts'
 import { Frame } from '../../../../../frontend/src/scenes/frame/Frame'
 import { socketLogic } from '../../../../../frontend/src/scenes/socketLogic'
 import { adminLogic } from './adminLogic'
@@ -11,7 +13,7 @@ interface AdminProps {
   id?: string
 }
 
-const resolveFrameId = (id?: string) => {
+export const resolveFrameId = (id?: string) => {
   if (id && id.trim()) {
     return id
   }
@@ -27,13 +29,14 @@ const resolveFrameId = (id?: string) => {
   return '1'
 }
 
-export default function Admin({ id }: AdminProps) {
-  const resolvedFrameId = resolveFrameId(id)
-
+// Shared bootstrap for every /admin view: checks the admin session, mounts the
+// models the workspaces depend on, and waits for the frame to load.
+export function AdminGate({ children }: { children: JSX.Element }): JSX.Element {
   useMountedLogic(adminLogic)
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
   useMountedLogic(entityImagesModel)
+  useMountedLogic(longRunningTasksModel)
 
   const { framesLoaded } = useValues(framesModel)
   const { isChecking, isAuthenticated } = useValues(adminLogic)
@@ -50,8 +53,21 @@ export default function Admin({ id }: AdminProps) {
   }
 
   if (framesLoaded) {
-    return <Frame id={resolvedFrameId} />
+    return (
+      <>
+        {children}
+        <LongRunningTaskToasts />
+      </>
+    )
   }
 
   return <div>Loading...</div>
+}
+
+export default function Admin({ id }: AdminProps) {
+  return (
+    <AdminGate>
+      <Frame id={resolveFrameId(id)} />
+    </AdminGate>
+  )
 }

@@ -46,7 +46,9 @@ from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
     Frame,
+    apply_device_frame_json,
     compact_timezone_updater,
+    device_frame_json_changes,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -2446,6 +2448,104 @@ async def api_frame_deploy_event(
         return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+DEVICE_FRAME_JSON_PATH = "/srv/frameos/current/frame.json"
+DEVICE_ALL_SCENES_PATH = "/srv/frameos/current/all_scenes.json"
+
+
+async def _read_device_all_scenes(db: Session, redis: Redis, frame: Frame) -> Optional[list]:
+    """Reads the device's full scene payload (which its on-device admin can
+    edit). Returns None when the file is missing or unreadable."""
+    status, stdout, _stderr = await run_command(
+        db, redis, frame,
+        f"zcat {DEVICE_ALL_SCENES_PATH}.gz 2>/dev/null || cat {DEVICE_ALL_SCENES_PATH} 2>/dev/null",
+        timeout=15,
+        log_output=False,
+        log_command=False,
+    )
+    if status != 0 or not stdout.strip():
+        return None
+    try:
+        scenes = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return scenes if isinstance(scenes, list) else None
+
+
+def _device_scenes_changed(frame: Frame, device_scenes: Optional[list]) -> bool:
+    return device_scenes is not None and device_scenes != list(frame.scenes or [])
+
+
+async def _read_device_frame_json(db: Session, redis: Redis, frame: Frame) -> dict:
+    status, stdout, stderr = await run_command(
+        db, redis, frame,
+        f"cat {DEVICE_FRAME_JSON_PATH}",
+        timeout=15,
+        log_output=False,
+        log_command=False,
+    )
+    if status != 0:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Could not read frame.json from the device: {stderr or stdout}",
+        )
+    try:
+        device_json = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"frame.json on the device is not valid JSON: {e}",
+        )
+    if not isinstance(device_json, dict):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="frame.json on the device is not an object")
+    return device_json
+
+
+@api_project.get("/frames/{id:int}/config_drift")
+async def api_frame_config_drift(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    """Compares the device's own frame.json (which the on-device admin can
+    edit) against the backend's record and reports the differing fields."""
+    frame = _project_frame(db, id) or _not_found()
+    device_json = await _read_device_frame_json(db, redis, frame)
+    changes = device_frame_json_changes(frame, device_json)
+    fields = sorted(changes.keys())
+    if _device_scenes_changed(frame, await _read_device_all_scenes(db, redis, frame)):
+        fields = sorted(fields + ["scenes"])
+    return {
+        "fields": fields,
+        "configUpdatedAt": device_json.get("configUpdatedAt"),
+    }
+
+
+@api_project.post("/frames/{id:int}/pull_config")
+async def api_frame_pull_config(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    """Pulls a self-updated config from the device into the backend, so frames
+    edited through their on-device admin can be synced without a redeploy."""
+    frame = _project_frame(db, id) or _not_found()
+    device_json = await _read_device_frame_json(db, redis, frame)
+    changed = apply_device_frame_json(frame, device_json)
+    device_scenes = await _read_device_all_scenes(db, redis, frame)
+    if _device_scenes_changed(frame, device_scenes):
+        frame.scenes = device_scenes
+        # The device is already running these scenes: pulling them must not
+        # surface phantom "undeployed changes".
+        if isinstance(frame.last_successful_deploy, dict):
+            frame.last_successful_deploy = {**frame.last_successful_deploy, "scenes": device_scenes}
+        changed = sorted(changed + ["scenes"])
+    if changed:
+        await update_frame(db, redis, frame)
+        await log(db, redis, frame.id, "stdout",
+                  f"Pulled config from frame: updated {', '.join(changed)}")
+    return {"fields": changed}
 
 
 @api_project.post("/frames/{id:int}/cancel_deploy")

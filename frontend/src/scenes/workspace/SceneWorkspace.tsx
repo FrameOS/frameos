@@ -43,6 +43,7 @@ import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 
@@ -76,7 +77,11 @@ function sceneIsCompiled(scene: FrameScene | null): boolean {
 }
 
 function sceneUtilityDefinitions(scene: FrameScene | null): UtilityDefinition[] {
-  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene))
+  // The generated Nim source comes from the backend's compiler pipeline; the
+  // device can't produce it.
+  return utilityDefinitions.filter(
+    (definition) => definition.panel !== 'source' || (sceneIsCompiled(scene) && !isFrameControlMode())
+  )
 }
 
 function sceneUtilityDefinition(
@@ -510,24 +515,26 @@ function SceneDiagramOverlay({
           {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
         </div>
         <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
-          <button
-            type="button"
-            title="Open AI chat"
-            onClick={() => {
-              if (chatDrawerIsOpen) {
-                closeChatDrawer()
-                return
-              }
-              closeUtilityPanel()
-              openChatDrawer(frameId, sceneId)
-            }}
-            className={clsx(
-              'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
-            )}
-          >
-            <SparklesIcon className="h-5 w-5" />
-          </button>
+          {!isFrameControlMode() ? (
+            <button
+              type="button"
+              title="Open AI chat"
+              onClick={() => {
+                if (chatDrawerIsOpen) {
+                  closeChatDrawer()
+                  return
+                }
+                closeUtilityPanel()
+                openChatDrawer(frameId, sceneId)
+              }}
+              className={clsx(
+                'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
+              )}
+            >
+              <SparklesIcon className="h-5 w-5" />
+            </button>
+          ) : null}
           <UtilityToolbar scene={scene} />
         </div>
       </div>
@@ -777,6 +784,14 @@ function SceneCanvas({
       <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <SceneDiagramOverlay frameId={frameId} scene={selectedScene} sceneId={selectedSceneId} />
+      {isFrameControlMode() && sceneIsCompiled(selectedScene) ? (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
+          <div className="rounded-lg border border-amber-200 bg-amber-100/95 px-4 py-2 text-xs font-medium text-amber-950 shadow-sm">
+            This scene runs compiled into the frame's binary. Edits saved here only take effect after switching the
+            scene's execution to "interpreted" in scene settings, or after a redeploy from a FrameOS backend.
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

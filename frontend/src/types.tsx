@@ -141,7 +141,7 @@ export interface FrameMountpointsConfig {
   items?: FrameMountpointConfig[]
 }
 
-export type FrameMode = 'rpios' | 'buildroot' | 'import'
+export type FrameMode = 'rpios' | 'buildroot' | 'import' | 'adopt'
 export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script'
 export interface NewFrameFormType {
   mode: FrameMode

@@ -5,6 +5,7 @@ import {
   ArrowLeftIcon,
   ArrowUpTrayIcon,
   CommandLineIcon,
+  LinkIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
@@ -143,7 +144,7 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
   ))
 }
 
-type AddFrameMode = FrameInstallMethod | 'import'
+type AddFrameMode = FrameInstallMethod | 'import' | 'adopt'
 
 function installMethodTitle(installMethod: AddFrameMode): string {
   if (installMethod === 'sd_card') {
@@ -154,6 +155,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'import') {
     return 'Import frame'
+  }
+  if (installMethod === 'adopt') {
+    return 'Adopt existing device'
   }
   return 'Install over SSH'
 }
@@ -172,12 +176,22 @@ function AddFrameSubmitButton({ loading }: { loading: boolean }): JSX.Element {
 }
 
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
-  const { hideForm, importFrame, resetNewFrame, setFile, setNewFrameValue, setNewFrameValues } =
+  const { generateAdoptionCode, hideForm, importFrame, resetNewFrame, setFile, setNewFrameValue, setNewFrameValues } =
     useActions(newFrameForm)
-  const { file, importingFrameLoading, isNewFrameSubmitting, newFrame, newFrameErrors } = useValues(newFrameForm)
+  const {
+    adoptionCode,
+    adoptionCodeError,
+    adoptionCodeLoading,
+    file,
+    importingFrameLoading,
+    isNewFrameSubmitting,
+    newFrame,
+    newFrameErrors,
+  } = useValues(newFrameForm)
   const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
-  const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
+  const addFrameMode: AddFrameMode | undefined =
+    newFrame.mode === 'import' ? 'import' : newFrame.mode === 'adopt' ? 'adopt' : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
@@ -232,6 +246,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Run one command on the device."
             >
               <CommandLineIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues({ mode: 'adopt', install_method: undefined })}
+              title="Adopt existing device"
+              description="Connect a frame that already runs FrameOS standalone."
+            >
+              <LinkIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
@@ -534,6 +555,44 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
+      ) : addFrameMode === 'adopt' ? (
+        <div className="space-y-4">
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            Adopt a frame that is already running FrameOS standalone. Generate a code here, then open the frame's own
+            admin page (<code>http://&lt;frame&gt;:8787/admin</code>), go to Settings &rarr; Backend, and enter this
+            backend's address together with the code. The frame will create itself here and connect.
+          </p>
+          {adoptionCode ? (
+            <div className="space-y-2">
+              <div className="frameos-form-label text-sm font-semibold text-slate-700">Adoption code</div>
+              <div className="frameos-form-control flex h-14 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-2xl font-bold tracking-[0.2em] text-slate-900">
+                {adoptionCode}
+              </div>
+              <p className="frameos-form-hint text-xs text-slate-500">
+                Valid for 15 minutes and usable once. The new frame appears in the list as soon as the device claims it.
+              </p>
+            </div>
+          ) : null}
+          {adoptionCodeError ? <p className="text-sm font-semibold text-red-500">{adoptionCodeError}</p> : null}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={generateAdoptionCode}
+              disabled={adoptionCodeLoading}
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {adoptionCodeLoading ? <Spinner color="white" /> : null}
+              {adoptionCode ? 'Generate a new code' : 'Generate adoption code'}
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       ) : addFrameMode === 'import' ? (
         <div className="space-y-4">
           <label className="frameos-import-target flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">

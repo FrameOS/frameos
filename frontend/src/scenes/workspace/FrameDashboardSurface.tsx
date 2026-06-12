@@ -37,6 +37,7 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -56,6 +57,10 @@ const sceneToolButtons = [
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const
+
+// The terminal needs the backend's SSH/agent channel; it has no on-device equivalent.
+const visibleSceneToolButtons = () =>
+  isFrameControlMode() ? sceneToolButtons.filter(({ panel }) => panel !== 'terminal') : sceneToolButtons
 
 interface FrameDashboardSurfaceProps {
   frame: FrameType
@@ -256,14 +261,16 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
     <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
       <HeaderMetrics frameId={frame.id} />
       <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          title="Open AI chat"
-          onClick={() => openChatDrawer(frame.id, null)}
-          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <SparklesIcon className="h-5 w-5" />
-        </button>
+        {!isFrameControlMode() ? (
+          <button
+            type="button"
+            title="Open AI chat"
+            onClick={() => openChatDrawer(frame.id, null)}
+            className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <SparklesIcon className="h-5 w-5" />
+          </button>
+        ) : null}
         <FrameActionsMenu
           frame={frame}
           archived={archived}
@@ -327,6 +334,8 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     undeployedChangeDetails.every((change) => change.label.startsWith('FrameOS upgrade'))
   const changeLabel = unsavedChanges
     ? 'unsaved'
+    : isFrameControlMode()
+    ? 'saved'
     : onlyFrameosUpgrade
     ? 'upgrade'
     : undeployedChanges
@@ -441,6 +450,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
   const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
+  const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const active = templateDrawerFrameId === frame.id
 
   return (
@@ -451,7 +461,13 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       onClick={() => {
         hideForm()
         closeSceneControl()
-        openTemplateDrawer(frame.id)
+        if (isFrameControlMode()) {
+          // Templates live in the backend; on the device itself we go straight
+          // to a blank scene and open it in the editor.
+          createBlankSceneAndSave(undefined, true)
+        } else {
+          openTemplateDrawer(frame.id)
+        }
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -471,8 +487,18 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
 function BlankFrameSceneHint(): JSX.Element {
   return (
     <div className="frameos-blank-frame-scene-hint mb-4 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
-      This frame has no scenes yet. Click <span className="font-bold">Add scene</span> to choose a template or create a
-      scene, then save it. After adding scenes, deploy the changes to the frame so they appear on the display.
+      {isFrameControlMode() ? (
+        <>
+          This frame has no scenes yet. Click <span className="font-bold">Add scene</span> to create one; saved scenes
+          go live on the display right away.
+        </>
+      ) : (
+        <>
+          This frame has no scenes yet. Click <span className="font-bold">Add scene</span> to choose a template or
+          create a scene, then save it. After adding scenes, deploy the changes to the frame so they appear on the
+          display.
+        </>
+      )}
     </div>
   )
 }
@@ -528,7 +554,7 @@ function FrameScenesBlock({
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {sceneToolButtons.map(({ label, panel, icon: Icon }) => (
+        {visibleSceneToolButtons().map(({ label, panel, icon: Icon }) => (
           <A
             key={panel}
             href={urls.frame(frame.id, panel)}

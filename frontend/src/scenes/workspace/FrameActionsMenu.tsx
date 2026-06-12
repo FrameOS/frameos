@@ -18,8 +18,10 @@ import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownM
 import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
 import { frameHost } from '../../decorators/frame'
+import { frameLogic } from '../frame/frameLogic'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { workspaceLogic } from './workspaceLogic'
 
 interface FrameActionsMenuProps {
@@ -47,8 +49,13 @@ export function FrameActionsMenu({
     stopFrame,
   } = useActions(framesModel)
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
+  const { pullConfigFromFrame } = useActions(frameLogic({ frameId: frame.id }))
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
+  // The on-device admin keeps actions the frame can perform on itself
+  // (rename, render, restart, reboot); deploys, agent management and frame
+  // lifecycle (archive/delete) belong to the backend.
+  const frameControlMode = isFrameControlMode()
 
   return (
     <DropdownMenu
@@ -68,13 +75,28 @@ export function FrameActionsMenu({
           onClick: () => renderFrame(frame.id),
           icon: <PlayIcon className="h-5 w-5" />,
         },
-        {
-          label: 'Deploy',
-          title: 'Open deploy options',
-          onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
-          icon: <RocketLaunchIcon className="h-5 w-5" />,
-        },
-        ...(frame.status === 'deploying'
+        ...(!frameControlMode
+          ? [
+              {
+                label: 'Deploy',
+                title: 'Open deploy options',
+                onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
+                icon: <RocketLaunchIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(!frameControlMode
+          ? [
+              {
+                label: 'Pull config from frame',
+                title: "Import changes the frame saved through its own admin page into the backend's record",
+                confirm: `Pull the on-device configuration of "${frameName}" into the backend?`,
+                onClick: () => pullConfigFromFrame(),
+                icon: <ArrowDownTrayIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(!frameControlMode && frame.status === 'deploying'
           ? [
               {
                 label: 'Cancel deploy',
@@ -85,18 +107,22 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        {
-          label: 'Build SD card',
-          title: 'Build or download a flashable SD card image',
-          onClick: () => openFrameChangeDrawer(frame.id, 'deploy', 'sdCard'),
-          icon: <ArrowDownTrayIcon className="h-5 w-5" />,
-        },
-        {
-          label: 'Stop FrameOS',
-          title: 'Stop FrameOS service',
-          onClick: () => stopFrame(frame.id),
-          icon: <StopCircleIcon className="h-5 w-5" />,
-        },
+        ...(!frameControlMode
+          ? [
+              {
+                label: 'Build SD card',
+                title: 'Build or download a flashable SD card image',
+                onClick: () => openFrameChangeDrawer(frame.id, 'deploy', 'sdCard'),
+                icon: <ArrowDownTrayIcon className="h-5 w-5" />,
+              },
+              {
+                label: 'Stop FrameOS',
+                title: 'Stop FrameOS service',
+                onClick: () => stopFrame(frame.id),
+                icon: <StopCircleIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
         {
           label: 'Restart FrameOS',
           title: 'Restart FrameOS service',
@@ -109,7 +135,7 @@ export function FrameActionsMenu({
           onClick: () => rebootFrame(frame.id),
           icon: <PowerIcon className="h-5 w-5" />,
         },
-        ...(agentConfigured
+        ...(!frameControlMode && agentConfigured
           ? [
               {
                 label: 'Restart agent',
@@ -117,10 +143,6 @@ export function FrameActionsMenu({
                 onClick: () => restartAgent(frame.id),
                 icon: <CommandLineIcon className="h-5 w-5" />,
               },
-            ]
-          : []),
-        ...(agentConfigured
-          ? [
               {
                 label: 'Deploy agent',
                 title: 'Deploy FrameOS agent',
@@ -129,19 +151,23 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        {
-          label: archived ? 'Restore' : 'Archive',
-          title: archived ? 'Restore frame' : 'Archive frame',
-          onClick: () => setFrameArchived(frame.id, !archived),
-          icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
-        },
-        {
-          label: 'Delete',
-          title: 'Delete frame',
-          confirm: `Delete "${frameName}"? This cannot be undone.`,
-          onClick: () => deleteFrame(frame.id),
-          icon: <TrashIcon className="h-5 w-5" />,
-        },
+        ...(!frameControlMode
+          ? [
+              {
+                label: archived ? 'Restore' : 'Archive',
+                title: archived ? 'Restore frame' : 'Archive frame',
+                onClick: () => setFrameArchived(frame.id, !archived),
+                icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
+              },
+              {
+                label: 'Delete',
+                title: 'Delete frame',
+                confirm: `Delete "${frameName}"? This cannot be undone.`,
+                onClick: () => deleteFrame(frame.id),
+                icon: <TrashIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
       ]}
     />
   )

@@ -32,10 +32,14 @@ proc buildExportedScenesTable(
   result = initTable[SceneId, ExportedScene]()
   for sceneId, scene in systemScenes:
     result[sceneId] = scene
-  for sceneId, scene in interpreted:
-    result[sceneId] = scene.ExportedScene
   for sceneId, scene in compiledScenes:
     result[sceneId] = scene
+  # Interpreted scenes from disk override a compiled scene with the same ID:
+  # backend deploys never write a compiled scene into scenes.json, so an
+  # overlap only happens when the on-device admin saved an edit to a scene
+  # that also ships in the binary — and the edit must win to take effect.
+  for sceneId, scene in interpreted:
+    result[sceneId] = scene.ExportedScene
   for sceneId, scene in uploaded:
     result[sceneId] = scene.ExportedScene
 

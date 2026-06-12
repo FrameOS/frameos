@@ -24,6 +24,17 @@ await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
 
+// The shared FrameosLogo component loads /img/logo-2/*.svg, which the backend
+// serves from frontend/public. Bundle the same files so the frame can serve them.
+const logoSourceDir = path.resolve(__dirname, '../../frontend/public/img/logo-2')
+const logoTargetDir = path.join(staticDir, 'img/logo-2')
+await fs.mkdir(logoTargetDir, { recursive: true })
+for (const file of await fs.readdir(logoSourceDir)) {
+  if (file.endsWith('.svg')) {
+    await fs.copyFile(path.join(logoSourceDir, file), path.join(logoTargetDir, file))
+  }
+}
+
 const postcssPlugins = [
   tailwindcss({ config: path.resolve(__dirname, 'tailwind.config.js') }),
   autoprefixer,

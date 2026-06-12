@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   BoltIcon,
@@ -56,6 +56,7 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 
@@ -221,6 +222,10 @@ function frameToolInitialScrollTop(
   return panel === 'logs' || panel === 'terminal' ? null : 0
 }
 
+// Tools that talk to the backend (or to the device over SSH/agent) and have no
+// equivalent when the admin UI is served by the frame itself.
+const backendOnlyFrameTools: WorkspaceUtilityPanel[] = ['terminal']
+
 const frameToolDefinitions: FrameToolDefinition[] = [
   {
     panel: 'overview',
@@ -249,28 +254,34 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
+function visibleFrameToolDefinitions(): FrameToolDefinition[] {
+  return isFrameControlMode()
+    ? frameToolDefinitions.filter((definition) => !backendOnlyFrameTools.includes(definition.panel))
+    : frameToolDefinitions
+}
+
 function frameToolPanelFromSearchParams(searchParams: Record<string, unknown>): WorkspaceUtilityPanel | null {
   const value = searchParams.tool
   const tool = Array.isArray(value) ? value[0] : value
   if (!tool) {
     return 'overview'
   }
-  return typeof tool === 'string' && frameToolDefinitions.some((definition) => definition.panel === tool)
+  return typeof tool === 'string' && visibleFrameToolDefinitions().some((definition) => definition.panel === tool)
     ? (tool as WorkspaceUtilityPanel)
     : 'overview'
 }
 
-const frameSettingsSections = [
+const allFrameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-device', label: 'Device' },
-  { id: 'frame-settings-ssh', label: 'SSH' },
-  { id: 'frame-settings-agent', label: 'Agent' },
+  { id: 'frame-settings-ssh', label: 'SSH', backendOnly: true },
+  { id: 'frame-settings-agent', label: 'Agent', backendOnly: true },
   { id: 'frame-settings-backend', label: 'Backend' },
   { id: 'frame-http-api-section', label: 'HTTP API' },
   { id: 'frame-settings-admin', label: 'Admin' },
-  { id: 'frame-http-proxy-section', label: 'HTTPS' },
+  { id: 'frame-http-proxy-section', label: 'HTTPS', backendOnly: true },
   { id: 'frame-settings-network', label: 'Network' },
-  { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
+  { id: 'frame-settings-mountpoints', label: 'Mountpoints', backendOnly: true },
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-error-behavior', label: 'Global errors' },
   { id: 'frame-settings-palette', label: 'Palette' },
@@ -278,8 +289,12 @@ const frameSettingsSections = [
   { id: 'frame-settings-assets', label: 'Assets' },
   { id: 'frame-settings-gpio', label: 'GPIO' },
   { id: 'frame-settings-logs', label: 'Logs' },
-  { id: 'frame-settings-reboot', label: 'Reboot' },
+  { id: 'frame-settings-reboot', label: 'Reboot', backendOnly: true },
 ]
+
+const frameSettingsSections = isFrameControlMode()
+  ? allFrameSettingsSections.filter((section) => !section.backendOnly)
+  : allFrameSettingsSections
 
 function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
@@ -481,7 +496,7 @@ function FrameTree({
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
-          {frameToolDefinitions.map((definition) => {
+          {visibleFrameToolDefinitions().map((definition) => {
             const active = activeTool === definition.panel
             return (
               <div key={definition.panel} className="space-y-1">
@@ -1275,12 +1290,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
     frameLogic(frameLogicProps)
   )
+  const { checkConfigDrift } = useActions(frameLogic(frameLogicProps))
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
-    frameToolDefinitions.find(
+    visibleFrameToolDefinitions().find(
       (definition) => definition.panel === (frameToolPanelFromSearchParams(searchParams) ?? utilityPanel)
     ) ?? frameToolDefinitions[0]
   const activeToolPanel = activeTool.panel
@@ -1293,6 +1309,15 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const toolUsesPageScroll = frameToolUsesPageScroll(activeToolPanel)
 
   frameToolScrollPositionsRef.current = frameToolScrollPositions
+
+  useEffect(() => {
+    // A frame's on-device admin may have edited its own frame.json; check for
+    // drift once per opened workspace so we can offer to pull the changes.
+    if (!isFrameControlMode() && frameLoaded && !frame?.archived) {
+      checkConfigDrift()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameId, frameLoaded])
 
   const rememberFrameToolScrollTop = useCallback(
     (scrollTop: number) => {

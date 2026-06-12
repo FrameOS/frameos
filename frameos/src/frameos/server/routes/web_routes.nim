@@ -62,7 +62,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
           request.respond(Http200, body = frameWebHtml())
   )
 
-  router.get("/admin", proc(request: Request) {.gcsafe.} =
+  proc adminSpaHandler(request: Request) {.gcsafe.} =
     {.gcsafe.}:
       if not adminPanelEnabled():
         request.respond(Http401, body = "Admin panel disabled")
@@ -72,7 +72,11 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http302, headers)
       else:
         request.respond(Http200, body = frameWebHtml())
-  )
+
+  router.get("/admin", adminSpaHandler)
+  # The admin SPA routes the scene and app editors under /admin/...; serve the
+  # same embedded index.html for every sub-path and let the client router run.
+  router.get("/admin/**", adminSpaHandler)
 
   router.get("/control", proc(request: Request) {.gcsafe.} =
     if not adminPanelEnabled():
@@ -112,6 +116,27 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http401, body = "Unauthorized")
         return
       let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
+      try:
+        var headers: mummy.HttpHeaders
+        headers["Content-Type"] = contentTypeForAsset(assetPath)
+        headers["Vary"] = "Accept-Encoding"
+        let asset =
+          if clientAcceptsGzip(request):
+            headers["Content-Encoding"] = "gzip"
+            getCompressedFrameWebAsset(assetPath)
+          else:
+            getFrameWebAsset(assetPath)
+        request.respond(Http200, headers, asset)
+      except KeyError:
+        request.respond(Http404, body = "Not found!")
+  )
+
+  router.get("/img/logo-2/@asset", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
+        request.respond(Http401, body = "Unauthorized")
+        return
+      let assetPath = "assets/compiled/frame_web/static/img/logo-2/" & request.pathParams["asset"]
       try:
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = contentTypeForAsset(assetPath)

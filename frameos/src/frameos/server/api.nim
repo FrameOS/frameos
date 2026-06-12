@@ -76,25 +76,36 @@ proc loadConfigJson(): JsonNode =
   except CatchableError:
     return %*{}
 
+proc readSceneFile(path: string): string =
+  try:
+    if path.endsWith(".gz") and fileExists(path):
+      return uncompress(readFile(path))
+    elif fileExists(path):
+      return readFile(path)
+  except CatchableError:
+    discard
+  ""
+
 proc loadScenePayload(): JsonNode =
+  # Prefer the full scene payload (all_scenes.json, written on deploy and by
+  # on-device saves) so the admin UI and backend drift checks see compiled
+  # scenes too; fall back to the interpreted-only scenes.json.
   var data = ""
-  let envPath = getEnv("FRAMEOS_SCENES_JSON")
-  if envPath.len > 0:
-    try:
-      if envPath.endsWith(".gz") and fileExists(envPath):
-        data = uncompress(readFile(envPath))
-      elif fileExists(envPath):
-        data = readFile(envPath)
-    except CatchableError:
-      data = ""
-  if data.len == 0:
-    try:
-      if fileExists("./scenes.json.gz"):
-        data = uncompress(readFile("./scenes.json.gz"))
-      elif fileExists("./scenes.json"):
-        data = readFile("./scenes.json")
-    except CatchableError:
-      data = ""
+  var candidates: seq[string] = @[]
+  let allScenesEnv = getEnv("FRAMEOS_ALL_SCENES_JSON")
+  if allScenesEnv.len > 0:
+    candidates.add(allScenesEnv)
+  candidates.add("./all_scenes.json.gz")
+  candidates.add("./all_scenes.json")
+  let scenesEnv = getEnv("FRAMEOS_SCENES_JSON")
+  if scenesEnv.len > 0:
+    candidates.add(scenesEnv)
+  candidates.add("./scenes.json.gz")
+  candidates.add("./scenes.json")
+  for candidate in candidates:
+    data = readSceneFile(candidate)
+    if data.len > 0:
+      break
   if data.len == 0:
     return %*[]
   try:
@@ -203,6 +214,33 @@ proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
     "uploadHeaders": headers,
   }
 
+const frameosVersion {.strdefine.}: string = "unknown"
+
+proc frameosVersionString*(): string =
+  let stripped = frameosVersion.strip()
+  if stripped.len == 0: "unknown" else: stripped
+
+proc frameErrorBehaviorJson(behavior: ErrorBehaviorConfig): JsonNode =
+  if behavior == nil:
+    return %*{"mode": "show_error_retry"}
+  %*{
+    "mode": behavior.mode,
+    "retry_seconds": behavior.retrySeconds,
+    "silent_retry_seconds": behavior.silentRetrySeconds,
+    "silent_retry_forever": behavior.silentRetryForever,
+    "silent_window_minutes": behavior.silentWindowMinutes,
+    "show_error_retry_seconds": behavior.showErrorRetrySeconds,
+  }
+
+proc frameTimeZoneUpdatesJson(updates: TimeZoneUpdatesConfig): JsonNode =
+  if updates == nil:
+    return newJNull()
+  %*{
+    "enabled": updates.enabled,
+    "hour": updates.hour,
+    "url": updates.url,
+  }
+
 proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false): JsonNode =
   let configJson = loadConfigJson()
   let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
@@ -226,6 +264,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   result = %*{
     "id": frameApiId(),
     "name": globalFrameConfig.name,
+    "version": frameosVersionString(),
     "mode": globalFrameConfig.mode,
     "frame_host": globalFrameConfig.frameHost,
     "frame_port": globalFrameConfig.framePort,
@@ -259,6 +298,9 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "log_to_file": globalFrameConfig.logToFile,
     "assets_path": globalFrameConfig.assetsPath,
     "save_assets": globalFrameConfig.saveAssets,
+    "timezone": globalFrameConfig.timeZone,
+    "timezone_updater": frameTimeZoneUpdatesJson(globalFrameConfig.timeZoneUpdates),
+    "error_behavior": frameErrorBehaviorJson(globalFrameConfig.errorBehavior),
     "control_code": frameControlCodeJson(globalFrameConfig.controlCode),
     "schedule": frameScheduleJson(globalFrameConfig.schedule),
     "gpio_buttons": frameGpioButtonsJson(globalFrameConfig.gpioButtons),
@@ -447,6 +489,26 @@ proc renderControlPage*(request: Request) =
 
 proc appsPayload*(): string =
   appsAsset.getAppsJson()
+
+var
+  appSourcesLock: Lock
+  appSourcesParsed {.guard: appSourcesLock.}: JsonNode = nil
+
+initLock(appSourcesLock)
+
+proc appSourcePayload*(keyword: string): JsonNode =
+  ## Returns {filename: contents} for a system app embedded in the binary,
+  ## or nil when the keyword is unknown.
+  {.gcsafe.}:
+    withLock appSourcesLock:
+      if appSourcesParsed == nil:
+        try:
+          appSourcesParsed = parseJson(appsAsset.getAppSourcesJson())
+        except CatchableError:
+          appSourcesParsed = %*{}
+      if appSourcesParsed.kind == JObject and appSourcesParsed.hasKey(keyword):
+        return appSourcesParsed[keyword].copy()
+  nil
 
 proc frameStatePayload*(): tuple[sceneId: SceneId, state: JsonNode] =
   let (sceneId, state, _, _) = getLastPublicState()

@@ -44,7 +44,13 @@ proc loadSchedule*(data: JsonNode): FrameSchedule =
   if data == nil or data.kind != JObject or (not data.contains("events")) or data["events"] == nil or data[
       "events"].kind != JArray:
     return result
+  # The backend strips disabled entries before deploying, but configs saved by
+  # the on-device admin keep them (frame.json is the storage there).
+  if data{"disabled"}.getBool(false):
+    return result
   for event in data["events"].items:
+    if event{"disabled"}.getBool(false):
+      continue
     result.events.add(ScheduledEvent(
       id: event{"id"}.getStr(),
       minute: event{"minute"}.getInt(),

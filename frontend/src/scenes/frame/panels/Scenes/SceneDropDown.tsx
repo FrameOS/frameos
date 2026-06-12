@@ -16,6 +16,7 @@ import {
 import { templatesLogic } from '../Templates/templatesLogic'
 import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
+import { isFrameControlMode } from '../../../../utils/frameControlMode'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -50,6 +51,9 @@ export function SceneDropDown({
   if (!scene) {
     return null
   }
+  // The on-device admin edits scenes directly in the frame's own scene files;
+  // only backend-side persistence (templates / "My scenes") is hidden there.
+  const frameControlMode = isFrameControlMode()
   const openSceneEditor = () => {
     if (navigation === 'workspace') {
       navigateToScene(frameId, scene.id)
@@ -109,17 +113,23 @@ export function SceneDropDown({
           onClick: () => copySceneJSON(scene.id),
           icon: <ClipboardDocumentIcon className="w-5 h-5" />,
         },
-        {
-          label: 'Save to "My scenes"',
-          onClick: () =>
-            saveAsTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
-          icon: <FolderPlusIcon className="w-5 h-5" />,
-        },
-        {
-          label: 'Download as .zip',
-          onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
-          icon: <CloudArrowDownIcon className="w-5 h-5" />,
-        },
+        !frameControlMode
+          ? {
+              label: 'Save to "My scenes"',
+              onClick: () =>
+                saveAsTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
+              icon: <FolderPlusIcon className="w-5 h-5" />,
+            }
+          : null,
+        // The .zip export is assembled by the backend's /api/templates endpoint.
+        !frameControlMode
+          ? {
+              label: 'Download as .zip',
+              onClick: () =>
+                saveAsZip({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
+              icon: <CloudArrowDownIcon className="w-5 h-5" />,
+            }
+          : null,
         context === 'scenes'
           ? {
               label: 'Duplicate',
@@ -132,18 +142,21 @@ export function SceneDropDown({
           onClick: () => renameScene(scene.id),
           icon: <TagIcon className="w-5 h-5" />,
         },
-
-        scene.default
-          ? {
-              label: 'Remove "start on boot"',
-              onClick: () => removeDefault(),
-              icon: <FlagIcon className="w-5 h-5" />,
-            }
-          : {
-              label: 'Set to start on boot',
-              onClick: () => setAsDefault(scene.id),
-              icon: <FlagIcon className="w-5 h-5" />,
-            },
+        // The runner only honors "start on boot" for compiled scenes, which
+        // are baked into the binary; toggling it on the device has no effect.
+        !frameControlMode
+          ? scene.default
+            ? {
+                label: 'Remove "start on boot"',
+                onClick: () => removeDefault(),
+                icon: <FlagIcon className="w-5 h-5" />,
+              }
+            : {
+                label: 'Set to start on boot',
+                onClick: () => setAsDefault(scene.id),
+                icon: <FlagIcon className="w-5 h-5" />,
+              }
+          : null,
         {
           label: 'Delete scene',
           confirm: 'Are you sure you want to delete this scene?',

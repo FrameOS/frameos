@@ -31,6 +31,7 @@ import {
   workspaceLogic,
 } from './workspaceLogic'
 import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { frameLogic } from '../frame/frameLogic'
@@ -308,10 +309,15 @@ export function FrameosShell({
   const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
+  // The on-device admin manages exactly one frame: there is no frames home
+  // and no backend settings to navigate to. The frame, scene and app
+  // workspaces all operate on the device's own config.
+  const frameControlMode = isFrameControlMode()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const appsHref = lastAppsHref ?? urls.systemApps()
-  const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
+  const showAiButton =
+    !frameControlMode && (showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame))
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
@@ -383,7 +389,7 @@ export function FrameosShell({
         >
           <a
             href={urls.frames()}
-            title="Frames home"
+            title={frameControlMode ? 'Frame overview' : 'Frames home'}
             onPointerEnter={preloadFrames}
             onFocus={preloadFrames}
             onMouseDown={preloadFrames}
@@ -406,26 +412,28 @@ export function FrameosShell({
             <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
           </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
-            <NavButton
-              active={activeMode === 'frames'}
-              current={mode === 'frames'}
-              href={urls.frames()}
-              pending={pendingMode === 'frames'}
-              preloadScene="frames"
-              sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
-              onActiveClick={() => {
-                requestNextFramesHomeScrollTop()
-                prepareFirstLevelNavigation()
-                toggleSecondarySidebar()
-              }}
-              onInactiveClick={() => {
-                requestNextFramesHomeScrollTop()
-                prepareFirstLevelNavigation()
-              }}
-            >
-              <Squares2X2Icon className="h-7 w-7" />
-            </NavButton>
+            {!frameControlMode ? (
+              <NavButton
+                active={activeMode === 'frames'}
+                current={mode === 'frames'}
+                href={urls.frames()}
+                pending={pendingMode === 'frames'}
+                preloadScene="frames"
+                sidebarOpen={secondarySidebarOpen}
+                title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
+                onActiveClick={() => {
+                  requestNextFramesHomeScrollTop()
+                  prepareFirstLevelNavigation()
+                  toggleSecondarySidebar()
+                }}
+                onInactiveClick={() => {
+                  requestNextFramesHomeScrollTop()
+                  prepareFirstLevelNavigation()
+                }}
+              >
+                <Squares2X2Icon className="h-7 w-7" />
+              </NavButton>
+            ) : null}
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}
@@ -478,19 +486,21 @@ export function FrameosShell({
           >
             {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
           </button>
-          <NavButton
-            active={activeMode === 'settings'}
-            current={mode === 'settings'}
-            href={urls.settings()}
-            pending={pendingMode === 'settings'}
-            preloadScene="settings"
-            sidebarOpen={secondarySidebarOpen}
-            title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
-            onActiveClick={toggleSecondarySidebar}
-            onInactiveClick={prepareFirstLevelNavigation}
-          >
-            <Cog6ToothIcon className="h-8 w-8" />
-          </NavButton>
+          {!frameControlMode ? (
+            <NavButton
+              active={activeMode === 'settings'}
+              current={mode === 'settings'}
+              href={urls.settings()}
+              pending={pendingMode === 'settings'}
+              preloadScene="settings"
+              sidebarOpen={secondarySidebarOpen}
+              title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
+              onActiveClick={toggleSecondarySidebar}
+              onInactiveClick={prepareFirstLevelNavigation}
+            >
+              <Cog6ToothIcon className="h-8 w-8" />
+            </NavButton>
+          ) : null}
         </div>
         <div
           className={clsx(
