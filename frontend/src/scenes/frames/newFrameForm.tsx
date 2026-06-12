@@ -8,7 +8,7 @@ import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
 import { inHassioIngress } from '../../utils/inHassioIngress'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W } from '../../devices'
+import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, EMBEDDED_ESP32_S3 } from '../../devices'
 import { settingsLogic } from '../settings/settingsLogic'
 
 function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
@@ -37,6 +37,15 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
       mode: 'buildroot',
       frame_host: '',
       platform: frameValues.platform || BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+    }
+  }
+
+  if (installMethod === 'embedded') {
+    return {
+      ...frameValues,
+      mode: 'embedded',
+      frame_host: '',
+      platform: frameValues.platform || EMBEDDED_ESP32_S3,
     }
   }
 
@@ -147,7 +156,7 @@ export const newFrameForm = kea<newFrameFormType>([
         name: !frame.name ? 'Please enter a name' : null,
         frame_host: frame.install_method === 'ssh' && !frame.frame_host ? 'Please enter a host' : null,
         platform:
-          frame.install_method === 'sd_card' && !frame.platform
+          (frame.install_method === 'sd_card' || frame.install_method === 'embedded') && !frame.platform
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,

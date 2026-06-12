@@ -16,7 +16,7 @@ export interface FrameType {
   id: number
   project_id: number
   name: string
-  mode?: 'rpios' | 'buildroot'
+  mode?: 'rpios' | 'buildroot' | 'embedded'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -121,6 +121,7 @@ export interface FrameType {
   error_behavior?: FrameErrorBehavior
   palette?: Palette
   buildroot?: FrameBuildrootConfig
+  embedded?: FrameEmbeddedConfig
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
@@ -141,8 +142,8 @@ export interface FrameMountpointsConfig {
   items?: FrameMountpointConfig[]
 }
 
-export type FrameMode = 'rpios' | 'buildroot' | 'import'
-export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script'
+export type FrameMode = 'rpios' | 'buildroot' | 'embedded' | 'import'
+export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script' | 'embedded'
 export interface NewFrameFormType {
   mode: FrameMode
   install_method?: FrameInstallMethod
@@ -732,4 +733,25 @@ export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: FrameCrossCompilationOptionValue
   compilationMode?: FrameCompilationModeOptionValue
+}
+
+export interface FrameEmbeddedConfig {
+  platform?: string
+  firmware?: {
+    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
+    requestId?: string
+    queueJobId?: string
+    platform?: string
+    filename?: string
+    path?: string
+    size?: number
+    sha256?: string
+    flashOffset?: string
+    downloadUrl?: string
+    queuedAt?: string
+    startedAt?: string
+    lastHeartbeatAt?: string
+    completedAt?: string
+    error?: string
+  }
 }

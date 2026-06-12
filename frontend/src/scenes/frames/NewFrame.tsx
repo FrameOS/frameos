@@ -5,9 +5,17 @@ import {
   ArrowLeftIcon,
   ArrowUpTrayIcon,
   CommandLineIcon,
+  CpuChipIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
+import {
+  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_ESP32_S3,
+  devices,
+  buildrootPlatforms,
+  embeddedPlatforms,
+  rpiOSPlatforms,
+} from '../../devices'
 import { newFrameForm } from './newFrameForm'
 import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
@@ -116,6 +124,9 @@ function setInstallMethodValues(
       rememberWifi: true,
     }
   }
+  if (installMethod === 'embedded') {
+    return { install_method: installMethod, mode: 'embedded', platform: EMBEDDED_ESP32_S3, frame_host: '' }
+  }
   if (installMethod === 'script') {
     return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
   }
@@ -135,7 +146,8 @@ function renderDeviceOptions(): JSX.Element[] {
 }
 
 function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[] {
-  const platforms = installMethod === 'sd_card' ? buildrootPlatforms : rpiOSPlatforms
+  const platforms =
+    installMethod === 'sd_card' ? buildrootPlatforms : installMethod === 'embedded' ? embeddedPlatforms : rpiOSPlatforms
   return platforms.map((platform) => (
     <option key={platform.value} value={platform.value}>
       {platform.label}
@@ -151,6 +163,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'script') {
     return 'Install with a script'
+  }
+  if (installMethod === 'embedded') {
+    return 'Flash embedded device'
   }
   if (installMethod === 'import') {
     return 'Import frame'
@@ -232,6 +247,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Run one command on the device."
             >
               <CommandLineIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
+              title="Flash embedded device"
+              description="Build firmware for an ESP32 and flash it over USB."
+            >
+              <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
@@ -523,6 +545,41 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           <Field name="rememberWifi">
             <Checkbox label="Remember wifi details for next time" />
           </Field>
+          <div className="flex gap-2 pt-2">
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </Form>
+      ) : addFrameMode === 'embedded' ? (
+        <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            Build a firmware image for an ESP32 microcontroller and flash it over USB serial. The current firmware is
+            an early stub: it blinks the onboard LED and does not run FrameOS yet.
+          </p>
+          <FormField label="Name" error={newFrameErrors.name}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.name ?? ''}
+              onChange={(event) => setNewFrameValue('name', event.target.value)}
+              placeholder="Kitchen Frame"
+              required
+            />
+          </FormField>
+          <FormField label="Platform" error={newFrameErrors.platform}>
+            <select
+              className={selectClassName()}
+              value={newFrame.platform ?? ''}
+              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+            >
+              {renderPlatformOptions('embedded')}
+            </select>
+          </FormField>
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button

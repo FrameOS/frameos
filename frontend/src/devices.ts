@@ -216,6 +216,10 @@ export const buildrootPlatforms: Option[] = [
   { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
 ]
 
+export const EMBEDDED_ESP32_S3 = 'esp32-s3'
+
+export const embeddedPlatforms: Option[] = [{ value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' }]
+
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },
   { value: 'pi.zerow', label: 'Raspberry Pi Zero W' },

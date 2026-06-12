@@ -1271,7 +1271,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.frameCreated]: ({ frameId, installMethod }) => {
-        const deployDrawerView = installMethod === 'sd_card' ? 'sdCard' : installMethod === 'script' ? 'script' : 'main'
+        const deployDrawerView =
+          installMethod === 'sd_card'
+            ? 'sdCard'
+            : installMethod === 'script'
+              ? 'script'
+              : installMethod === 'embedded'
+                ? 'embedded'
+                : 'main'
         actions.setSearch('')
         actions.selectFrame(frameId)
         cache.skipNextFrameChangeDrawerScrollPreserve = true

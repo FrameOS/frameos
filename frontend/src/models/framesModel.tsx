@@ -97,6 +97,10 @@ function startBrowserDownload(path: string): void {
 const pendingSdCardImageDownloads = new Set<number>()
 const sdCardImageStatusPollsInFlight = new Set<number>()
 const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
+
+const pendingEmbeddedFirmwareDownloads = new Set<number>()
+const embeddedFirmwareStatusPollsInFlight = new Set<number>()
+const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
 function sdCardImageProgressDetail(startedAt: number): string {
@@ -181,6 +185,93 @@ function startSdCardImageProgress(frameId: number): void {
   sdCardImageProgressTimers.set(frameId, window.setInterval(updateProgressDetail, SD_CARD_IMAGE_PROGRESS_INTERVAL_MS))
 }
 
+const EMBEDDED_FIRMWARE_PROGRESS_INTERVAL_MS = 15 * 1000
+
+function embeddedFirmwareProgressDetail(startedAt: number): string {
+  const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
+  if (elapsedMinutes > 0) {
+    return `Still building firmware (${elapsedMinutes} min elapsed)`
+  }
+  return 'Still building firmware'
+}
+
+function stopEmbeddedFirmwareProgress(frameId: number): void {
+  const timer = embeddedFirmwareProgressTimers.get(frameId)
+  if (timer === undefined || typeof window === 'undefined') {
+    return
+  }
+  window.clearInterval(timer)
+  embeddedFirmwareProgressTimers.delete(frameId)
+}
+
+async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string): Promise<void> {
+  if (!pendingEmbeddedFirmwareDownloads.has(frameId) || embeddedFirmwareStatusPollsInFlight.has(frameId)) {
+    return
+  }
+  embeddedFirmwareStatusPollsInFlight.add(frameId)
+  try {
+    const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware`)
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    const firmware = data?.firmware as NonNullable<NonNullable<FrameType['embedded']>['firmware']> | undefined
+    if (!firmware || !pendingEmbeddedFirmwareDownloads.has(frameId)) {
+      return
+    }
+    if (firmware.status === 'ready') {
+      pendingEmbeddedFirmwareDownloads.delete(frameId)
+      stopEmbeddedFirmwareProgress(frameId)
+      startBrowserDownload(firmware.downloadUrl || downloadUrl || `/api/frames/${frameId}/embedded/firmware/download`)
+      framesModel.actions.loadFrame(frameId)
+      longRunningTasksModel.actions.finishTask({
+        frameId,
+        kind: 'embeddedFirmware',
+        status: 'success',
+        detail: 'Firmware image ready',
+      })
+    } else if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
+      pendingEmbeddedFirmwareDownloads.delete(frameId)
+      stopEmbeddedFirmwareProgress(frameId)
+      framesModel.actions.loadFrame(frameId)
+      longRunningTasksModel.actions.taskFailed({
+        frameId,
+        kind: 'embeddedFirmware',
+        detail: firmware.error || 'Firmware build failed',
+      })
+    }
+  } finally {
+    embeddedFirmwareStatusPollsInFlight.delete(frameId)
+  }
+}
+
+function startEmbeddedFirmwareProgress(frameId: number): void {
+  stopEmbeddedFirmwareProgress(frameId)
+  if (typeof window === 'undefined') {
+    return
+  }
+  const startedAt = Date.now()
+  const updateProgressDetail = (): void => {
+    if (!pendingEmbeddedFirmwareDownloads.has(frameId)) {
+      stopEmbeddedFirmwareProgress(frameId)
+      return
+    }
+    longRunningTasksModel.actions.updateTaskProgress({
+      frameId,
+      kind: 'embeddedFirmware',
+      progressCurrent: null,
+      progressTotal: null,
+      detail: embeddedFirmwareProgressDetail(startedAt),
+    })
+    void pollEmbeddedFirmwareStatus(frameId)
+  }
+  embeddedFirmwareProgressTimers.set(
+    frameId,
+    window.setInterval(updateProgressDetail, EMBEDDED_FIRMWARE_PROGRESS_INTERVAL_MS)
+  )
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -202,6 +293,7 @@ export const framesModel = kea<framesModelType>([
     }),
     restartAgent: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: number) => ({ id }),
+    downloadEmbeddedFirmware: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
@@ -521,6 +613,59 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
+    downloadEmbeddedFirmware: async ({ id }) => {
+      const frame = values.frames[id]
+      const firmware = frame?.embedded?.firmware
+      const downloadUrl = firmware?.downloadUrl || `/api/frames/${id}/embedded/firmware/download`
+
+      pendingEmbeddedFirmwareDownloads.add(id)
+      startEmbeddedFirmwareProgress(id)
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'embeddedFirmware',
+        title: 'Building firmware image',
+        detail:
+          firmware?.status === 'building' || firmware?.status === 'queued'
+            ? 'Checking firmware build status'
+            : 'Firmware build started',
+      })
+
+      try {
+        const response = await apiFetch(`/api/frames/${id}/embedded/firmware`, {
+          method: 'POST',
+        })
+        if (!response.ok) {
+          let detail = 'Failed to start firmware build'
+          try {
+            detail = (await response.json())?.detail || detail
+          } catch (error) {}
+          throw new Error(detail)
+        }
+        const data = await response.json()
+        if (data?.firmware?.status === 'ready') {
+          pendingEmbeddedFirmwareDownloads.delete(id)
+          stopEmbeddedFirmwareProgress(id)
+          startBrowserDownload(data.firmware.downloadUrl || downloadUrl)
+          longRunningTasksModel.actions.finishTask({
+            frameId: id,
+            kind: 'embeddedFirmware',
+            status: 'success',
+            detail: 'Firmware image ready',
+          })
+          return
+        }
+        void pollEmbeddedFirmwareStatus(id, downloadUrl)
+      } catch (error) {
+        pendingEmbeddedFirmwareDownloads.delete(id)
+        stopEmbeddedFirmwareProgress(id)
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'embeddedFirmware',
+          detail: error instanceof Error ? error.message : 'Failed to build firmware image',
+        })
+        throw error
+      }
+    },
     [socketLogic.actionTypes.socketReconnected]: () => {
       // Frame state is event-sourced over the websocket; anything that
       // happened while disconnected (backend deploys drop the socket at
@@ -529,16 +674,37 @@ export const framesModel = kea<framesModelType>([
     },
     [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
       const sdImage = frame.buildroot?.sdImage
-      if (!sdImage || !pendingSdCardImageDownloads.has(frame.id)) {
-        return
+      if (sdImage && pendingSdCardImageDownloads.has(frame.id)) {
+        if (sdImage.status === 'ready') {
+          pendingSdCardImageDownloads.delete(frame.id)
+          stopSdCardImageProgress(frame.id)
+          startBrowserDownload(sdImage.downloadUrl || `/api/frames/${frame.id}/buildroot/sd_image/download`)
+        } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
+          pendingSdCardImageDownloads.delete(frame.id)
+          stopSdCardImageProgress(frame.id)
+        }
       }
-      if (sdImage.status === 'ready') {
-        pendingSdCardImageDownloads.delete(frame.id)
-        stopSdCardImageProgress(frame.id)
-        startBrowserDownload(sdImage.downloadUrl || `/api/frames/${frame.id}/buildroot/sd_image/download`)
-      } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
-        pendingSdCardImageDownloads.delete(frame.id)
-        stopSdCardImageProgress(frame.id)
+      const firmware = frame.embedded?.firmware
+      if (firmware && pendingEmbeddedFirmwareDownloads.has(frame.id)) {
+        if (firmware.status === 'ready') {
+          pendingEmbeddedFirmwareDownloads.delete(frame.id)
+          stopEmbeddedFirmwareProgress(frame.id)
+          startBrowserDownload(firmware.downloadUrl || `/api/frames/${frame.id}/embedded/firmware/download`)
+          longRunningTasksModel.actions.finishTask({
+            frameId: frame.id,
+            kind: 'embeddedFirmware',
+            status: 'success',
+            detail: 'Firmware image ready',
+          })
+        } else if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
+          pendingEmbeddedFirmwareDownloads.delete(frame.id)
+          stopEmbeddedFirmwareProgress(frame.id)
+          longRunningTasksModel.actions.taskFailed({
+            frameId: frame.id,
+            kind: 'embeddedFirmware',
+            detail: firmware.error || 'Firmware build failed',
+          })
+        }
       }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {

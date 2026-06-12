@@ -52,7 +52,7 @@ interface DeployPlanApiResponse {
   plan: DeployPlanResponse
 }
 
-export type DeployDrawerView = 'main' | 'sdCard' | 'script'
+export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
 
 export interface FrameLogicProps {
   frameId: number

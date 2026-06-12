@@ -42,6 +42,7 @@ import {
 } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
+import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -1050,6 +1051,87 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
   )
 }
 
+function EmbeddedFirmwareSection({
+  frame,
+  onBack,
+  onDownload,
+}: {
+  frame: FrameType
+  onBack?: () => void
+  onDownload: () => void
+}): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const firmware = frame.embedded?.firmware
+  const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
+  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 write_flash ${
+    firmware?.flashOffset || '0x0'
+  } ${filename}`
+  const building = firmware?.status === 'building' || firmware?.status === 'queued'
+
+  const copyFlashCommand = (): void => {
+    copy(flashCommand)
+    setCopied(true)
+  }
+
+  return (
+    <section className="mb-5 space-y-2">
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>
+        <span className="inline-flex items-center gap-2">
+          {onBack ? <BackToDeployButton onClick={onBack} /> : null}
+          <span>Firmware</span>
+        </span>
+      </DrawerHeading>
+      <div className="mb-3">
+        <div className="frame-tool-muted mt-1 text-sm leading-5">
+          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The current
+          firmware is an early stub: it blinks the onboard LED and does not run FrameOS yet.
+        </div>
+        {firmware?.status ? (
+          <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+            Status: {firmware.status}
+          </div>
+        ) : null}
+        {firmware?.error ? <div className="mt-2 text-sm font-semibold text-red-500">{firmware.error}</div> : null}
+      </div>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built
+          on demand, so the first flash can take a minute.
+        </div>
+        <EmbeddedWebFlasher frame={frame} />
+      </div>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
+        </div>
+        <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+          <code>{flashCommand}</code>
+        </pre>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={building}
+            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+          >
+            {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+            {building ? 'Building firmware' : 'Build & download firmware'}
+          </button>
+          <button
+            type="button"
+            onClick={copyFlashCommand}
+            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ClipboardDocumentIcon className="h-4 w-4" />
+            {copied ? 'Copied' : 'Copy flash command'}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
@@ -1076,17 +1158,23 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
-  const { cancelDeploy, downloadSdCardImage, loadFrame } = useActions(framesModel)
+  const { cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
+  const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
   const hasSuccessfulDeploy = Boolean(frame.last_successful_deploy_at || frame.last_successful_deploy)
   const firstInstall = !hasSuccessfulDeploy
   const directSdCardFirstInstall = firstInstall && isBuildrootFrame && deployDrawerView === 'main'
-  const activeDeployDrawerView = directSdCardFirstInstall ? 'sdCard' : deployDrawerView
+  const activeDeployDrawerView = directSdCardFirstInstall
+    ? 'sdCard'
+    : isEmbeddedFrame
+      ? 'embedded'
+      : deployDrawerView
+  const closeOnlyDrawerView = directSdCardFirstInstall || isEmbeddedFrame
   const canDeployAgent = true
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
@@ -1156,7 +1244,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {activeDeployDrawerView === 'sdCard' ? (
+          {activeDeployDrawerView === 'embedded' ? (
+            <EmbeddedFirmwareSection
+              frame={frame}
+              onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
+            />
+          ) : activeDeployDrawerView === 'sdCard' ? (
             <BuildrootSdCardSection
               frame={frame}
               frameForm={frameForm}
@@ -1250,10 +1343,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           {activeDeployDrawerView !== 'main' ? (
             <button
               type="button"
-              onClick={directSdCardFirstInstall ? closeDrawer : showMainDeployView}
+              onClick={closeOnlyDrawerView ? closeDrawer : showMainDeployView}
               className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
-              {directSdCardFirstInstall ? 'Close' : 'Cancel'}
+              {closeOnlyDrawerView ? 'Close' : 'Cancel'}
             </button>
           ) : (
             <>
