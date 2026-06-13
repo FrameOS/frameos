@@ -17,16 +17,32 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { TemplateType } from '../../../../types'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { appsModel } from '../../../../models/appsModel'
+import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 
 interface TemplatesProps {
   openInstalledSceneDrawer?: boolean
   persistOnInstall?: boolean
 }
 
+interface CompatibleTemplateRow {
+  template: TemplateType
+  index: number
+  compatibility: CompatibilityResult
+}
+
+function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplateRow): number {
+  if (a.compatibility.supported !== b.compatibility.supported) {
+    return a.compatibility.supported ? -1 : 1
+  }
+  return a.template.name.localeCompare(b.template.name)
+}
+
 export function Templates({ openInstalledSceneDrawer = false, persistOnInstall = false }: TemplatesProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
   const { applyTemplate, applyTemplateAndSave } = useActions(frameLogic)
-  const { frameId } = useValues(frameLogic)
+  const { frameId, mode } = useValues(frameLogic)
+  const { apps } = useValues(appsModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
@@ -145,25 +161,35 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
           </div>
           {isExpanded('') && (
             <div className="space-y-2">
-              {templates.map((template, index) => (
-                <TemplateRow
-                  key={template.id ?? -index}
-                  template={template}
-                  frameId={frameId}
-                  exportTemplate={exportTemplate}
-                  removeTemplate={removeTemplate}
-                  applyTemplate={(template: TemplateType) => {
-                    if (persistOnInstall) {
-                      applyTemplateAndSave(template, openInstalledSceneDrawer)
-                    } else {
-                      applyTemplate(template)
-                    }
-                  }}
-                  editTemplate={editLocalTemplate}
-                  installedTemplatesByName={installedTemplatesByName}
-                  templateDragData={{ template }}
-                />
-              ))}
+              {templates
+                .map((template, index) => ({
+                  template,
+                  index,
+                  compatibility: templateCompatibilityForFrame(mode, template, apps),
+                }))
+                .toSorted(sortCompatibleTemplates)
+                .map(({ template, index, compatibility }) => {
+                  return (
+                    <TemplateRow
+                      key={template.id ?? -index}
+                      template={template}
+                      frameId={frameId}
+                      exportTemplate={exportTemplate}
+                      removeTemplate={removeTemplate}
+                      applyTemplate={(template: TemplateType) => {
+                        if (persistOnInstall) {
+                          applyTemplateAndSave(template, openInstalledSceneDrawer)
+                        } else {
+                          applyTemplate(template)
+                        }
+                      }}
+                      editTemplate={editLocalTemplate}
+                      installedTemplatesByName={installedTemplatesByName}
+                      templateDragData={compatibility.supported ? { template } : undefined}
+                      compatibility={compatibility}
+                    />
+                  )
+                })}
             </div>
           )}
           {isExpanded('') && templates.length === 0 ? (
@@ -217,31 +243,45 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
               ) : null}
               {isExpanded(repository.url) && repository.templates ? (
                 <div className="space-y-2">
-                  {repository.templates.map((template, index) => (
-                    <TemplateRow
-                      key={template.id ?? -index}
-                      template={template}
-                      frameId={frameId}
-                      saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                      applyTemplate={(template) => {
-                        applyRemoteToFrame(
-                          repository,
-                          template,
-                          persistOnInstall,
-                          persistOnInstall && openInstalledSceneDrawer
-                        )
-                      }}
-                      installedTemplatesByName={installedTemplatesByName}
-                      templateDragData={{
-                        template,
-                        repository: {
-                          id: repository.id,
-                          name: repository.name,
-                          url: repository.url,
-                        },
-                      }}
-                    />
-                  ))}
+                  {repository.templates
+                    .map((template, index) => ({
+                      template,
+                      index,
+                      compatibility: templateCompatibilityForFrame(mode, template, apps),
+                    }))
+                    .toSorted(sortCompatibleTemplates)
+                    .map(({ template, index, compatibility }) => {
+                      return (
+                        <TemplateRow
+                          key={template.id ?? -index}
+                          template={template}
+                          frameId={frameId}
+                          saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                          applyTemplate={(template) => {
+                            applyRemoteToFrame(
+                              repository,
+                              template,
+                              persistOnInstall,
+                              persistOnInstall && openInstalledSceneDrawer
+                            )
+                          }}
+                          installedTemplatesByName={installedTemplatesByName}
+                          templateDragData={
+                            compatibility.supported
+                              ? {
+                                  template,
+                                  repository: {
+                                    id: repository.id,
+                                    name: repository.name,
+                                    url: repository.url,
+                                  },
+                                }
+                              : undefined
+                          }
+                          compatibility={compatibility}
+                        />
+                      )
+                    })}
                 </div>
               ) : null}
               {isExpanded(repository.url) && repository.templates?.length === 0 ? (

@@ -18,6 +18,7 @@ import {
   EventNodeData,
   FrameEvent,
   DispatchNodeData,
+  FrameType,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -34,6 +35,7 @@ import {
   javascriptCatalogAppKeywords,
   javascriptCatalogAppLabel,
 } from '../../../../utils/sceneApps'
+import { appCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
@@ -64,6 +66,7 @@ export interface OptionWithType extends Option {
   type: FieldType
   /** keyword we can use to refer to the other node, e.g. the field name */
   keyword: string
+  disabledReason?: string
 }
 
 export function getNewFieldName(codeArgs: CodeArg[]): string {
@@ -100,6 +103,7 @@ function isRunnableApp(app: AppConfig): boolean {
 function addJavaScriptCatalogAppOptions(
   options: OptionWithType[],
   apps: Record<string, AppConfig>,
+  mode: FrameType['mode'] | undefined | null,
   filter?: (app: AppConfig) => boolean,
   optionKeyword?: string
 ): void {
@@ -108,11 +112,13 @@ function addJavaScriptCatalogAppOptions(
     if (!app || (filter && !filter(app))) {
       continue
     }
+    const compatibility = appCompatibilityForFrame(mode, keyword, app)
     options.push({
       label: javascriptCatalogAppLabel(keyword, app),
       value: `app/${keyword}`,
       type: toFieldType(app.output?.[0].type ?? 'string'),
       keyword: optionKeyword ?? keyword,
+      disabledReason: compatibility.reason,
     })
   }
 }
@@ -276,11 +282,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
     ],
     allNewNodeOptions: [
-      (s) => [s.newNodePicker, s.effectiveApps, s.scene, s.scenes, s.newNodeHandleDataType, s.node],
-      (newNodePicker, effectiveApps, scene, scenes, newNodeHandleDataType, node): OptionWithType[] => {
+      (s) => [s.newNodePicker, s.effectiveApps, s.scene, s.scenes, s.newNodeHandleDataType, s.node, s.frameForm],
+      (newNodePicker, effectiveApps, scene, scenes, newNodeHandleDataType, node, frameForm): OptionWithType[] => {
         if (!newNodePicker) {
           return []
         }
+        const mode = frameForm.mode
         const { handleId, handleType, nodeId } = newNodePicker
         const options: OptionWithType[] = []
 
@@ -292,7 +299,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword: 'clipboard',
           })
           options.push({ label: INLINE_CODE_OPTION_LABEL, value: 'code', type: 'string', keyword: 'code' })
-          addJavaScriptCatalogAppOptions(options, effectiveApps)
+          addJavaScriptCatalogAppOptions(options, effectiveApps, mode)
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,
@@ -314,11 +321,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               continue
             }
             if (isRunnableApp(app)) {
+              const compatibility = appCompatibilityForFrame(mode, keyword, app)
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
                 keyword,
+                disabledReason: compatibility.reason,
               })
             }
           }
@@ -349,16 +358,18 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(effectiveApps, newNodeHandleDataType)
-            addJavaScriptCatalogAppOptions(options, appsForType, undefined, key)
+            addJavaScriptCatalogAppOptions(options, appsForType, mode, undefined, key)
             for (const [keyword, app] of Object.entries(appsForType)) {
               if (isJavaScriptCatalogApp(keyword)) {
                 continue
               }
+              const compatibility = appCompatibilityForFrame(mode, keyword, app)
               options.push({
                 label: appLabel(app, 'App'),
                 value: `app/${keyword}`,
                 type: newNodeHandleDataType,
                 keyword: key,
+                disabledReason: compatibility.reason,
               })
             }
             if (newNodeHandleDataType === 'image') {
@@ -383,6 +394,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             addJavaScriptCatalogAppOptions(
               options,
               effectiveApps,
+              mode,
               (app) => !!app.output && app.output.length > 0,
               key
             )
@@ -391,11 +403,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 continue
               }
               if (app.output && app.output.length > 0) {
+                const compatibility = appCompatibilityForFrame(mode, keyword, app)
                 options.push({
                   label: appLabel(app, 'App'),
                   value: `app/${keyword}`,
                   type: app.output[0].type,
                   keyword: key,
+                  disabledReason: compatibility.reason,
                 })
               }
             }
@@ -415,17 +429,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
-          addJavaScriptCatalogAppOptions(options, effectiveApps, isRunnableApp)
+          addJavaScriptCatalogAppOptions(options, effectiveApps, mode, isRunnableApp)
           for (const [keyword, app] of Object.entries(effectiveApps)) {
             if (isJavaScriptCatalogApp(keyword)) {
               continue
             }
             if (isRunnableApp(app)) {
+              const compatibility = appCompatibilityForFrame(mode, keyword, app)
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
                 keyword,
+                disabledReason: compatibility.reason,
               })
             }
           }
@@ -573,8 +589,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
   listeners(({ actions, values, props }) => ({
     selectNewNodeOption: async ({
       newNodePicker: { diagramX, diagramY, nodeId, handleId, handleType },
-      option: { value, type, keyword },
+      option: { value, type, keyword, disabledReason },
     }) => {
+      if (disabledReason) {
+        return
+      }
+
       if (value === 'clipboard/paste') {
         actions.setCursorPosition({ x: diagramX, y: diagramY })
         actions.pasteFromClipboard()
