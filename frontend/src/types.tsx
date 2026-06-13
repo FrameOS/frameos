@@ -62,6 +62,19 @@ export interface FrameType {
     vcom?: number
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
+    psramMB?: number
+    renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    pins?: {
+      rst?: number
+      dc?: number
+      cs?: number
+      cs2?: number
+      busy?: number
+      sck?: number
+      sclk?: number
+      mosi?: number
+      pwr?: number
+    }
   }
   color?: string
   interval: number

@@ -29,7 +29,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize)
 }
 
 extern void NimMain(void);
-extern bool fos_nim_init_impl(int width, int height, const char *name);
+extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
@@ -43,13 +43,13 @@ static bool s_nim_ready = false;
 
 bool frameos_nim_available(void) { return true; }
 
-bool frameos_nim_init(int width, int height, const char *frame_name)
+bool frameos_nim_init(int width, int height, const char *frame_name, uint32_t max_http_response_bytes)
 {
     if (!s_nim_started) {
         NimMain();
         s_nim_started = true;
     }
-    s_nim_ready = fos_nim_init_impl(width, height, frame_name);
+    s_nim_ready = fos_nim_init_impl(width, height, frame_name, (int)max_http_response_bytes);
     return s_nim_ready;
 }
 

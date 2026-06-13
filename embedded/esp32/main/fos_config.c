@@ -29,6 +29,7 @@ static void load_defaults(void)
     strlcpy(s_config.panel, FRAMEOS_DEFAULT_PANEL, sizeof(s_config.panel));
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
+    s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
@@ -100,6 +101,7 @@ esp_err_t fos_config_init(void)
     uint32_t u32;
     if (nvs_get_u32(nvs, "frame_id", &u32) == ESP_OK) s_config.frame_id = u32;
     if (nvs_get_u32(nvs, "interval", &u32) == ESP_OK) s_config.interval_sec = u32;
+    if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
@@ -135,6 +137,7 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "panel", s_config.panel);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
+    nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
     nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);

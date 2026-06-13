@@ -50,6 +50,7 @@ typedef struct {
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
+    uint32_t max_http_response_bytes;
     bool deep_sleep;               /* deep sleep between refreshes */
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */

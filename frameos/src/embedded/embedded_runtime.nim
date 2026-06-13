@@ -66,10 +66,12 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 
 # ------------------------------------------------------------------- setup
 
-proc initRuntime*(width, height: int, name: string) =
+proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int) =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Logs go synchronously to the firmware's ESP_LOG hook; events (e.g. a
   ## "render" dispatched from a scene) set a flag the C render loop polls.
+  let httpResponseLimit =
+    if maxHttpResponseBytes > 0: maxHttpResponseBytes else: DefaultMaxHttpResponseBytes
   frameConfig = FrameConfig(
     name: name,
     mode: "embedded",
@@ -77,7 +79,7 @@ proc initRuntime*(width, height: int, name: string) =
     height: height,
     device: "embedded",
     deviceConfig: DeviceConfig(pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)),
-    maxHttpResponseBytes: DefaultMaxHttpResponseBytes,
+    maxHttpResponseBytes: httpResponseLimit,
     rotate: 0,
     flip: "",
     scalingMode: "cover",

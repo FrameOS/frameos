@@ -3,9 +3,9 @@
 #include "frameos_nim.h"
 
 bool frameos_nim_available(void) { return false; }
-bool frameos_nim_init(int width, int height, const char *frame_name)
+bool frameos_nim_init(int width, int height, const char *frame_name, uint32_t max_http_response_bytes)
 {
-    (void)width; (void)height; (void)frame_name;
+    (void)width; (void)height; (void)frame_name; (void)max_http_response_bytes;
     return false;
 }
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)

@@ -32,7 +32,7 @@ from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
-from app.models.frame import Frame, update_frame
+from app.models.frame import DEFAULT_MAX_HTTP_RESPONSE_BYTES, Frame, update_frame
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
 from app.utils.token import secure_token
@@ -45,6 +45,19 @@ EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
 EMBEDDED_FIRMWARE_VERSION = 8  # enlarged 8MB flash layout with 3840K OTA slots
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
+EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
+EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
+EMBEDDED_DEFAULT_PINS = {
+    "rst": 5,
+    "dc": 4,
+    "cs": 3,
+    "cs2": -1,
+    "busy": 6,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": -1,
+}
+EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1
@@ -162,6 +175,43 @@ def embedded_render_mode_for_frame(frame: Frame) -> int:
             elif isinstance(value, int) and not isinstance(value, bool):
                 return EMBEDDED_RENDER_REMOTE if value == EMBEDDED_RENDER_REMOTE else EMBEDDED_RENDER_LOCAL
     return EMBEDDED_RENDER_LOCAL
+
+
+def embedded_device_config(frame: Frame) -> dict[str, Any]:
+    return frame.device_config if isinstance(frame.device_config, dict) else {}
+
+
+def embedded_max_http_response_bytes_for_frame(frame: Frame) -> int:
+    value = getattr(frame, "max_http_response_bytes", None)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        return EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    if value == DEFAULT_MAX_HTTP_RESPONSE_BYTES:
+        return EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    return value
+
+
+def embedded_default_pins_for_panel(panel: str) -> dict[str, int]:
+    if panel == "EPD_13in3e":
+        return dict(EMBEDDED_13IN3E_DEFAULT_PINS)
+    return dict(EMBEDDED_DEFAULT_PINS)
+
+
+def embedded_default_pins_for_frame(frame: Frame) -> dict[str, int]:
+    return embedded_default_pins_for_panel(embedded_panel_for_frame(frame))
+
+
+def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
+    pins = embedded_default_pins_for_frame(frame)
+    raw_pins = embedded_device_config(frame).get("pins")
+    if not isinstance(raw_pins, dict):
+        return pins
+    for key in EMBEDDED_PIN_KEYS:
+        raw_value = raw_pins.get(key)
+        if raw_value is None and key == "sck":
+            raw_value = raw_pins.get("sclk")
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+            pins[key] = raw_value
+    return pins
 
 
 def embedded_pixel_format_for_panel(panel: str) -> int:
@@ -316,19 +366,17 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",
+        f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {embedded_max_http_response_bytes_for_frame(frame)}",
     ]
-    pins = (frame.device_config or {}).get("pins")
-    if isinstance(pins, dict):
-        mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
-                   "sck": "SCK", "sclk": "SCK", "mosi": "MOSI", "pwr": "PWR"}
-        for key, macro in mapping.items():
-            value = pins.get(key)
-            if isinstance(value, int):
-                lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {value}")
+    pins = embedded_pins_for_frame(frame)
+    mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
+               "sck": "SCK", "mosi": "MOSI", "pwr": "PWR"}
+    for key, macro in mapping.items():
+        lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {pins[key]}")
 
     # Optional power-management settings (M4). Absent → firmware defaults
     # (no deep sleep, no battery pin); all still overridable from the device.
-    device_config = frame.device_config or {}
+    device_config = embedded_device_config(frame)
 
     def _config_value(*keys: str) -> object:
         for key in keys:
@@ -380,6 +428,12 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
         frame.server_api_key = secure_token(32)
     if not frame.device or frame.device == "web_only":
         frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
+
+    frame.max_http_response_bytes = embedded_max_http_response_bytes_for_frame(frame)
+
+    device_config = dict(embedded_device_config(frame))
+    device_config["pins"] = embedded_pins_for_frame(frame)
+    frame.device_config = device_config
 
 
 def clear_embedded_firmware(frame: Frame | Any) -> None:

@@ -20,7 +20,7 @@ extern "C" {
 bool frameos_nim_available(void);
 /* One-time init: panel dimensions + frame name. Safe to call when
  * unavailable (returns false). Allocates the Nim heap (PSRAM via malloc). */
-bool frameos_nim_init(int width, int height, const char *frame_name);
+bool frameos_nim_init(int width, int height, const char *frame_name, uint32_t max_http_response_bytes);
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);

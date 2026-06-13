@@ -404,6 +404,8 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
     old_mode = frame.mode
     if data.mode == "buildroot" or ((preview.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         ensure_buildroot_frame_defaults(preview, (preview.buildroot or {}).get("platform"))
+    elif data.mode == "embedded" or (preview.mode or "rpios") == "embedded":
+        ensure_embedded_frame_defaults(preview, (preview.embedded or {}).get("platform"))
     elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
         preview.ssh_user = "pi"
 
@@ -2888,7 +2890,7 @@ async def api_frame_update_endpoint(
             ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
         except ValueError as exc:
             _bad_request(str(exc))
-    elif data.mode == "embedded" or ((frame.mode or "rpios") == "embedded" and "embedded" in update_data):
+    elif data.mode == "embedded" or (frame.mode or "rpios") == "embedded":
         try:
             ensure_embedded_frame_defaults(frame, (frame.embedded or {}).get("platform"))
         except ValueError as exc:

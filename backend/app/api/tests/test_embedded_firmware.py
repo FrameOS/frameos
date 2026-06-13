@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from app.models.frame import Frame
 from app.tasks.embedded_firmware import (
+    EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_FIRMWARE_VERSION,
     EMBEDDED_RENDER_REMOTE,
     EMBEDDED_SUPPORTED_PANELS,
@@ -13,13 +14,17 @@ from app.tasks.embedded_firmware import (
     embedded_buffer_size,
     _generated_config_header,
     check_embedded_panel_fits_memory,
+    embedded_default_pins_for_frame,
     embedded_gpio_buttons_for_frame,
     embedded_hostname_for_frame,
+    embedded_max_http_response_bytes_for_frame,
     embedded_module_psram_bytes,
     embedded_panel_for_frame,
+    embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
+    ensure_embedded_frame_defaults,
 )
 
 
@@ -42,6 +47,9 @@ async def test_new_embedded_frame(async_client):
     assert frame['embedded']['platform'] == 'esp32-s3'
     assert frame['agent']['agentEnabled'] is False
     assert frame['https_proxy']['enable'] is False
+    assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    assert frame['device_config']['pins']['cs'] == 3
+    assert frame['device_config']['pins']['cs2'] == -1
 
 
 @pytest.mark.asyncio
@@ -83,6 +91,8 @@ async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     assert stored.network['wifiSSID'] == 'Test WiFi'
     assert stored.network['wifiPassword'] == 'secret1234'
     assert stored.device.startswith('waveshare.')
+    assert stored.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    assert stored.device_config['pins']['rst'] == 5
 
 
 @pytest.mark.asyncio
@@ -264,6 +274,28 @@ def test_large_spectra_panel_requires_16mb_for_local_rendering():
     check_embedded_panel_fits_memory(frame)
 
 
+def test_embedded_defaults_choose_response_limit_and_pin_layout():
+    frame = Frame(
+        id=7,
+        device="waveshare.EPD_13in3e",
+        max_http_response_bytes=64 * 1024 * 1024,
+        device_config={"psramMB": 16},
+    )
+    ensure_embedded_frame_defaults(frame)
+    assert frame.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    assert frame.device_config["pins"]["cs2"] == 8
+    assert embedded_default_pins_for_frame(frame)["cs2"] == 8
+
+    custom = Frame(
+        device="waveshare.EPD_7in5_V2",
+        max_http_response_bytes=3 * 1024 * 1024,
+        device_config={"pins": {"rst": 12, "sclk": 11}},
+    )
+    assert embedded_max_http_response_bytes_for_frame(custom) == 3 * 1024 * 1024
+    assert embedded_pins_for_frame(custom)["rst"] == 12
+    assert embedded_pins_for_frame(custom)["sck"] == 11
+
+
 def test_large_spectra_panel_can_use_thin_client_on_8mb():
     frame = Frame(device="waveshare.EPD_13in3e", device_config={"renderMode": "remote"})
     assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
@@ -296,6 +328,7 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 2" in header
     assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
     assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
+    assert f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES}" in header
 
 
 def test_generated_config_bakes_hostname_from_frame_host():

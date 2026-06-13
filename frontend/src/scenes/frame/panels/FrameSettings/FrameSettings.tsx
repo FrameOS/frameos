@@ -5,7 +5,7 @@ import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
-import { Select } from '../../../../components/Select'
+import { Select, type Option } from '../../../../components/Select'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import {
   DEFAULT_FRAME_ERROR_BEHAVIOR,
@@ -153,6 +153,103 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   }
 }
 
+const DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
+const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
+
+type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pins']>
+type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
+type Esp32PinLayout = Record<Esp32PinKey, number>
+
+const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
+  { key: 'rst', label: 'RST' },
+  { key: 'dc', label: 'DC' },
+  { key: 'cs', label: 'CS' },
+  { key: 'cs2', label: 'CS2' },
+  { key: 'busy', label: 'BUSY' },
+  { key: 'sck', label: 'SCK' },
+  { key: 'mosi', label: 'MOSI' },
+  { key: 'pwr', label: 'PWR' },
+]
+
+const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 5,
+  dc: 4,
+  cs: 3,
+  cs2: -1,
+  busy: 6,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_XIAO_13IN3E_PIN_LAYOUT: Esp32PinLayout = {
+  ...ESP32_XIAO_PIN_LAYOUT,
+  cs2: 8,
+}
+
+function esp32RecommendedPinLayout(device?: string): Esp32PinLayout {
+  return device === 'waveshare.EPD_13in3e' ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
+}
+
+function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+  return Math.max(-1, Math.min(48, Math.round(value)))
+}
+
+function normalizeEsp32PinLayout(value: Esp32Pins | undefined, device?: string): Esp32PinLayout {
+  const recommended = esp32RecommendedPinLayout(device)
+  if (!value || typeof value !== 'object') {
+    return recommended
+  }
+  return {
+    rst: normalizeEsp32PinNumber(value.rst, recommended.rst),
+    dc: normalizeEsp32PinNumber(value.dc, recommended.dc),
+    cs: normalizeEsp32PinNumber(value.cs, recommended.cs),
+    cs2: normalizeEsp32PinNumber(value.cs2, recommended.cs2),
+    busy: normalizeEsp32PinNumber(value.busy, recommended.busy),
+    sck: normalizeEsp32PinNumber(value.sck ?? value.sclk, recommended.sck),
+    mosi: normalizeEsp32PinNumber(value.mosi, recommended.mosi),
+    pwr: normalizeEsp32PinNumber(value.pwr, recommended.pwr),
+  }
+}
+
+function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): boolean {
+  return ESP32_PIN_FIELDS.every(({ key }) => first[key] === second[key])
+}
+
+function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
+  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_PIN_LAYOUT)) {
+    return 'xiao'
+  }
+  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_13IN3E_PIN_LAYOUT)) {
+    return 'xiao-13in3e'
+  }
+  return 'custom'
+}
+
+function esp32PinLayoutPresetOptions(device?: string): Option[] {
+  const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
+  const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
+  return device === 'waveshare.EPD_13in3e'
+    ? [xiao13in3e, xiao, { value: 'custom', label: 'Custom' }]
+    : [xiao, xiao13in3e, { value: 'custom', label: 'Custom' }]
+}
+
+function esp32PinLayoutForPreset(preset: string, device?: string): Esp32PinLayout | null {
+  if (preset === 'xiao') {
+    return { ...ESP32_XIAO_PIN_LAYOUT }
+  }
+  if (preset === 'xiao-13in3e') {
+    return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
+  }
+  if (preset === 'recommended') {
+    return esp32RecommendedPinLayout(device)
+  }
+  return null
+}
+
 export function FrameSettings({
   className,
   hideDropdown,
@@ -216,6 +313,9 @@ export function FrameSettings({
   const isBuildrootMode = mode === 'buildroot'
   const isEmbeddedMode = mode === 'embedded'
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
+  const maxHttpResponsePlaceholder = String(
+    isEmbeddedMode ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
+  )
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
   const timezoneUpdater = frameForm.timezone_updater ?? {}
   const timezoneUpdateHourValue =
@@ -551,9 +651,23 @@ export function FrameSettings({
                   disabled={inFrameAdminMode}
                   onChange={(nextMode) => {
                     onChange(nextMode)
-                    if (nextMode === 'embedded' && !frameForm.embedded?.platform) {
+                    if (nextMode === 'embedded') {
+                      const nextValues: Partial<FrameType> = {}
+                      if (!frameForm.embedded?.platform) {
+                        nextValues.embedded = { ...(frameForm.embedded ?? {}), platform: EMBEDDED_ESP32_S3 }
+                      }
+                      if (
+                        !frameForm.max_http_response_bytes ||
+                        frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
+                      ) {
+                        nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+                      }
+                      nextValues.device_config = {
+                        ...(frameForm.device_config ?? {}),
+                        pins: normalizeEsp32PinLayout(frameForm.device_config?.pins, frameForm.device),
+                      }
                       setFrameFormValues({
-                        embedded: { ...(frameForm.embedded ?? {}), platform: EMBEDDED_ESP32_S3 },
+                        ...nextValues,
                       })
                     }
                   }}
@@ -562,7 +676,29 @@ export function FrameSettings({
             </Field>
           ) : null}
           <Field name="device" label="Display driver">
-            <Select name="device" options={devices} />
+            {({ value, onChange }) => (
+              <Select
+                name="device"
+                value={(value as string) || ''}
+                options={devices}
+                onChange={(nextDevice) => {
+                  const previousDevice = (value as string) || ''
+                  onChange(nextDevice)
+                  if (isEmbeddedMode) {
+                    const currentPins = frameForm.device_config?.pins
+                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice)
+                    if (!currentPins || esp32PinLayoutsEqual(previousPins, esp32RecommendedPinLayout(previousDevice))) {
+                      setFrameFormValues({
+                        device_config: {
+                          ...(frameForm.device_config ?? {}),
+                          pins: esp32RecommendedPinLayout(nextDevice),
+                        },
+                      })
+                    }
+                  }
+                }}
+              />
+            )}
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
@@ -661,11 +797,58 @@ export function FrameSettings({
             </Group>
           ) : null}
           {isEmbeddedMode ? (
-            <Group name="embedded">
-              <Field name="platform" label="Platform">
-                <Select name="embedded.platform" options={embeddedPlatforms} />
-              </Field>
-            </Group>
+            <>
+              <Group name="embedded">
+                <Field name="platform" label="Platform">
+                  <Select name="embedded.platform" options={embeddedPlatforms} />
+                </Field>
+              </Group>
+              <Group name="device_config">
+                <Field
+                  name="pins"
+                  label="ESP32 GPIO pin layout"
+                  tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
+                >
+                  {({ value, onChange }) => {
+                    const pins = normalizeEsp32PinLayout(value as Esp32Pins | undefined, frameForm.device)
+                    const preset = esp32PinLayoutPresetValue(pins)
+                    const recommended = esp32RecommendedPinLayout(frameForm.device)
+                    return (
+                      <div className="space-y-3">
+                        <Select
+                          value={preset}
+                          options={esp32PinLayoutPresetOptions(frameForm.device)}
+                          onChange={(nextPreset) => {
+                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device)
+                            if (layout) {
+                              onChange(layout)
+                            }
+                          }}
+                        />
+                        <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
+                          {ESP32_PIN_FIELDS.map(({ key, label }) => (
+                            <label key={key} className="space-y-1">
+                              <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
+                              <NumberTextInput
+                                value={pins[key]}
+                                placeholder={String(recommended[key])}
+                                onChange={(nextValue) => {
+                                  const fallback = key === 'cs2' || key === 'pwr' ? -1 : pins[key]
+                                  onChange({
+                                    ...pins,
+                                    [key]: normalizeEsp32PinNumber(nextValue, fallback),
+                                  })
+                                }}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  }}
+                </Field>
+              </Group>
+            </>
           ) : null}
           {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
             <Group name="rpios">
@@ -1525,11 +1708,11 @@ export function FrameSettings({
             tooltip={
               <>
                 Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-                larger calendar feeds, images, or APIs.
+                larger calendar feeds, images, or APIs. ESP32 frames default to 2 MiB to avoid large PSRAM allocations.
               </>
             }
           >
-            <NumberTextInput name="max_http_response_bytes" placeholder="67108864" />
+            <NumberTextInput name="max_http_response_bytes" placeholder={maxHttpResponsePlaceholder} />
           </Field>
           <Field name="scaling_mode" label="Scaling mode">
             <Select

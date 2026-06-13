@@ -194,12 +194,12 @@ proc packImageForFormat(
 
 # ------------------------------------------------------------------ C API
 
-proc fos_nim_init_impl(width, height: cint; name: cstring): bool {.exportc, cdecl.} =
+proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
   frameHeight = height.int
   frameName = $name
   try:
-    initRuntime(frameWidth, frameHeight, frameName)
+    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int)
     initScene()
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} \"{frameName}\", nim {NimVersion}")
     true

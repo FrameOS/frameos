@@ -149,6 +149,7 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
   'frame_host',
   'gpio_buttons',
   'interval',
+  'max_http_response_bytes',
   'network',
   'scenes',
   'server_api_key',
