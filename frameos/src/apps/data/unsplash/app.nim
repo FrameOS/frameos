@@ -3,7 +3,6 @@ import json
 import uri
 import strformat
 import strutils
-import httpclient
 import frameos/apps
 import frameos/types
 import frameos/utils/http_client
@@ -29,6 +28,7 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
         if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
 
 proc get*(self: App, context: ExecutionContext): Image =
+  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"unsplash"}{"accessKey"}.getStr
   if apiKey == "":
     return self.error(context, "Please provide an Unsplash API key in the settings.")
@@ -47,20 +47,19 @@ proc get*(self: App, context: ExecutionContext): Image =
     let url = &"https://api.unsplash.com/photos/random/?orientation={encodeUrl(orientation)}&query={encodeUrl(search)}"
     if self.frameConfig.debug:
       self.log(&"API request: {url}")
-    var client = newHttpClient(timeout = 60000)
-    # Close on every exit path: a request that raises (timeout, DNS, TLS — the
-    # common case on flaky networks) must not leak the socket and SSL context.
-    defer: client.close()
-    client.limitHttpResponse(self.maxHttpResponseBytes(), 60)
-    client.headers = newHttpHeaders([
-        ("Authorization", "Client-ID " & apiKey),
-        ("Accept-Version", "v1"),
-        ("Content-Type", "application/json"),
-    ])
-    let response = client.request(url, httpMethod = HttpGet)
-    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
+    let response = boundedRequestWithHeaders(
+      url,
+      headers = @[
+        (name: "Authorization", value: "Client-ID " & apiKey),
+        (name: "Accept-Version", value: "v1"),
+        (name: "Content-Type", value: "application/json"),
+      ],
+      timeoutMs = 60000,
+      maxBytes = self.maxHttpResponseBytes(),
+      maxSeconds = 60
+    )
 
-    if response.code != Http200:
+    if response.code != 200:
       try:
         let json = parseJson(response.body)
         let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
@@ -72,16 +71,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     let imageUrl = json{"urls"}{"raw"}.getStr
     if imageUrl == "":
       return self.error(context, "No image URL returned from Unsplash.")
-    var client2 = newHttpClient(timeout = 60000)
-    client2.limitHttpResponse(self.maxHttpResponseBytes(), 60)
-    defer: client2.close()
     let realImageUrl = &"{imageUrl}&w={width}&h={height}&fit=crop&crop=faces,edges"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {realImageUrl}")
-    let imageData = client2.request(realImageUrl, httpMethod = HttpGet)
-    requireHttpResponseWithinLimit(imageData.body, self.maxHttpResponseBytes())
-    if imageData.code != Http200:
-      return self.error(context, &"Error {imageData.status} fetching image")
+    let (downloadedImage, imageData) = downloadImageWithData(
+      realImageUrl,
+      maxBytes = self.maxHttpResponseBytes(),
+      proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+    )
 
     if self.appConfig.metadataStateKey != "":
       let description = json{"description"}.getStr(json{"alt_description"}.getStr(""))
@@ -102,9 +99,9 @@ proc get*(self: App, context: ExecutionContext): Image =
         "authorUrl": json{"user"}{"links"}{"html"}.getStr
       }
 
-    if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
-      discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
+    if imageData.len > 0 and (self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always"):
+      discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData, self.appConfig.saveAssets == "auto")
 
-    result = decodeImageWithFallback(imageData.body)
+    result = downloadedImage
   except CatchableError as e:
     return self.error(context, "Error fetching image from Unsplash: " & $e.msg)

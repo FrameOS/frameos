@@ -43,9 +43,9 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 9  # config fingerprint + Wi-Fi auth threshold fix
+EMBEDDED_FIRMWARE_VERSION = 13  # direct ESP32 HTTPS image downloads + no-OTA 8MB layout
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
-EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
+EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
 EMBEDDED_DEFAULT_PINS = {
     "rst": 5,

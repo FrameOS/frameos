@@ -20,7 +20,8 @@ static const char *TAG = "fos_wifi";
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAILED_BIT BIT1
-#define WIFI_MAX_RETRIES 6
+#define WIFI_MAX_RETRIES 12
+#define WIFI_PORTAL_RETRY_LOG_INTERVAL 10
 
 static EventGroupHandle_t s_events;
 static fos_wifi_state_t s_state = FOS_WIFI_OFFLINE;
@@ -29,6 +30,8 @@ static char s_ap_ssid[32] = "";
 static int s_retries = 0;
 static bool s_time_synced = false;
 static bool s_scan_only = false;
+static bool s_portal_active = false;
+static bool s_portal_sta_retry = false;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 
@@ -105,11 +108,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
             ESP_LOGW(TAG, "disconnected reason=%u (%s), retry %d/%d",
                      (unsigned)reason, disconnect_reason_name(reason), s_retries, WIFI_MAX_RETRIES);
             esp_wifi_connect();
+        } else if (s_portal_active && s_portal_sta_retry && !s_scan_only) {
+            s_state = FOS_WIFI_PORTAL;
+            strlcpy(s_ip, "192.168.4.1", sizeof(s_ip));
+            s_retries++;
+            if (s_retries == 1 || (s_retries % WIFI_PORTAL_RETRY_LOG_INTERVAL) == 0) {
+                ESP_LOGW(TAG, "portal STA disconnected reason=%u (%s), continuing background retry #%d",
+                         (unsigned)reason, disconnect_reason_name(reason), s_retries);
+            }
+            esp_wifi_connect();
         } else if (s_state == FOS_WIFI_CONNECTING) {
             xEventGroupSetBits(s_events, WIFI_FAILED_BIT);
         } else if (s_state == FOS_WIFI_CONNECTED) {
             ESP_LOGW(TAG, "connection lost, reconnecting");
-            s_state = FOS_WIFI_CONNECTING;
+            s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
             s_retries = 0;
             esp_wifi_connect();
         }
@@ -157,6 +169,8 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
 
     s_state = FOS_WIFI_CONNECTING;
     s_retries = 0;
+    s_portal_active = false;
+    s_portal_sta_retry = false;
     xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -240,11 +254,24 @@ esp_err_t fos_wifi_start_portal(void)
     strlcpy((char *)ap_config.ap.ssid, s_ap_ssid, sizeof(ap_config.ap.ssid));
     ap_config.ap.ssid_len = strlen(s_ap_ssid);
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    bool keep_sta_retrying = fos_config_wifi_ready();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(keep_sta_retrying ? WIFI_MODE_APSTA : WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    s_portal_active = true;
+    s_portal_sta_retry = keep_sta_retrying;
     s_state = FOS_WIFI_PORTAL;
     strlcpy(s_ip, "192.168.4.1", sizeof(s_ip));
+    if (keep_sta_retrying) {
+        s_retries = 0;
+        esp_err_t err = esp_wifi_connect();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "provisioning portal up; station will keep retrying \"%s\" in APSTA mode",
+                     fos_config()->wifi_ssid);
+        } else {
+            ESP_LOGW(TAG, "failed to start portal station retry: %s", esp_err_to_name(err));
+        }
+    }
     xTaskCreate(dns_hijack_task, "fos_dns", 3072, NULL, 5, NULL);
     ESP_LOGI(TAG, "provisioning portal up: ssid=%s ip=%s", s_ap_ssid, s_ip);
     return ESP_OK;

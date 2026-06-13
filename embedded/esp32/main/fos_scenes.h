@@ -29,6 +29,13 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len);
 /* Ask the render task to force a backend sync on its next pass. */
 void fos_scenes_request_sync(void);
 
+/* Queue a scene switch. Safe from any task; the render task applies it before
+ * the next render so Nim/QuickJS scene state stays single-threaded. */
+esp_err_t fos_scenes_select(const char *scene_id);
+
+/* Apply a queued scene switch. Render task only. True if selection changed. */
+bool fos_scenes_apply_pending_selection(void);
+
 /* Apply pending scenes (file → Nim). Render task only. True if applied. */
 bool fos_scenes_apply_pending(void);
 

@@ -30,23 +30,31 @@ proc readEmbeddedFont(path: string): string =
 
 proc getDefaultTypeface*(): Typeface =
   if not typefaces.hasKey(defaultFont):
-    typefaces[defaultFont] = parseTtf(readEmbeddedFont("assets/compiled/fonts/" & defaultFont))
+    withLock typefaceLock:
+      if not typefaces.hasKey(defaultFont):
+        typefaces[defaultFont] = parseTtf(readEmbeddedFont("assets/compiled/fonts/" & defaultFont))
   return typefaces[defaultFont]
 
 proc getTypeface*(font: string, assetsPath: string): Typeface =
-  if not typefaces.hasKey(font):
-    # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
-    if "/" in font or ".." in font or "~" in font:
-      raise newException(ValueError, "Invalid font name")
-    withLock typefaceLock:
-      let ttf = if font == defaultFont:
-        readEmbeddedFont("assets/compiled/fonts/" & font)
-      elif fileExists(assetsPath & "/fonts/" & font):
-        readFile(assetsPath & "/fonts/" & font)
-      else:
-        readEmbeddedFont("assets/compiled/fonts/" & defaultFont)
-      typefaces[font] = parseTtf(ttf)
-  return typefaces[font]
+  if font.len == 0 or font == defaultFont:
+    return getDefaultTypeface()
+  when defined(frameosEmbedded):
+    # Custom scene font names often come from desktop/web renders. On embedded
+    # targets, reuse the parsed default typeface to avoid repeated TTF parsing
+    # and scarce internal heap pressure.
+    return getDefaultTypeface()
+  else:
+    if not typefaces.hasKey(font):
+      # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
+      if "/" in font or ".." in font or "~" in font:
+        raise newException(ValueError, "Invalid font name")
+      withLock typefaceLock:
+        if not typefaces.hasKey(font):
+          if fileExists(assetsPath & "/fonts/" & font):
+            typefaces[font] = parseTtf(readFile(assetsPath & "/fonts/" & font))
+          else:
+            typefaces[font] = getDefaultTypeface()
+    return typefaces[font]
 
 proc newFont*(typeface: Typeface, size: float, color: Color): Font =
   result = newFont(typeface)

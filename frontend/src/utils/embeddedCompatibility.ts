@@ -13,14 +13,11 @@ const embeddedUnavailableApps: Record<string, string> = {
   'data/chromiumScreenshot': 'Requires Playwright/Chromium and child processes.',
   'data/haSensor': 'Requires Home Assistant service settings that are not available in ESP32 firmware.',
   'data/localImage': 'Requires local assets or mounted files, which ESP32 frames do not support yet.',
-  'data/openaiImage': 'Requires OpenAI service settings that are not available in ESP32 firmware.',
-  'data/openaiText': 'Requires OpenAI service settings that are not available in ESP32 firmware.',
   'data/rstpSnapshot': 'Requires FFmpeg and child processes.',
-  'data/unsplash': 'Uses Nim std/httpclient networking that is not ported to ESP32 yet.',
   'data/wikicommons': 'Uses Nim std/httpclient networking that is not ported to ESP32 yet.',
 }
 
-const embeddedIgnoredSettings = new Set(['frameOS'])
+const embeddedIgnoredSettings = new Set(['frameOS', 'openAI', 'unsplash'])
 
 function unsupported(reason: string): CompatibilityResult {
   return { supported: false, reason }

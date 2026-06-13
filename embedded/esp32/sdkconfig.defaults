@@ -7,16 +7,17 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
-# Two 3840K app slots leave meaningful headroom for the Nim + QuickJS runtime
-# while preserving rollback.
+# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), no-OTA layout.
+# A single 7744K app slot leaves room for the Nim + QuickJS runtime and
+# multi-format image decoding on small modules. Production 16MB builds can use
+# partitions_ota_16mb.csv to restore A/B rollback with two 7872K app slots.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# OTA rollback: new images boot once as "pending verify"; the app marks
-# itself valid after a healthy boot, otherwise the bootloader rolls back.
-CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# OTA rollback is disabled in the default 8MB profile because there is no
+# inactive app partition. fos_ota.c detects this and no-ops OTA checks.
+# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set
 
 # 8MB octal PSRAM (XIAO ESP32-S3). Big allocations (framebuffers, Nim heap)
 # go to PSRAM via malloc; small/hot ones stay in internal SRAM.
@@ -32,6 +33,10 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+# HTTPS renders happen after Nim/QuickJS have consumed most internal SRAM.
+# Put mbedTLS' large dynamic buffers in PSRAM so image/data apps can fetch
+# public HTTPS APIs reliably on 8MB PSRAM boards.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
 
 # Wi-Fi provisioning portal posts can carry long headers/forms

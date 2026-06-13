@@ -7,6 +7,9 @@ import checksums/md5
 import frameos/types
 import frameos/utils/system
 
+when defined(frameosEmbedded):
+  import frameos/utils/http_client
+
 proc renderWidth*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.height else: config.width
 
@@ -24,6 +27,47 @@ proc maxHttpResponseBytes*(self: AppRoot): int {.inline.} =
     self.frameConfig.maxHttpResponseBytes()
   else:
     DefaultMaxHttpResponseBytes
+
+proc embeddedMediaProxyBaseUrl*(config: FrameConfig): string {.inline.} =
+  when defined(frameosEmbedded):
+    if config != nil and config.settings != nil:
+      return config.settings{"embedded"}{"mediaProxyBaseUrl"}.getStr()
+  ""
+
+proc embeddedMediaProxyBaseUrl*(self: AppRoot): string {.inline.} =
+  if self != nil:
+    self.frameConfig.embeddedMediaProxyBaseUrl()
+  else:
+    ""
+
+proc ensureEmbeddedServiceSettings*(config: FrameConfig) =
+  when defined(frameosEmbedded):
+    if config == nil:
+      return
+    if config.settings == nil or config.settings.kind != JObject:
+      config.settings = %*{}
+    if config.settings{"embedded"} == nil or config.settings{"embedded"}.kind != JObject:
+      config.settings["embedded"] = %*{}
+    let embedded = config.settings["embedded"]
+    if embedded{"settingsLoaded"}.getBool(false):
+      return
+    let url = embedded{"settingsUrl"}.getStr()
+    if url.len == 0:
+      return
+    let body = boundedGetContent(url, timeoutMs = 10000, maxBytes = 16 * 1024,
+                                 maxSeconds = 12)
+    let fetched = parseJson(body)
+    if fetched.kind == JObject:
+      for key, value in fetched.pairs:
+        if key != "embedded":
+          config.settings[key] = value
+    embedded["settingsLoaded"] = %true
+  else:
+    discard
+
+proc ensureEmbeddedServiceSettings*(self: AppRoot) =
+  if self != nil:
+    self.frameConfig.ensureEmbeddedServiceSettings()
 
 proc appName(self: AppRoot): string =
   if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName

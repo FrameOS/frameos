@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 import pixie
 
 import ../app
@@ -35,6 +35,9 @@ suite "data/downloadImage app":
     check outputImage.width == 13
     check outputImage.height == 9
     check not scene.state.hasKey("meta")
+    check logs.items.len == 1
+    check logs.items[0]["event"].getStr().contains("error")
+    check logs.items[0]["error"].getStr().contains("An error occurred while downloading the image:")
 
   test "invalid URL falls back to frame render dimensions without context image":
     let logs = LogStore(items: @[])

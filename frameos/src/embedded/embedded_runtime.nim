@@ -7,7 +7,7 @@
 # run the AOT-compiled standard app library. The firmware's C side feeds us
 # scene JSON (from SPIFFS or the backend) and asks for rendered frames.
 
-import std/[json, locks, options, strformat, tables]
+import std/[json, locks, options, strformat, strutils, tables]
 import pixie
 
 import frameos/types
@@ -47,6 +47,32 @@ proc currentSceneName*(): string =
     return currentSceneId.get().string
   ""
 
+proc sceneInfoJson*(): string =
+  let scenes = getInterpretedScenes()
+  var sceneItems = newJArray()
+  for sceneId, exported in scenes:
+    sceneItems.add(%*{
+      "id": sceneId.string,
+      "name": if exported.name.len > 0: exported.name else: sceneId.string,
+      "refreshInterval": exported.refreshInterval,
+    })
+  let payload = %*{
+    "loaded": scenesLoadedCount,
+    "available": scenes.len,
+    "hasScene": hasScene(),
+    "currentSceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
+    "currentSceneName": currentSceneName(),
+    "defaultSceneId": if defaultSceneId.isSome: defaultSceneId.get().string else: "",
+    "renderRequested": renderRequested,
+    "scenes": sceneItems,
+  }
+  $payload
+
+proc sceneStateJson*(): string =
+  if currentScene.isNil or currentScene.state.isNil or currentScene.state.kind != JObject:
+    return "{}"
+  $currentScene.state
+
 proc takeRenderRequested*(): bool =
   result = renderRequested
   renderRequested = false
@@ -66,12 +92,20 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 
 # ------------------------------------------------------------------- setup
 
-proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int) =
+proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
+    backendUrl = "", frameId = 0) =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Logs go synchronously to the firmware's ESP_LOG hook; events (e.g. a
   ## "render" dispatched from a scene) set a flag the C render loop polls.
   let httpResponseLimit =
     if maxHttpResponseBytes > 0: maxHttpResponseBytes else: DefaultMaxHttpResponseBytes
+  let normalizedBackendUrl = backendUrl.strip(chars = {'/'})
+  var settings = %*{}
+  if normalizedBackendUrl.len > 0 and frameId > 0:
+    settings["embedded"] = %*{
+      "mediaProxyBaseUrl": &"{normalizedBackendUrl}/api/frames/{frameId}/embedded/media",
+      "settingsUrl": &"{normalizedBackendUrl}/api/frames/{frameId}/embedded/settings",
+    }
   frameConfig = FrameConfig(
     name: name,
     mode: "embedded",
@@ -84,7 +118,7 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int) =
     flip: "",
     scalingMode: "cover",
     imageEngine: "pixie",
-    settings: %*{},
+    settings: settings,
     assetsPath: "/state/assets",
     saveAssets: %*false,
     logToFile: "",
@@ -112,15 +146,16 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int) =
   channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
     espLog(($payload).cstring)
   channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
-    if event == "render":
-      renderRequested = true
-    elif event in ["setSceneState", "setCurrentScene"] and not currentScene.isNil:
-      try:
-        let context = ExecutionContext(scene: currentScene, event: event,
-            payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
-        runEvent(currentScene, context)
-      except Exception as e:
-        log("event " & event & " failed: " & e.msg)
+    {.cast(gcsafe).}:
+      if event == "render":
+        renderRequested = true
+      elif event in ["setSceneState", "setCurrentScene"] and not currentScene.isNil:
+        try:
+          let context = ExecutionContext(scene: currentScene, event: event,
+              payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
+          runEvent(currentScene, context)
+        except Exception as e:
+          log("event " & event & " failed: " & e.msg)
 
 proc cleanupScene(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
@@ -187,6 +222,23 @@ proc loadScenes*(payload: string): int =
 
   log(&"loadScenes: {scenesLoadedCount} scene(s) ready, default \"{firstId.get().string}\"")
   scenesLoadedCount
+
+proc selectScene*(sceneIdText: string): bool =
+  let sceneId = SceneId(sceneIdText)
+  let scenes = getInterpretedScenes()
+  if not scenes.hasKey(sceneId):
+    log("selectScene: scene not found: " & sceneIdText)
+    return false
+
+  if not currentScene.isNil:
+    cleanupScene(currentScene)
+    currentScene = nil
+    currentExported = nil
+
+  currentSceneId = some(sceneId)
+  renderRequested = true
+  log("selectScene: " & sceneIdText)
+  true
 
 proc ensureScene(): bool =
   if not currentScene.isNil:

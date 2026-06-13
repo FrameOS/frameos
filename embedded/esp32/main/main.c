@@ -33,7 +33,7 @@
 
 static const char *TAG = "frameos";
 
-#define WIFI_CONNECT_TIMEOUT_MS 25000
+#define WIFI_CONNECT_TIMEOUT_MS 45000
 #define SNTP_TIMEOUT_MS 10000
 
 /* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Driving an
@@ -121,7 +121,8 @@ void app_main(void)
         int height = fos_display_present() ? fos_display_height() : 480;
         char frame_name[64];
         snprintf(frame_name, sizeof(frame_name), "frame %lu", (unsigned long)config->frame_id);
-        if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes)) {
+        if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes,
+                             config->backend_url, config->frame_id, config->api_key)) {
             ESP_LOGI(TAG, "nim runtime up: %s", frameos_nim_info());
         } else {
             ESP_LOGE(TAG, "nim runtime failed to initialize");

@@ -37,8 +37,13 @@ elif defined(frameosEmbedded):
   import frameos/ids
   import frameos/driver_abi
 
-  var embeddedLogHook*: proc(payload: JsonNode) {.gcsafe.}
-  var embeddedEventHook*: proc(sceneId: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.}
+  type
+    EmbeddedLogHook* = proc(payload: JsonNode) {.gcsafe, nimcall.}
+    EmbeddedEventHook* = proc(sceneId: Option[SceneId], event: string,
+                             payload: JsonNode) {.gcsafe, nimcall.}
+
+  var embeddedLogHook*: EmbeddedLogHook
+  var embeddedEventHook*: EmbeddedEventHook
 
   proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
     discard

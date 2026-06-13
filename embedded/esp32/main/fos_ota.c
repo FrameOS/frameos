@@ -19,6 +19,11 @@
 static const char *TAG = "fos_ota";
 static char s_auth_header[FOS_STR_LEN + 16];
 
+static bool ota_supported(void)
+{
+    return esp_ota_get_next_update_partition(NULL) != NULL;
+}
+
 static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
 {
     return esp_http_client_set_header(client, "Authorization", s_auth_header);
@@ -26,6 +31,8 @@ static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
 
 void fos_ota_mark_boot_valid(void)
 {
+    if (!ota_supported()) return;
+
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
@@ -104,6 +111,11 @@ static esp_err_t fetch_manifest_sha(const fos_config_t *config, char *sha, size_
 
 esp_err_t fos_ota_check_and_apply(void)
 {
+    if (!ota_supported()) {
+        ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA check");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0) {
         ESP_LOGW(TAG, "no backend configured, skipping OTA check");
@@ -189,5 +201,9 @@ static void ota_task(void *arg)
 
 void fos_ota_start_periodic_task(uint32_t interval_hours)
 {
+    if (!ota_supported()) {
+        ESP_LOGI(TAG, "no OTA app partition in this flash layout; periodic OTA disabled");
+        return;
+    }
     xTaskCreate(ota_task, "fos_ota", 8192, (void *)(uintptr_t)interval_hours, 4, NULL);
 }

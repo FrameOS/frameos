@@ -6,10 +6,12 @@
 #include <sys/time.h>
 
 #include "esp_app_desc.h"
+#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -19,6 +21,7 @@
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
+#include "frameos_nim.h"
 
 static const char *TAG = "fos_http";
 
@@ -100,6 +103,36 @@ static esp_err_t send_escaped_attr(httpd_req_t *req, const char *value)
     return used ? httpd_resp_send_chunk(req, buf, used) : ESP_OK;
 }
 
+static char *json_escape_dup(const char *value)
+{
+    if (!value) value = "";
+    size_t len = strlen(value);
+    char *out = malloc(len * 6 + 1);
+    if (!out) return NULL;
+    char *dst = out;
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        switch (*p) {
+            case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
+            case '"': *dst++ = '\\'; *dst++ = '"'; break;
+            case '\b': *dst++ = '\\'; *dst++ = 'b'; break;
+            case '\f': *dst++ = '\\'; *dst++ = 'f'; break;
+            case '\n': *dst++ = '\\'; *dst++ = 'n'; break;
+            case '\r': *dst++ = '\\'; *dst++ = 'r'; break;
+            case '\t': *dst++ = '\\'; *dst++ = 't'; break;
+            default:
+                if (*p < 0x20) {
+                    snprintf(dst, 7, "\\u%04x", *p);
+                    dst += 6;
+                } else {
+                    *dst++ = (char)*p;
+                }
+                break;
+        }
+    }
+    *dst = '\0';
+    return out;
+}
+
 static esp_err_t send_input(httpd_req_t *req, const char *label, const char *name,
                             const char *type, const char *value, const char *attrs)
 {
@@ -123,6 +156,51 @@ static esp_err_t send_option(httpd_req_t *req, const char *value, const char *la
     return sendstr(req, "</option>");
 }
 
+typedef struct {
+    uint32_t flash_bytes;
+    uint32_t nvs_bytes;
+    uint32_t otadata_bytes;
+    uint32_t phy_bytes;
+    uint32_t factory_slot_bytes;
+    uint32_t ota_slots;
+    uint32_t ota_slot_bytes;
+    uint32_t ota_bytes;
+    uint32_t state_bytes;
+} fos_storage_info_t;
+
+static uint32_t partition_size(esp_partition_type_t type, esp_partition_subtype_t subtype,
+                               const char *label)
+{
+    const esp_partition_t *partition = esp_partition_find_first(type, subtype, label);
+    return partition ? partition->size : 0;
+}
+
+static void collect_storage_info(fos_storage_info_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    if (esp_flash_get_size(NULL, &info->flash_bytes) != ESP_OK) {
+        info->flash_bytes = 0;
+    }
+    info->nvs_bytes = partition_size(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, NULL);
+    info->otadata_bytes = partition_size(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
+    info->phy_bytes = partition_size(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_PHY, NULL);
+    info->state_bytes = partition_size(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "state");
+    info->factory_slot_bytes = partition_size(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+
+    for (int i = 0; ESP_PARTITION_SUBTYPE_APP_OTA_MIN + i < ESP_PARTITION_SUBTYPE_APP_OTA_MAX; i++) {
+        const esp_partition_t *partition = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_OTA(i), NULL);
+        if (!partition) {
+            continue;
+        }
+        info->ota_slots++;
+        info->ota_bytes += partition->size;
+        if (info->ota_slot_bytes == 0 || partition->size < info->ota_slot_bytes) {
+            info->ota_slot_bytes = partition->size;
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ pages */
 
 static const char *SETUP_PAGE_HEAD =
@@ -134,9 +212,11 @@ static const char *SETUP_PAGE_HEAD =
     "input,select{width:100%;padding:.5rem;box-sizing:border-box}"
     "button{margin-top:1.2rem;padding:.6rem 1.4rem;font-size:1rem}"
     ".row{display:flex;gap:.7rem;flex-wrap:wrap}.row>*{flex:1 1 10rem}"
-    ".preview{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}"
+    ".preview,.panel{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}"
     ".preview img{display:block;max-width:100%;height:auto;border:1px solid #ddd;background:#fff}"
     ".muted{color:#666;font-size:.9rem}"
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}"
+    ".metric{background:#f6f6f6;border:1px solid #ddd;padding:.5rem}.metric b{display:block}"
     "code{background:#eee;padding:0 .3rem}</style></head><body>"
     "<h1>FrameOS</h1><p>Configure this frame. It reboots and connects after saving.</p>";
 
@@ -154,17 +234,31 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     if (sendstr(req,
         "<section class='preview'><h2>Preview</h2>"
         "<p class='muted'>Last successful render from this device.</p>"
-        "<img id='preview' src='/api/preview.bmp' alt='No rendered preview yet'>"
+        "<img id='preview' alt='No rendered preview yet'>"
         "<div class='row'><button type='button' onclick='renderNow()'>Render now</button>"
         "<button type='button' onclick='refreshPreview()'>Refresh preview</button></div>"
+        "</section>"
+        "<section class='panel'><h2>Scenes</h2>"
+        "<select id='scene_select'></select>"
+        "<div class='row'><button type='button' onclick='showScene()'>Show scene</button>"
+        "<button type='button' onclick='syncScenes()'>Sync from backend</button></div>"
+        "<p id='scene_status' class='muted'></p>"
+        "</section>"
+        "<section class='panel'><h2>Board</h2><div id='board_metrics' class='grid'></div>"
         "</section>"
         "<form method='POST' action='/api/setup'>") != ESP_OK) return ESP_FAIL;
 
     if (send_input(req, "Wi-Fi network", "ssid", "text", config->wifi_ssid, " required") != ESP_OK) return ESP_FAIL;
-    if (send_input(req, "Wi-Fi password", "pass", "password", config->wifi_pass, "") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "Wi-Fi password", "pass", "password", "",
+                   " autocomplete='new-password' placeholder='Leave blank to keep current password'") != ESP_OK) {
+        return ESP_FAIL;
+    }
     if (send_input(req, "Backend URL", "backend", "text", config->backend_url,
                    " placeholder='https://backend.example.com'") != ESP_OK) return ESP_FAIL;
-    if (send_input(req, "Frame API key", "api_key", "text", config->api_key, "") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "Frame API key", "api_key", "password", "",
+                   " autocomplete='off' placeholder='Leave blank to keep current key'") != ESP_OK) {
+        return ESP_FAIL;
+    }
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->frame_id);
     if (send_input(req, "Frame ID", "frame_id", "number", field, " min='0'") != ESP_OK) return ESP_FAIL;
 
@@ -203,11 +297,31 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     }
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
-        "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/preview.bmp'>Open preview image</a></p>"
+        "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
+        "<a href='/api/scene-state'>Scene state JSON</a> | <a href='/api/preview.bmp'>Open preview image</a></p>"
         "<script>"
+        "async function loadStatus(){const res=await fetch('/status');const s=await res.json();"
+        "const scenes=s.scenes&&s.scenes.scenes?s.scenes.scenes:[];const sel=document.getElementById('scene_select');"
+        "sel.innerHTML='';for(const scene of scenes){const o=document.createElement('option');o.value=scene.id;"
+        "o.textContent=scene.name||scene.id;if(scene.id===(s.scenes&&s.scenes.currentSceneId))o.selected=true;sel.appendChild(o);}"
+        "document.getElementById('scene_status').textContent=scenes.length?`Loaded ${s.scenes.loaded} scene(s); current: ${s.scenes.currentSceneName||s.scenes.currentSceneId||'none'}`:'No scenes loaded yet';"
+        "const b=s.board||{},m=s.memory||{},st=s.storage||{};"
+        "const fl=st.otaSlots?`${st.otaSlots}x ${Math.round((st.otaSlotBytes||0)/1024)}K OTA + ${Math.round((st.stateBytes||0)/1024)}K state`:"
+        "`${Math.round((st.factorySlotBytes||0)/1024)}K app + ${Math.round((st.stateBytes||0)/1024)}K state (no OTA)`;"
+        "document.getElementById('board_metrics').innerHTML="
+        "`<div class='metric'><b>Board</b>${b.target||'ESP32-S3'}</div>`+"
+        "`<div class='metric'><b>Flash</b>${Math.round((st.flashBytes||0)/1024)}K: ${fl}</div>`+"
+        "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
+        "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`;"
+        "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
         "function refreshPreview(){const img=document.getElementById('preview');img.src='/api/preview.bmp?t='+Date.now();}"
         "function renderNow(){fetch('/api/action/render',{method:'POST'}).then(()=>{let n=0;"
         "const t=setInterval(()=>{refreshPreview();if(++n>=12)clearInterval(t);},2500);});}"
+        "function syncScenes(){fetch('/api/action/scenes_sync',{method:'POST'}).then(()=>setTimeout(loadStatus,1500));}"
+        "function showScene(){const id=document.getElementById('scene_select').value;if(!id)return;"
+        "fetch('/api/action/scene',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'scene_id='+encodeURIComponent(id)})"
+        ".then(()=>{loadStatus();renderNow();});}"
+        "loadStatus().catch(()=>{});"
         "</script></body></html>") != ESP_OK) return ESP_FAIL;
     return httpd_resp_sendstr_chunk(req, NULL);
 }
@@ -228,34 +342,72 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     bool preview_ready = fos_client_snapshot_info(&preview_width, &preview_height, &preview_format,
                                                   &preview_len, &preview_render_count,
                                                   NULL);
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    const char *scene_json = frameos_nim_scene_info_json();
+    if (!scene_json || !scene_json[0]) scene_json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+    fos_storage_info_t storage;
+    collect_storage_info(&storage);
+
+    char *app_name = json_escape_dup(app->project_name);
+    char *app_version = json_escape_dup(app->version);
+    char *idf_version = json_escape_dup(app->idf_ver);
+    char *partition = json_escape_dup(running ? running->label : "?");
+    char *ip = json_escape_dup(fos_wifi_ip());
+    char *panel = json_escape_dup(config->panel);
+    char *pins_json = json_escape_dup(pins);
+    char *backend = json_escape_dup(config->backend_url);
+    char *ssid = json_escape_dup(config->wifi_ssid);
+    char *nim_info = json_escape_dup(frameos_nim_info());
+    if (!app_name || !app_version || !idf_version || !partition || !ip ||
+        !panel || !pins_json || !backend || !ssid || !nim_info) {
+        free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
+        free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
+        return httpd_resp_send_500(req);
+    }
 
     char *json = NULL;
     int len = asprintf(&json,
         "{\"app\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
-        "\"uptimeSec\":%lld,\"heapFree\":%u,\"psramFree\":%u,"
+        "\"uptimeSec\":%lld,"
+        "\"board\":{\"target\":\"esp32-s3\",\"module\":\"Seeed XIAO ESP32-S3 class\",\"display\":\"%s\"},"
+        "\"memory\":{\"internalFree\":%u,\"psramFree\":%u,\"psramTotal\":%u},"
+        "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
+        "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
+        "\"stateBytes\":%u},"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u},"
+        "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
-        app->project_name, app->version, app->idf_ver, running ? running->label : "?",
+        app_name, app_version, idf_version, partition,
         esp_timer_get_time() / 1000000,
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-        (int)fos_wifi_state(), fos_wifi_ip(), fos_wifi_rssi(),
+        panel,
+        (unsigned)internal_free, (unsigned)psram_free, (unsigned)psram_total,
+        (unsigned)storage.flash_bytes, (unsigned)storage.nvs_bytes,
+        (unsigned)storage.otadata_bytes, (unsigned)storage.phy_bytes,
+        (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
+        (unsigned)storage.ota_slot_bytes, (unsigned)storage.ota_bytes,
+        (unsigned)storage.state_bytes,
+        (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
         fos_battery_present() ? "true" : "false",
         fos_battery_millivolts(), fos_battery_percent(),
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
-        (unsigned long)config->frame_id, config->panel,
+        nim_info, scene_json,
+        (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec, config->deep_sleep ? "true" : "false",
         config->wake_schedule ? "true" : "false",
-        pins, config->backend_url, config->wifi_ssid);
+        pins_json, backend, ssid);
+    free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
+    free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
     if (len < 0 || !json) {
         return httpd_resp_send_500(req);
     }
@@ -277,6 +429,29 @@ static const uint8_t PREVIEW_PALETTE_7[] = {
 static const uint8_t PREVIEW_PALETTE_SPECTRA6[] = {
     25, 20, 38, 178, 193, 192, 199, 187, 0, 107, 17, 25,
     255, 255, 255, 24, 83, 154, 42, 85, 49,
+};
+
+static const uint8_t PREVIEW_PALETTE_BW[] = {
+    0, 0, 0, 255, 255, 255,
+};
+
+static const uint8_t PREVIEW_PALETTE_BWR[] = {
+    0, 0, 0, 255, 255, 255, 156, 72, 75,
+};
+
+static const uint8_t PREVIEW_PALETTE_BWY[] = {
+    0, 0, 0, 255, 255, 255, 208, 190, 71,
+};
+
+static const uint8_t PREVIEW_PALETTE_GRAY4[] = {
+    0, 0, 0, 85, 85, 85, 170, 170, 170, 255, 255, 255,
+};
+
+static const uint8_t PREVIEW_PALETTE_GRAY16[] = {
+    0, 0, 0, 17, 17, 17, 34, 34, 34, 51, 51, 51,
+    68, 68, 68, 85, 85, 85, 102, 102, 102, 119, 119, 119,
+    136, 136, 136, 153, 153, 153, 170, 170, 170, 187, 187, 187,
+    204, 204, 204, 221, 221, 221, 238, 238, 238, 255, 255, 255,
 };
 
 static void put_u16le(uint8_t *buf, uint16_t value)
@@ -307,68 +482,69 @@ static uint8_t packed_twobit(const uint8_t *buf, int width, int x, int y)
     return (value >> (6 - ((x & 3) * 2))) & 0x03;
 }
 
-static void palette_rgb(const uint8_t *palette, size_t colors, uint8_t index,
-                        uint8_t *r, uint8_t *g, uint8_t *b)
+static const uint8_t *preview_palette(fos_pixel_format_t format, size_t *colors)
 {
-    if (index >= colors) index = 1;
-    *r = palette[(size_t)index * 3u];
-    *g = palette[(size_t)index * 3u + 1u];
-    *b = palette[(size_t)index * 3u + 2u];
+    switch (format) {
+        case FOS_PIXEL_1BPP:
+            *colors = 2;
+            return PREVIEW_PALETTE_BW;
+        case FOS_PIXEL_DUAL_1BPP_RED:
+            *colors = 3;
+            return PREVIEW_PALETTE_BWR;
+        case FOS_PIXEL_DUAL_1BPP_YELLOW:
+            *colors = 3;
+            return PREVIEW_PALETTE_BWY;
+        case FOS_PIXEL_2BPP_GRAY:
+            *colors = 4;
+            return PREVIEW_PALETTE_GRAY4;
+        case FOS_PIXEL_2BPP_BWYR:
+            *colors = 4;
+            return PREVIEW_PALETTE_4;
+        case FOS_PIXEL_4BPP_7COLOR:
+            *colors = 7;
+            return PREVIEW_PALETTE_7;
+        case FOS_PIXEL_4BPP_SPECTRA6:
+            *colors = 7;
+            return PREVIEW_PALETTE_SPECTRA6;
+        case FOS_PIXEL_4BPP_GRAY:
+            *colors = 16;
+            return PREVIEW_PALETTE_GRAY16;
+        default:
+            *colors = 2;
+            return PREVIEW_PALETTE_BW;
+    }
 }
 
-static void preview_pixel_rgb(const uint8_t *buf, int width, int height,
-                              fos_pixel_format_t format, int x, int y,
-                              uint8_t *r, uint8_t *g, uint8_t *b)
+static uint8_t preview_palette_index(const uint8_t *buf, int width, int height,
+                                     fos_pixel_format_t format, int x, int y)
 {
     switch (format) {
         case FOS_PIXEL_1BPP: {
             size_t row = ((size_t)width + 7u) / 8u;
             uint8_t bit = 0x80 >> (x & 7);
-            uint8_t white = (buf[(size_t)y * row + (size_t)(x >> 3)] & bit) ? 255 : 0;
-            *r = white; *g = white; *b = white;
-            break;
+            return (buf[(size_t)y * row + (size_t)(x >> 3)] & bit) ? 1 : 0;
         }
         case FOS_PIXEL_DUAL_1BPP_RED:
         case FOS_PIXEL_DUAL_1BPP_YELLOW: {
             size_t row = ((size_t)width + 7u) / 8u;
-            size_t plane = row * (size_t)height;
-            size_t offset = (size_t)y * row + (size_t)(x >> 3);
+            size_t plane = row * (size_t)y;
+            size_t accent_plane = row * (size_t)height;
+            size_t offset = plane + (size_t)(x >> 3);
             uint8_t bit = 0x80 >> (x & 7);
             bool black = (buf[offset] & bit) == 0;
-            bool accent = (buf[plane + offset] & bit) == 0;
-            if (black) {
-                *r = 0; *g = 0; *b = 0;
-            } else if (accent && format == FOS_PIXEL_DUAL_1BPP_RED) {
-                *r = 255; *g = 0; *b = 0;
-            } else if (accent) {
-                *r = 255; *g = 255; *b = 0;
-            } else {
-                *r = 255; *g = 255; *b = 255;
-            }
-            break;
+            bool accent = (buf[accent_plane + offset] & bit) == 0;
+            if (black) return 0;
+            return accent ? 2 : 1;
         }
-        case FOS_PIXEL_2BPP_GRAY: {
-            uint8_t gray = packed_twobit(buf, width, x, y) * 85u;
-            *r = gray; *g = gray; *b = gray;
-            break;
-        }
+        case FOS_PIXEL_2BPP_GRAY:
         case FOS_PIXEL_2BPP_BWYR:
-            palette_rgb(PREVIEW_PALETTE_4, 4, packed_twobit(buf, width, x, y), r, g, b);
-            break;
+            return packed_twobit(buf, width, x, y);
         case FOS_PIXEL_4BPP_7COLOR:
-            palette_rgb(PREVIEW_PALETTE_7, 7, packed_nibble(buf, width, x, y), r, g, b);
-            break;
         case FOS_PIXEL_4BPP_SPECTRA6:
-            palette_rgb(PREVIEW_PALETTE_SPECTRA6, 7, packed_nibble(buf, width, x, y), r, g, b);
-            break;
-        case FOS_PIXEL_4BPP_GRAY: {
-            uint8_t gray = packed_nibble(buf, width, x, y) * 17u;
-            *r = gray; *g = gray; *b = gray;
-            break;
-        }
+        case FOS_PIXEL_4BPP_GRAY:
+            return packed_nibble(buf, width, x, y);
         default:
-            *r = 255; *g = 255; *b = 255;
-            break;
+            return 1;
     }
 }
 
@@ -393,47 +569,78 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
     }
 
-    size_t row_stride = (((size_t)width * 3u) + 3u) & ~3u;
+    uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
+    size_t palette_entries = bit_count == 1 ? 2 : 16;
+    size_t row_payload = (((size_t)width * bit_count) + 7u) / 8u;
+    size_t row_stride = (row_payload + 3u) & ~3u;
     size_t pixel_bytes = row_stride * (size_t)height;
-    if (pixel_bytes > UINT32_MAX - 54u) {
+    size_t palette_bytes = palette_entries * 4u;
+    if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
         free(packed);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
     }
 
     uint8_t header[54] = {0};
     header[0] = 'B'; header[1] = 'M';
-    put_u32le(&header[2], (uint32_t)(54u + pixel_bytes));
-    put_u32le(&header[10], 54);
+    put_u32le(&header[2], (uint32_t)(54u + palette_bytes + pixel_bytes));
+    put_u32le(&header[10], (uint32_t)(54u + palette_bytes));
     put_u32le(&header[14], 40);
     put_u32le(&header[18], (uint32_t)width);
     put_u32le(&header[22], (uint32_t)height);
     put_u16le(&header[26], 1);
-    put_u16le(&header[28], 24);
+    put_u16le(&header[28], bit_count);
     put_u32le(&header[34], (uint32_t)pixel_bytes);
+    put_u32le(&header[46], (uint32_t)palette_entries);
+    put_u32le(&header[50], (uint32_t)palette_entries);
 
-    uint8_t *row = heap_caps_calloc(1, row_stride, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!row) row = calloc(1, row_stride);
-    if (!row) {
+    const size_t rows_per_chunk = 16;
+    uint8_t *rows = heap_caps_calloc(rows_per_chunk, row_stride, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!rows) rows = calloc(rows_per_chunk, row_stride);
+    if (!rows) {
         free(packed);
         return httpd_resp_send_500(req);
+    }
+
+    uint8_t palette[64];
+    memset(palette, 255, sizeof(palette));
+    size_t colors = 0;
+    const uint8_t *rgb = preview_palette(format, &colors);
+    for (size_t i = 0; i < palette_entries; i++) {
+        size_t src = i < colors ? i : 1;
+        palette[i * 4u] = rgb[src * 3u + 2u];
+        palette[i * 4u + 1u] = rgb[src * 3u + 1u];
+        palette[i * 4u + 2u] = rgb[src * 3u];
+        palette[i * 4u + 3u] = 0;
     }
 
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     err = httpd_resp_send_chunk(req, (const char *)header, sizeof(header));
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, (const char *)palette, palette_bytes);
+    }
+    size_t pending_rows = 0;
     for (int y = height - 1; err == ESP_OK && y >= 0; y--) {
+        uint8_t *row = rows + pending_rows * row_stride;
         memset(row, 0, row_stride);
         for (int x = 0; x < width; x++) {
-            uint8_t r, g, b;
-            preview_pixel_rgb(packed, width, height, format, x, y, &r, &g, &b);
-            row[(size_t)x * 3u] = b;
-            row[(size_t)x * 3u + 1u] = g;
-            row[(size_t)x * 3u + 2u] = r;
+            uint8_t index = preview_palette_index(packed, width, height, format, x, y);
+            if (bit_count == 1) {
+                if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
+            } else if (x & 1) {
+                row[(size_t)x >> 1] |= index & 0x0F;
+            } else {
+                row[(size_t)x >> 1] |= (index & 0x0F) << 4;
+            }
         }
-        err = httpd_resp_send_chunk(req, (const char *)row, row_stride);
+        pending_rows++;
+        if (pending_rows == rows_per_chunk || y == 0) {
+            err = httpd_resp_send_chunk(req, (const char *)rows, row_stride * pending_rows);
+            pending_rows = 0;
+        }
     }
 
-    free(row);
+    free(rows);
     free(packed);
     if (err != ESP_OK) return err;
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -461,9 +668,13 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     fos_config_t *config = fos_config();
     char value[FOS_URL_LEN];
     if (form_value(body, "ssid", value, sizeof(value))) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));
-    if (form_value(body, "pass", value, sizeof(value))) strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
+    if (form_value(body, "pass", value, sizeof(value)) && value[0]) {
+        strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
+    }
     if (form_value(body, "backend", value, sizeof(value))) strlcpy(config->backend_url, value, sizeof(config->backend_url));
-    if (form_value(body, "api_key", value, sizeof(value))) strlcpy(config->api_key, value, sizeof(config->api_key));
+    if (form_value(body, "api_key", value, sizeof(value)) && value[0]) {
+        strlcpy(config->api_key, value, sizeof(config->api_key));
+    }
     if (form_value(body, "frame_id", value, sizeof(value))) config->frame_id = strtoul(value, NULL, 10);
     if (form_value(body, "panel", value, sizeof(value))) strlcpy(config->panel, value, sizeof(config->panel));
     if (form_value(body, "render_mode", value, sizeof(value))) config->render_mode = atoi(value) ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
@@ -492,6 +703,60 @@ static esp_err_t action_handler(httpd_req_t *req)
     cb();
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t scenes_get_handler(httpd_req_t *req)
+{
+    const char *json = frameos_nim_scene_info_json();
+    if (!json || !json[0]) {
+        json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, json);
+}
+
+static esp_err_t scene_state_get_handler(httpd_req_t *req)
+{
+    const char *json = frameos_nim_scene_state_json();
+    if (!json || !json[0]) {
+        json = "{}";
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, json);
+}
+
+static esp_err_t scene_select_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 512) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    char *body = malloc(total + 1);
+    if (!body) return httpd_resp_send_500(req);
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, body + received, total - received);
+        if (r <= 0) {
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed");
+        }
+        received += r;
+    }
+    body[total] = '\0';
+
+    char scene_id[128];
+    bool has_scene = form_value(body, "scene_id", scene_id, sizeof(scene_id));
+    free(body);
+    if (!has_scene || !scene_id[0]) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing scene_id");
+    }
+    esp_err_t err = fos_scenes_select(scene_id);
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, esp_err_to_name(err));
+    }
+    if (s_render_cb) s_render_cb();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"ok\":true,\"queued\":true}", HTTPD_RESP_USE_STRLEN);
 }
 
 /* Local scene push (M3): accept a scenes.json array, persist it to /state
@@ -557,6 +822,10 @@ esp_err_t fos_http_start(bool portal_mode)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 20;
+    config.max_open_sockets = 7;
+    config.backlog_conn = 8;
+    config.recv_wait_timeout = 5;
+    config.send_wait_timeout = 5;
     config.lru_purge_enable = true;
     config.stack_size = 8192;
     esp_err_t err = httpd_start(&s_server, &config);
@@ -569,15 +838,21 @@ esp_err_t fos_http_start(bool portal_mode)
     const httpd_uri_t status = {.uri = "/status", .method = HTTP_GET, .handler = status_get_handler};
     const httpd_uri_t preview = {.uri = "/api/preview.bmp", .method = HTTP_GET, .handler = preview_bmp_handler};
     const httpd_uri_t setup = {.uri = "/api/setup", .method = HTTP_POST, .handler = setup_post_handler};
+    const httpd_uri_t scenes_info = {.uri = "/api/scenes", .method = HTTP_GET, .handler = scenes_get_handler};
+    const httpd_uri_t scene_state = {.uri = "/api/scene-state", .method = HTTP_GET, .handler = scene_state_get_handler};
     httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &status);
     httpd_register_uri_handler(s_server, &preview);
     httpd_register_uri_handler(s_server, &setup);
+    httpd_register_uri_handler(s_server, &scenes_info);
+    httpd_register_uri_handler(s_server, &scene_state);
 
     httpd_uri_t render = {.uri = "/api/action/render", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_render_cb};
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};
+    httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
     httpd_register_uri_handler(s_server, &render);
     httpd_register_uri_handler(s_server, &ota);
+    httpd_register_uri_handler(s_server, &scene);
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
     httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};

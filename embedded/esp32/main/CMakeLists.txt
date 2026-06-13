@@ -22,6 +22,7 @@ idf_component_register(
         esp_https_ota
         esp-tls
         app_update
+        spi_flash
         json
         console
         driver

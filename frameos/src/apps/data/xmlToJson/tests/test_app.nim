@@ -14,6 +14,16 @@ suite "data/xmlToJson app":
     check payload["root"]["children"][0]["name"].getStr() == "child"
     check payload["root"]["children"][0]["children"][0]["text"].getStr() == "Hello"
 
+  test "converts xkcd image fragment attributes":
+    let app = App(appConfig: AppConfig(
+      xml: """<img src="https://imgs.xkcd.com/comics/plate_flip.png" title="It's great" alt="It's great" />"""
+    ))
+    let payload = app.get(nil)
+
+    check payload["root"]["name"].getStr() == "img"
+    check payload["root"]["attributes"]["src"].getStr() == "https://imgs.xkcd.com/comics/plate_flip.png"
+    check payload["root"]["attributes"]["alt"].getStr() == "It's great"
+
   test "invalid xml raises a value error":
     let app = App(appConfig: AppConfig(xml: "<root>"))
     expect(ValueError):

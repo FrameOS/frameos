@@ -30,6 +30,8 @@ var
   renderCount = 0
   lastRenderMs = 0
   infoBuffer: string
+  sceneInfoBuffer: string
+  sceneStateBuffer: string
 
 # ------------------------------------------------------- dither + packing
 # Floyd–Steinberg to packed 1bpp (white=1, MSB first) — the format the
@@ -87,6 +89,13 @@ proc grayLevel(value: float32; maxValue: uint8): uint8 {.inline.} =
   if rounded > maxValue.int:
     return maxValue
   rounded.uint8
+
+proc clip8(value: int): uint8 {.inline.} =
+  if value < 0:
+    return 0
+  if value > 255:
+    return 255
+  value.uint8
 
 proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; maxValue: uint8): bool =
   let
@@ -157,7 +166,65 @@ proc packImagePalette(
     bufLen: int;
     palette: seq[(int, int, int)]
   ): bool =
-  copyPacked(ditherPaletteIndexed(image, palette), buf, bufLen)
+  let
+    width = image.width
+    height = image.height
+    bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
+    pixelsPerByte = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
+    rowBytes = (width + pixelsPerByte - 1) div pixelsPerByte
+    distribution = [7, 3, 5, 1]
+    dy = [0, 1, 1, 1]
+    dx = [1, -1, 0, 1]
+
+  if rowBytes * height != bufLen:
+    log(&"pack palette: buffer mismatch, want {rowBytes * height} bytes, got {bufLen}")
+    return false
+
+  for i in 0 ..< bufLen:
+    buf[i] = 0
+
+  # Mutate the rendered image in-place while packing. The image is discarded
+  # immediately after this step, and avoiding an extra pixie image copy plus a
+  # packed output seq keeps ESP32 renders inside PSRAM headroom.
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let
+        dataIndex = y * width + x
+        outputIndex = y * rowBytes + x div pixelsPerByte
+        imageR = image.data[dataIndex].r.int
+        imageG = image.data[dataIndex].g.int
+        imageB = image.data[dataIndex].b.int
+        (index, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
+        errorR = imageR - palR
+        errorG = imageG - palG
+        errorB = imageB - palB
+
+      case bits:
+      of 8:
+        buf[outputIndex] = index.uint8
+      of 4:
+        let bitPosition = (1 - (x mod 2)) * 4
+        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+      of 2:
+        let bitPosition = (3 - (x mod 4)) * 2
+        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+      of 1:
+        let bitPosition = (7 - x) mod 8
+        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+      else:
+        discard
+
+      for i in 0 ..< 4:
+        let
+          nextX = x + dx[i]
+          nextY = y + dy[i]
+        if nextX >= 0 and nextX < width and nextY < height:
+          let errorIndex = nextY * width + nextX
+          image.data[errorIndex].r = clip8(image.data[errorIndex].r.int + (errorR * distribution[i] div 16))
+          image.data[errorIndex].g = clip8(image.data[errorIndex].g.int + (errorG * distribution[i] div 16))
+          image.data[errorIndex].b = clip8(image.data[errorIndex].b.int + (errorB * distribution[i] div 16))
+
+  true
 
 proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
@@ -194,12 +261,18 @@ proc packImageForFormat(
 
 # ------------------------------------------------------------------ C API
 
-proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint): bool {.exportc, cdecl.} =
+proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
+    backendUrl: cstring, frameId: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
   frameHeight = height.int
   frameName = $name
   try:
-    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int)
+    let backend =
+      if backendUrl == nil or ($backendUrl).len == 0:
+        ""
+      else:
+        $backendUrl
+    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, backend, frameId.int)
     initScene()
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} \"{frameName}\", nim {NimVersion}")
     true
@@ -222,6 +295,10 @@ proc fos_nim_render_impl(
     pixelFormat: cint
   ): cint {.exportc, cdecl.} =
   try:
+    # A render request may be the reason C woke the render task. Clear that
+    # stale request before running the scene so only new events raised during
+    # this render can schedule another pass.
+    discard takeRenderRequested()
     let start = getMonoTime()
     let (image, source) = renderFrameImage()
     let renderedAt = getMonoTime()
@@ -232,6 +309,10 @@ proc fos_nim_render_impl(
     lastRenderMs = ((packed - start).inMilliseconds).int
     log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
         &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+    # Many interpreted scene graphs dispatch "render" while responding to the
+    # render event itself. On embedded that should not immediately replay the
+    # same frame and fragment the tiny internal heap.
+    discard takeRenderRequested()
     0
   except CatchableError as e:
     log("render failed: " & e.msg)
@@ -249,6 +330,23 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a
   ## redraw; clears the flag.
   takeRenderRequested()
+
+proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
+  sceneInfoBuffer = sceneInfoJson()
+  sceneInfoBuffer.cstring
+
+proc fos_nim_scene_state_json_impl(): cstring {.exportc, cdecl.} =
+  sceneStateBuffer = sceneStateJson()
+  sceneStateBuffer.cstring
+
+proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
+  try:
+    if sceneId == nil:
+      return false
+    selectScene($sceneId)
+  except CatchableError as e:
+    log("set scene failed: " & e.msg)
+    false
 
 proc fos_nim_info_impl(): cstring {.exportc, cdecl.} =
   infoBuffer = &"nim {NimVersion} + pixie + quickjs, {frameWidth}x{frameHeight}, " &

@@ -10,6 +10,7 @@ type LogStore = ref object
 var
   galleryHookUrl {.global.}: string
   galleryHookMaxBytes {.global.}: int
+  galleryHookProxyBaseUrl {.global.}: string
 
 proc newLogger(store: LogStore): Logger =
   Logger(
@@ -17,9 +18,10 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeGalleryDownload(url: string, maxBytes: int): Image =
+proc fakeGalleryDownload(url: string, maxBytes: int, proxyBaseUrl: string): Image =
   galleryHookUrl = url
   galleryHookMaxBytes = maxBytes
+  galleryHookProxyBaseUrl = proxyBaseUrl
   newImage(2, 3)
 
 suite "data/frameOSGallery app":
@@ -31,6 +33,7 @@ suite "data/frameOSGallery app":
     let logs = LogStore(items: @[])
     galleryHookUrl = ""
     galleryHookMaxBytes = 0
+    galleryHookProxyBaseUrl = ""
     let previousHook = galleryDownloadHook
     galleryDownloadHook = fakeGalleryDownload
     defer:
@@ -40,7 +43,10 @@ suite "data/frameOSGallery app":
       nodeId: 11.NodeId,
       nodeName: "data/frameOSGallery",
       scene: FrameScene(logger: newLogger(logs)),
-      frameConfig: FrameConfig(maxHttpResponseBytes: 1234),
+      frameConfig: FrameConfig(
+        maxHttpResponseBytes: 1234,
+        settings: %*{"embedded": {"mediaProxyBaseUrl": "http://proxy.local/image"}}
+      ),
       appConfig: AppConfig(category: "other", categoryOther: "nature")
     )
 
@@ -50,5 +56,9 @@ suite "data/frameOSGallery app":
     check image.height == 3
     check galleryHookUrl == "https://gallery.frameos.net/image?category=nature"
     check galleryHookMaxBytes == 1234
+    when defined(frameosEmbedded):
+      check galleryHookProxyBaseUrl == "http://proxy.local/image"
+    else:
+      check galleryHookProxyBaseUrl == ""
     check logs.items.len == 1
     check logs.items[0]["category"].getStr() == "nature"

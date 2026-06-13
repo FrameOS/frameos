@@ -296,6 +296,7 @@ static void client_task(void *arg)
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
             fos_scenes_sync(false);
             fos_scenes_apply_pending();
+            fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
         }
 

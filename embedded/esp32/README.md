@@ -4,12 +4,12 @@ FrameOS for ESP32-S3 microcontrollers (milestones M1+M2 in the repo-root `TODO.m
 The firmware provisions Wi-Fi over a captive portal or the serial console, renders
 scenes **on-device** with the Nim runtime (pixie in PSRAM), drives Waveshare SPI
 e-ink panels through the same vendor drivers the Raspberry Pi build uses, can
-alternatively run as a thin client fetching backend-rendered bitmaps, and updates
-itself over the air with A/B rollback.
+alternatively run as a thin client fetching backend-rendered bitmaps.
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
-The firmware uses two 3840K OTA slots, which is the largest practical A/B
-layout on 8MB flash while still leaving a small state partition.
+The default 8MB profile disables OTA updates and uses one 7744K app slot,
+leaving a 384K state partition. Production 16MB modules can use the optional
+OTA profile with two 7872K app slots and 512K state.
 
 ## Layout
 
@@ -20,7 +20,7 @@ main/                     boot orchestration + platform modules
   fos_wifi.c              STA connect, SoftAP portal, DNS hijack, SNTP
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
-  fos_ota.c               OTA manifest check + esp_https_ota + rollback handling
+  fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
   fos_console.c           USB-serial REPL: status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them
@@ -30,7 +30,8 @@ components/
                           configure time and wrapped from generated metadata
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent
-partitions.csv            8MB: nvs + otadata + ota_0/ota_1 (3840K each) + state
+partitions.csv            8MB: nvs + phy + factory app (7744K) + state
+partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (7872K each) + state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 ```
 
@@ -135,10 +136,21 @@ and `POST /api/action/render` / `POST /api/action/ota` on port 80.
 
 ## OTA
 
-Images boot as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`); the app
-marks itself valid once the network is up, otherwise the next reset rolls back to
-the previous slot. The device polls `/api/frames/{id}/embedded/ota/manifest` daily
-(or on `ota`) and applies new builds via `esp_https_ota`.
+The default 8MB flash profile has no inactive app partition, so OTA checks are
+disabled at runtime and firmware is updated by USB/browser flashing the merged
+image. This reclaims almost 4MB for the app binary.
+
+For production 16MB flash, build with the optional OTA defaults:
+
+```bash
+SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.16mb-ota" \
+  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+```
+
+That profile boots new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
+the app marks itself valid once the network is up, otherwise the next reset rolls
+back to the previous slot. The device polls `/api/frames/{id}/embedded/ota/manifest`
+daily (or on `ota`) and applies new builds via `esp_https_ota`.
 
 ## Adding a panel
 

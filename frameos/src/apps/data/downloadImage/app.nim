@@ -16,7 +16,11 @@ type
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
-    let (image, imageData) = downloadImageWithData(url, maxBytes = self.maxHttpResponseBytes())
+    let (image, imageData) = downloadImageWithData(
+      url,
+      maxBytes = self.maxHttpResponseBytes(),
+      proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+    )
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{
         "url": url,
@@ -28,7 +32,9 @@ proc get*(self: App, context: ExecutionContext): Image =
         metadata["exif"] = exifMetadata.get()
       self.scene.state[self.appConfig.metadataStateKey] = metadata
     return image
-  except:
-    self.logError "An error occurred while downloading the image."
+  except CatchableError as e:
+    let detail = if e.msg.len > 0: e.msg else: "unknown error"
+    self.logError "An error occurred while downloading the image: " & detail
     return renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), "An error occurred while downloading the image.")
+        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
+        "An error occurred while downloading the image.\n" & detail)

@@ -10,6 +10,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "freertos/FreeRTOS.h"
 
 #include "fos_config.h"
 #include "fos_wifi.h"
@@ -22,12 +23,16 @@ static const char *TAG = "fos_scenes";
 #define SCENES_ETAG_PATH "/state/scenes.etag"
 #define SCENES_MAX_BYTES (512 * 1024)
 #define ETAG_LEN 80
+#define SCENE_ID_LEN 128
 
 static bool s_mounted = false;
 static volatile bool s_pending = false;
 static volatile bool s_sync_requested = false;
+static volatile bool s_scene_select_pending = false;
 static int s_loaded = 0;
 static char s_etag[ETAG_LEN] = "";
+static char s_pending_scene_id[SCENE_ID_LEN] = "";
+static portMUX_TYPE s_scene_select_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* ------------------------------------------------------------- storage */
 
@@ -155,6 +160,40 @@ bool fos_scenes_apply_pending(void)
 int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
 void fos_scenes_request_sync(void) { s_sync_requested = true; }
+
+esp_err_t fos_scenes_select(const char *scene_id)
+{
+    if (scene_id == NULL || scene_id[0] == '\0') return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_scene_select_lock);
+    snprintf(s_pending_scene_id, sizeof(s_pending_scene_id), "%s", scene_id);
+    s_scene_select_pending = true;
+    portEXIT_CRITICAL(&s_scene_select_lock);
+    ESP_LOGI(TAG, "scene selection queued: %s", scene_id);
+    return ESP_OK;
+}
+
+bool fos_scenes_apply_pending_selection(void)
+{
+    char scene_id[SCENE_ID_LEN];
+    bool pending;
+
+    portENTER_CRITICAL(&s_scene_select_lock);
+    pending = s_scene_select_pending;
+    if (pending) {
+        snprintf(scene_id, sizeof(scene_id), "%s", s_pending_scene_id);
+        s_scene_select_pending = false;
+        s_pending_scene_id[0] = '\0';
+    }
+    portEXIT_CRITICAL(&s_scene_select_lock);
+
+    if (!pending) return false;
+    if (!frameos_nim_set_scene(scene_id)) {
+        ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
+        return false;
+    }
+    ESP_LOGI(TAG, "scene selected: %s", scene_id);
+    return true;
+}
 
 /* ---------------------------------------------------------------- init */
 

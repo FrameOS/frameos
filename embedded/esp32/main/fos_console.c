@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "esp_console.h"
+#include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -210,9 +211,33 @@ static int cmd_scenes(int argc, char **argv)
 {
     printf("scenes: %d loaded, etag %s\n", fos_scenes_loaded(),
            fos_scenes_etag()[0] ? fos_scenes_etag() : "none");
+    printf("%s\n", frameos_nim_scene_info_json());
     fos_scenes_request_sync();
     fos_client_render_now();
     printf("sync requested; the render task pulls from the backend next pass\n");
+    return 0;
+}
+
+static int cmd_scene_state(int argc, char **argv)
+{
+    printf("%s\n", frameos_nim_scene_state_json());
+    return 0;
+}
+
+static int cmd_scene(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("usage: scene <scene-id>\n");
+        printf("%s\n", frameos_nim_scene_info_json());
+        return 1;
+    }
+    esp_err_t err = fos_scenes_select(argv[1]);
+    if (err != ESP_OK) {
+        printf("scene select failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    fos_client_render_now();
+    printf("scene queued: %s\n", argv[1]);
     return 0;
 }
 
@@ -254,6 +279,8 @@ esp_err_t fos_console_start(void)
         {.command = "render", .help = "Render now", .func = cmd_render},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
+        {.command = "scene_state", .help = "Show current interpreted scene state JSON", .func = cmd_scene_state},
+        {.command = "scene", .help = "scene <id> — select a loaded scene and render", .func = cmd_scene},
         {.command = "restart", .help = "Reboot", .func = cmd_restart},
         {.command = "factory-reset", .help = "Erase config and reboot", .func = cmd_factory_reset},
     };

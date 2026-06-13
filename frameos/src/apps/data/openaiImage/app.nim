@@ -1,7 +1,6 @@
 import pixie
 import options
 import json
-import httpclient
 import base64
 import frameos/apps
 import frameos/types
@@ -30,19 +29,11 @@ proc get*(self: App, context: ExecutionContext): Image =
   let prompt = self.appConfig.prompt
   if prompt == "":
     return self.error(context, "No prompt provided in app config.")
+  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"openAI"}{"apiKey"}.getStr
   if apiKey == "":
     return self.error(context, "Please provide an OpenAI API key in the settings.")
 
-  var client = newHttpClient(timeout = 300000) # 5 min timeout
-  # Close on every exit path: a request that raises (timeout, DNS, TLS — the
-  # common case on flaky networks) must not leak the socket and SSL context.
-  defer: client.close()
-  client.limitHttpResponse(self.maxHttpResponseBytes(), 300)
-  client.headers = newHttpHeaders([
-      ("Authorization", "Bearer " & apiKey),
-      ("Content-Type", "application/json"),
-  ])
   let imageWidth = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
   let imageHeight = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   let defaultSize = "1024x1024"
@@ -85,10 +76,19 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.appConfig.quality != "":
       body["quality"] = %self.appConfig.quality
   try:
-    let response = client.request("https://api.openai.com/v1/images/generations",
-        httpMethod = HttpPost, body = $body)
-    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
-    if response.code != Http200:
+    let response = boundedRequestWithHeaders(
+      "https://api.openai.com/v1/images/generations",
+      httpMethod = "POST",
+      body = $body,
+      headers = @[
+        (name: "Authorization", value: "Bearer " & apiKey),
+        (name: "Content-Type", value: "application/json"),
+      ],
+      timeoutMs = 300000,
+      maxBytes = self.maxHttpResponseBytes(),
+      maxSeconds = 300
+    )
+    if response.code != 200:
       try:
         let json = parseJson(response.body)
         let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
@@ -106,15 +106,27 @@ proc get*(self: App, context: ExecutionContext): Image =
       let imageUrl = imageNode{"url"}.getStr
       if imageUrl == "":
         return self.error(context, "No image data returned from OpenAI.")
-      var client2 = newHttpClient(timeout = 60000)
-      client2.limitHttpResponse(self.maxHttpResponseBytes(), 60)
-      defer: client2.close()
-      let imageData = client2.request(imageUrl, httpMethod = HttpGet)
-      requireHttpResponseWithinLimit(imageData.body, self.maxHttpResponseBytes())
-      if imageData.code != Http200:
-        return self.error(context, "Error fetching image " & $imageData.status)
-      imageDataBody = imageData.body
-    if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
+      let (downloadedImage, downloadedData) = downloadImageWithData(
+        imageUrl,
+        maxBytes = self.maxHttpResponseBytes(),
+        proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+      )
+      imageDataBody = downloadedData
+      if self.appConfig.metadataStateKey != "":
+        var metadata = %*{
+          "source": "openai",
+          "prompt": prompt,
+          "generatedPrompt": if revisedPrompt != "": revisedPrompt else: prompt,
+          "model": self.appConfig.model,
+          "size": size,
+        }
+        if revisedPrompt != "":
+          metadata["revisedPrompt"] = %revisedPrompt
+        self.scene.state[self.appConfig.metadataStateKey] = metadata
+      if imageDataBody.len > 0 and (self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always"):
+        discard self.saveAsset(prompt, ".jpg", imageDataBody, self.appConfig.saveAssets == "auto")
+      return downloadedImage
+    if imageDataBody.len > 0 and (self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always"):
       discard self.saveAsset(prompt, ".jpg", imageDataBody, self.appConfig.saveAssets == "auto")
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{
@@ -128,6 +140,11 @@ proc get*(self: App, context: ExecutionContext): Image =
         metadata["revisedPrompt"] = %revisedPrompt
       self.scene.state[self.appConfig.metadataStateKey] = metadata
 
-    result = decodeImageWithFallback(imageDataBody)
+    when defined(frameosEmbedded):
+      if imageDataBody.len <= 0:
+        return self.error(context, "No image data returned from OpenAI.")
+      result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len)
+    else:
+      result = decodeImageWithFallback(imageDataBody)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)

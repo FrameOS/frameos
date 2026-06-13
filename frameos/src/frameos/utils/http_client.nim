@@ -17,8 +17,11 @@ const
   DefaultFetchMaxBytes* = 10 * 1024 * 1024
   DefaultFetchMaxSeconds* = 35.0
 
+type
+  SimpleHttpHeader* = tuple[name: string, value: string]
+
 when defined(frameosEmbedded):
-  import std/strformat
+  import std/[strformat, strutils]
 
   type
     HttpRequestError* = object of IOError
@@ -28,20 +31,76 @@ when defined(frameosEmbedded):
       status*: string
       body*: string
 
+    BoundedHttpBufferResponse* = object
+      code*: int
+      status*: string
+      body*: pointer
+      bodyLen*: int
+
     HttpResponseMetadata* = object
       contentLength*: int
       etag*: string
 
   proc fos_nim_http_request(httpMethod: cstring, url: cstring,
                             body: pointer, bodyLen: csize_t,
+                            headers: pointer, headersLen: csize_t,
                             timeoutMs: cint, maxBytes: csize_t,
                             outStatus: ptr cint, outLen: ptr csize_t):
                             pointer {.importc: "fos_nim_http_request", cdecl.}
   proc fos_nim_http_free(p: pointer) {.importc: "fos_nim_http_free", cdecl.}
 
+  proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
+    for header in headers:
+      let name = header.name.strip()
+      if name.len == 0:
+        continue
+      if name.contains(":") or name.contains("\r") or name.contains("\n"):
+        raise newException(ValueError, "Invalid HTTP header name: " & name)
+      let value = header.value.replace("\r", " ").replace("\n", " ").strip()
+      result.add(name & ": " & value & "\n")
+
   proc requireHttpResponseWithinLimit*(content: string, maxBytes: int) =
     if maxBytes > 0 and content.len > maxBytes:
       raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
+
+  proc freeHttpBufferResponse*(response: var BoundedHttpBufferResponse) =
+    if response.body != nil:
+      fos_nim_http_free(response.body)
+      response.body = nil
+      response.bodyLen = 0
+
+  proc boundedRequestBuffer*(
+      url: string,
+      httpMethod = "GET",
+      body = "",
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
+    ): BoundedHttpBufferResponse =
+    ## Returns the C-owned response buffer directly on embedded targets.
+    ## Callers must release it with freeHttpBufferResponse once they have
+    ## decoded or copied the bytes they need.
+    if url.strip().len == 0:
+      raise newException(ValueError, "Invalid HTTP URL: empty")
+    if not (url.startsWith("http://") or url.startsWith("https://")):
+      raise newException(ValueError, &"Invalid HTTP URL: {url}")
+    var status: cint = 0
+    var outLen: csize_t = 0
+    let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
+    let headerBlock = encodeSimpleHeaders(headers)
+    let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
+    let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
+                                   bodyPtr, body.len.csize_t,
+                                   headerPtr, headerBlock.len.csize_t,
+                                   timeoutMs.cint, maxBytes.csize_t,
+                                   addr status, addr outLen)
+    if buf == nil and status == 0:
+      raise newException(IOError, &"HTTP request failed: {url}")
+    result.code = status.int
+    result.status = $status
+    result.body = buf
+    result.bodyLen = outLen.int
 
   proc boundedRequest*(
       url: string,
@@ -49,26 +108,28 @@ when defined(frameosEmbedded):
       body = "",
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
     ): BoundedHttpResponse =
     ## esp_http_client follows redirects and bounds every phase with its own
     ## timeout; maxSeconds is approximated by the C side's overall timeout.
-    var status: cint = 0
-    var outLen: csize_t = 0
-    let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
-    let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
-                                   bodyPtr, body.len.csize_t,
-                                   timeoutMs.cint, maxBytes.csize_t,
-                                   addr status, addr outLen)
-    if buf == nil and status == 0:
-      raise newException(IOError, &"HTTP request failed: {url}")
-    result.code = status.int
-    result.status = $status
-    if buf != nil:
-      result.body = newString(outLen.int)
-      if outLen.int > 0:
-        copyMem(addr result.body[0], buf, outLen.int)
-      fos_nim_http_free(buf)
+    var response = boundedRequestBuffer(
+      url,
+      httpMethod = httpMethod,
+      body = body,
+      timeoutMs = timeoutMs,
+      maxBytes = maxBytes,
+      maxSeconds = maxSeconds,
+      headers = headers
+    )
+    try:
+      result.code = response.code
+      result.status = response.status
+      if response.body != nil and response.bodyLen > 0:
+        result.body = newString(response.bodyLen)
+        copyMem(addr result.body[0], response.body, response.bodyLen)
+    finally:
+      response.freeHttpBufferResponse()
 
   proc boundedRequestContent*(
       url: string,
@@ -76,32 +137,49 @@ when defined(frameosEmbedded):
       body = "",
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
     ): string =
-    let response = boundedRequest(url, httpMethod, body, timeoutMs, maxBytes, maxSeconds)
+    let response = boundedRequest(url, httpMethod, body, timeoutMs, maxBytes, maxSeconds, headers)
     if response.code >= 400:
-      raise newException(HttpRequestError, response.status)
+      let detail = if response.body.len > 0: ": " & response.body else: ""
+      raise newException(HttpRequestError, "HTTP " & response.status & detail)
     result = response.body
 
   proc boundedGetContent*(
       url: string,
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
     ): string =
     boundedRequestContent(url, httpMethod = "GET", timeoutMs = timeoutMs,
-                          maxBytes = maxBytes, maxSeconds = maxSeconds)
+                          maxBytes = maxBytes, maxSeconds = maxSeconds,
+                          headers = headers)
 
   proc boundedPostContent*(
       url: string,
       body = "",
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
     ): string =
     boundedRequestContent(url, httpMethod = "POST", body = body,
                           timeoutMs = timeoutMs, maxBytes = maxBytes,
-                          maxSeconds = maxSeconds)
+                          maxSeconds = maxSeconds, headers = headers)
+
+  proc boundedRequestWithHeaders*(
+      url: string,
+      httpMethod = "GET",
+      body = "",
+      headers: seq[SimpleHttpHeader] = @[],
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds
+    ): BoundedHttpResponse =
+    boundedRequest(url, httpMethod = httpMethod, body = body, timeoutMs = timeoutMs,
+                   maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers)
 
 else:
   import std/[httpclient, net, posix, strformat, strutils, times, uri]
@@ -371,6 +449,41 @@ else:
       httpMethod = HttpPost,
       body = body,
       headers = headers,
+      timeoutMs = timeoutMs,
+      maxBytes = maxBytes,
+      maxSeconds = maxSeconds
+    )
+
+  proc simpleHeaders(headers: seq[SimpleHttpHeader]): HttpHeaders =
+    result = newHttpHeaders()
+    for header in headers:
+      let name = header.name.strip()
+      if name.len > 0:
+        result[name] = header.value
+
+  proc simpleMethod(methodName: string): HttpMethod =
+    case methodName.toUpperAscii()
+    of "POST": HttpPost
+    of "PUT": HttpPut
+    of "PATCH": HttpPatch
+    of "DELETE": HttpDelete
+    of "HEAD": HttpHead
+    else: HttpGet
+
+  proc boundedRequestWithHeaders*(
+      url: string,
+      httpMethod = "GET",
+      body = "",
+      headers: seq[SimpleHttpHeader] = @[],
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds
+    ): BoundedHttpResponse =
+    boundedRequest(
+      url,
+      httpMethod = simpleMethod(httpMethod),
+      body = body,
+      headers = simpleHeaders(headers),
       timeoutMs = timeoutMs,
       maxBytes = maxBytes,
       maxSeconds = maxSeconds

@@ -11,6 +11,9 @@ import uri
 
 import frameos/utils/font
 import frameos/utils/http_client
+when defined(frameosEmbedded):
+  import pixie/fileformats/bmp
+  import pixie/fileformats/png
 when not defined(frameosEmbedded):
   # No child processes on FreeRTOS: ImageMagick/exiftool fallbacks are
   # compiled out and pixie does all decoding.
@@ -22,6 +25,10 @@ const MaxExifOutputBytes = 1024 * 1024
 const ImageMagickTimeoutMs = 30_000
 const ExifToolTimeoutMs = 10_000
 const ImageEngineImageMagick* = "imagemagick"
+when defined(frameosEmbedded):
+  const EmbeddedSmallDecodeCopyBytes = 512 * 1024
+  const EmbeddedMaxDirectDecodeCopyBytes = 2 * 1024 * 1024
+  const EmbeddedMaxDirectRgbaBytes = 3 * 1024 * 1024
 
 var runtimeImageEngine = ""
 
@@ -119,6 +126,73 @@ proc decodeImageWithFallback*(data: string): Image =
       return converted.get()
   return decodeImage(data)
 
+when defined(frameosEmbedded):
+  proc copyImageBuffer(data: pointer, len: int): string =
+    result = newString(len)
+    if len > 0:
+      copyMem(addr result[0], data, len)
+
+  proc embeddedImageFormat(data: pointer, len: int): string =
+    if data == nil or len <= 0:
+      return "empty"
+    if len > 8 and equalMem(data, pngSignature[0].unsafeAddr, 8):
+      return "PNG"
+    let bytes = cast[ptr UncheckedArray[uint8]](data)
+    if len > 2 and bytes[0] == 0xFF'u8 and bytes[1] == 0xD8'u8:
+      return "JPEG"
+    if len > 2 and bytes[0] == 'B'.uint8 and bytes[1] == 'M'.uint8:
+      return "BMP"
+    if len > 6 and bytes[0] == 'G'.uint8 and bytes[1] == 'I'.uint8 and bytes[2] == 'F'.uint8:
+      return "GIF"
+    if len > 12 and bytes[0] == 'R'.uint8 and bytes[1] == 'I'.uint8 and
+        bytes[2] == 'F'.uint8 and bytes[3] == 'F'.uint8:
+      return "WEBP"
+    "unknown"
+
+  proc guardEmbeddedDirectDecode(data: pointer, len: int, format: string) =
+    let dimensions = decodeImageDimensions(data, len)
+    let rgbaBytes = dimensions.width.int64 * dimensions.height.int64 * 4'i64
+    if rgbaBytes > EmbeddedMaxDirectRgbaBytes:
+      raise newException(PixieError,
+        &"Direct on-device {format} decode would allocate {rgbaBytes div 1024}K RGBA for {dimensions.width}x{dimensions.height}; using low-memory fallback")
+
+  proc decodeImageWithFallback*(data: pointer, len: int): Image =
+    if data == nil or len <= 0:
+      raise newException(PixieError, "Unsupported image file format: empty response")
+    let format = embeddedImageFormat(data, len)
+    if len > 8 and equalMem(data, pngSignature[0].unsafeAddr, 8):
+      guardEmbeddedDirectDecode(data, len, format)
+      return decodePng(data, len).convertToImage()
+    if len > 14:
+      let bytes = cast[ptr UncheckedArray[uint8]](data)
+      if bytes[0] == 'B'.uint8 and bytes[1] == 'M'.uint8:
+        guardEmbeddedDirectDecode(data, len, format)
+        return decodeDib(bytes[14].unsafeAddr, len - 14)
+    if format in ["JPEG", "GIF"]:
+      guardEmbeddedDirectDecode(data, len, format)
+      if len <= EmbeddedMaxDirectDecodeCopyBytes:
+        return decodeImageWithFallback(copyImageBuffer(data, len))
+      raise newException(PixieError,
+        &"Direct on-device {format} decode needs a {len div 1024}K source copy; using low-memory fallback")
+    if format == "WEBP":
+      raise newException(PixieError,
+        &"Direct on-device decode for {format} images uses the low-memory media proxy")
+    if len <= EmbeddedSmallDecodeCopyBytes:
+      return decodeImageWithFallback(copyImageBuffer(data, len))
+    raise newException(PixieError,
+      &"Direct on-device decode for {format} images over {EmbeddedSmallDecodeCopyBytes div 1024}K needs a low-memory decoder; fetched {len div 1024}K")
+
+  proc httpErrorDetail(response: BoundedHttpBufferResponse): string =
+    if response.body == nil or response.bodyLen <= 0:
+      return ""
+    let copyLen = min(response.bodyLen, 512)
+    var snippet = newString(copyLen)
+    if copyLen > 0:
+      copyMem(addr snippet[0], response.body, copyLen)
+    if response.bodyLen > copyLen:
+      snippet.add("...")
+    ": " & snippet
+
 proc readImageWithFallback*(path: string): Image =
   if useImageMagick():
     let converted = readImageWithImageMagick(path)
@@ -143,15 +217,55 @@ proc decodeDataUrl*(dataUrl: string): Image =
       decodeUrl(dataBody)
   return decodeImageWithFallback(decodedData)
 
-proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes): Image =
+proc proxiedImageUrl*(url: string, proxyBaseUrl = ""): string =
+  let proxy = proxyBaseUrl.strip()
+  if proxy.len > 0 and (url.startsWith("http://") or url.startsWith("https://")):
+    return proxy & "?url=" & encodeUrl(url)
+  url
+
+when defined(frameosEmbedded):
+  proc downloadImageFromResolvedBuffer(url: string, maxBytes: int):
+      tuple[image: Image, data: string] =
+    var response = boundedRequestBuffer(url, maxBytes = maxBytes)
+    try:
+      if response.code >= 400:
+        raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
+      result = (decodeImageWithFallback(response.body, response.bodyLen), "")
+    finally:
+      response.freeHttpBufferResponse()
+
+  proc downloadImageFromBuffer(url: string, maxBytes: int, proxyBaseUrl = ""):
+      tuple[image: Image, data: string] =
+    try:
+      return downloadImageFromResolvedBuffer(url, maxBytes)
+    except CatchableError:
+      let fallbackUrl = proxiedImageUrl(url, proxyBaseUrl)
+      if fallbackUrl != url:
+        try:
+          return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes)
+        except CatchableError as proxyError:
+          raise proxyError
+      raise
+
+proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, proxyBaseUrl = ""): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  let content = boundedGetContent(url, maxBytes = maxBytes)
-  result = decodeImageWithFallback(content)
+  when defined(frameosEmbedded):
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl).image
+  else:
+    let content = boundedGetContent(proxiedImageUrl(url, proxyBaseUrl), maxBytes = maxBytes)
+    result = decodeImageWithFallback(content)
 
-proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes): tuple[image: Image, data: string] =
-  let content = boundedGetContent(url, maxBytes = maxBytes)
-  result = (decodeImageWithFallback(content), content)
+proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
+    proxyBaseUrl = ""): tuple[image: Image, data: string] =
+  if url.startsWith("data:"):
+    let image = decodeDataUrl(url)
+    return (image, "")
+  when defined(frameosEmbedded):
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl)
+  else:
+    let content = boundedGetContent(proxiedImageUrl(url, proxyBaseUrl), maxBytes = maxBytes)
+    result = (decodeImageWithFallback(content), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:
@@ -289,7 +403,6 @@ proc previewSourceIndex*(x, y, width, height, rotate: int, flip: string): int =
 proc writeError*(image: Image, width, height: int, message: string) =
   let typeface = getDefaultTypeface()
   let font = newFont(typeface, 32, parseHtmlColor("#000000"))
-  let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
   let padding = 10.0
   let types = typeset(
       spans = [newSpan(message, font)],
@@ -298,14 +411,16 @@ proc writeError*(image: Image, width, height: int, message: string) =
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-  let borderTypes = typeset(
-      spans = [newSpan(message, borderFont)],
-      bounds = vec2(width.toFloat() - 2 * padding,
-      height.toFloat() - 2 * padding),
-      hAlign = CenterAlign,
-      vAlign = MiddleAlign,
-    )
-  image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
+  when not defined(frameosEmbedded):
+    let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+    let borderTypes = typeset(
+        spans = [newSpan(message, borderFont)],
+        bounds = vec2(width.toFloat() - 2 * padding,
+        height.toFloat() - 2 * padding),
+        hAlign = CenterAlign,
+        vAlign = MiddleAlign,
+      )
+    image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
   image.fillText(types, translate(vec2(padding, padding)))
 
 proc renderError*(width, height: int, message: string): Image =
