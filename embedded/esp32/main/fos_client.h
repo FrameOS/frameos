@@ -7,7 +7,12 @@
  */
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include "esp_err.h"
+#include "frameos_display.h"
 
 void fos_client_start(void);
 /* Trigger an immediate render from another task (HTTP action, console). */
@@ -15,3 +20,9 @@ void fos_client_render_now(void);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
 int64_t fos_client_last_render_ms(void);
+/* Last successfully rendered packed framebuffer, for HTTP preview. */
+bool fos_client_snapshot_info(int *width, int *height, fos_pixel_format_t *format,
+                              size_t *len, uint32_t *render_count, int64_t *render_ms);
+esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int *height,
+                                   fos_pixel_format_t *format, uint32_t *render_count,
+                                   int64_t *render_ms);

@@ -6,6 +6,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_crt_bundle.h"
@@ -37,8 +38,16 @@ static const char *TAG = "fos_client";
 #define FOSB_HEADER_LEN 12
 
 static EventGroupHandle_t s_events;
+static SemaphoreHandle_t s_snapshot_lock;
 static uint32_t s_render_count = 0;
 static int64_t s_last_render_ms = 0;
+static uint8_t *s_last_frame = NULL;
+static size_t s_last_frame_len = 0;
+static int s_last_frame_width = 0;
+static int s_last_frame_height = 0;
+static fos_pixel_format_t s_last_frame_format = FOS_PIXEL_1BPP;
+static uint32_t s_last_frame_render_count = 0;
+static int64_t s_last_frame_render_ms = 0;
 
 uint32_t fos_client_render_count(void) { return s_render_count; }
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
@@ -48,6 +57,74 @@ void fos_client_render_now(void)
     if (s_events) {
         xEventGroupSetBits(s_events, RENDER_NOW_BIT);
     }
+}
+
+static void store_snapshot(const uint8_t *buf, size_t len, int width, int height,
+                           fos_pixel_format_t format, uint32_t render_count,
+                           int64_t render_ms)
+{
+    if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
+    uint8_t *copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!copy) copy = malloc(len);
+    if (!copy) {
+        ESP_LOGW(TAG, "preview snapshot skipped: out of memory for %u bytes", (unsigned)len);
+        return;
+    }
+    memcpy(copy, buf, len);
+
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    uint8_t *old = s_last_frame;
+    s_last_frame = copy;
+    s_last_frame_len = len;
+    s_last_frame_width = width;
+    s_last_frame_height = height;
+    s_last_frame_format = format;
+    s_last_frame_render_count = render_count;
+    s_last_frame_render_ms = render_ms;
+    xSemaphoreGive(s_snapshot_lock);
+    free(old);
+}
+
+bool fos_client_snapshot_info(int *width, int *height, fos_pixel_format_t *format,
+                              size_t *len, uint32_t *render_count, int64_t *render_ms)
+{
+    if (!s_snapshot_lock) return false;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    bool ok = s_last_frame && s_last_frame_len > 0;
+    if (ok) {
+        if (width) *width = s_last_frame_width;
+        if (height) *height = s_last_frame_height;
+        if (format) *format = s_last_frame_format;
+        if (len) *len = s_last_frame_len;
+        if (render_count) *render_count = s_last_frame_render_count;
+        if (render_ms) *render_ms = s_last_frame_render_ms;
+    }
+    xSemaphoreGive(s_snapshot_lock);
+    return ok;
+}
+
+esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int *height,
+                                   fos_pixel_format_t *format, uint32_t *render_count,
+                                   int64_t *render_ms)
+{
+    if (!out || !s_snapshot_lock) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    if (!s_last_frame || s_last_frame_len == 0) {
+        xSemaphoreGive(s_snapshot_lock);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (out_len != s_last_frame_len) {
+        xSemaphoreGive(s_snapshot_lock);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memcpy(out, s_last_frame, s_last_frame_len);
+    if (width) *width = s_last_frame_width;
+    if (height) *height = s_last_frame_height;
+    if (format) *format = s_last_frame_format;
+    if (render_count) *render_count = s_last_frame_render_count;
+    if (render_ms) *render_ms = s_last_frame_render_ms;
+    xSemaphoreGive(s_snapshot_lock);
+    return ESP_OK;
 }
 
 /* ------------------------------------------------------------ remote mode */
@@ -142,8 +219,11 @@ static esp_err_t render_once(void)
     fos_config_t *config = fos_config();
     int64_t start = esp_timer_get_time();
 
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    fos_pixel_format_t format = fos_display_present() ? fos_display_format() : FOS_PIXEL_1BPP;
     size_t buf_len = fos_display_present() ? fos_display_buffer_size()
-                                           : (((size_t)800 + 7u) / 8u) * 480u;
+                                           : (((size_t)width + 7u) / 8u) * (size_t)height;
 
     uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) buf = malloc(buf_len);
@@ -169,14 +249,14 @@ static esp_err_t render_once(void)
     } else if (err == ESP_OK) {
         ESP_LOGI(TAG, "headless: rendered %u bytes, no panel to blit", (unsigned)buf_len);
     }
-    free(buf);
-
     if (err == ESP_OK) {
         s_render_count++;
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
+        store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
     }
+    free(buf);
     return err;
 }
 
@@ -267,6 +347,7 @@ void fos_client_start(void)
 {
     if (s_events) return;
     s_events = xEventGroupCreate();
+    s_snapshot_lock = xSemaphoreCreateMutex();
     /* Nim render + pixie + the QuickJS interpreter share this stack; QuickJS
      * is capped at 20KB (fos_qjs_glue.c), 48KB leaves room beneath it. */
     xTaskCreate(client_task, "fos_client", 49152, NULL, 5, NULL);
