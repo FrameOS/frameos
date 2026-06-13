@@ -13,6 +13,7 @@ from app.tasks.embedded_firmware import (
     embedded_buffer_size,
     _generated_config_header,
     check_embedded_panel_fits_memory,
+    embedded_hostname_for_frame,
     embedded_module_psram_bytes,
     embedded_panel_for_frame,
     embedded_pixel_format_for_panel,
@@ -294,6 +295,18 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 2" in header
     assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
     assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
+
+
+def test_generated_config_bakes_hostname_from_frame_host():
+    frame = Frame(id=7, frame_host="Kitchen Frame.local", server_host="backend.local",
+                  server_port=8989, server_api_key="key", device="waveshare.EPD_7in5_V2")
+    header = _generated_config_header(frame)
+    assert embedded_hostname_for_frame(frame) == "kitchen-frame"
+    assert '#define FRAMEOS_DEFAULT_HOSTNAME "kitchen-frame"' in header
+
+
+def test_embedded_hostname_falls_back_for_ip_hosts():
+    assert embedded_hostname_for_frame(Frame(id=12, frame_host="192.168.1.50")) == "frame12"
 
 
 def test_generated_config_omits_absent_power_settings():

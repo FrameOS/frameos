@@ -37,6 +37,7 @@ typedef struct {
     char backend_url[FOS_URL_LEN]; /* e.g. http://192.168.1.10:8989 */
     char api_key[FOS_STR_LEN];     /* frame server_api_key */
     uint32_t frame_id;
+    char hostname[FOS_STR_LEN];    /* DHCP hostname, e.g. "kitchen" */
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */

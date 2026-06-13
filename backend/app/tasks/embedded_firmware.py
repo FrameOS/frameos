@@ -226,6 +226,36 @@ def embedded_wifi_credentials(frame: Frame) -> tuple[str, str]:
     return ssid, password
 
 
+def embedded_hostname_for_frame(frame: Frame) -> str:
+    """Hostname baked into ESP32 firmware from frame_host.
+
+    The UI stores user-facing hosts like "kitchen.local". ESP-IDF wants a DHCP
+    hostname, not an mDNS name or IP literal, so strip common wrappers and keep
+    it to a conservative 31-byte label.
+    """
+    raw = str(frame.frame_host or "").strip()
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0].split("?", 1)[0]
+    if "@" in raw:
+        raw = raw.rsplit("@", 1)[1]
+    raw = raw.strip().lower()
+    if raw.endswith(".local"):
+        raw = raw[:-6]
+    if raw.startswith("[") and "]" in raw:
+        raw = ""
+    elif raw.count(":") == 1:
+        raw = raw.rsplit(":", 1)[0]
+    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", raw):
+        raw = ""
+
+    hostname = re.sub(r"[^a-z0-9-]+", "-", raw)
+    hostname = re.sub(r"-+", "-", hostname).strip("-")
+    if not hostname:
+        hostname = f"frame{int(frame.id)}" if getattr(frame, "id", None) else "frameos"
+    return hostname[:31].rstrip("-") or "frameos"
+
+
 def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: str = "") -> str:
     """Per-frame compile-time defaults baked into the image (NVS overrides win).
 
@@ -252,6 +282,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_BACKEND_URL {c_str(backend_url)}",
         f"#define FRAMEOS_DEFAULT_API_KEY {c_str(frame.server_api_key)}",
         f"#define FRAMEOS_DEFAULT_FRAME_ID {int(frame.id)}",
+        f"#define FRAMEOS_DEFAULT_HOSTNAME {c_str(embedded_hostname_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",

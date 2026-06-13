@@ -146,6 +146,7 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
   'device',
   'device_config',
   'embedded',
+  'frame_host',
   'interval',
   'network',
   'scenes',

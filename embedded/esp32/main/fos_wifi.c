@@ -31,6 +31,20 @@ static bool s_time_synced = false;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 
+static void apply_hostname(esp_netif_t *netif)
+{
+    const char *hostname = fos_config()->hostname;
+    if (!hostname[0]) {
+        return;
+    }
+    esp_err_t err = esp_netif_set_hostname(netif, hostname);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "hostname set to %s", hostname);
+    } else {
+        ESP_LOGW(TAG, "failed to set hostname %s: %s", hostname, esp_err_to_name(err));
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -80,6 +94,7 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     }
     if (!s_sta_netif) {
         s_sta_netif = esp_netif_create_default_wifi_sta();
+        apply_hostname(s_sta_netif);
     }
 
     wifi_config_t wifi_config = {0};

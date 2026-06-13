@@ -767,10 +767,16 @@ export function FrameSettings({
           ) : null}
         </div>
 
-        {!inFrameAdminMode && !isEmbeddedMode ? (
+        {!inFrameAdminMode ? (
           <>
             <H6 id="frame-settings-ssh" className="mt-2">
-              SSH <span className="text-gray-500">(backend &#8594; frame)</span>
+              {isEmbeddedMode ? (
+                <>Frame host</>
+              ) : (
+                <>
+                  SSH <span className="text-gray-500">(backend &#8594; frame)</span>
+                </>
+              )}
             </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field
@@ -778,176 +784,196 @@ export function FrameSettings({
                 label="Frame host"
                 tooltip={
                   <div className="space-y-2">
-                    <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
-                    <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
+                    {isEmbeddedMode ? (
+                      <>
+                        <p>
+                          The hostname to bake into the ESP32 firmware. A value like frame.local sets the device
+                          hostname to frame.
+                        </p>
+                        <p>Leave it blank to use the generated frame hostname.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
+                        <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
+                      </>
+                    )}
                   </div>
                 }
               >
                 <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
               </Field>
-              <Field name="ssh_user" label="SSH user">
-                <TextInput name="ssh_user" placeholder="pi" required />
-              </Field>
-              <Field
-                name="ssh_pass"
-                label="SSH pass"
-                tooltip={
-                  <p>
-                    Leave empty to use a SSH key. Configure it under{' '}
-                    <A href="/settings" className="frameos-link hover:underline">
-                      global settings.
-                    </A>
-                  </p>
-                }
-              >
-                <TextInput
-                  name="ssh_pass"
-                  onClick={() => touchFrameFormField('ssh_pass')}
-                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                  placeholder="no password, using SSH key"
-                />
-              </Field>
-              <Field name="ssh_port" label="SSH port">
-                <TextInput name="ssh_port" placeholder="22" required />
-              </Field>
-              <div className="@md:flex @md:gap-2">
-                <Label className="@md:w-1/3">SSH Keys</Label>
-                <div className="w-full space-y-2">
-                  {sshKeyOptions.length === 0 ? (
-                    <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
-                  ) : (
-                    <div className="space-y-2">
-                      {sshKeyOptions.map((key) => {
-                        const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
-                        return (
-                          <div key={key.id} className="flex flex-row gap-2">
-                            <Switch
-                              value={selectedKeys.has(key.id)}
-                              onChange={(value) => {
-                                const next = new Set(selectedKeys)
-                                if (value) {
-                                  next.add(key.id)
-                                } else {
-                                  next.delete(key.id)
-                                }
-                                setFrameFormValues({ ssh_keys: Array.from(next) })
-                              }}
-                            />
-                            <div className="text-sm">{key.name || key.id}</div>
-                            {key.use_for_new_frames ? (
-                              <div className="text-xs text-gray-500">Default for new frames</div>
-                            ) : null}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {mode === 'rpios' ? (
-                    <div className="flex gap-2">
-                      <Button
-                        size="small"
-                        color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
-                        onClick={() => {
-                          updateDeployedSshKeys()
-                          openLogs()
-                        }}
-                        disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
-                      >
-                        Save changes & update deployed keys
-                      </Button>
-                    </div>
-                  ) : null}
-                  <p className="text-xs text-gray-500">
-                    At least one previously installed key must remain when updating deployed keys.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <H6 id="frame-settings-agent">
-              Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Group name="agent">
-                <Field
-                  name="agentEnabled"
-                  label="Agent enabled"
-                  tooltip={
-                    <div className="space-y-2">
+              {!isEmbeddedMode ? (
+                <>
+                  <Field name="ssh_user" label="SSH user">
+                    <TextInput name="ssh_user" placeholder="pi" required />
+                  </Field>
+                  <Field
+                    name="ssh_pass"
+                    label="SSH pass"
+                    tooltip={
                       <p>
-                        The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used
-                        by the backend to control the frame. This allows you to control the frame even if it's behind a
-                        firewall. The backend must be publicly accessible for this to work.
+                        Leave empty to use a SSH key. Configure it under{' '}
+                        <A href="/settings" className="frameos-link hover:underline">
+                          global settings.
+                        </A>
                       </p>
-                      <p>
-                        This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
-                        connect to the backend to await further commands.
-                      </p>
-                      <p>
-                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
-                        menu in the top.
-                      </p>
-                    </div>
-                  }
-                >
-                  <Switch name="agentEnabled" fullWidth />
-                </Field>
-                {frameForm.agent?.agentEnabled && (
-                  <>
-                    <Field
-                      name="agentRunCommands"
-                      label="Allow remote control"
-                      tooltip={
+                    }
+                  >
+                    <TextInput
+                      name="ssh_pass"
+                      onClick={() => touchFrameFormField('ssh_pass')}
+                      type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                      placeholder="no password, using SSH key"
+                    />
+                  </Field>
+                  <Field name="ssh_port" label="SSH port">
+                    <TextInput name="ssh_port" placeholder="22" required />
+                  </Field>
+                  <div className="@md:flex @md:gap-2">
+                    <Label className="@md:w-1/3">SSH Keys</Label>
+                    <div className="w-full space-y-2">
+                      {sshKeyOptions.length === 0 ? (
+                        <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
+                      ) : (
                         <div className="space-y-2">
-                          <p>Can the FrameOS agent actually run commands and execute updates?</p>
-                          <p>
-                            This is a second "are you really sure?" toggle, as this comes with risk when enabled on an
-                            unsecure connection.
-                          </p>
-                          <p>
-                            Make sure you're either aware of the risks, or that the backend is only accessible over
-                            HTTPS before enabling this.
-                          </p>
-                        </div>
-                      }
-                    >
-                      {({ value, onChange }) => (
-                        <div className="w-full">
-                          <Switch name="agentRunCommands" value={value} onChange={onChange} />
+                          {sshKeyOptions.map((key) => {
+                            const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
+                            return (
+                              <div key={key.id} className="flex flex-row gap-2">
+                                <Switch
+                                  value={selectedKeys.has(key.id)}
+                                  onChange={(value) => {
+                                    const next = new Set(selectedKeys)
+                                    if (value) {
+                                      next.add(key.id)
+                                    } else {
+                                      next.delete(key.id)
+                                    }
+                                    setFrameFormValues({ ssh_keys: Array.from(next) })
+                                  }}
+                                />
+                                <div className="text-sm">{key.name || key.id}</div>
+                                {key.use_for_new_frames ? (
+                                  <div className="text-xs text-gray-500">Default for new frames</div>
+                                ) : null}
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
-                    </Field>
-                    <Field
-                      name="agentSharedSecret"
-                      label={<div>Agent shared secret</div>}
-                      labelRight={
-                        <Button
-                          color="secondary"
-                          size="small"
-                          onClick={() => {
-                            setFrameFormValues({
-                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
-                            })
-                            touchFrameFormField('agent.agentSharedSecret')
-                          }}
-                        >
-                          Regenerate
-                        </Button>
-                      }
-                      tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
-                    >
-                      <TextInput
-                        name="agentSharedSecret"
-                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
-                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
-                        placeholder=""
-                        required
-                      />
-                    </Field>
-                  </>
-                )}
-              </Group>
+                      {mode === 'rpios' ? (
+                        <div className="flex gap-2">
+                          <Button
+                            size="small"
+                            color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
+                            onClick={() => {
+                              updateDeployedSshKeys()
+                              openLogs()
+                            }}
+                            disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
+                          >
+                            Save changes & update deployed keys
+                          </Button>
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-gray-500">
+                        At least one previously installed key must remain when updating deployed keys.
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
+
+            {!isEmbeddedMode ? (
+              <>
+                <H6 id="frame-settings-agent">
+                  Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+                </H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Group name="agent">
+                    <Field
+                      name="agentEnabled"
+                      label="Agent enabled"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>
+                            The FrameOS Agent opens a websocket connection from the frame to the backend, which is then
+                            used by the backend to control the frame. This allows you to control the frame even if it's
+                            behind a firewall. The backend must be publicly accessible for this to work.
+                          </p>
+                          <p>
+                            This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
+                            connect to the backend to await further commands.
+                          </p>
+                          <p>
+                            Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
+                            Agent" menu in the top.
+                          </p>
+                        </div>
+                      }
+                    >
+                      <Switch name="agentEnabled" fullWidth />
+                    </Field>
+                    {frameForm.agent?.agentEnabled && (
+                      <>
+                        <Field
+                          name="agentRunCommands"
+                          label="Allow remote control"
+                          tooltip={
+                            <div className="space-y-2">
+                              <p>Can the FrameOS agent actually run commands and execute updates?</p>
+                              <p>
+                                This is a second "are you really sure?" toggle, as this comes with risk when enabled on
+                                an unsecure connection.
+                              </p>
+                              <p>
+                                Make sure you're either aware of the risks, or that the backend is only accessible over
+                                HTTPS before enabling this.
+                              </p>
+                            </div>
+                          }
+                        >
+                          {({ value, onChange }) => (
+                            <div className="w-full">
+                              <Switch name="agentRunCommands" value={value} onChange={onChange} />
+                            </div>
+                          )}
+                        </Field>
+                        <Field
+                          name="agentSharedSecret"
+                          label={<div>Agent shared secret</div>}
+                          labelRight={
+                            <Button
+                              color="secondary"
+                              size="small"
+                              onClick={() => {
+                                setFrameFormValues({
+                                  agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
+                                })
+                                touchFrameFormField('agent.agentSharedSecret')
+                              }}
+                            >
+                              Regenerate
+                            </Button>
+                          }
+                          tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
+                        >
+                          <TextInput
+                            name="agentSharedSecret"
+                            onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                            type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
+                            placeholder=""
+                            required
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </Group>
+                </div>
+              </>
+            ) : null}
           </>
         ) : null}
 
