@@ -27,3 +27,4 @@ int fos_wifi_rssi(void);
 /* Wait up to timeout for SNTP time sync after connecting. */
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms);
 bool fos_wifi_time_synced(void);
+void fos_wifi_set_scan_only(bool enabled);

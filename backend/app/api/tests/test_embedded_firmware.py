@@ -15,6 +15,7 @@ from app.tasks.embedded_firmware import (
     _generated_config_header,
     check_embedded_panel_fits_memory,
     embedded_default_pins_for_frame,
+    embedded_firmware_config_hash,
     embedded_gpio_buttons_for_frame,
     embedded_hostname_for_frame,
     embedded_max_http_response_bytes_for_frame,
@@ -163,6 +164,8 @@ async def test_firmware_download(async_client, db, tmp_path):
             'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
             'filename': 'frameos-esp32-s3.bin',
             'path': str(artifact),
+            'panel': 'EPD_7in5_V2',
+            'configHash': embedded_firmware_config_hash(stored),
         },
     }
     db.add(stored)
@@ -372,3 +375,32 @@ def test_generated_config_bakes_remote_render_mode():
                   device_config={"renderMode": "remote"})
     header = _generated_config_header(frame)
     assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
+
+
+def test_ready_firmware_is_stale_when_panel_changes(tmp_path):
+    artifact = tmp_path / "frameos-esp32-s3.bin"
+    artifact.write_bytes(b"firmware-bytes")
+    frame = Frame(
+        id=53,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in3e",
+        embedded={
+            "platform": "esp32-s3",
+            "firmware": {
+                "status": "ready",
+                "platform": "esp32-s3",
+                "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+                "filename": "frameos-esp32-s3.bin",
+                "path": str(artifact),
+                "panel": "EPD_7in5_V2",
+                "configHash": "old",
+            },
+        },
+    )
+    from app.tasks.embedded_firmware import latest_embedded_firmware
+
+    firmware = latest_embedded_firmware(frame)
+    assert firmware["status"] == "stale"
+    assert "different embedded panel" in firmware["error"]

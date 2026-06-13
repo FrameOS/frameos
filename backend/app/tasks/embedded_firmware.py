@@ -43,7 +43,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 8  # enlarged 8MB flash layout with 3840K OTA slots
+EMBEDDED_FIRMWARE_VERSION = 9  # config fingerprint + Wi-Fi auth threshold fix
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -327,6 +327,12 @@ def embedded_gpio_buttons_config(frame: Frame) -> str:
     return "\n".join(f"{pin}:{label}" for pin, label in embedded_gpio_buttons_for_frame(frame))
 
 
+def embedded_firmware_config_hash(frame: Frame) -> str:
+    wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
+    generated = _generated_config_header(frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password)
+    return hashlib.sha256(generated.encode("utf-8")).hexdigest()
+
+
 def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: str = "") -> str:
     """Per-frame compile-time defaults baked into the image (NVS overrides win).
 
@@ -453,6 +459,22 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             "status": "stale",
             "error": "The generated firmware was built from an older firmware project version",
         }
+    if firmware.get("status") == "ready":
+        panel = firmware.get("panel")
+        if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
+            return {
+                **firmware,
+                "status": "stale",
+                "error": "The generated firmware was built for a different embedded panel",
+            }
+        config_hash = firmware.get("configHash")
+        expected_hash = embedded_firmware_config_hash(frame)
+        if not isinstance(config_hash, str) or config_hash != expected_hash:
+            return {
+                **firmware,
+                "status": "stale",
+                "error": "The generated firmware was built from older embedded frame settings",
+            }
     path = firmware.get("path")
     if firmware.get("status") == "ready" and isinstance(path, str) and not Path(path).is_file():
         return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
@@ -591,8 +613,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi)
     wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
     generated_header = EMBEDDED_PROJECT_DIR / "main" / "generated_config.h"
-    generated_header.write_text(_generated_config_header(
-        frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password))
+    generated_config = _generated_config_header(frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password)
+    generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
+    generated_header.write_text(generated_config)
 
     # Compiled-scene parameters: bake the frame's first scene into the Nim
     # build. Full scene-graph codegen for Xtensa is the M3 follow-up; for now
@@ -690,7 +713,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "size": artifact_path.stat().st_size,
         "sha256": _sha256(artifact_path),
         "flashOffset": EMBEDDED_FLASH_OFFSET,
-        "panel": embedded_panel_for_frame(frame),
+        "panel": selected_panel,
+        "configHash": generated_config_hash,
         "otaPath": str(ota_artifact_path),
         "otaSize": ota_artifact_path.stat().st_size,
         "otaSha256": _sha256(ota_artifact_path),

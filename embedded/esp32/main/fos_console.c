@@ -8,6 +8,9 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "fos_battery.h"
 #include "fos_client.h"
@@ -19,6 +22,28 @@
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_console";
+
+static const char *auth_mode_name(wifi_auth_mode_t authmode)
+{
+    switch (authmode) {
+        case WIFI_AUTH_OPEN:
+            return "open";
+        case WIFI_AUTH_WEP:
+            return "wep";
+        case WIFI_AUTH_WPA_PSK:
+            return "wpa";
+        case WIFI_AUTH_WPA2_PSK:
+            return "wpa2";
+        case WIFI_AUTH_WPA_WPA2_PSK:
+            return "wpa/wpa2";
+        case WIFI_AUTH_WPA3_PSK:
+            return "wpa3";
+        case WIFI_AUTH_WPA2_WPA3_PSK:
+            return "wpa2/wpa3";
+        default:
+            return "other";
+    }
+}
 
 static int cmd_status(int argc, char **argv)
 {
@@ -110,6 +135,63 @@ static int cmd_wifi(int argc, char **argv)
     return 0;
 }
 
+static int cmd_wifi_scan(int argc, char **argv)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK) {
+        printf("wifi-scan: get mode failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    if (mode == WIFI_MODE_AP) {
+        fos_wifi_set_scan_only(true);
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (err != ESP_OK) {
+            fos_wifi_set_scan_only(false);
+            printf("wifi-scan: switch to APSTA failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    wifi_scan_config_t scan_config = {
+        .show_hidden = true,
+    };
+    printf("wifi-scan: scanning...\n");
+    err = esp_wifi_scan_start(&scan_config, true);
+    fos_wifi_set_scan_only(false);
+    if (err != ESP_OK) {
+        printf("wifi-scan: scan failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    uint16_t total = 0;
+    esp_wifi_scan_get_ap_num(&total);
+    uint16_t count = total > 20 ? 20 : total;
+    wifi_ap_record_t records[20] = {0};
+    err = esp_wifi_scan_get_ap_records(&count, records);
+    if (err != ESP_OK) {
+        esp_wifi_clear_ap_list();
+        printf("wifi-scan: read results failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("wifi-scan: %u APs found", (unsigned)total);
+    if (total > count) printf(" (showing strongest %u)", (unsigned)count);
+    printf("\n");
+    for (uint16_t i = 0; i < count; i++) {
+        printf("%2u: ch=%2u rssi=%4d auth=%-9s ssid=\"%s\"\n",
+               (unsigned)(i + 1),
+               (unsigned)records[i].primary,
+               (int)records[i].rssi,
+               auth_mode_name(records[i].authmode),
+               (char *)records[i].ssid);
+    }
+    return 0;
+}
+
 static int cmd_render(int argc, char **argv)
 {
     fos_client_render_now();
@@ -168,6 +250,7 @@ esp_err_t fos_console_start(void)
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
+        {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},
         {.command = "render", .help = "Render now", .func = cmd_render},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},

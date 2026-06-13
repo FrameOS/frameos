@@ -28,8 +28,54 @@ static char s_ip[16] = "";
 static char s_ap_ssid[32] = "";
 static int s_retries = 0;
 static bool s_time_synced = false;
+static bool s_scan_only = false;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
+
+static const char *disconnect_reason_name(uint8_t reason)
+{
+    switch (reason) {
+        case WIFI_REASON_BEACON_TIMEOUT:
+            return "beacon_timeout";
+        case WIFI_REASON_NO_AP_FOUND:
+            return "no_ap_found";
+        case WIFI_REASON_AUTH_FAIL:
+            return "auth_fail";
+        case WIFI_REASON_ASSOC_FAIL:
+            return "assoc_fail";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+            return "handshake_timeout";
+        case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+            return "no_ap_found_with_compatible_security";
+        case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+            return "no_ap_found_in_authmode_threshold";
+        case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+            return "no_ap_found_in_rssi_threshold";
+        default:
+            return "unknown";
+    }
+}
+
+static void configure_wifi_country(void)
+{
+    /*
+     * ESP-IDF defaults to "01" world-safe mode (channels 1-11). Many EU
+     * networks use channels 12/13, which otherwise surfaces as NO_AP_FOUND.
+     */
+    const wifi_country_t country = {
+        .cc = "01",
+        .schan = 1,
+        .nchan = 13,
+        .max_tx_power = 20,
+        .policy = WIFI_COUNTRY_POLICY_MANUAL,
+    };
+    esp_err_t err = esp_wifi_set_country(&country);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "wifi 2.4GHz channels set to 1-13");
+    } else {
+        ESP_LOGW(TAG, "failed to set wifi country/channel range: %s", esp_err_to_name(err));
+    }
+}
 
 static void apply_hostname(esp_netif_t *netif)
 {
@@ -48,11 +94,16 @@ static void apply_hostname(esp_netif_t *netif)
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (!s_scan_only) {
+            esp_wifi_connect();
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)data;
+        uint8_t reason = event ? event->reason : 0;
         s_ip[0] = '\0';
         if (s_state == FOS_WIFI_CONNECTING && s_retries++ < WIFI_MAX_RETRIES) {
-            ESP_LOGW(TAG, "disconnected, retry %d/%d", s_retries, WIFI_MAX_RETRIES);
+            ESP_LOGW(TAG, "disconnected reason=%u (%s), retry %d/%d",
+                     (unsigned)reason, disconnect_reason_name(reason), s_retries, WIFI_MAX_RETRIES);
             esp_wifi_connect();
         } else if (s_state == FOS_WIFI_CONNECTING) {
             xEventGroupSetBits(s_events, WIFI_FAILED_BIT);
@@ -79,6 +130,7 @@ esp_err_t fos_wifi_init(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    configure_wifi_country();
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                                         &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
@@ -100,7 +152,8 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     wifi_config_t wifi_config = {0};
     strlcpy((char *)wifi_config.sta.ssid, config->wifi_ssid, sizeof(wifi_config.sta.ssid));
     strlcpy((char *)wifi_config.sta.password, config->wifi_pass, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA_WPA2_PSK : WIFI_AUTH_OPEN;
+    wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
     s_state = FOS_WIFI_CONNECTING;
     s_retries = 0;
@@ -227,3 +280,5 @@ esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
 }
 
 bool fos_wifi_time_synced(void) { return s_time_synced; }
+
+void fos_wifi_set_scan_only(bool enabled) { s_scan_only = enabled; }
