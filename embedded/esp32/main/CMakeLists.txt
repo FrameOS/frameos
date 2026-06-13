@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "fos_buttons.c"
         "fos_config.c"
         "fos_wifi.c"
         "fos_http.c"

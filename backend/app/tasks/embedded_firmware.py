@@ -256,6 +256,27 @@ def embedded_hostname_for_frame(frame: Frame) -> str:
     return hostname[:31].rstrip("-") or "frameos"
 
 
+def embedded_gpio_buttons_for_frame(frame: Frame) -> list[tuple[int, str]]:
+    buttons: list[tuple[int, str]] = []
+    for raw_button in frame.gpio_buttons or []:
+        if not isinstance(raw_button, dict):
+            continue
+        try:
+            pin = int(raw_button.get("pin"))
+        except (TypeError, ValueError):
+            continue
+        if pin < 0 or pin > 48:
+            continue
+        label = str(raw_button.get("label") or f"Pin {pin}")
+        label = re.sub(r"[\s:]+", " ", label).strip()
+        buttons.append((pin, label[:31] or f"Pin {pin}"))
+    return buttons[:8]
+
+
+def embedded_gpio_buttons_config(frame: Frame) -> str:
+    return "\n".join(f"{pin}:{label}" for pin, label in embedded_gpio_buttons_for_frame(frame))
+
+
 def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: str = "") -> str:
     """Per-frame compile-time defaults baked into the image (NVS overrides win).
 
@@ -265,7 +286,15 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     console remain available to override everything.
     """
     def c_str(value: object) -> str:
-        return '"' + str(value or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return (
+            '"'
+            + str(value or "")
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            + '"'
+        )
 
     server_host = str(frame.server_host or "")
     server_port = int(frame.server_port or 8989)
@@ -283,6 +312,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_API_KEY {c_str(frame.server_api_key)}",
         f"#define FRAMEOS_DEFAULT_FRAME_ID {int(frame.id)}",
         f"#define FRAMEOS_DEFAULT_HOSTNAME {c_str(embedded_hostname_for_frame(frame))}",
+        f"#define FRAMEOS_DEFAULT_GPIO_BUTTONS {c_str(embedded_gpio_buttons_config(frame))}",
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",

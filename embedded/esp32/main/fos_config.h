@@ -9,11 +9,15 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 
 #define FOS_STR_LEN 128
 #define FOS_URL_LEN 256
+#define FOS_GPIO_BUTTONS_MAX 8
+#define FOS_GPIO_BUTTON_LABEL_LEN 32
+#define FOS_GPIO_BUTTONS_SPEC_LEN 384
 
 typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
@@ -32,6 +36,11 @@ typedef struct {
 } fos_pins_t;
 
 typedef struct {
+    int8_t pin;
+    char label[FOS_GPIO_BUTTON_LABEL_LEN];
+} fos_gpio_button_t;
+
+typedef struct {
     char wifi_ssid[FOS_STR_LEN];
     char wifi_pass[FOS_STR_LEN];
     char backend_url[FOS_URL_LEN]; /* e.g. http://192.168.1.10:8989 */
@@ -45,6 +54,8 @@ typedef struct {
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
     float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
+    size_t gpio_button_count;
+    fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;
 } fos_config_t;
 
@@ -57,3 +68,6 @@ bool fos_config_wifi_ready(void);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);
+/* "5:A\n6:B" */
+esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config);
+void fos_config_format_gpio_buttons(const fos_config_t *config, char *out, size_t out_len);

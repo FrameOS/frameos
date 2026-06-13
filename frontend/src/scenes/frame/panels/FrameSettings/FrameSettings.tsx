@@ -1868,59 +1868,6 @@ export function FrameSettings({
                 </Field>
               ) : null}
             </div>
-            <H6 id="frame-settings-gpio" className="flex items-center gap-2">
-              GPIO buttons
-              {!inkyAutoButtonDevice ? (
-                <Button
-                  size="small"
-                  color="secondary"
-                  onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
-                  className="flex items-center gap-1"
-                >
-                  <PlusIcon className="w-4 h-4" />
-                  Add button
-                </Button>
-              ) : null}
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              {inkyAutoButtonDevice ? (
-                <div>
-                  Inky Impression boards automatically configure pins 5, 6, {inkyThirteenDevice ? '25' : '16'} and 24
-                  as buttons A, B, C and D
-                </div>
-              ) : (
-                frameForm.gpio_buttons?.map((_, index) => (
-                  <Group key={index} name={`gpio_buttons.${index}`}>
-                    <div>
-                      <Field
-                        name="pin"
-                        label="Pin"
-                        labelRight={
-                          <Button
-                            color="secondary"
-                            size="small"
-                            className="flex items-center gap-1"
-                            onClick={() =>
-                              setFrameFormValues({
-                                gpio_buttons: frameForm.gpio_buttons?.filter((_, i) => i !== index),
-                              })
-                            }
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                            Remove
-                          </Button>
-                        }
-                      >
-                        <TextInput name="pin" placeholder="5" />
-                      </Field>
-                      <Field name="label" label="Label">
-                        <TextInput name="label" placeholder="A" />
-                      </Field>
-                    </div>
-                  </Group>
-                ))
-              )}
-            </div>
             <H6 id="frame-settings-logs">Logs</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field
@@ -1987,6 +1934,59 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
+        <H6 id="frame-settings-gpio" className="flex items-center gap-2">
+          GPIO buttons
+          {!(!isEmbeddedMode && inkyAutoButtonDevice) ? (
+            <Button
+              size="small"
+              color="secondary"
+              onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
+              className="flex items-center gap-1"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Add button
+            </Button>
+          ) : null}
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          {!isEmbeddedMode && inkyAutoButtonDevice ? (
+            <div>
+              Inky Impression boards automatically configure pins 5, 6, {inkyThirteenDevice ? '25' : '16'} and 24 as
+              buttons A, B, C and D
+            </div>
+          ) : (
+            frameForm.gpio_buttons?.map((_, index) => (
+              <Group key={index} name={`gpio_buttons.${index}`}>
+                <div>
+                  <Field
+                    name="pin"
+                    label="Pin"
+                    labelRight={
+                      <Button
+                        color="secondary"
+                        size="small"
+                        className="flex items-center gap-1"
+                        onClick={() =>
+                          setFrameFormValues({
+                            gpio_buttons: frameForm.gpio_buttons?.filter((_, i) => i !== index),
+                          })
+                        }
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                        Remove
+                      </Button>
+                    }
+                  >
+                    <TextInput name="pin" placeholder="5" />
+                  </Field>
+                  <Field name="label" label="Label">
+                    <TextInput name="label" placeholder="A" />
+                  </Field>
+                </div>
+              </Group>
+            ))
+          )}
+        </div>
       </Form>
     </div>
   )

@@ -16,6 +16,7 @@
 #include "esp_timer.h"
 
 #include "fos_battery.h"
+#include "fos_buttons.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -215,6 +216,7 @@ static void client_task(void *arg)
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
             fos_scenes_sync(false);
             fos_scenes_apply_pending();
+            fos_buttons_process_events();
         }
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
@@ -252,6 +254,9 @@ static void client_task(void *arg)
             EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE,
                                                    pdFALSE, pdMS_TO_TICKS(slice));
             if (bits & RENDER_NOW_BIT) break;
+            if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+                fos_buttons_process_events();
+            }
             if (frameos_nim_render_requested()) break;
             remaining_ms -= slice;
         }

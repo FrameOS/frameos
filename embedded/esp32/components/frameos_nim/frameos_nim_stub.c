@@ -22,6 +22,11 @@ int frameos_nim_load_scenes(const char *json)
 }
 double frameos_nim_scene_interval(void) { return 0; }
 bool frameos_nim_render_requested(void) { return false; }
+bool frameos_nim_send_event(const char *event, const char *payload_json)
+{
+    (void)event; (void)payload_json;
+    return false;
+}
 uint8_t *fos_nim_http_request(const char *method, const char *url,
                               const void *body, size_t body_len,
                               int timeout_ms, size_t max_bytes,

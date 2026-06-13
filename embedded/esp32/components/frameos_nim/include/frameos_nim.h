@@ -38,6 +38,8 @@ int frameos_nim_load_scenes(const char *json);
 double frameos_nim_scene_interval(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
+/* Deliver a JSON event payload to the current interpreted scene. */
+bool frameos_nim_send_event(const char *event, const char *payload_json);
 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);

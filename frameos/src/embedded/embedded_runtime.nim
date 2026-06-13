@@ -51,6 +51,19 @@ proc takeRenderRequested*(): bool =
   result = renderRequested
   renderRequested = false
 
+proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+  try:
+    let payload =
+      if payloadJson == nil or ($payloadJson).len == 0:
+        %*{}
+      else:
+        parseJson($payloadJson)
+    channels.sendEvent($eventName, payload)
+    result = true
+  except Exception as e:
+    log("event " & $eventName & " failed: " & e.msg)
+    result = false
+
 # ------------------------------------------------------------------- setup
 
 proc initRuntime*(width, height: int, name: string) =

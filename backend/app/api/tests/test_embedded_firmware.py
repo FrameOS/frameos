@@ -13,6 +13,7 @@ from app.tasks.embedded_firmware import (
     embedded_buffer_size,
     _generated_config_header,
     check_embedded_panel_fits_memory,
+    embedded_gpio_buttons_for_frame,
     embedded_hostname_for_frame,
     embedded_module_psram_bytes,
     embedded_panel_for_frame,
@@ -303,6 +304,20 @@ def test_generated_config_bakes_hostname_from_frame_host():
     header = _generated_config_header(frame)
     assert embedded_hostname_for_frame(frame) == "kitchen-frame"
     assert '#define FRAMEOS_DEFAULT_HOSTNAME "kitchen-frame"' in header
+
+
+def test_generated_config_bakes_gpio_buttons():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        gpio_buttons=[{"pin": 5, "label": "A"}, {"pin": 6, "label": "Render: now"}],
+    )
+    header = _generated_config_header(frame)
+    assert embedded_gpio_buttons_for_frame(frame) == [(5, "A"), (6, "Render now")]
+    assert '#define FRAMEOS_DEFAULT_GPIO_BUTTONS "5:A\\n6:Render now"' in header
 
 
 def test_embedded_hostname_falls_back_for_ip_hosts():

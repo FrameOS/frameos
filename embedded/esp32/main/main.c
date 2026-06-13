@@ -20,6 +20,7 @@
 #include "esp_ota_ops.h"
 
 #include "fos_battery.h"
+#include "fos_buttons.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_console.h"
@@ -171,6 +172,9 @@ void app_main(void)
 
     /* Render loop runs in both cases: local mode works fully offline. */
     fos_client_start();
+    if (fos_buttons_start() != ESP_OK) {
+        ESP_LOGW(TAG, "GPIO buttons unavailable");
+    }
 
     ESP_LOGI(TAG, "boot complete: wifi=%s ip=%s portal=%s",
              online ? "connected" : "offline", fos_wifi_ip(),

@@ -36,6 +36,7 @@ extern const char *fos_nim_info_impl(void);
 extern int fos_nim_load_scenes_impl(const char *json);
 extern double fos_nim_scene_interval_impl(void);
 extern bool fos_nim_render_requested_impl(void);
+extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
 
 static bool s_nim_started = false;
 static bool s_nim_ready = false;
@@ -85,6 +86,12 @@ bool frameos_nim_render_requested(void)
 {
     if (!s_nim_ready) return false;
     return fos_nim_render_requested_impl();
+}
+
+bool frameos_nim_send_event(const char *event, const char *payload_json)
+{
+    if (!s_nim_ready || event == NULL) return false;
+    return fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
 }
 
 void frameos_nim_log_hook(const char *msg)
