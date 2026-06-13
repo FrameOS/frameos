@@ -291,7 +291,9 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
 
 
 def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) -> None:
-    normalized_platform = normalize_embedded_platform(platform or (frame.embedded or {}).get("platform"))
+    normalized_platform = normalize_embedded_platform(
+        platform or (frame.embedded or {}).get("platform") or SUPPORTED_EMBEDDED_PLATFORM
+    )
 
     frame.mode = "embedded"
     if not frame.frame_host:

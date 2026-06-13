@@ -142,6 +142,17 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'agent',
   'buildroot',
 ]
+const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
+  'device',
+  'device_config',
+  'embedded',
+  'interval',
+  'network',
+  'scenes',
+  'server_api_key',
+  'server_host',
+  'server_port',
+]
 
 const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   name: 'Frame name',
@@ -321,7 +332,13 @@ function keyLabel(key: keyof FrameType): string {
 }
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
-  return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+  if (mode === 'buildroot') {
+    return FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
+  }
+  if (mode === 'embedded') {
+    return FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED
+  }
+  return FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
 function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVersion: string | null): boolean {

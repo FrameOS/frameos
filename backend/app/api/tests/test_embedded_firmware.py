@@ -56,6 +56,34 @@ async def test_new_embedded_frame_rejects_unknown_platform(async_client):
 
 
 @pytest.mark.asyncio
+async def test_update_frame_to_embedded_applies_defaults(async_client, db):
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Pi Frame',
+        'frame_host': 'pi.local',
+        'server_host': 'localhost',
+    })
+    assert response.status_code == 200, response.text
+    frame_id = response.json()['frame']['id']
+
+    response = await async_client.post(f'/api/frames/{frame_id}', json={
+        'mode': 'embedded',
+        'network': {'wifiSSID': 'Test WiFi', 'wifiPassword': 'secret1234'},
+    })
+    assert response.status_code == 200, response.text
+
+    db.expire_all()
+    stored = db.get(Frame, frame_id)
+    assert stored.mode == 'embedded'
+    assert stored.embedded['platform'] == 'esp32-s3'
+    assert stored.agent['agentEnabled'] is False
+    assert stored.https_proxy['enable'] is False
+    assert stored.log_to_file is None
+    assert stored.network['wifiSSID'] == 'Test WiFi'
+    assert stored.network['wifiPassword'] == 'secret1234'
+    assert stored.device.startswith('waveshare.')
+
+
+@pytest.mark.asyncio
 async def test_firmware_status_idle(async_client):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")

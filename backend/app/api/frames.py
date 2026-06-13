@@ -2888,6 +2888,11 @@ async def api_frame_update_endpoint(
             ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
         except ValueError as exc:
             _bad_request(str(exc))
+    elif data.mode == "embedded" or ((frame.mode or "rpios") == "embedded" and "embedded" in update_data):
+        try:
+            ensure_embedded_frame_defaults(frame, (frame.embedded or {}).get("platform"))
+        except ValueError as exc:
+            _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
 
