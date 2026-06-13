@@ -24,7 +24,7 @@ const events: FrameEvent[] = _events as any
 
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
-  const { width, height, defaultInterval } = useValues(frameLogic)
+  const { width, height, defaultInterval, mode } = useValues(frameLogic)
   const { scene } = useValues(diagramLogic)
   const { selectNode, updateNodeData, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const { updateScene } = useActions(frameLogic)
@@ -61,8 +61,8 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   // these fields are deprecated, but keep showing nodes that are connected
   const sourceFieldsToShow = fields.filter((field) => {
     const fieldValue = isEventWithStateFields
-      ? stateFieldAccess(scene, field, 'state')
-      : stateFieldAccess(scene, field, 'context.payload')
+      ? stateFieldAccess(scene, field, 'state', mode)
+      : stateFieldAccess(scene, field, 'context.payload', mode)
     return nodeEdges.some((edge) => edge.sourceHandle === `code/${fieldValue}`)
   })
 
@@ -231,8 +231,8 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
               <tbody>
                 {sourceFieldsToShow.map((field: StateField, i) => {
                   const fieldValue = isEventWithStateFields
-                    ? stateFieldAccess(scene, field, 'state')
-                    : stateFieldAccess(scene, field, 'context.payload')
+                    ? stateFieldAccess(scene, field, 'state', mode)
+                    : stateFieldAccess(scene, field, 'context.payload', mode)
                   return (
                     <tr key={i}>
                       <td className="font-sm frameos-node-muted-text w-full" colSpan={3}>
@@ -246,8 +246,8 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
                             onClick={() =>
                               copy(
                                 isEventWithStateFields
-                                  ? stateFieldAccess(scene, field, 'state')
-                                  : stateFieldAccess(scene, field, 'context.payload')
+                                  ? stateFieldAccess(scene, field, 'state', mode)
+                                  : stateFieldAccess(scene, field, 'context.payload', mode)
                               )
                             }
                           />

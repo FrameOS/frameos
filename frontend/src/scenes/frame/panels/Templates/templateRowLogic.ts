@@ -1,9 +1,11 @@
-import { actions, kea, key, path, props, reducers, selectors, listeners } from 'kea'
+import { actions, connect, kea, key, path, props, reducers, selectors, listeners } from 'kea'
 import { forms } from 'kea-forms'
 import { SceneNodeData, TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { framesModel } from '../../../../models/framesModel'
+import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
 
 import type { templateRowLogicType } from './templateRowLogicType'
 
@@ -16,6 +18,9 @@ export const templateRowLogic = kea<templateRowLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templateRowLogic']),
   props({} as TemplateRowLogicProps),
   key((props: TemplateRowLogicProps) => `${props.frameId ?? 'no-frame'}-${props.template.id ?? props.template.name}`),
+  connect({
+    values: [framesModel, ['frames']],
+  }),
   actions({
     tryScene: (state?: Record<string, any>) => ({ state }),
     openTrySceneModal: true,
@@ -50,10 +55,16 @@ export const templateRowLogic = kea<templateRowLogicType>([
   })),
   selectors({
     scenes: [() => [(_, props: TemplateRowLogicProps) => props.template?.scenes], (scenes) => scenes ?? []],
+    frameMode: [
+      (s) => [s.frames, (_, props: TemplateRowLogicProps) => props.frameId],
+      (frames, frameId: number | undefined) => (frameId ? frames[frameId]?.mode : undefined),
+    ],
     trySceneConfig: [
-      (s) => [s.scenes],
-      (scenes) => {
-        const interpretedScenes = scenes.filter((scene) => scene.settings?.execution === 'interpreted')
+      (s) => [s.scenes, s.frameMode],
+      (scenes, frameMode) => {
+        const interpretedScenes = frameRunsScenesInterpreted(frameMode)
+          ? scenes
+          : scenes.filter((scene) => scene.settings?.execution === 'interpreted')
         if (!interpretedScenes.length) {
           return null
         }

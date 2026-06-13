@@ -285,9 +285,14 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
         device_config={"psramMB": 16},
     )
     ensure_embedded_frame_defaults(frame)
+    assert frame.frame_port == 80
     assert frame.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame.device_config["pins"]["cs2"] == 8
     assert embedded_default_pins_for_frame(frame)["cs2"] == 8
+
+    custom_port = Frame(device="waveshare.EPD_7in5_V2", frame_port=8081)
+    ensure_embedded_frame_defaults(custom_port)
+    assert custom_port.frame_port == 8081
 
     custom = Frame(
         device="waveshare.EPD_7in5_V2",
@@ -332,6 +337,7 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
     assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
     assert f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES}" in header
+    assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1" in header
 
 
 def test_generated_config_bakes_hostname_from_frame_host():
@@ -375,6 +381,14 @@ def test_generated_config_bakes_remote_render_mode():
                   device_config={"renderMode": "remote"})
     header = _generated_config_header(frame)
     assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
+
+
+def test_generated_config_bakes_disabled_backend_logs():
+    frame = Frame(id=7, server_host="backend.local", server_port=8989,
+                  server_api_key="key", device="waveshare.EPD_7in5_V2",
+                  server_send_logs=False)
+    header = _generated_config_header(frame)
+    assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 0" in header
 
 
 def test_ready_firmware_is_stale_when_panel_changes(tmp_path):

@@ -11,6 +11,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { Tooltip } from '../../../../components/Tooltip'
 import type { AppNodeData, CodeNodeData, FrameScene } from '../../../../types'
 import { hasCompiledAppSource, hasJavaScriptAppSource } from '../../../../utils/sceneApps'
+import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -59,8 +60,10 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
   }
   const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
   const promptFieldClassName = embedded ? sceneSettingsEmbeddedPromptFieldClass : sceneSettingsPromptFieldClass
+  const frameRunsInterpreted = frameRunsScenesInterpreted(frameForm.mode)
+  const hasCompiledOnlyContent = sceneHasCompiledOnlyContent(scene)
   const hasInterpretedCompiledOnlyContent =
-    scene.settings?.execution === 'interpreted' && sceneHasCompiledOnlyContent(scene)
+    (frameRunsInterpreted || scene.settings?.execution === 'interpreted') && hasCompiledOnlyContent
 
   return (
     <Form
@@ -97,43 +100,50 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
             >
               <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
-            <Field
-              className={fieldClassName}
-              name="execution"
-              label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
-              tooltip={
-                <div className="space-y-2">
-                  <p>Choose between compiled and interpreted execution modes.</p>
-                  <p>
-                    <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
-                    whenever changes are made. If you edit the nim code for apps on the scene, you must use this mode.
-                    All inline code nodes must also be written in Nim.
-                  </p>
-                  <p>
-                    <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
-                    for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim source
-                    of apps in this mode.
-                  </p>
-                  <p>A full deploy is needed if switching between modes.</p>
-                </div>
-              }
-            >
-              <Select
+            {!frameRunsInterpreted ? (
+              <Field
+                className={fieldClassName}
                 name="execution"
-                className="h-10"
-                options={[
-                  { value: 'compiled', label: 'compiled' },
-                  { value: 'interpreted', label: 'interpreted' },
-                ]}
-              />
-            </Field>
+                label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
+                tooltip={
+                  <div className="space-y-2">
+                    <p>Choose between compiled and interpreted execution modes.</p>
+                    <p>
+                      <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
+                      whenever changes are made. If you edit the nim code for apps on the scene, you must use this mode.
+                      All inline code nodes must also be written in Nim.
+                    </p>
+                    <p>
+                      <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
+                      for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
+                      matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim source
+                      of apps in this mode.
+                    </p>
+                    <p>A full deploy is needed if switching between modes.</p>
+                  </div>
+                }
+              >
+                <Select
+                  name="execution"
+                  className="h-10"
+                  options={[
+                    { value: 'compiled', label: 'compiled' },
+                    { value: 'interpreted', label: 'interpreted' },
+                  ]}
+                />
+              </Field>
+            ) : null}
             {hasInterpretedCompiledOnlyContent ? (
               <div className="app-compiled-warning rounded-xl p-3 text-sm">
-                <div className="font-semibold">This compiled scene will not work in interpreted mode.</div>
+                <div className="font-semibold">
+                  {frameRunsInterpreted
+                    ? 'This scene uses compiled-only content that ESP32 frames cannot run.'
+                    : 'This compiled scene will not work in interpreted mode.'}
+                </div>
                 <div>
-                  It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run.
-                  Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.
+                  {frameRunsInterpreted
+                    ? 'It still contains Nim app source, Nim code nodes, or source nodes. Move the customization into JavaScript apps or inline code nodes.'
+                    : 'It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run. Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.'}
                 </div>
               </div>
             ) : null}

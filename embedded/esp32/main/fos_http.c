@@ -1,5 +1,6 @@
 #include "fos_http.h"
 
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "cJSON.h"
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
@@ -29,6 +31,8 @@ static httpd_handle_t s_server = NULL;
 static bool s_portal_mode = false;
 static fos_action_cb s_render_cb = NULL;
 static fos_action_cb s_ota_cb = NULL;
+
+static esp_err_t scenes_post_handler(httpd_req_t *req);
 
 void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now)
 {
@@ -131,6 +135,101 @@ static char *json_escape_dup(const char *value)
     }
     *dst = '\0';
     return out;
+}
+
+static bool copy_request_path(httpd_req_t *req, char *out, size_t out_len)
+{
+    if (!req || !out || out_len == 0) return false;
+    const char *uri = req->uri;
+    const char *query = strchr(uri, '?');
+    size_t len = query ? (size_t)(query - uri) : strlen(uri);
+    if (len >= out_len) return false;
+    memcpy(out, uri, len);
+    out[len] = '\0';
+    return true;
+}
+
+static bool json_string_value(const char *json, const char *key, char *out, size_t out_len)
+{
+    if (!json || !key || !out || out_len == 0) return false;
+    out[0] = '\0';
+
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p = strchr(p + strlen(pattern), ':');
+    if (!p) return false;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    if (*p != '"') return false;
+    p++;
+
+    size_t used = 0;
+    while (*p && *p != '"' && used + 1 < out_len) {
+        if (*p == '\\' && p[1]) p++;
+        out[used++] = *p++;
+    }
+    out[used] = '\0';
+    return used > 0;
+}
+
+static void current_scene_id(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    json_string_value(frameos_nim_scene_info_json(), "currentSceneId", out, out_len);
+}
+
+static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_empty, char **out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    *out = NULL;
+    int total = req->content_len;
+    if (total < 0 || (total == 0 && !allow_empty) || (size_t)total > max_len) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    char *body = heap_caps_malloc((size_t)total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) body = malloc((size_t)total + 1);
+    if (!body) return ESP_ERR_NO_MEM;
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, body + received, total - received);
+        if (r <= 0) {
+            free(body);
+            return ESP_FAIL;
+        }
+        received += r;
+    }
+    body[total] = '\0';
+    *out = body;
+    return ESP_OK;
+}
+
+static esp_err_t store_uploaded_scenes_payload(const char *body, size_t len)
+{
+    const char *payload = body;
+    size_t payload_len = len;
+    char *owned_payload = NULL;
+    cJSON *root = body ? cJSON_Parse(body) : NULL;
+
+    if (cJSON_IsObject(root)) {
+        cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
+        if (cJSON_IsArray(scenes)) {
+            owned_payload = cJSON_PrintUnformatted(scenes);
+            if (!owned_payload) {
+                cJSON_Delete(root);
+                return ESP_ERR_NO_MEM;
+            }
+            payload = owned_payload;
+            payload_len = strlen(owned_payload);
+        }
+    }
+
+    esp_err_t err = fos_scenes_set_json(payload, payload_len);
+    if (owned_payload) cJSON_free(owned_payload);
+    cJSON_Delete(root);
+    return err;
 }
 
 static esp_err_t send_input(httpd_req_t *req, const char *label, const char *name,
@@ -289,6 +388,11 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     if (send_option(req, "1", "Thin client (backend renders)", config->render_mode == FOS_RENDER_REMOTE) != ESP_OK) return ESP_FAIL;
     if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
 
+    if (sendstr(req, "<label for='server_send_logs'>Backend logs</label><select id='server_send_logs' name='server_send_logs'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Send render/runtime logs", config->server_send_logs) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Serial only", !config->server_send_logs) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->interval_sec);
     if (send_input(req, "Refresh interval (seconds)", "interval", "number", field, " min='5'") != ESP_OK) return ESP_FAIL;
     if (send_input(req, "Pins", "pins", "text", pins,
@@ -298,7 +402,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
         "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
-        "<a href='/api/scene-state'>Scene state JSON</a> | <a href='/api/preview.bmp'>Open preview image</a></p>"
+        "<a href='/state'>Scene state JSON</a> | <a href='/image'>Open frame image</a></p>"
         "<script>"
         "async function loadStatus(){const res=await fetch('/status');const s=await res.json();"
         "const scenes=s.scenes&&s.scenes.scenes?s.scenes.scenes:[];const sel=document.getElementById('scene_select');"
@@ -314,8 +418,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
         "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`;"
         "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
-        "function refreshPreview(){const img=document.getElementById('preview');img.src='/api/preview.bmp?t='+Date.now();}"
-        "function renderNow(){fetch('/api/action/render',{method:'POST'}).then(()=>{let n=0;"
+        "function refreshPreview(){const img=document.getElementById('preview');img.src='/image?t='+Date.now();}"
+        "function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;"
         "const t=setInterval(()=>{refreshPreview();if(++n>=12)clearInterval(t);},2500);});}"
         "function syncScenes(){fetch('/api/action/scenes_sync',{method:'POST'}).then(()=>setTimeout(loadStatus,1500));}"
         "function showScene(){const id=document.getElementById('scene_select').value;if(!id)return;"
@@ -382,7 +486,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
-        "\"intervalSec\":%lu,\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
+        "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app_name, app_version, idf_version, partition,
         esp_timer_get_time() / 1000000,
@@ -403,7 +507,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         nim_info, scene_json,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
-        (unsigned long)config->interval_sec, config->deep_sleep ? "true" : "false",
+        (unsigned long)config->interval_sec, config->server_send_logs ? "true" : "false",
+        config->deep_sleep ? "true" : "false",
         config->wake_schedule ? "true" : "false",
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
@@ -615,6 +720,11 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    char scene_id[128];
+    current_scene_id(scene_id, sizeof(scene_id));
+    if (scene_id[0]) {
+        httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
+    }
     err = httpd_resp_send_chunk(req, (const char *)header, sizeof(header));
     if (err == ESP_OK) {
         err = httpd_resp_send_chunk(req, (const char *)palette, palette_bytes);
@@ -678,6 +788,7 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "frame_id", value, sizeof(value))) config->frame_id = strtoul(value, NULL, 10);
     if (form_value(body, "panel", value, sizeof(value))) strlcpy(config->panel, value, sizeof(config->panel));
     if (form_value(body, "render_mode", value, sizeof(value))) config->render_mode = atoi(value) ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
+    if (form_value(body, "server_send_logs", value, sizeof(value))) config->server_send_logs = atoi(value) != 0;
     if (form_value(body, "interval", value, sizeof(value)) && atoi(value) >= 5) config->interval_sec = atoi(value);
     if (form_value(body, "pins", value, sizeof(value))) fos_config_parse_pins(value, &config->pins);
     free(body);
@@ -723,6 +834,264 @@ static esp_err_t scene_state_get_handler(httpd_req_t *req)
     }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, json);
+}
+
+static esp_err_t state_alias_get_handler(httpd_req_t *req)
+{
+    const char *state_json = frameos_nim_scene_state_json();
+    if (!state_json || !state_json[0]) state_json = "{}";
+    char scene_id[128];
+    current_scene_id(scene_id, sizeof(scene_id));
+    char *scene = json_escape_dup(scene_id);
+    if (!scene) return httpd_resp_send_500(req);
+
+    char *json = NULL;
+    int len = asprintf(&json, "{\"sceneId\":\"%s\",\"state\":%s}", scene, state_json);
+    free(scene);
+    if (len < 0 || !json) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, json, len);
+    free(json);
+    return err;
+}
+
+static esp_err_t states_alias_get_handler(httpd_req_t *req)
+{
+    const char *state_json = frameos_nim_scene_state_json();
+    if (!state_json || !state_json[0]) state_json = "{}";
+    char scene_id[128];
+    current_scene_id(scene_id, sizeof(scene_id));
+    char *scene = json_escape_dup(scene_id);
+    if (!scene) return httpd_resp_send_500(req);
+
+    char *json = NULL;
+    int len;
+    if (scene_id[0]) {
+        len = asprintf(&json, "{\"sceneId\":\"%s\",\"states\":{\"%s\":%s}}",
+                       scene, scene, state_json);
+    } else {
+        len = asprintf(&json, "{\"sceneId\":\"\",\"states\":{}}");
+    }
+    free(scene);
+    if (len < 0 || !json) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, json, len);
+    free(json);
+    return err;
+}
+
+static esp_err_t uploaded_scenes_get_handler(httpd_req_t *req)
+{
+    const char *json = frameos_nim_scene_info_json();
+    if (!json || !json[0]) {
+        json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+    }
+    char *payload = NULL;
+    int len = asprintf(&payload, "{\"scenes\":%s}", json);
+    if (len < 0 || !payload) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, payload, len);
+    free(payload);
+    return err;
+}
+
+static esp_err_t ping_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, "pong", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_apps_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"apps\":[]}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t frame_api_ping_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req,
+        "{\"ok\":true,\"mode\":\"http\",\"target\":\"frame\","
+        "\"elapsed_ms\":0,\"status\":200,\"message\":\"pong\"}",
+        HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t frame_api_frame_payload(httpd_req_t *req, bool list)
+{
+    fos_config_t *config = fos_config();
+    char *panel = json_escape_dup(config->panel);
+    char *ip = json_escape_dup(fos_wifi_ip());
+    if (!panel || !ip) {
+        free(panel); free(ip);
+        return httpd_resp_send_500(req);
+    }
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    char *json = NULL;
+    const char *prefix = list ? "{\"frames\":[" : "{\"frame\":";
+    const char *suffix = list ? "]}" : "}";
+    int len = asprintf(&json,
+        "%s{\"id\":%lu,\"name\":\"frame %lu\",\"mode\":\"embedded\","
+        "\"frame_host\":\"%s\",\"frame_port\":80,\"device\":\"waveshare.%s\","
+        "\"width\":%d,\"height\":%d,\"status\":\"online\","
+        "\"server_send_logs\":%s}%s",
+        prefix, (unsigned long)config->frame_id, (unsigned long)config->frame_id,
+        ip, panel, width, height, config->server_send_logs ? "true" : "false", suffix);
+    free(panel); free(ip);
+    if (len < 0 || !json) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, json, len);
+    free(json);
+    return err;
+}
+
+static esp_err_t frames_get_handler(httpd_req_t *req)
+{
+    return frame_api_frame_payload(req, true);
+}
+
+static esp_err_t frame_detail_get_handler(httpd_req_t *req)
+{
+    return frame_api_frame_payload(req, false);
+}
+
+static esp_err_t reload_post_handler(httpd_req_t *req)
+{
+    fos_scenes_request_sync();
+    if (s_render_cb) s_render_cb();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"status\":\"ok\",\"queued\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
+{
+    if (!event_name || !event_name[0]) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing event");
+    }
+
+    char *body = NULL;
+    esp_err_t err = read_request_body(req, 64 * 1024, true, &body);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    if (err != ESP_OK) return httpd_resp_send_500(req);
+    const char *payload = body && body[0] ? body : "{}";
+
+    bool ok = true;
+    if (strcmp(event_name, "render") == 0) {
+        if (s_render_cb) s_render_cb();
+    } else if (strcmp(event_name, "reload") == 0) {
+        fos_scenes_request_sync();
+        if (s_render_cb) s_render_cb();
+    } else if (strcmp(event_name, "uploadScenes") == 0) {
+        ok = store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
+        if (ok && s_render_cb) s_render_cb();
+    } else if (strcmp(event_name, "setCurrentScene") == 0) {
+        char scene_id[128];
+        if (json_string_value(payload, "sceneId", scene_id, sizeof(scene_id)) ||
+            json_string_value(payload, "scene_id", scene_id, sizeof(scene_id))) {
+            ok = fos_scenes_select(scene_id) == ESP_OK;
+            if (ok && s_render_cb) s_render_cb();
+        } else {
+            ok = false;
+        }
+    } else if (frameos_nim_available()) {
+        ok = frameos_nim_send_event(event_name, payload);
+        if (frameos_nim_render_requested() && s_render_cb) s_render_cb();
+    } else {
+        ok = false;
+    }
+    free(body);
+    if (!ok) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "event rejected");
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t event_post_handler(httpd_req_t *req)
+{
+    char path[256];
+    if (!copy_request_path(req, path, sizeof(path))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "URI too long");
+    }
+    const char *prefix = "/event/";
+    if (strncmp(path, prefix, strlen(prefix)) != 0) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    char event_name[96];
+    strlcpy(event_name, path + strlen(prefix), sizeof(event_name));
+    url_decode(event_name);
+    return handle_event_post(req, event_name);
+}
+
+static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
+{
+    char path[256];
+    if (!copy_request_path(req, path, sizeof(path))) return false;
+    const char *prefix = "/api/frames/";
+    if (strncmp(path, prefix, strlen(prefix)) != 0) return false;
+    char *p = path + strlen(prefix);
+    char *end = NULL;
+    unsigned long frame_id = strtoul(p, &end, 10);
+    if (end == p) return false;
+    if (fos_config()->frame_id != 0 && frame_id != fos_config()->frame_id) return false;
+    if (*end == '\0') {
+        strlcpy(suffix, "/", suffix_len);
+        return true;
+    }
+    if (*end != '/') return false;
+    strlcpy(suffix, end, suffix_len);
+    return true;
+}
+
+static esp_err_t frame_api_get_handler(httpd_req_t *req)
+{
+    char suffix[160];
+    if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    if (strcmp(suffix, "/") == 0) return frame_detail_get_handler(req);
+    if (strcmp(suffix, "/ping") == 0) return frame_api_ping_get_handler(req);
+    if (strcmp(suffix, "/state") == 0) return state_alias_get_handler(req);
+    if (strcmp(suffix, "/states") == 0) return states_alias_get_handler(req);
+    if (strcmp(suffix, "/uploaded_scenes") == 0) return uploaded_scenes_get_handler(req);
+    if (strcmp(suffix, "/image") == 0 || strncmp(suffix, "/scene_images/", 14) == 0) {
+        return preview_bmp_handler(req);
+    }
+    if (strcmp(suffix, "/logs") == 0) {
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, "{\"logs\":[]}", HTTPD_RESP_USE_STRLEN);
+    }
+    if (strcmp(suffix, "/metrics") == 0) {
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, "{\"metrics\":[]}", HTTPD_RESP_USE_STRLEN);
+    }
+    if (strcmp(suffix, "/assets") == 0) {
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, "{\"assets\":[]}", HTTPD_RESP_USE_STRLEN);
+    }
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+}
+
+static esp_err_t frame_api_post_handler(httpd_req_t *req)
+{
+    char suffix[160];
+    if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    if (strcmp(suffix, "/reload") == 0) return reload_post_handler(req);
+    if (strcmp(suffix, "/uploadScenes") == 0 || strcmp(suffix, "/uploaded_scenes") == 0) {
+        return scenes_post_handler(req);
+    }
+    const char *event_prefix = "/event/";
+    if (strncmp(suffix, event_prefix, strlen(event_prefix)) == 0) {
+        char event_name[96];
+        strlcpy(event_name, suffix + strlen(event_prefix), sizeof(event_name));
+        url_decode(event_name);
+        return handle_event_post(req, event_name);
+    }
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
 }
 
 static esp_err_t scene_select_handler(httpd_req_t *req)
@@ -782,7 +1151,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     }
     body[total] = '\0';
 
-    esp_err_t err = fos_scenes_set_json(body, total);
+    esp_err_t err = store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
@@ -821,13 +1190,14 @@ esp_err_t fos_http_start(bool portal_mode)
     s_portal_mode = portal_mode;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 32;
     config.max_open_sockets = 7;
     config.backlog_conn = 8;
     config.recv_wait_timeout = 5;
     config.send_wait_timeout = 5;
     config.lru_purge_enable = true;
     config.stack_size = 8192;
+    config.uri_match_fn = httpd_uri_match_wildcard;
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(err));
@@ -835,13 +1205,27 @@ esp_err_t fos_http_start(bool portal_mode)
     }
 
     const httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = root_get_handler};
+    const httpd_uri_t ping = {.uri = "/ping", .method = HTTP_GET, .handler = ping_get_handler};
     const httpd_uri_t status = {.uri = "/status", .method = HTTP_GET, .handler = status_get_handler};
+    const httpd_uri_t image = {.uri = "/image", .method = HTTP_GET, .handler = preview_bmp_handler};
+    const httpd_uri_t state = {.uri = "/state", .method = HTTP_GET, .handler = state_alias_get_handler};
+    const httpd_uri_t states = {.uri = "/states", .method = HTTP_GET, .handler = states_alias_get_handler};
+    const httpd_uri_t uploaded = {.uri = "/getUploadedScenes", .method = HTTP_GET, .handler = uploaded_scenes_get_handler};
+    const httpd_uri_t api_apps = {.uri = "/api/apps", .method = HTTP_GET, .handler = api_apps_get_handler};
+    const httpd_uri_t api_frames = {.uri = "/api/frames", .method = HTTP_GET, .handler = frames_get_handler};
     const httpd_uri_t preview = {.uri = "/api/preview.bmp", .method = HTTP_GET, .handler = preview_bmp_handler};
     const httpd_uri_t setup = {.uri = "/api/setup", .method = HTTP_POST, .handler = setup_post_handler};
     const httpd_uri_t scenes_info = {.uri = "/api/scenes", .method = HTTP_GET, .handler = scenes_get_handler};
     const httpd_uri_t scene_state = {.uri = "/api/scene-state", .method = HTTP_GET, .handler = scene_state_get_handler};
     httpd_register_uri_handler(s_server, &root);
+    httpd_register_uri_handler(s_server, &ping);
     httpd_register_uri_handler(s_server, &status);
+    httpd_register_uri_handler(s_server, &image);
+    httpd_register_uri_handler(s_server, &state);
+    httpd_register_uri_handler(s_server, &states);
+    httpd_register_uri_handler(s_server, &uploaded);
+    httpd_register_uri_handler(s_server, &api_apps);
+    httpd_register_uri_handler(s_server, &api_frames);
     httpd_register_uri_handler(s_server, &preview);
     httpd_register_uri_handler(s_server, &setup);
     httpd_register_uri_handler(s_server, &scenes_info);
@@ -856,8 +1240,18 @@ esp_err_t fos_http_start(bool portal_mode)
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
     httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};
+    httpd_uri_t upload_scenes = {.uri = "/uploadScenes", .method = HTTP_POST, .handler = scenes_post_handler};
+    httpd_uri_t reload = {.uri = "/reload", .method = HTTP_POST, .handler = reload_post_handler};
+    httpd_uri_t event = {.uri = "/event/*", .method = HTTP_POST, .handler = event_post_handler};
+    httpd_uri_t frame_api_get = {.uri = "/api/frames/*", .method = HTTP_GET, .handler = frame_api_get_handler};
+    httpd_uri_t frame_api_post = {.uri = "/api/frames/*", .method = HTTP_POST, .handler = frame_api_post_handler};
     httpd_register_uri_handler(s_server, &scenes);
     httpd_register_uri_handler(s_server, &scenes_sync);
+    httpd_register_uri_handler(s_server, &upload_scenes);
+    httpd_register_uri_handler(s_server, &reload);
+    httpd_register_uri_handler(s_server, &event);
+    httpd_register_uri_handler(s_server, &frame_api_get);
+    httpd_register_uri_handler(s_server, &frame_api_post);
 
     if (portal_mode) {
         static const char *probes[] = {

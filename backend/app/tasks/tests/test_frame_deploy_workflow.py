@@ -146,6 +146,36 @@ class FakePrecompiledBinaryBuilder:
 
 
 @pytest.mark.asyncio
+async def test_plan_fast_for_embedded_uses_http_scene_reload_plan():
+    class NoDistroDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            raise AssertionError("embedded fast plan should not probe Linux distro")
+
+    frame = SimpleNamespace(
+        id=53,
+        name="ESPvaarikas",
+        mode="embedded",
+        last_successful_deploy=None,
+        to_dict=lambda: {"id": 53, "name": "ESPvaarikas", "mode": "embedded"},
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=NoDistroDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("fast")
+
+    assert plan.fast_deploy is not None
+    assert plan.fast_deploy.action == "http_upload_scenes_reload"
+    assert plan.frame_dict["mode"] == "embedded"
+    assert plan.full_deploy is None
+
+
+@pytest.mark.asyncio
 async def test_full_deploy_skips_authorized_keys_when_agent_is_transport(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=28,
@@ -1582,6 +1612,83 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
     assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=53,
+        name="ESPvaarikas",
+        mode="embedded",
+        status="ready",
+        scenes=[{"id": "scene-a", "nodes": []}],
+        last_log_at="2026-06-14T00:14:41+00:00",
+        last_successful_deploy=None,
+        last_successful_deploy_at=None,
+        to_dict=lambda: {"id": 53, "name": "ESPvaarikas", "mode": "embedded"},
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=RecordingDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    calls: list[dict[str, object]] = []
+    logs: list[tuple[str, str]] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, log_type: str, message: str):
+        logs.append((log_type, message))
+
+    async def fake_fetch_frame_http_bytes(
+        _frame,
+        _redis,
+        *,
+        path: str,
+        method: str,
+        body=None,
+        headers=None,
+    ):
+        calls.append({"path": path, "method": method, "body": body, "headers": headers})
+        return 200, b'{"status":"ok"}', {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    plan = FrameDeployPlan(
+        mode="fast",
+        frame_id=53,
+        frame_name="ESPvaarikas",
+        build_id="build12345678",
+        frame_dict={"id": 53, "name": "ESPvaarikas", "mode": "embedded"},
+        previous_frameos_version=None,
+        fast_deploy=SimpleNamespace(
+            tls_settings_changed=False,
+            reload_supported=True,
+            action="http_upload_scenes_reload",
+        ),
+    )
+
+    await workflow._execute_embedded_fast(plan)
+
+    assert calls == [
+        {
+            "path": "/uploadScenes",
+            "method": "POST",
+            "body": b'[{"id":"scene-a","nodes":[]}]',
+            "headers": {"Content-Type": "application/json"},
+        },
+        {"path": "/reload", "method": "POST", "body": None, "headers": None},
+    ]
+    assert frame.status == "starting"
+    assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
+    assert frame.last_successful_deploy_at is not None
+    assert any("Embedded fast deploy complete" in message for _, message in logs)
 
 
 @pytest.mark.asyncio

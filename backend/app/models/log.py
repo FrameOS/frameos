@@ -1,6 +1,7 @@
 import json
 from datetime import timezone, datetime
 from copy import deepcopy
+from ipaddress import ip_address
 from typing import Any, Optional
 from arq import ArqRedis as Redis
 
@@ -167,6 +168,14 @@ async def process_log(
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
         if frame.status != 'ready':
             changes['status'] = 'ready'
+        boot_ip = log.get("ip") or ip
+        if frame.mode == "embedded" and isinstance(boot_ip, str):
+            try:
+                ip_address(boot_ip)
+            except ValueError:
+                boot_ip = None
+            if boot_ip and boot_ip != frame.frame_host:
+                changes["frame_host"] = boot_ip
         for key in ['width', 'height', 'color']:
             # Width/height left empty means "autodetect": fill them in from the device's bootup
             # report, but never overwrite an explicitly configured resolution with a detected one.

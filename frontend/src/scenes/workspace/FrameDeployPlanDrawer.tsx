@@ -19,7 +19,7 @@ import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
-import { frameHost } from '../../decorators/frame'
+import { frameHasActivityLog, frameHost } from '../../decorators/frame'
 import { buildrootPlatforms, devices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameOSSettings, FrameType, LogType } from '../../types'
@@ -1084,8 +1084,8 @@ function EmbeddedFirmwareSection({
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The current
-          firmware is an early stub: it blinks the onboard LED and does not run FrameOS yet.
+          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The firmware
+          runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
         </div>
         {firmware?.status ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
@@ -1166,15 +1166,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
-  const hasSuccessfulDeploy = Boolean(frame.last_successful_deploy_at || frame.last_successful_deploy)
+  const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
+  const hasSuccessfulDeploy = Boolean(
+    frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady
+  )
   const firstInstall = !hasSuccessfulDeploy
   const directSdCardFirstInstall = firstInstall && isBuildrootFrame && deployDrawerView === 'main'
   const activeDeployDrawerView = directSdCardFirstInstall
     ? 'sdCard'
-    : isEmbeddedFrame
+    : isEmbeddedFrame && !embeddedFastDeployReady
       ? 'embedded'
       : deployDrawerView
-  const closeOnlyDrawerView = directSdCardFirstInstall || isEmbeddedFrame
+  const closeOnlyDrawerView = directSdCardFirstInstall || (isEmbeddedFrame && !embeddedFastDeployReady)
   const canDeployAgent = true
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
@@ -1247,6 +1250,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           {activeDeployDrawerView === 'embedded' ? (
             <EmbeddedFirmwareSection
               frame={frame}
+              onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
               onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
             />
           ) : activeDeployDrawerView === 'sdCard' ? (
@@ -1377,16 +1381,26 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              <button
-                type="button"
-                onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                className={clsx(
-                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                )}
-              >
-                Full deploy
-              </button>
+              {isEmbeddedFrame ? (
+                <button
+                  type="button"
+                  onClick={() => setDeployDrawerView('embedded')}
+                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Flash firmware
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                  className={clsx(
+                    'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                    deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                  )}
+                >
+                  Full deploy
+                </button>
+              )}
             </>
           )}
         </div>

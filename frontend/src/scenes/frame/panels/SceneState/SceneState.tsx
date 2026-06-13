@@ -17,6 +17,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
+import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 
 function codenameToLabel(codename: string): string {
   const label = codename
@@ -47,7 +48,9 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
   const { frameId } = useValues(frameLogic)
   const { selectedSceneId } = useValues(frameEditorsLogic({ frameId }))
   const sceneId = sceneIdOverride ?? selectedSceneId
-  const { sceneIndex, scene, editingFields, fieldsWithErrors } = useValues(sceneStateLogic({ frameId, sceneId }))
+  const { sceneIndex, scene, editingFields, fieldsWithErrors, frameForm } = useValues(
+    sceneStateLogic({ frameId, sceneId })
+  )
   const { setFields, addField, editField, closeField, removeField } = useActions(sceneStateLogic({ frameId, sceneId }))
   const [draggedField, setDraggedField] = useState<number | null>(null)
 
@@ -58,7 +61,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
   const stateFields = scene.fields ?? []
   const publicFieldCount = stateFields.filter((field) => field.access === 'public').length
   const persistedFieldCount = stateFields.filter((field) => field.persist === 'disk').length
-  const isInterpreted = scene.settings?.execution === 'interpreted'
+  const isInterpreted = sceneExecutionForFrame(scene, frameForm?.mode) === 'interpreted'
 
   const onDragStart = (event: any, type: 'state', keyword: string, index: number) => {
     setDraggedField(index)
@@ -309,10 +312,10 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                     <div className="flex items-center gap-1 max-w-full w-full overflow-hidden">
                       <ClipboardDocumentIcon
                         className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
-                        onClick={() => copy(stateFieldAccess(scene, field))}
+                        onClick={() => copy(stateFieldAccess(scene, field, 'state', frameForm?.mode))}
                       />
                       <code className="frame-tool-muted text-sm break-words truncate">
-                        {stateFieldAccess(scene, field)}
+                        {stateFieldAccess(scene, field, 'state', frameForm?.mode)}
                       </code>
                     </div>
                   </div>

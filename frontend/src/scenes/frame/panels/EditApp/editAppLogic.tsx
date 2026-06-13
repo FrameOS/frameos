@@ -20,6 +20,7 @@ import {
   normalizeSceneApps,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
+import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -99,7 +100,10 @@ export const editAppLogic = kea<editAppLogicType>([
       (s) => [s.appData, s.sceneApp],
       (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
     ],
-    isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
+    isInterpreted: [
+      (s) => [s.scene, s.frameForm],
+      (scene, frameForm): boolean => sceneExecutionForFrame(scene, frameForm?.mode) === 'interpreted',
+    ],
     appUsageCount: [
       (s) => [s.scene, s.sceneAppKey],
       (scene, sceneAppKey): number =>

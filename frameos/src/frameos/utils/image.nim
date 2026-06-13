@@ -193,6 +193,26 @@ when defined(frameosEmbedded):
       snippet.add("...")
     ": " & snippet
 
+  proc embeddedRemoteImageShouldPreferProxy(url: string, proxyBaseUrl: string): bool =
+    if proxyBaseUrl.strip().len == 0:
+      return false
+    if not (url.startsWith("http://") or url.startsWith("https://")):
+      return false
+
+    var path = ""
+    try:
+      path = parseUri(url).path.toLowerAscii()
+    except CatchableError:
+      path = url.toLowerAscii()
+
+    if path.endsWith(".png") or path.endsWith(".bmp"):
+      return false
+
+    # JPEG/GIF/WebP and extensionless CDN URLs can make pixie's embedded
+    # decoders allocate large transient buffers before they can raise a
+    # catchable error. The backend media endpoint resizes and returns BMP.
+    true
+
 proc readImageWithFallback*(path: string): Image =
   if useImageMagick():
     let converted = readImageWithImageMagick(path)
@@ -236,10 +256,13 @@ when defined(frameosEmbedded):
 
   proc downloadImageFromBuffer(url: string, maxBytes: int, proxyBaseUrl = ""):
       tuple[image: Image, data: string] =
+    let fallbackUrl = proxiedImageUrl(url, proxyBaseUrl)
+    if embeddedRemoteImageShouldPreferProxy(url, proxyBaseUrl) and fallbackUrl != url:
+      return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes)
+
     try:
       return downloadImageFromResolvedBuffer(url, maxBytes)
     except CatchableError:
-      let fallbackUrl = proxiedImageUrl(url, proxyBaseUrl)
       if fallbackUrl != url:
         try:
           return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes)

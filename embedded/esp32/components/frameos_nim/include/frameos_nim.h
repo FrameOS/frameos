@@ -22,7 +22,8 @@ bool frameos_nim_available(void);
  * unavailable (returns false). Allocates the Nim heap (PSRAM via malloc). */
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key);
+                      uint32_t frame_id, const char *api_key,
+                      bool server_send_logs);
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
@@ -51,6 +52,11 @@ bool frameos_nim_send_event(const char *event, const char *payload_json);
 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
+/* Enable/disable backend log upload after network state changes. The baked
+ * config still gates this; passing true has no effect when logs are disabled. */
+void frameos_nim_set_log_upload_enabled(bool enabled);
+/* Send queued Nim/runtime logs to the FrameOS backend, if enabled. */
+void frameos_nim_flush_logs(void);
 
 /* Outbound HTTP(S) for the Nim side (apps, frameos.fetchText in JS apps):
  * esp_http_client + cert bundle. Returns a malloc'd body (caller frees with

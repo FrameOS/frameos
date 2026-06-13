@@ -5,10 +5,11 @@
 bool frameos_nim_available(void) { return false; }
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key)
+                      uint32_t frame_id, const char *api_key,
+                      bool server_send_logs)
 {
     (void)width; (void)height; (void)frame_name; (void)max_http_response_bytes;
-    (void)backend_url; (void)frame_id; (void)api_key;
+    (void)backend_url; (void)frame_id; (void)api_key; (void)server_send_logs;
     return false;
 }
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
@@ -37,6 +38,9 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     (void)event; (void)payload_json;
     return false;
 }
+void frameos_nim_log_hook(const char *msg) { (void)msg; }
+void frameos_nim_set_log_upload_enabled(bool enabled) { (void)enabled; }
+void frameos_nim_flush_logs(void) {}
 uint8_t *fos_nim_http_request(const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,

@@ -37,6 +37,33 @@ async def test_api_log_multiple_entries(async_client, db, redis):
     # 1 welcome + 2 new
     assert len(logs) == 3
 
+
+@pytest.mark.asyncio
+async def test_api_log_embedded_bootup_updates_frame_host(async_client, db, redis):
+    frame = await new_frame(db, redis, 'EmbeddedLogFrame', 'frame53.local', 'localhost')
+    frame.mode = 'embedded'
+    frame.server_api_key = 'testkey'
+    await update_frame(db, redis, frame)
+
+    headers = {'Authorization': 'Bearer testkey'}
+    data = {
+        'log': {
+            'event': 'bootup',
+            'source': 'esp32',
+            'ip': '10.8.0.232',
+            'width': 800,
+            'height': 480,
+        }
+    }
+    response = await async_client.post('/api/log', json=data, headers=headers)
+
+    assert response.status_code == 200
+    db.refresh(frame)
+    assert frame.frame_host == '10.8.0.232'
+    assert frame.width == 800
+    assert frame.height == 480
+
+
 @pytest.mark.asyncio
 async def test_api_log_no_data(async_client, db, redis):
     frame = await new_frame(db, redis, 'NoDataFrame', 'localhost', 'localhost')

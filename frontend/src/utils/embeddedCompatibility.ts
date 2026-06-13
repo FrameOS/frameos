@@ -1,4 +1,4 @@
-import { AppConfig, AppNodeData, FrameScene, FrameType, SceneApp, TemplateType } from '../types'
+import { AppConfig, AppNodeData, CodeNodeData, FrameScene, FrameType, SceneApp, TemplateType } from '../types'
 import { hasCompiledAppSource, hasJavaScriptAppSource, isJavaScriptCatalogApp, sceneAppToAppConfig } from './sceneApps'
 
 export interface CompatibilityResult {
@@ -115,13 +115,18 @@ export function templateCompatibilityForFrame(
   }
 
   for (const scene of scenes) {
-    if (scene.settings?.execution === 'compiled') {
-      return unsupported(
-        `"${scene.name || 'Untitled scene'}" is a compiled scene; ESP32 frames run interpreted scenes.`
-      )
-    }
-
     for (const node of scene.nodes ?? []) {
+      if (node.type === 'source') {
+        return unsupported(`"${scene.name || 'Untitled scene'}" uses a source node, which ESP32 cannot interpret yet.`)
+      }
+
+      if (node.type === 'code') {
+        const codeData = node.data as CodeNodeData | undefined
+        if (codeData?.code?.trim() && !codeData?.codeJS?.trim()) {
+          return unsupported(`"${scene.name || 'Untitled scene'}" uses Nim inline code, which ESP32 cannot interpret.`)
+        }
+      }
+
       if (node.type !== 'app') {
         continue
       }

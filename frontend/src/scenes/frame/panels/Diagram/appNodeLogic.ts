@@ -30,6 +30,7 @@ import {
   isRepoAppKeyword,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
+import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -48,7 +49,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       diagramLogic({ frameId, sceneId }),
       ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage', 'effectiveApps'],
       frameLogic({ frameId }),
-      ['scenes'],
+      ['frameForm', 'scenes'],
     ],
     actions: [
       diagramLogic({ frameId, sceneId }),
@@ -190,9 +191,9 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (isSceneApp, sources): boolean => isSceneApp && hasJavaScriptAppSource(sources),
     ],
     isNimAppInInterpretedScene: [
-      (s) => [s.currentScene, s.node, s.sources],
-      (currentScene, node, sources): boolean => {
-        if (currentScene?.settings?.execution !== 'interpreted' || node?.type !== 'app') {
+      (s) => [s.currentScene, s.node, s.sources, s.frameForm],
+      (currentScene, node, sources, frameForm): boolean => {
+        if (sceneExecutionForFrame(currentScene, frameForm?.mode) !== 'interpreted' || node?.type !== 'app') {
           return false
         }
         if (sources) {

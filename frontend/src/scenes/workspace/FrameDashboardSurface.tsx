@@ -38,6 +38,7 @@ import {
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
+import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 const uploadedScenePrefix = 'uploaded/'
 const livePreviewSceneId = '__live_preview__'
@@ -103,8 +104,8 @@ function sceneDisplayName(scene: FrameScene | null | undefined, fallback = 'Unti
   return scene?.name || fallback
 }
 
-function sceneIsCompiled(scene: FrameScene): boolean {
-  return scene.settings?.execution !== 'interpreted'
+function sceneIsCompiled(scene: FrameScene, frameMode?: FrameType['mode'] | null): boolean {
+  return sceneIsCompiledForFrame(scene, frameMode)
 }
 
 function scheduleTimeLabel(event: ScheduledEvent): string {
@@ -369,7 +370,7 @@ function FrameSceneTile({
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
-  const compiled = sceneIsCompiled(scene)
+  const compiled = sceneIsCompiled(scene, frame.mode)
 
   return (
     <div

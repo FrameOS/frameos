@@ -248,6 +248,19 @@ def _frame_image_cache_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image"
 
 
+def _coerce_frame_image_to_png(body: bytes, headers: dict[str, str]) -> bytes:
+    content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type not in ("image/bmp", "image/x-ms-bmp"):
+        return body
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(body)) as image:
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+
+
 def _frame_states_cache_lock_key(frame_id: int) -> str:
     return f"frame:{frame_id}:states:refreshing"
 
@@ -1795,6 +1808,9 @@ async def api_frame_get_image(
             )
 
             if status == 200:
+                body = await asyncio.get_running_loop().run_in_executor(
+                    None, _coerce_frame_image_to_png, body, headers
+                )
                 await redis.set(cache_key, body, ex=86400 * 30)
                 scene_id = headers.get("x-scene-id")
                 if not scene_id:

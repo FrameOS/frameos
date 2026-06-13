@@ -473,6 +473,27 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_converts_bmp_preview(async_client, db, redis):
+    frame = await new_frame(db, redis, 'BmpImageFrame', 'localhost', 'localhost')
+    bmp = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(bmp, format='BMP')
+    bmp_body = bmp.getvalue()
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        return 200, bmp_body, {'content-type': 'image/bmp', 'x-scene-id': 'scene-1'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.content.startswith(b'\x89PNG')
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (2, 1)
+    cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
+    assert cached.startswith(b'\x89PNG')
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_does_not_share_host_port_cache_across_projects(async_client, db, redis):
     frame = await new_frame(
         db,

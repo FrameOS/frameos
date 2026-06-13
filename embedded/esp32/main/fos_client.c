@@ -1,5 +1,6 @@
 #include "fos_client.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -57,6 +58,54 @@ void fos_client_render_now(void)
     if (s_events) {
         xEventGroupSetBits(s_events, RENDER_NOW_BIT);
     }
+}
+
+static bool json_string_value(const char *json, const char *key, char *out, size_t out_len)
+{
+    if (!json || !key || !out || out_len == 0) return false;
+    out[0] = '\0';
+
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p = strchr(p + strlen(pattern), ':');
+    if (!p) return false;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    if (*p != '"') return false;
+    p++;
+
+    size_t used = 0;
+    while (*p && *p != '"' && used + 1 < out_len) {
+        if (*p == '\\' && p[1]) p++;
+        out[used++] = *p++;
+    }
+    out[used] = '\0';
+    return used > 0;
+}
+
+static void current_scene_id(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    json_string_value(frameos_nim_scene_info_json(), "currentSceneId", out, out_len);
+}
+
+static void log_render_event(const char *event, const char *scene_id, const char *status,
+                             const char *mode, uint32_t count, int64_t ms, int width,
+                             int height, fos_pixel_format_t format, size_t bytes,
+                             esp_err_t esp_err)
+{
+    char log_line[512];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"%s\",\"source\":\"esp32\",\"sceneId\":\"%s\",\"status\":\"%s\","
+             "\"mode\":\"%s\",\"count\":%lu,\"ms\":%lld,\"durationMs\":%lld,"
+             "\"width\":%d,\"height\":%d,\"pixelFormat\":%d,\"bytes\":%u,\"espErr\":%d}",
+             event, scene_id ? scene_id : "", status ? status : "",
+             mode ? mode : "", (unsigned long)count, ms, ms, width, height,
+             (int)format, (unsigned)bytes, (int)esp_err);
+    frameos_nim_log_hook(log_line);
 }
 
 static void store_snapshot(const uint8_t *buf, size_t len, int width, int height,
@@ -224,17 +273,27 @@ static esp_err_t render_once(void)
     fos_pixel_format_t format = fos_display_present() ? fos_display_format() : FOS_PIXEL_1BPP;
     size_t buf_len = fos_display_present() ? fos_display_buffer_size()
                                            : (((size_t)width + 7u) / 8u) * (size_t)height;
+    bool local_render = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    const char *mode = local_render ? "local" : "remote";
+    char scene_id[128];
+    current_scene_id(scene_id, sizeof(scene_id));
+    log_render_event("render:scene", scene_id, "rendering", mode, s_render_count + 1,
+                     0, width, height, format, buf_len, ESP_OK);
 
     uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) buf = malloc(buf_len);
     if (!buf) {
         ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
+        log_render_event("render:error", scene_id, "error", mode, s_render_count,
+                         (esp_timer_get_time() - start) / 1000, width, height,
+                         format, buf_len, ESP_ERR_NO_MEM);
+        frameos_nim_flush_logs();
         return ESP_ERR_NO_MEM;
     }
     memset(buf, 0xFF, buf_len); /* white */
 
     esp_err_t err;
-    if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+    if (local_render) {
         err = frameos_nim_render(buf, buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
@@ -256,6 +315,12 @@ static esp_err_t render_once(void)
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
     }
+    int64_t total_ms = (esp_timer_get_time() - start) / 1000;
+    current_scene_id(scene_id, sizeof(scene_id));
+    log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
+                     err == ESP_OK ? "ok" : "error", mode, s_render_count,
+                     total_ms, width, height, format, buf_len, err);
+    frameos_nim_flush_logs();
     free(buf);
     return err;
 }

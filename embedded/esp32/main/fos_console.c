@@ -58,6 +58,7 @@ static int cmd_status(int argc, char **argv)
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
+    printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("interval:    %lu s, deep_sleep=%d, wake_schedule=%d\n",
            (unsigned long)config->interval_sec, (int)config->deep_sleep,
            (int)config->wake_schedule);
@@ -81,7 +82,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|panel|render_mode|"
-               "interval|deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
+               "interval|server_send_logs|deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -103,6 +104,7 @@ static int cmd_set(int argc, char **argv)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
+    else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "deep_sleep") == 0) config->deep_sleep = atoi(value) != 0;
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)atoi(value);

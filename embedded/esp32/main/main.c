@@ -72,6 +72,25 @@ static void action_render_now(void)
     fos_client_render_now();
 }
 
+static void log_bootup_event(bool online)
+{
+    fos_config_t *config = fos_config();
+    const esp_app_desc_t *app = esp_app_get_description();
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    int pixel_format = fos_display_present() ? (int)fos_display_format() : 1;
+    char log_line[360];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"bootup\",\"source\":\"esp32\",\"width\":%d,\"height\":%d,"
+             "\"pixelFormat\":%d,\"mode\":\"embedded\",\"renderMode\":\"%s\","
+             "\"version\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\",\"wifi\":\"%s\"}",
+             width, height, pixel_format,
+             config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
+             app->version, config->panel, fos_wifi_ip(), online ? "connected" : "offline");
+    frameos_nim_log_hook(log_line);
+    frameos_nim_flush_logs();
+}
+
 void app_main(void)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -122,7 +141,8 @@ void app_main(void)
         char frame_name[64];
         snprintf(frame_name, sizeof(frame_name), "frame %lu", (unsigned long)config->frame_id);
         if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes,
-                             config->backend_url, config->frame_id, config->api_key)) {
+                             config->backend_url, config->frame_id, config->api_key,
+                             config->server_send_logs)) {
             ESP_LOGI(TAG, "nim runtime up: %s", frameos_nim_info());
         } else {
             ESP_LOGE(TAG, "nim runtime failed to initialize");
@@ -157,9 +177,12 @@ void app_main(void)
         fos_wifi_sync_time(SNTP_TIMEOUT_MS);
         /* Network up = this image is good; cancel any pending rollback. */
         fos_ota_mark_boot_valid();
+        frameos_nim_set_log_upload_enabled(true);
+        log_bootup_event(true);
         fos_http_start(false);
         fos_ota_start_periodic_task(24);
     } else {
+        frameos_nim_set_log_upload_enabled(false);
         if (!fos_config_wifi_ready()) {
             /* Fresh device: nothing to roll back to that would do better. */
             fos_ota_mark_boot_valid();

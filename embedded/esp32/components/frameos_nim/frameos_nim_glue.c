@@ -3,6 +3,7 @@
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -53,6 +54,24 @@ static SemaphoreHandle_t s_nim_lock = NULL;
 static char s_backend_url[256] = "";
 static char s_backend_embedded_prefix[320] = "";
 static char s_backend_auth[192] = "";
+static bool s_log_upload_configured = false;
+static bool s_log_upload_enabled = false;
+
+#define FOS_NIM_LOG_MAX_LINE 1536
+#define FOS_NIM_LOG_MAX_PENDING 128
+#define FOS_NIM_LOG_BATCH_MAX 32
+#define FOS_NIM_LOG_BODY_MAX (32 * 1024)
+
+typedef struct fos_nim_log_node {
+    struct fos_nim_log_node *next;
+    char *line;
+} fos_nim_log_node_t;
+
+static SemaphoreHandle_t s_log_lock = NULL;
+static fos_nim_log_node_t *s_log_head = NULL;
+static fos_nim_log_node_t *s_log_tail = NULL;
+static size_t s_log_pending = 0;
+static size_t s_log_dropped = 0;
 
 static bool nim_lock_take(void)
 {
@@ -88,11 +107,25 @@ static void configure_backend_auth(const char *backend_url, uint32_t frame_id, c
     }
 }
 
+static void ensure_log_lock(void)
+{
+    if (s_log_lock == NULL) {
+        s_log_lock = xSemaphoreCreateMutex();
+        if (s_log_lock == NULL) {
+            ESP_LOGW("fos_nim_log", "failed to create log upload mutex");
+        }
+    }
+}
+
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key)
+                      uint32_t frame_id, const char *api_key,
+                      bool server_send_logs)
 {
     configure_backend_auth(backend_url, frame_id, api_key);
+    s_log_upload_configured = server_send_logs;
+    s_log_upload_enabled = false;
+    ensure_log_lock();
     if (s_nim_lock == NULL) {
         s_nim_lock = xSemaphoreCreateMutex();
         if (s_nim_lock == NULL) {
@@ -196,9 +229,322 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     return ok;
 }
 
+static void note_log_drop(void)
+{
+    if (s_log_lock != NULL && xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) == pdTRUE) {
+        s_log_dropped++;
+        xSemaphoreGive(s_log_lock);
+    }
+}
+
+static void free_log_nodes(fos_nim_log_node_t *node)
+{
+    while (node != NULL) {
+        fos_nim_log_node_t *next = node->next;
+        free(node->line);
+        free(node);
+        node = next;
+    }
+}
+
+static void queue_log_line(const char *msg)
+{
+    if (!s_log_upload_enabled || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
+        return;
+    }
+    ensure_log_lock();
+    if (s_log_lock == NULL) return;
+
+    if (msg == NULL) msg = "";
+    size_t len = strnlen(msg, FOS_NIM_LOG_MAX_LINE + 1);
+    if (len > FOS_NIM_LOG_MAX_LINE) len = FOS_NIM_LOG_MAX_LINE;
+
+    fos_nim_log_node_t *node = heap_caps_malloc(sizeof(*node), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (node == NULL) node = malloc(sizeof(*node));
+    char *line = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (line == NULL) line = malloc(len + 1);
+    if (node == NULL || line == NULL) {
+        free(node);
+        free(line);
+        note_log_drop();
+        return;
+    }
+    memcpy(line, msg, len);
+    line[len] = '\0';
+    node->next = NULL;
+    node->line = line;
+
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) != pdTRUE) {
+        free_log_nodes(node);
+        return;
+    }
+    if (s_log_pending >= FOS_NIM_LOG_MAX_PENDING) {
+        s_log_dropped++;
+        xSemaphoreGive(s_log_lock);
+        free_log_nodes(node);
+        return;
+    }
+    if (s_log_tail != NULL) {
+        s_log_tail->next = node;
+    } else {
+        s_log_head = node;
+    }
+    s_log_tail = node;
+    s_log_pending++;
+    xSemaphoreGive(s_log_lock);
+}
+
 void frameos_nim_log_hook(const char *msg)
 {
-    ESP_LOGI("nim", "%s", msg);
+    ESP_LOGI("nim", "%s", msg ? msg : "");
+    queue_log_line(msg);
+}
+
+void frameos_nim_set_log_upload_enabled(bool enabled)
+{
+    s_log_upload_enabled = s_log_upload_configured && enabled;
+}
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} json_buf_t;
+
+static void json_buf_free(json_buf_t *buf)
+{
+    free(buf->data);
+    buf->data = NULL;
+    buf->len = 0;
+    buf->cap = 0;
+}
+
+static bool json_buf_reserve(json_buf_t *buf, size_t extra)
+{
+    if (extra >= FOS_NIM_LOG_BODY_MAX || buf->len > FOS_NIM_LOG_BODY_MAX - extra - 1) {
+        return false;
+    }
+    size_t need = buf->len + extra + 1;
+    if (need <= buf->cap) return true;
+
+    size_t cap = buf->cap ? buf->cap * 2 : 4096;
+    while (cap < need && cap < FOS_NIM_LOG_BODY_MAX) {
+        cap *= 2;
+    }
+    if (cap > FOS_NIM_LOG_BODY_MAX) cap = FOS_NIM_LOG_BODY_MAX;
+    if (cap < need) return false;
+
+    char *next = NULL;
+    if (buf->data == NULL) {
+        next = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (next == NULL) next = malloc(cap);
+    } else {
+        next = heap_caps_realloc(buf->data, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (next == NULL) next = realloc(buf->data, cap);
+    }
+    if (next == NULL) return false;
+    buf->data = next;
+    buf->cap = cap;
+    return true;
+}
+
+static bool json_buf_append_len(json_buf_t *buf, const char *text, size_t len)
+{
+    if (!json_buf_reserve(buf, len)) return false;
+    memcpy(buf->data + buf->len, text, len);
+    buf->len += len;
+    buf->data[buf->len] = '\0';
+    return true;
+}
+
+static bool json_buf_append(json_buf_t *buf, const char *text)
+{
+    return json_buf_append_len(buf, text, strlen(text));
+}
+
+static bool json_buf_append_char(json_buf_t *buf, char c)
+{
+    return json_buf_append_len(buf, &c, 1);
+}
+
+static bool json_buf_append_escaped(json_buf_t *buf, const char *text)
+{
+    if (text == NULL) text = "";
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        switch (*p) {
+            case '\\':
+                if (!json_buf_append(buf, "\\\\")) return false;
+                break;
+            case '"':
+                if (!json_buf_append(buf, "\\\"")) return false;
+                break;
+            case '\b':
+                if (!json_buf_append(buf, "\\b")) return false;
+                break;
+            case '\f':
+                if (!json_buf_append(buf, "\\f")) return false;
+                break;
+            case '\n':
+                if (!json_buf_append(buf, "\\n")) return false;
+                break;
+            case '\r':
+                if (!json_buf_append(buf, "\\r")) return false;
+                break;
+            case '\t':
+                if (!json_buf_append(buf, "\\t")) return false;
+                break;
+            default:
+                if (*p < 0x20) {
+                    char esc[7];
+                    snprintf(esc, sizeof(esc), "\\u%04x", *p);
+                    if (!json_buf_append(buf, esc)) return false;
+                } else if (!json_buf_append_char(buf, (char)*p)) {
+                    return false;
+                }
+                break;
+        }
+    }
+    return true;
+}
+
+static bool append_log_payload(json_buf_t *buf, const char *line)
+{
+    if (line == NULL) line = "";
+    const char *start = line;
+    while (*start && isspace((unsigned char)*start)) start++;
+    const char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) end--;
+
+    if (end > start && start[0] == '{' && end[-1] == '}') {
+        return json_buf_append_len(buf, start, (size_t)(end - start));
+    }
+
+    return json_buf_append(buf, "{\"event\":\"log\",\"source\":\"esp32\",\"message\":\"") &&
+           json_buf_append_escaped(buf, line) &&
+           json_buf_append(buf, "\"}");
+}
+
+static fos_nim_log_node_t *pop_log_batch(size_t *count, size_t *dropped)
+{
+    *count = 0;
+    *dropped = 0;
+    if (s_log_lock == NULL) return NULL;
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return NULL;
+
+    *dropped = s_log_dropped;
+    s_log_dropped = 0;
+
+    fos_nim_log_node_t *head = s_log_head;
+    fos_nim_log_node_t *tail = NULL;
+    while (s_log_head != NULL && *count < FOS_NIM_LOG_BATCH_MAX) {
+        tail = s_log_head;
+        s_log_head = s_log_head->next;
+        (*count)++;
+        s_log_pending--;
+    }
+    if (tail != NULL) {
+        tail->next = NULL;
+    }
+    if (s_log_head == NULL) {
+        s_log_tail = NULL;
+    }
+    xSemaphoreGive(s_log_lock);
+    return head;
+}
+
+static esp_err_t post_log_body(const char *body, size_t body_len)
+{
+    if (body == NULL || body_len == 0 || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char url[sizeof(s_backend_url) + 16];
+    int written = snprintf(url, sizeof(url), "%s/api/log", s_backend_url);
+    if (written <= 0 || (size_t)written >= sizeof(url)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 10000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 2048,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) return ESP_FAIL;
+    esp_http_client_set_header(client, "Authorization", s_backend_auth);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "User-Agent", "FrameOS-ESP32/1");
+
+    esp_err_t err = esp_http_client_open(client, body_len);
+    if (err != ESP_OK) {
+        ESP_LOGW("fos_nim_log", "POST %s connect failed: %s", url, esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    size_t offset = 0;
+    while (offset < body_len) {
+        int sent = esp_http_client_write(client, body + offset, body_len - offset);
+        if (sent <= 0) {
+            ESP_LOGW("fos_nim_log", "POST %s body write failed", url);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return ESP_FAIL;
+        }
+        offset += (size_t)sent;
+    }
+    esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    if (status < 200 || status >= 300) {
+        ESP_LOGW("fos_nim_log", "POST %s returned HTTP %d", url, status);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void frameos_nim_flush_logs(void)
+{
+    if (!s_log_upload_enabled || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
+        return;
+    }
+
+    while (true) {
+        size_t count = 0;
+        size_t dropped = 0;
+        fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);
+        if (batch == NULL && dropped == 0) {
+            break;
+        }
+
+        json_buf_t body = {0};
+        bool ok = json_buf_append(&body, "{\"logs\":[");
+        bool first = true;
+        if (ok && dropped > 0) {
+            char dropped_json[128];
+            snprintf(dropped_json, sizeof(dropped_json),
+                     "{\"event\":\"log:dropped\",\"source\":\"esp32\",\"count\":%lu}",
+                     (unsigned long)dropped);
+            ok = json_buf_append(&body, dropped_json);
+            first = false;
+        }
+        for (fos_nim_log_node_t *node = batch; ok && node != NULL; node = node->next) {
+            if (!first) ok = json_buf_append_char(&body, ',');
+            if (ok) ok = append_log_payload(&body, node->line);
+            first = false;
+        }
+        if (ok) ok = json_buf_append(&body, "]}");
+
+        if (ok) {
+            post_log_body(body.data, body.len);
+        } else {
+            ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
+        }
+        json_buf_free(&body);
+        free_log_nodes(batch);
+    }
 }
 
 /* ------------------------------------------------------- outbound HTTP */

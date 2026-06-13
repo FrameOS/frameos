@@ -84,6 +84,7 @@ static char *read_file(const char *path, size_t *out_len)
 static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
                                    const char *data, size_t len)
 {
+    remove(tmp_path);
     FILE *f = fopen(tmp_path, "wb");
     if (f == NULL) {
         ESP_LOGE(TAG, "open %s for write failed", tmp_path);
@@ -99,6 +100,35 @@ static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
     remove(path);
     if (rename(tmp_path, path) != 0) {
         ESP_LOGE(TAG, "rename %s -> %s failed", tmp_path, path);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t write_file_replace(const char *path, const char *tmp_path,
+                                    const char *data, size_t len)
+{
+    esp_err_t err = write_file_atomic(path, tmp_path, data, len);
+    if (err == ESP_OK) return ESP_OK;
+
+    ESP_LOGW(TAG, "atomic write failed for %s; freeing old file and retrying", path);
+    remove(path);
+    remove(tmp_path);
+    FILE *f = fopen(tmp_path, "wb");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "open %s for retry write failed", tmp_path);
+        return ESP_FAIL;
+    }
+    size_t written = fwrite(data, 1, len, f);
+    fclose(f);
+    if (written != len) {
+        ESP_LOGE(TAG, "retry short write to %s (%u/%u)", tmp_path, (unsigned)written, (unsigned)len);
+        remove(tmp_path);
+        return ESP_FAIL;
+    }
+    if (rename(tmp_path, path) != 0) {
+        ESP_LOGE(TAG, "retry rename %s -> %s failed", tmp_path, path);
+        remove(tmp_path);
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -220,7 +250,7 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
     if (json == NULL || len == 0 || len > SCENES_MAX_BYTES) return ESP_ERR_INVALID_ARG;
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
-    err = write_file_atomic(SCENES_PATH, SCENES_TMP_PATH, json, len);
+    err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err != ESP_OK) return err;
     save_etag("local");
     s_pending = true;
@@ -344,7 +374,7 @@ esp_err_t fos_scenes_sync(bool force)
     esp_http_client_cleanup(client);
     buf[total] = 0;
 
-    err = write_file_atomic(SCENES_PATH, SCENES_TMP_PATH, buf, total);
+    err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
     if (err == ESP_OK) {
         save_etag(response_etag);
         ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)",

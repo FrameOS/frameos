@@ -71,7 +71,7 @@ export function frameIsStale(frame: FrameType): boolean {
   return Number.isFinite(lastLogAt) && Date.now() - lastLogAt > 1000 * 60 * 60
 }
 
-function frameHasActivityLog(frame: FrameType): boolean {
+export function frameHasActivityLog(frame: FrameType): boolean {
   return Number.isFinite(parseFrameTimestamp(frame.last_log_at))
 }
 
@@ -117,6 +117,9 @@ export function frameStatusLabel(frame: FrameType): string {
 }
 
 export function frameNeedsInitialDeploy(frame: FrameType): boolean {
+  if ((frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)) {
+    return false
+  }
   return !frame.last_successful_deploy_at
 }
 

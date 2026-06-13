@@ -43,7 +43,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 13  # direct ESP32 HTTPS image downloads + no-OTA 8MB layout
+EMBEDDED_FIRMWARE_VERSION = 15  # ESP32 Pi-compatible HTTP API/log events
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -373,6 +373,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",
         f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {embedded_max_http_response_bytes_for_frame(frame)}",
+        f"#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS {1 if frame.server_send_logs is not False else 0}",
     ]
     pins = embedded_pins_for_frame(frame)
     mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
@@ -413,6 +414,8 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     frame.mode = "embedded"
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
+    if not frame.frame_port or frame.frame_port == 8787:
+        frame.frame_port = 80
 
     # No SSH, no HTTPS proxy, no agent on a microcontroller
     https_proxy = dict(frame.https_proxy or {})
