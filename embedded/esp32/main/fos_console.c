@@ -12,6 +12,7 @@
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_ota.h"
+#include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -110,6 +111,16 @@ static int cmd_ota(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+static int cmd_scenes(int argc, char **argv)
+{
+    printf("scenes: %d loaded, etag %s\n", fos_scenes_loaded(),
+           fos_scenes_etag()[0] ? fos_scenes_etag() : "none");
+    fos_scenes_request_sync();
+    fos_client_render_now();
+    printf("sync requested; the render task pulls from the backend next pass\n");
+    return 0;
+}
+
 static int cmd_restart(int argc, char **argv)
 {
     esp_restart();
@@ -146,6 +157,7 @@ esp_err_t fos_console_start(void)
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "render", .help = "Render now", .func = cmd_render},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
+        {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
         {.command = "restart", .help = "Reboot", .func = cmd_restart},
         {.command = "factory-reset", .help = "Erase config and reboot", .func = cmd_factory_reset},
     };

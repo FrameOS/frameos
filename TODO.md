@@ -103,9 +103,29 @@ that assumes Linux gets replaced; everything that's pure Nim or vendor C comes a
       codegen for Xtensa is the M3 follow-up.
 
 ### M3 — interpreted scenes (QuickJS)
-- [ ] QuickJS on Xtensa, JS heap in PSRAM
-- [ ] Bind `js_runtime`/`app_runtime` API surface + standard app library (AOT) to embedded build
-- [ ] Scene push as JS over the backend channel — hot updates without reflash
+- [x] QuickJS on Xtensa, JS heap in PSRAM: vendored engine compiled as the
+      `frameos_quickjs` IDF component (no quickjs-libc); `fos_js_new_runtime()`
+      allocates from PSRAM (`heap_caps_malloc`), 4MB memory limit, 20KB
+      interpreter stack inside the 48KB render task
+- [x] Bind `js_runtime`/`app_runtime` + standard app library (AOT) to the embedded
+      build: full `interpreter.nim` + QuickJS bridge cross-compile under
+      `-d:frameosEmbedded` (types/channels/burrito/http_client/image/tz gained
+      embedded branches). App registry minus chromiumScreenshot + rstpSnapshot
+      (child processes) and 6 apps that import std/httpclient directly; outbound
+      HTTP for apps goes through esp_http_client + cert bundle (`fos_nim_http_request`)
+- [x] Scene push without reflash: scenes live on the `state` SPIFFS partition
+      (/state/scenes.json), hot-swapped into the running Nim runtime. Pull:
+      device polls `GET /embedded/scenes` (sha256 ETag → 304) each render pass +
+      `scenes` console cmd + `POST /api/action/scenes_sync`. Push: `POST /api/scenes`
+      on the device takes a scenes.json payload directly (LAN)
+- [ ] On-device verification: firmware built (2.95MB/3MB slot) and the same
+      interpreter+scene JSON verified on host, but the XIAO stopped responding
+      over USB (no REPL, no esptool download mode) before it could be flashed —
+      needs a physical RESET/BOOT press, then:
+      `python -m esptool --chip esp32s3 -p /dev/cu.usbmodem1101 --baud 460800 erase_region 0xf000 0x2000` (reset otadata, keeps NVS+Wi-Fi)
+      `python -m esptool --chip esp32s3 -p /dev/cu.usbmodem1101 --baud 460800 write_flash 0x20000 embedded/esp32/build/frameos_esp32.bin`
+      then over serial: `scenes` (backend sync) or
+      `curl -X POST --data-binary @/tmp/esp32-test-scenes.json http://<device-ip>/api/scenes`
 
 ### M4 — make it a product
 - [ ] Battery/deep-sleep modes, wake-on-schedule

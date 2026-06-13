@@ -7,6 +7,7 @@ idf_component_register(
         "fos_client.c"
         "fos_ota.c"
         "fos_console.c"
+        "fos_scenes.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -21,6 +22,7 @@ idf_component_register(
         json
         console
         driver
+        spiffs
         frameos_display
         frameos_nim
 )

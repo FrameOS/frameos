@@ -53,9 +53,16 @@ proc initTimeZone*() =
 
   if timeZoneDataLoaded:
     return
-  # TODO: allow users to only load the timezones and years that matter
-  const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
-  loadTimeZoneData(tzData)
+  when defined(frameosEmbedded):
+    # The full tzdata.json is ~1.4MB — too big for the 3MB OTA app partitions
+    # next to QuickJS and pixie. The embedded build runs in UTC; an override
+    # file can still be loaded from /state/tz/tzdata.json above. (Baking the
+    # frame's own zone at firmware build time is a follow-up.)
+    timeZoneDataLoaded = true
+  else:
+    # TODO: allow users to only load the timezones and years that matter
+    const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
+    loadTimeZoneData(tzData)
 
 proc initTimeZoneAliases() =
   if timeZoneAliasDataLoaded:

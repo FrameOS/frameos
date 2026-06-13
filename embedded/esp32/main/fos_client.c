@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 
 #include "fos_config.h"
+#include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -172,16 +173,37 @@ static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
     while (true) {
+        /* Interpreted scenes (M3): pick up backend changes and any payload
+         * pushed over HTTP/console since the last pass. Both touch the Nim
+         * runtime, so they only ever run here on the render task. */
+        if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+            fos_scenes_sync(false);
+            fos_scenes_apply_pending();
+        }
+
         render_once();
 
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
+        double scene_interval = frameos_nim_scene_interval();
+        if (scene_interval >= 1.0 && scene_interval < interval) {
+            interval = (uint32_t)scene_interval;
+        }
         if (config->deep_sleep && fos_display_present()) {
             ESP_LOGI(TAG, "deep sleeping for %lu s", (unsigned long)interval);
             /* USB console drops in deep sleep; that's the point (battery). */
             esp_deep_sleep((uint64_t)interval * 1000000ULL);
         }
-        xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE, pdFALSE,
-                            pdMS_TO_TICKS(interval * 1000));
+        /* Wait in 1s slices so scene-dispatched "render" events (QuickJS
+         * setting the redraw flag) take effect promptly. */
+        uint32_t remaining_ms = interval * 1000;
+        while (remaining_ms > 0) {
+            uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
+            EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE,
+                                                   pdFALSE, pdMS_TO_TICKS(slice));
+            if (bits & RENDER_NOW_BIT) break;
+            if (frameos_nim_render_requested()) break;
+            remaining_ms -= slice;
+        }
     }
 }
 
@@ -189,6 +211,7 @@ void fos_client_start(void)
 {
     if (s_events) return;
     s_events = xEventGroupCreate();
-    /* Nim render + pixie want stack; 32KB keeps it comfortable. */
-    xTaskCreate(client_task, "fos_client", 32768, NULL, 5, NULL);
+    /* Nim render + pixie + the QuickJS interpreter share this stack; QuickJS
+     * is capped at 20KB (fos_qjs_glue.c), 48KB leaves room beneath it. */
+    xTaskCreate(client_task, "fos_client", 49152, NULL, 5, NULL);
 }

@@ -27,8 +27,28 @@ int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */
 const char *frameos_nim_info(void);
 
+/* M3: interpreted scenes. Install scenes from JSON (the backend's
+ * scenes.json array format); code nodes run on QuickJS, app nodes on the
+ * AOT-compiled standard library. Returns the number of scenes loaded
+ * (0 = bad payload or runtime unavailable). Hot-swaps live scenes. */
+int frameos_nim_load_scenes(const char *json);
+/* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
+double frameos_nim_scene_interval(void);
+/* True once when a scene event requested a redraw (clears the flag). */
+bool frameos_nim_render_requested(void);
+
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
+
+/* Outbound HTTP(S) for the Nim side (apps, frameos.fetchText in JS apps):
+ * esp_http_client + cert bundle. Returns a malloc'd body (caller frees with
+ * fos_nim_http_free), sets *out_status and *out_len. NULL on transport
+ * error (with *out_status = 0) or when the body exceeds max_bytes. */
+uint8_t *fos_nim_http_request(const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_len);
+void fos_nim_http_free(void *ptr);
 
 #ifdef __cplusplus
 }

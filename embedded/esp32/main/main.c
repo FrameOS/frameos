@@ -23,6 +23,7 @@
 #include "fos_console.h"
 #include "fos_http.h"
 #include "fos_ota.h"
+#include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -102,6 +103,12 @@ void app_main(void)
         }
     } else {
         ESP_LOGI(TAG, "nim runtime not compiled in (thin-client only)");
+    }
+
+    /* Interpreted scenes (M3): mount /state and queue any cached scenes.json;
+     * the render task applies it and keeps it synced with the backend. */
+    if (fos_scenes_init() != ESP_OK) {
+        ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
 
     ESP_ERROR_CHECK(fos_wifi_init());

@@ -13,6 +13,7 @@
 #include "esp_timer.h"
 
 #include "fos_config.h"
+#include "fos_scenes.h"
 #include "fos_wifi.h"
 
 static const char *TAG = "fos_http";
@@ -179,6 +180,48 @@ static esp_err_t action_handler(httpd_req_t *req)
     return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
 }
 
+/* Local scene push (M3): accept a scenes.json array, persist it to /state
+ * and apply it on the next render — hot scene update over the LAN without
+ * touching the backend. */
+static esp_err_t scenes_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 512 * 1024) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    char *body = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) body = malloc(total + 1);
+    if (!body) return httpd_resp_send_500(req);
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, body + received, total - received);
+        if (r <= 0) {
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed");
+        }
+        received += r;
+    }
+    body[total] = '\0';
+
+    esp_err_t err = fos_scenes_set_json(body, total);
+    free(body);
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
+    }
+    if (s_render_cb) s_render_cb();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
+/* Force a backend scenes sync on the next render pass. */
+static esp_err_t scenes_sync_handler(httpd_req_t *req)
+{
+    fos_scenes_request_sync();
+    if (s_render_cb) s_render_cb();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
 /* Captive portal: any unknown URL (and the OS connectivity probes) redirect
  * to the setup page so phones pop the sign-in sheet. */
 static esp_err_t portal_redirect_handler(httpd_req_t *req, httpd_err_code_t err)
@@ -219,6 +262,11 @@ esp_err_t fos_http_start(bool portal_mode)
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};
     httpd_register_uri_handler(s_server, &render);
     httpd_register_uri_handler(s_server, &ota);
+
+    httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
+    httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};
+    httpd_register_uri_handler(s_server, &scenes);
+    httpd_register_uri_handler(s_server, &scenes_sync);
 
     if (portal_mode) {
         static const char *probes[] = {

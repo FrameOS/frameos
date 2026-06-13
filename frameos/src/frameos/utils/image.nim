@@ -11,7 +11,10 @@ import uri
 
 import frameos/utils/font
 import frameos/utils/http_client
-import frameos/utils/process
+when not defined(frameosEmbedded):
+  # No child processes on FreeRTOS: ImageMagick/exiftool fallbacks are
+  # compiled out and pixie does all decoding.
+  import frameos/utils/process
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
 const MaxImageMagickOutputBytes = 50 * 1024 * 1024
@@ -59,22 +62,25 @@ proc decodeImageMagickOutput(output: string): Option[Image] =
     return none(Image)
 
 proc runImageMagick(args: seq[string]; input = ""): Option[string] =
-  let cmd = imageMagickCommand()
-  if cmd == "":
-    return none(string)
-  try:
-    let processResult = runProcessPiped(
-      cmd,
-      args,
-      input = input,
-      timeoutMs = ImageMagickTimeoutMs,
-      maxOutputBytes = MaxImageMagickOutputBytes
-    )
-    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
-      return some(processResult.output)
-  except CatchableError:
-    discard
-  none(string)
+  when defined(frameosEmbedded):
+    none(string)
+  else:
+    let cmd = imageMagickCommand()
+    if cmd == "":
+      return none(string)
+    try:
+      let processResult = runProcessPiped(
+        cmd,
+        args,
+        input = input,
+        timeoutMs = ImageMagickTimeoutMs,
+        maxOutputBytes = MaxImageMagickOutputBytes
+      )
+      if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+        return some(processResult.output)
+    except CatchableError:
+      discard
+    none(string)
 
 proc decodeImageWithImageMagick(data: string): Option[Image] =
   let output = runImageMagick(@["-quiet", "-", "-auto-orient", "bmp:-"], input = data)
@@ -157,39 +163,45 @@ proc parseExifJson(output: string): Option[JsonNode] =
   return none(JsonNode)
 
 proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
-  let exiftool = findExe("exiftool")
-  if exiftool == "":
+  when defined(frameosEmbedded):
+    none(JsonNode)
+  else:
+    let exiftool = findExe("exiftool")
+    if exiftool == "":
+      return none(JsonNode)
+    try:
+      let processResult = runProcessPiped(
+        exiftool,
+        @["-j", "-n", path],
+        timeoutMs = ExifToolTimeoutMs,
+        maxOutputBytes = MaxExifOutputBytes
+      )
+      if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+        return parseExifJson(processResult.output)
+    except CatchableError:
+      discard
     return none(JsonNode)
-  try:
-    let processResult = runProcessPiped(
-      exiftool,
-      @["-j", "-n", path],
-      timeoutMs = ExifToolTimeoutMs,
-      maxOutputBytes = MaxExifOutputBytes
-    )
-    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
-      return parseExifJson(processResult.output)
-  except CatchableError:
-    discard
-  return none(JsonNode)
 
 proc getExifMetadataFromData*(data: string): Option[JsonNode] =
-  let exiftool = findExe("exiftool")
-  if exiftool == "":
+  when defined(frameosEmbedded):
+    none(JsonNode)
+  else:
+    let exiftool = findExe("exiftool")
+    if exiftool == "":
+      return none(JsonNode)
+    try:
+      let processResult = runProcessPiped(
+        exiftool,
+        @["-j", "-n", "-"],
+        input = data,
+        timeoutMs = ExifToolTimeoutMs,
+        maxOutputBytes = MaxExifOutputBytes
+      )
+      if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+        return parseExifJson(processResult.output)
+    except CatchableError:
+      discard
     return none(JsonNode)
-  try:
-    let processResult = runProcessPiped(
-      exiftool,
-      @["-j", "-n", "-"],
-      input = data,
-      timeoutMs = ExifToolTimeoutMs,
-      maxOutputBytes = MaxExifOutputBytes
-    )
-    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
-      return parseExifJson(processResult.output)
-  except CatchableError:
-    discard
-  return none(JsonNode)
 
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck

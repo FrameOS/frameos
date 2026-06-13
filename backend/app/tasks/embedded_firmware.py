@@ -42,7 +42,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 4
+EMBEDDED_FIRMWARE_VERSION = 5  # M3: QuickJS interpreted scenes + scene sync
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 # Panels the ESP-IDF display component has drivers for (components/frameos_display)
 EMBEDDED_SUPPORTED_PANELS = {"none", "EPD_7in5_V2"}

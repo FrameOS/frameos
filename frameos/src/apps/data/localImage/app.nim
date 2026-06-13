@@ -9,6 +9,7 @@ import random
 import frameos/utils/image
 import frameos/apps
 import frameos/types
+import frameos/hal/entropy
 
 let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".qoi", ".ppm", ".svg"]
 
@@ -93,7 +94,7 @@ proc init*(self: App) =
     self.log("Search query: " & self.appConfig.search)
   self.log("Found " & $self.images.len & " images in the folder: " & folder)
   if self.appConfig.order == "random":
-    randomize()
+    randomizeSafe()
     self.images.shuffle()
   else:
     self.images.sortImagesAlphabetically()
@@ -112,7 +113,7 @@ proc refreshImages(self: App) =
   if self.appConfig.order == "random":
     hasChanged = not hasSameImages(newImages, self.images)
     if hasChanged:
-      randomize()
+      randomizeSafe()
       nextImages.shuffle()
     else:
       nextImages = self.images

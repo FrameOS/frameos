@@ -11,6 +11,10 @@ token (same scheme as ``/api/log``). Three endpoints:
   OTA app image so the device can decide whether to update.
 - ``GET /api/frames/{id}/embedded/ota/download`` — the OTA app image
   (``frameos_esp32.bin``, not the merged flash image).
+- ``GET /api/frames/{id}/embedded/scenes`` — the frame's scenes as a JSON
+  array (M3 interpreted scenes: QuickJS + AOT app library on-device). The
+  ETag is the payload's sha256; devices poll with ``If-None-Match`` and get
+  304 when nothing changed, so hot scene updates need no reflash.
 
 Wire format for /render ("FOSB"): magic ``FOSB``, version u8 (1), pixel
 format u8 (1 = packed 1bpp white=1 MSB-first), width u16le, height u16le,
@@ -19,6 +23,8 @@ reserved u16, then ``ceil(width/8)*height`` payload bytes.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import struct
 from datetime import datetime, timezone
@@ -109,6 +115,33 @@ async def api_embedded_device_render(
                             detail=f"packed buffer {len(packed)} != expected {expected}")
     return Response(content=fosb_payload(width, height, packed),
                     media_type="application/octet-stream")
+
+
+def embedded_scenes_payload(frame: Frame) -> bytes:
+    """The frame's scenes as the JSON array the on-device interpreter loads.
+
+    Embedded frames run every scene interpreted (there is no on-device
+    compiler), so unlike Linux fast-deploy this does not filter on
+    ``settings.execution``.
+    """
+    scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+    return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+@api_public.get("/frames/{id:int}/embedded/scenes")
+async def api_embedded_device_scenes(
+    id: int,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+    if_none_match: str = Header(None),
+):
+    frame = _embedded_frame_from_bearer(db, id, authorization)
+    payload = embedded_scenes_payload(frame)
+    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
+    return Response(content=payload, media_type="application/json",
+                    headers={"ETag": etag})
 
 
 @api_public.get("/frames/{id:int}/embedded/ota/manifest")

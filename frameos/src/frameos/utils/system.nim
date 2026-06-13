@@ -1,12 +1,17 @@
-import posix
+when defined(frameosEmbedded):
+  proc getAvailableDiskSpace*(path: string): int64 =
+    ## No statvfs on the embedded VFS; callers treat -1 as "unknown".
+    -1
+else:
+  import posix
 
-proc getAvailableDiskSpace*(path: string): int64 =
-  let fd = open(path.cstring, O_RDONLY)
-  if fd >= 0:
-    try:
-      var statvfs: StatVfs
-      if fstatvfs(fd, statvfs) == 0:
-        return (statvfs.f_bavail * statvfs.f_frsize).int64
-    finally:
-      discard close(fd)
-  return -1
+  proc getAvailableDiskSpace*(path: string): int64 =
+    let fd = open(path.cstring, O_RDONLY)
+    if fd >= 0:
+      try:
+        var statvfs: StatVfs
+        if fstatvfs(fd, statvfs) == 0:
+          return (statvfs.f_bavail * statvfs.f_frsize).int64
+      finally:
+        discard close(fd)
+    return -1

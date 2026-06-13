@@ -14,3 +14,22 @@ int frameos_nim_render_1bpp(uint8_t *buf, size_t len)
     return -1;
 }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
+int frameos_nim_load_scenes(const char *json)
+{
+    (void)json;
+    return 0;
+}
+double frameos_nim_scene_interval(void) { return 0; }
+bool frameos_nim_render_requested(void) { return false; }
+uint8_t *fos_nim_http_request(const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_len)
+{
+    (void)method; (void)url; (void)body; (void)body_len;
+    (void)timeout_ms; (void)max_bytes;
+    *out_status = 0;
+    *out_len = 0;
+    return 0;
+}
+void fos_nim_http_free(void *ptr) { (void)ptr; }

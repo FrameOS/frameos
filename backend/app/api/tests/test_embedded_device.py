@@ -70,6 +70,53 @@ async def test_render_returns_fosb_bitmap(async_client, no_auth_client, db):
 
 
 @pytest.mark.asyncio
+async def test_scenes_requires_device_auth(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes')
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_scenes_returns_payload_with_etag(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{
+        'id': 'scene-1',
+        'name': 'Clock',
+        'nodes': [],
+        'edges': [],
+        'settings': {'refreshInterval': 60},
+    }]
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    etag = response.headers['etag']
+    assert etag.startswith('"') and etag.endswith('"')
+    scenes = response.json()
+    assert len(scenes) == 1
+    assert scenes[0]['id'] == 'scene-1'
+
+    # Unchanged payload + If-None-Match → 304 (device polls every render)
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 304
+
+    # Changed scenes → new ETag + fresh payload
+    frame.scenes = [{**frame.scenes[0], 'name': 'Clock v2'}]
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 200
+    assert response.headers['etag'] != etag
+    assert response.json()[0]['name'] == 'Clock v2'
+
+
+@pytest.mark.asyncio
 async def test_ota_manifest_404_without_build(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     response = await no_auth_client.get(

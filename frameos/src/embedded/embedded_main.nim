@@ -1,22 +1,24 @@
-# FrameOS embedded runtime (M2: Nim core on the metal).
+# FrameOS embedded runtime (M2: Nim core on the metal; M3: interpreted
+# scenes via QuickJS).
 #
 # Compiled with `--os:freertos --cpu:esp --compileOnly` into C and built as
 # the ESP-IDF component embedded/esp32/components/frameos_nim (see
 # embedded/esp32/build_nim.sh). The firmware drives it through the small
 # C API below; pixie does the rendering, the Nim heap lives in PSRAM via
 # -d:useMalloc + CONFIG_SPIRAM_USE_MALLOC.
+#
+# Rendering picks the first available source:
+#   1. interpreted scenes loaded through fos_nim_load_scenes (QuickJS + the
+#      AOT app library, hot-updatable from the backend without reflashing)
+#   2. the baked demo scene in embedded_scene.nim
 
-import std/[monotimes, strformat, times]
+import std/[monotimes, options, strformat, times]
 import pixie
 
 import embedded_scene
+import embedded_runtime
 
-# ------------------------------------------------------------------ C hooks
-
-proc espLog(msg: cstring) {.importc: "frameos_nim_log_hook", cdecl.}
-
-proc log*(msg: string) =
-  espLog(msg.cstring)
+# `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
 
 # ------------------------------------------------------------------- state
 
@@ -76,6 +78,7 @@ proc fos_nim_init_impl(width, height: cint; name: cstring): bool {.exportc, cdec
   frameHeight = height.int
   frameName = $name
   try:
+    initRuntime(frameWidth, frameHeight, frameName)
     initScene()
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} \"{frameName}\", nim {NimVersion}")
     true
@@ -83,24 +86,51 @@ proc fos_nim_init_impl(width, height: cint; name: cstring): bool {.exportc, cdec
     log("nim init failed: " & e.msg)
     false
 
+proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
+  ## Install interpreted scenes from JSON (backend scenes.json format).
+  ## Returns the number of scenes loaded, 0 on bad payload.
+  try:
+    loadScenes($payload).cint
+  except CatchableError as e:
+    log("loadScenes failed: " & e.msg)
+    0
+
 proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): cint {.exportc, cdecl.} =
   try:
     let start = getMonoTime()
-    let image = render(frameWidth, frameHeight, frameName, renderCount + 1)
+    var image: Image
+    var source = "scene"
+    let interpreted = renderCurrentScene()
+    if interpreted.isSome:
+      image = interpreted.get()
+      source = "interpreted scene \"" & currentSceneName() & "\""
+    else:
+      image = render(frameWidth, frameHeight, frameName, renderCount + 1)
+      source = "demo scene"
     let renderedAt = getMonoTime()
     if not packImage1bpp(image, buf, bufLen.int):
       return 1
     let packed = getMonoTime()
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
-    log(&"render #{renderCount}: scene {(renderedAt - start).inMilliseconds} ms, " &
+    log(&"render #{renderCount} ({source}): render {(renderedAt - start).inMilliseconds} ms, " &
         &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
     0
   except CatchableError as e:
     log("render failed: " & e.msg)
     1
 
+proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
+  ## Refresh interval requested by the active interpreted scene, in seconds;
+  ## 0 means "no opinion" (firmware falls back to its configured interval).
+  sceneRefreshSeconds().cdouble
+
+proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
+  ## True once when a scene event (e.g. dispatched "render") asked for a
+  ## redraw; clears the flag.
+  takeRenderRequested()
+
 proc fos_nim_info_impl(): cstring {.exportc, cdecl.} =
-  infoBuffer = &"nim {NimVersion} + pixie, {frameWidth}x{frameHeight}, " &
-               &"renders={renderCount}, last={lastRenderMs} ms"
+  infoBuffer = &"nim {NimVersion} + pixie + quickjs, {frameWidth}x{frameHeight}, " &
+               &"scenes={sceneCount()}, renders={renderCount}, last={lastRenderMs} ms"
   infoBuffer.cstring

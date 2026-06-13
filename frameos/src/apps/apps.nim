@@ -1,28 +1,32 @@
 import frameos/types
-import apps/data/beRecycle/app_loader as data_beRecycle_loader
-import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
 import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
 import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
-import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
-import apps/data/openaiImage/app_loader as data_openaiImage_loader
-import apps/data/openaiText/app_loader as data_openaiText_loader
 import apps/data/parseJson/app_loader as data_parseJson_loader
 import apps/data/prettyJson/app_loader as data_prettyJson_loader
 import apps/data/qr/app_loader as data_qr_loader
 import apps/data/resizeImage/app_loader as data_resizeImage_loader
 import apps/data/rotateImage/app_loader as data_rotateImage_loader
-import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
-import apps/data/unsplash/app_loader as data_unsplash_loader
 import apps/data/weather/app_loader as data_weather_loader
-import apps/data/wikicommons/app_loader as data_wikicommons_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
+when not defined(frameosEmbedded):
+  # Excluded from the embedded build: chromiumScreenshot/rstpSnapshot spawn
+  # child processes; the rest import std/httpclient directly (no std/net on
+  # FreeRTOS — porting them to utils/http_client would bring them back).
+  import apps/data/beRecycle/app_loader as data_beRecycle_loader
+  import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
+  import apps/data/haSensor/app_loader as data_haSensor_loader
+  import apps/data/openaiImage/app_loader as data_openaiImage_loader
+  import apps/data/openaiText/app_loader as data_openaiText_loader
+  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
+  import apps/data/unsplash/app_loader as data_unsplash_loader
+  import apps/data/wikicommons/app_loader as data_wikicommons_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
@@ -38,29 +42,61 @@ import apps/render/text/app_loader as render_text_loader
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
-  of "data/beRecycle": data_beRecycle_loader.init(node, scene)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.init(node, scene)
+  of "data/beRecycle":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
+    else:
+      data_beRecycle_loader.init(node, scene)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.init(node, scene)
   of "data/clock": data_clock_loader.init(node, scene)
   of "data/downloadImage": data_downloadImage_loader.init(node, scene)
   of "data/downloadUrl": data_downloadUrl_loader.init(node, scene)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.init(node, scene)
   of "data/frameOSGallery": data_frameOSGallery_loader.init(node, scene)
-  of "data/haSensor": data_haSensor_loader.init(node, scene)
+  of "data/haSensor":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
+    else:
+      data_haSensor_loader.init(node, scene)
   of "data/icalJson": data_icalJson_loader.init(node, scene)
   of "data/localImage": data_localImage_loader.init(node, scene)
   of "data/log": data_log_loader.init(node, scene)
   of "data/newImage": data_newImage_loader.init(node, scene)
-  of "data/openaiImage": data_openaiImage_loader.init(node, scene)
-  of "data/openaiText": data_openaiText_loader.init(node, scene)
+  of "data/openaiImage":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiImage' is not available on embedded builds")
+    else:
+      data_openaiImage_loader.init(node, scene)
+  of "data/openaiText":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiText' is not available on embedded builds")
+    else:
+      data_openaiText_loader.init(node, scene)
   of "data/parseJson": data_parseJson_loader.init(node, scene)
   of "data/prettyJson": data_prettyJson_loader.init(node, scene)
   of "data/qr": data_qr_loader.init(node, scene)
   of "data/resizeImage": data_resizeImage_loader.init(node, scene)
   of "data/rotateImage": data_rotateImage_loader.init(node, scene)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.init(node, scene)
-  of "data/unsplash": data_unsplash_loader.init(node, scene)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.init(node, scene)
+  of "data/unsplash":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/unsplash' is not available on embedded builds")
+    else:
+      data_unsplash_loader.init(node, scene)
   of "data/weather": data_weather_loader.init(node, scene)
-  of "data/wikicommons": data_wikicommons_loader.init(node, scene)
+  of "data/wikicommons":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/wikicommons' is not available on embedded builds")
+    else:
+      data_wikicommons_loader.init(node, scene)
   of "data/xmlToJson": data_xmlToJson_loader.init(node, scene)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.init(node, scene)
   of "logic/ifElse": logic_ifElse_loader.init(node, scene)
@@ -78,29 +114,61 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   case keyword:
-  of "data/beRecycle": data_beRecycle_loader.setField(app, field, value)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.setField(app, field, value)
+  of "data/beRecycle":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
+    else:
+      data_beRecycle_loader.setField(app, field, value)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.setField(app, field, value)
   of "data/clock": data_clock_loader.setField(app, field, value)
   of "data/downloadImage": data_downloadImage_loader.setField(app, field, value)
   of "data/downloadUrl": data_downloadUrl_loader.setField(app, field, value)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.setField(app, field, value)
   of "data/frameOSGallery": data_frameOSGallery_loader.setField(app, field, value)
-  of "data/haSensor": data_haSensor_loader.setField(app, field, value)
+  of "data/haSensor":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
+    else:
+      data_haSensor_loader.setField(app, field, value)
   of "data/icalJson": data_icalJson_loader.setField(app, field, value)
   of "data/localImage": data_localImage_loader.setField(app, field, value)
   of "data/log": data_log_loader.setField(app, field, value)
   of "data/newImage": data_newImage_loader.setField(app, field, value)
-  of "data/openaiImage": data_openaiImage_loader.setField(app, field, value)
-  of "data/openaiText": data_openaiText_loader.setField(app, field, value)
+  of "data/openaiImage":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiImage' is not available on embedded builds")
+    else:
+      data_openaiImage_loader.setField(app, field, value)
+  of "data/openaiText":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiText' is not available on embedded builds")
+    else:
+      data_openaiText_loader.setField(app, field, value)
   of "data/parseJson": data_parseJson_loader.setField(app, field, value)
   of "data/prettyJson": data_prettyJson_loader.setField(app, field, value)
   of "data/qr": data_qr_loader.setField(app, field, value)
   of "data/resizeImage": data_resizeImage_loader.setField(app, field, value)
   of "data/rotateImage": data_rotateImage_loader.setField(app, field, value)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.setField(app, field, value)
-  of "data/unsplash": data_unsplash_loader.setField(app, field, value)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.setField(app, field, value)
+  of "data/unsplash":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/unsplash' is not available on embedded builds")
+    else:
+      data_unsplash_loader.setField(app, field, value)
   of "data/weather": data_weather_loader.setField(app, field, value)
-  of "data/wikicommons": data_wikicommons_loader.setField(app, field, value)
+  of "data/wikicommons":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/wikicommons' is not available on embedded builds")
+    else:
+      data_wikicommons_loader.setField(app, field, value)
   of "data/xmlToJson": data_xmlToJson_loader.setField(app, field, value)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.setField(app, field, value)
   of "logic/ifElse": logic_ifElse_loader.setField(app, field, value)
@@ -134,29 +202,61 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   case keyword:
-  of "data/beRecycle": data_beRecycle_loader.get(app, context)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.get(app, context)
+  of "data/beRecycle":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
+    else:
+      data_beRecycle_loader.get(app, context)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.get(app, context)
   of "data/clock": data_clock_loader.get(app, context)
   of "data/downloadImage": data_downloadImage_loader.get(app, context)
   of "data/downloadUrl": data_downloadUrl_loader.get(app, context)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.get(app, context)
   of "data/frameOSGallery": data_frameOSGallery_loader.get(app, context)
-  of "data/haSensor": data_haSensor_loader.get(app, context)
+  of "data/haSensor":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
+    else:
+      data_haSensor_loader.get(app, context)
   of "data/icalJson": data_icalJson_loader.get(app, context)
   of "data/localImage": data_localImage_loader.get(app, context)
   of "data/log": data_log_loader.get(app, context)
   of "data/newImage": data_newImage_loader.get(app, context)
-  of "data/openaiImage": data_openaiImage_loader.get(app, context)
-  of "data/openaiText": data_openaiText_loader.get(app, context)
+  of "data/openaiImage":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiImage' is not available on embedded builds")
+    else:
+      data_openaiImage_loader.get(app, context)
+  of "data/openaiText":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/openaiText' is not available on embedded builds")
+    else:
+      data_openaiText_loader.get(app, context)
   of "data/parseJson": data_parseJson_loader.get(app, context)
   of "data/prettyJson": data_prettyJson_loader.get(app, context)
   of "data/qr": data_qr_loader.get(app, context)
   of "data/resizeImage": data_resizeImage_loader.get(app, context)
   of "data/rotateImage": data_rotateImage_loader.get(app, context)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.get(app, context)
-  of "data/unsplash": data_unsplash_loader.get(app, context)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.get(app, context)
+  of "data/unsplash":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/unsplash' is not available on embedded builds")
+    else:
+      data_unsplash_loader.get(app, context)
   of "data/weather": data_weather_loader.get(app, context)
-  of "data/wikicommons": data_wikicommons_loader.get(app, context)
+  of "data/wikicommons":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/wikicommons' is not available on embedded builds")
+    else:
+      data_wikicommons_loader.get(app, context)
   of "data/xmlToJson": data_xmlToJson_loader.get(app, context)
   of "render/calendar": render_calendar_loader.get(app, context)
   of "render/color": render_color_loader.get(app, context)
