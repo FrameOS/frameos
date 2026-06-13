@@ -77,7 +77,7 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
 
 async function saveRememberedWifiDefaults(frame: NewFrameFormType): Promise<void> {
   const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
-  if (installMethod !== 'sd_card' || !frame.rememberWifi) {
+  if ((installMethod !== 'sd_card' && installMethod !== 'embedded') || !frame.rememberWifi) {
     return
   }
 

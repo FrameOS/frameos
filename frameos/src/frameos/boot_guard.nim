@@ -1,4 +1,5 @@
-import json, os, options
+import json, options
+import frameos/hal/files
 
 const
   BOOT_GUARD_STATE_PATH* = "./state/boot_guard.json"
@@ -17,13 +18,13 @@ type BootGuardFailureDetails* = object
 var cachedCrashCount = -1
 
 proc ensureBootGuardStateDir() =
-  createDir(parentDir(BOOT_GUARD_STATE_PATH))
+  ensureParentDir(BOOT_GUARD_STATE_PATH)
 
 proc loadBootCrashCount*(): int =
   if cachedCrashCount >= 0:
     return cachedCrashCount
   try:
-    let data = parseJson(readFile(BOOT_GUARD_STATE_PATH))
+    let data = parseJson(readTextFile(BOOT_GUARD_STATE_PATH))
     cachedCrashCount = max(0, data{"crashesWithoutRender"}.getInt())
   except JsonParsingError, IOError:
     cachedCrashCount = 0
@@ -32,7 +33,7 @@ proc loadBootCrashCount*(): int =
 proc loadBootGuardFailureDetails*(): BootGuardFailureDetails =
   result = BootGuardFailureDetails(sceneId: none(string), sceneName: none(string), error: none(string))
   try:
-    let data = parseJson(readFile(BOOT_GUARD_STATE_PATH))
+    let data = parseJson(readTextFile(BOOT_GUARD_STATE_PATH))
     if data.hasKey("sceneId"):
       let sceneId = data{"sceneId"}.getStr()
       if sceneId.len > 0:
@@ -62,7 +63,7 @@ proc writeBootGuardState(crashCount: int, failureDetails: BootGuardFailureDetail
       payload["sceneName"] = %failureDetails.sceneName.get()
     if failureDetails.error.isSome:
       payload["error"] = %failureDetails.error.get()
-    writeFile(BOOT_GUARD_STATE_PATH, $payload)
+    writeTextFile(BOOT_GUARD_STATE_PATH, $payload)
   except IOError, OSError:
     echo "Error writing boot guard state: " & getCurrentExceptionMsg()
 

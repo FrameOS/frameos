@@ -79,6 +79,10 @@ extern int EPD_MOSI_PIN;
 extern int EPD_SCLK_PIN;
 
 /*------------------------------------------------------------------------------------------------------*/
+/* GPIO remap layer: override the default Raspberry Pi pins before
+ * DEV_Module_Init(). -1 keeps the default for that pin. */
+void DEV_SetPinConfig(int rst, int dc, int cs, int busy, int sclk, int mosi, int pwr);
+
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
 UBYTE DEV_Digital_Read(UWORD Pin);
 

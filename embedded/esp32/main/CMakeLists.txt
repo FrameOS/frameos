@@ -1,1 +1,26 @@
-idf_component_register(SRCS "main.c")
+idf_component_register(
+    SRCS
+        "main.c"
+        "fos_config.c"
+        "fos_wifi.c"
+        "fos_http.c"
+        "fos_client.c"
+        "fos_ota.c"
+        "fos_console.c"
+    PRIV_REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        esp_http_server
+        esp_http_client
+        esp_https_ota
+        esp-tls
+        app_update
+        json
+        console
+        driver
+        frameos_display
+        frameos_nim
+)

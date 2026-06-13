@@ -139,10 +139,15 @@ type
     name*: string
     value*: string
 
+  PinOverrides* = ref object
+    ## GPIO remap for SPI panel drivers; -1 = keep the driver's default pin.
+    rst*, dc*, cs*, busy*, sclk*, mosi*, pwr*: int
+
   DeviceConfig* = ref object
     vcom*: float # used for the 10.3" display
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
+    pins*: PinOverrides
 
   SerializedLog* = object
     timestamp*: float

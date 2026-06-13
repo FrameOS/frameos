@@ -43,6 +43,33 @@ int EPD_PWR_PIN;
 int EPD_MOSI_PIN;
 int EPD_SCLK_PIN;
 
+/* GPIO remap layer: DEV_GPIO_Init() hardcodes the classic Raspberry Pi pins
+ * on every init, so overrides are stored here and applied after the
+ * defaults. -1 = keep the default for that pin. */
+static int s_pin_overrides[7] = {-1, -1, -1, -1, -1, -1, -1};
+
+void DEV_SetPinConfig(int rst, int dc, int cs, int busy, int sclk, int mosi, int pwr)
+{
+    s_pin_overrides[0] = rst;
+    s_pin_overrides[1] = dc;
+    s_pin_overrides[2] = cs;
+    s_pin_overrides[3] = busy;
+    s_pin_overrides[4] = sclk;
+    s_pin_overrides[5] = mosi;
+    s_pin_overrides[6] = pwr;
+}
+
+static void DEV_ApplyPinOverrides(void)
+{
+    if (s_pin_overrides[0] >= 0) EPD_RST_PIN = s_pin_overrides[0];
+    if (s_pin_overrides[1] >= 0) EPD_DC_PIN = s_pin_overrides[1];
+    if (s_pin_overrides[2] >= 0) EPD_CS_PIN = s_pin_overrides[2];
+    if (s_pin_overrides[3] >= 0) EPD_BUSY_PIN = s_pin_overrides[3];
+    if (s_pin_overrides[4] >= 0) EPD_SCLK_PIN = s_pin_overrides[4];
+    if (s_pin_overrides[5] >= 0) EPD_MOSI_PIN = s_pin_overrides[5];
+    if (s_pin_overrides[6] >= 0) EPD_PWR_PIN = s_pin_overrides[6];
+}
+
 /**
  * GPIO read and write
 **/
@@ -137,6 +164,8 @@ void DEV_GPIO_Init(void)
 	EPD_BUSY_PIN    = 24;
     EPD_MOSI_PIN    = 10;
 	EPD_SCLK_PIN    = 11;
+
+	DEV_ApplyPinOverrides();
 
     DEV_GPIO_Mode(EPD_BUSY_PIN, 0);
 	DEV_GPIO_Mode(EPD_RST_PIN, 1);

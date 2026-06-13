@@ -3,3 +3,5 @@ managed_components/
 dependencies.lock
 sdkconfig
 sdkconfig.old
+main/generated_config.h
+components/frameos_nim/nimcache/

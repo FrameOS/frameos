@@ -1,5 +1,6 @@
 import json, pixie, os, strutils
 import zippy
+import frameos/hal/files
 import frameos/types
 import frameos/utils/image
 import lib/tz
@@ -103,17 +104,30 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
         if name.len > 0:
           headers.add(HttpHeaderPair(name: name, value: value))
 
+  proc loadPins(data: JsonNode): PinOverrides =
+    result = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
+    if data != nil and data.kind == JObject:
+      result.rst = data{"rst"}.getInt(-1)
+      result.dc = data{"dc"}.getInt(-1)
+      result.cs = data{"cs"}.getInt(-1)
+      result.busy = data{"busy"}.getInt(-1)
+      result.sclk = data{"sclk"}.getInt(-1)
+      result.mosi = data{"mosi"}.getInt(-1)
+      result.pwr = data{"pwr"}.getInt(-1)
+
   if data == nil or data.kind != JObject:
     result = DeviceConfig(
       vcom: 0,
       httpUploadUrl: "",
       httpUploadHeaders: headers,
+      pins: loadPins(nil),
     )
   else:
     result = DeviceConfig(
       vcom: data{"vcom"}.getFloat(0),
       httpUploadUrl: data{"uploadUrl"}.getStr(""),
       httpUploadHeaders: headers,
+      pins: loadPins(data{"pins"}),
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =
@@ -210,7 +224,7 @@ proc getConfigFilename*(overridePath = ""): string =
     result = "./frame.json"
 
 proc readJsonFile(path: string): JsonNode =
-  let encoded = readFile(path)
+  let encoded = readTextFile(path)
   let decoded =
     if path.endsWith(".gz"):
       uncompress(encoded)

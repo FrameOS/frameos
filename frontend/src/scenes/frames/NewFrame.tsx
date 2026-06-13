@@ -125,7 +125,15 @@ function setInstallMethodValues(
     }
   }
   if (installMethod === 'embedded') {
-    return { install_method: installMethod, mode: 'embedded', platform: EMBEDDED_ESP32_S3, frame_host: '' }
+    return {
+      install_method: installMethod,
+      mode: 'embedded',
+      platform: EMBEDDED_ESP32_S3,
+      frame_host: '',
+      device: 'waveshare.EPD_7in5_V2',
+      network: defaultWifiNetwork(savedSettings),
+      rememberWifi: true,
+    }
   }
   if (installMethod === 'script') {
     return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
@@ -142,6 +150,20 @@ function renderDeviceOptions(): JSX.Element[] {
         </option>
       ))}
     </optgroup>
+  ))
+}
+
+// Panels with drivers in the ESP32 firmware (embedded/esp32/components/frameos_display)
+const embeddedDevices = [
+  { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" e-ink V2 (800x480, black/white)' },
+  { value: 'web_only', label: 'No display (headless)' },
+]
+
+function renderEmbeddedDeviceOptions(): JSX.Element[] {
+  return embeddedDevices.map((device) => (
+    <option key={device.value} value={device.value}>
+      {device.label}
+    </option>
   ))
 }
 
@@ -559,8 +581,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Build a firmware image for an ESP32 microcontroller and flash it over USB serial. The current firmware is
-            an early stub: it blinks the onboard LED and does not run FrameOS yet.
+            Build a firmware image for an ESP32 microcontroller and flash it over USB serial or from the browser. The
+            firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the air.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -580,6 +602,41 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderPlatformOptions('embedded')}
             </select>
           </FormField>
+          <FormField label="Display panel">
+            <select
+              className={selectClassName()}
+              value={newFrame.device ?? 'waveshare.EPD_7in5_V2'}
+              onChange={(event) => setNewFrameValue('device', event.target.value)}
+            >
+              {renderEmbeddedDeviceOptions()}
+            </select>
+          </FormField>
+          <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiSSID ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
+              }
+              placeholder="Home WiFi"
+              autoComplete="off"
+            />
+          </FormField>
+          <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiPassword ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiPassword: event.target.value })
+              }
+              placeholder="Network password"
+              type="password"
+              autoComplete="new-password"
+            />
+          </FormField>
+          <Field name="rememberWifi">
+            <Checkbox label="Remember wifi details for next time" />
+          </Field>
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button

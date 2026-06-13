@@ -67,21 +67,40 @@ that assumes Linux gets replaced; everything that's pure Nim or vendor C comes a
 - [x] Flash directly from the browser via Web Serial (esptool-js) in the firmware drawer —
       builds on demand, streams progress, hard-resets the board after flashing
 
-### M1 — thin client (shippable on its own)
-- [ ] Wi-Fi provisioning (captive portal, like today's hotspot setup flow)
-- [ ] Fetch backend-prerendered bitmap over HTTPS (`esp_http_client` + mbedTLS), display, deep-sleep
-- [ ] `DEV_Config` for ESP-IDF → bring up one Waveshare SPI e-ink panel end to end
-- [ ] OTA updates (A/B partitions, rollback on boot failure)
-- [ ] Backend: per-frame render endpoint (dithered to panel palette), device type plumbing
+### M1 — thin client (shippable on its own)  ← done
+- [x] Wi-Fi provisioning: SoftAP captive portal (`FrameOS-XXXX`, DNS hijack on :53, setup
+      form) + serial-console provisioning (`wifi <ssid> [pass]`, `set <key> <value>`); config
+      persisted in NVS, per-frame defaults baked by the backend into `generated_config.h`
+- [x] Thin client: fetch backend bitmap over HTTP(S) (`esp_http_client` + cert bundle,
+      "FOSB" 1bpp wire format), display, optional deep sleep between refreshes (`set deep_sleep 1`)
+- [x] `DEV_Config` for ESP-IDF (`components/frameos_display`): hardware SPI + GPIO with
+      runtime pin remapping; vendor `EPD_7in5_V2.c` compiles unmodified from the shared
+      `frameos/src/drivers/waveshare/ePaper` tree. GPIO remap also added to the Pi build
+      (`DEV_SetPinConfig` + `deviceConfig.pins` in frame.json, all platforms).
+      Verified on the XIAO ESP32-S3 over serial; end-to-end panel test still needs a panel wired up.
+- [x] OTA updates: A/B `ota_0`/`ota_1` partitions, manifest+download pull from the backend,
+      `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` with mark-valid-after-healthy-boot
+- [x] Backend: device-authed endpoints (Bearer `server_api_key`) — `/embedded/render`
+      (stub placeholder card, dithered+packed; real scenes render on-device),
+      `/embedded/ota/manifest`, `/embedded/ota/download`; panel picker in New Frame
 
-### M2 — Nim core on the metal
-- [ ] Toolchain spike: Nim → C → IDF component; ARC, stdlib subset, PSRAM allocator
-- [ ] HAL split in `frameos/src`: isolate files/net/time/threads/process behind interfaces
-      (valuable refactor even for Linux)
-- [ ] Port logger/scheduler/runner onto FreeRTOS tasks; channels → queues
-- [ ] Server route layer on `esp_http_server` (trimmed admin UI or none)
-- [ ] Pixie on PSRAM; optional 8-bit palette/gray internal format; banded rendering
-- [ ] Compiled-scene pipeline: backend Xtensa target → OTA artifact
+### M2 — Nim core on the metal  ← done
+- [x] Toolchain spike: `nim c --compileOnly --os:freertos --cpu:esp --mm:orc -d:useMalloc`
+      → nimcache C compiled as IDF component (`build_nim.sh` + `components/frameos_nim`);
+      gotchas: `-d:noSignalHandler`, `-Wno-error=incompatible-pointer-types` (GCC 14)
+- [x] HAL split in `frameos/src/frameos/hal/`: files / clock / processes / net_client;
+      config, logger, scenes, boot_guard, scheduler rewired; embedded build excludes
+      process/net modules at compile time
+- [x] Embedded runtime on FreeRTOS: render loop task (`fos_client`), Nim logging via C hook,
+      interval scheduler + render-now triggers from console/HTTP
+- [x] Server route layer on `esp_http_server`: `/` setup page, `/status` JSON,
+      `POST /api/setup`, `POST /api/action/render|ota` (same layer serves the captive portal)
+- [x] Pixie on PSRAM: 800×480 RGBA scene renders in ~400 ms + ~530 ms Floyd–Steinberg
+      dither+pack to 1bpp on the S3 (8MB octal PSRAM via `SPIRAM_USE_MALLOC`)
+- [x] Compiled-scene pipeline: backend firmware build runs the Nim cross-compile and bakes
+      scene parameters (`-d:frameosSceneName/...Background` from the frame's first scene)
+      into the OTA artifact (`...-ota.bin` + sha256 manifest). Full scene-graph → Nim
+      codegen for Xtensa is the M3 follow-up.
 
 ### M3 — interpreted scenes (QuickJS)
 - [ ] QuickJS on Xtensa, JS heap in PSRAM

@@ -38,6 +38,9 @@ proc init*(frameOS: DriverContext): Driver =
 
   setDriverDebugLogger(logger)
   logger.log(%*{"event": "driver:waveshare", "width": width, "height": height, "init": "starting"})
+  if not frameOS.frameConfig.deviceConfig.isNil and
+      not frameOS.frameConfig.deviceConfig.pins.isNil:
+    waveshareDriver.setPinOverrides(frameOS.frameConfig.deviceConfig.pins)
   waveshareDriver.init()
 
   try:

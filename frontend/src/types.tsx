@@ -748,6 +748,10 @@ export interface FrameEmbeddedConfig {
     sha256?: string
     flashOffset?: string
     downloadUrl?: string
+    panel?: string
+    otaPath?: string
+    otaSha256?: string
+    otaSize?: number
     queuedAt?: string
     startedAt?: string
     lastHeartbeatAt?: string
