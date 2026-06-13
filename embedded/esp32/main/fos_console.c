@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_ota.h"
@@ -31,8 +32,16 @@ static int cmd_status(int argc, char **argv)
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
-    printf("interval:    %lu s, deep_sleep=%d\n",
-           (unsigned long)config->interval_sec, (int)config->deep_sleep);
+    printf("interval:    %lu s, deep_sleep=%d, wake_schedule=%d\n",
+           (unsigned long)config->interval_sec, (int)config->deep_sleep,
+           (int)config->wake_schedule);
+    if (fos_battery_present()) {
+        printf("battery:     %d mV (%d%%) on GPIO %d, divider %.2f\n",
+               fos_battery_millivolts(), fos_battery_percent(),
+               (int)config->battery_pin, config->battery_divider);
+    } else {
+        printf("battery:     not configured\n");
+    }
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -45,7 +54,8 @@ static int cmd_status(int argc, char **argv)
 static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
-        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|panel|render_mode|interval|deep_sleep|pins> <value...>\n");
+        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|panel|render_mode|"
+               "interval|deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -68,9 +78,12 @@ static int cmd_set(int argc, char **argv)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
     else if (strcmp(key, "deep_sleep") == 0) config->deep_sleep = atoi(value) != 0;
+    else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
+    else if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)atoi(value);
+    else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
-            printf("bad pin spec, want e.g. rst=5,dc=4,cs=3,busy=6,sck=7,mosi=9,pwr=-1\n");
+            printf("bad pin spec, want e.g. rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1\n");
             return 1;
         }
     } else {

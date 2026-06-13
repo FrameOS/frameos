@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -14,6 +15,7 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 
+#include "fos_battery.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -24,9 +26,13 @@ static const char *TAG = "fos_client";
 
 #define RENDER_NOW_BIT BIT0
 
+/* Below this charge we stop rendering and sleep long to protect the cell. */
+#define FOS_BATTERY_CRITICAL_PCT 3
+#define FOS_BATTERY_CRITICAL_SLEEP_SEC (6 * 3600)
+
 /* FrameOS embedded bitmap wire format ("FOSB"):
  * magic[4] ver(u8) format(u8) width(u16le) height(u16le) reserved(u16le),
- * then width/8 * height payload bytes for 1bpp. */
+ * then the packed payload bytes for the current FOS_PIXEL_* format. */
 #define FOSB_HEADER_LEN 12
 
 static EventGroupHandle_t s_events;
@@ -97,8 +103,13 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
     }
     int width = header[6] | (header[7] << 8);
     int height = header[8] | (header[9] << 8);
-    size_t expected = ((size_t)(width + 7) / 8) * height;
-    if (header[5] != FOS_PIXEL_1BPP || expected != buf_len) {
+    size_t expected = fos_display_present()
+        ? fos_display_buffer_size()
+        : (((size_t)width + 7u) / 8u) * (size_t)height;
+    int want_format = fos_display_present() ? (int)fos_display_format() : FOS_PIXEL_1BPP;
+    bool dims_ok = !fos_display_present()
+        || (width == fos_display_width() && height == fos_display_height());
+    if (header[5] != want_format || expected != buf_len || !dims_ok) {
         ESP_LOGE(TAG, "remote render: format mismatch (%dx%d fmt=%d, want %u bytes, have %u)",
                  width, height, header[5], (unsigned)expected, (unsigned)buf_len);
         esp_http_client_close(client);
@@ -130,9 +141,8 @@ static esp_err_t render_once(void)
     fos_config_t *config = fos_config();
     int64_t start = esp_timer_get_time();
 
-    int width = fos_display_present() ? fos_display_width() : 800;
-    int height = fos_display_present() ? fos_display_height() : 480;
-    size_t buf_len = ((size_t)(width + 7) / 8) * height;
+    size_t buf_len = fos_display_present() ? fos_display_buffer_size()
+                                           : (((size_t)800 + 7u) / 8u) * 480u;
 
     uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) buf = malloc(buf_len);
@@ -144,7 +154,7 @@ static esp_err_t render_once(void)
 
     esp_err_t err;
     if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
-        err = frameos_nim_render_1bpp(buf, buf_len) == 0 ? ESP_OK : ESP_FAIL;
+        err = frameos_nim_render(buf, buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
         if (config->render_mode == FOS_RENDER_LOCAL) {
@@ -169,10 +179,36 @@ static esp_err_t render_once(void)
     return err;
 }
 
+/* How long to wait before the next render, in seconds.
+ *
+ * wake_schedule + a synced clock → align to wall-clock interval boundaries
+ * (a 1h frame wakes at the top of the hour, a 5min frame on :00/:05/...),
+ * which is what makes clock faces tick on time. Otherwise we subtract the
+ * time already spent this cycle (boot + Wi-Fi + render) so the period stays
+ * ~interval instead of drifting by however long a render took. */
+static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
+{
+    fos_config_t *config = fos_config();
+    if (interval == 0) interval = 1;
+    if (config->wake_schedule && fos_wifi_time_synced()) {
+        time_t now = time(NULL);
+        if (now > 1000000000) { /* clock actually set, not 1970 */
+            uint32_t until = interval - (uint32_t)((uint64_t)now % interval);
+            return until == 0 ? interval : until;
+        }
+    }
+    int64_t elapsed_s = (esp_timer_get_time() - cycle_start_us) / 1000000;
+    if (elapsed_s < 0) elapsed_s = 0;
+    if ((uint32_t)elapsed_s >= interval) return 1;
+    return interval - (uint32_t)elapsed_s;
+}
+
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
     while (true) {
+        int64_t cycle_start = esp_timer_get_time();
+
         /* Interpreted scenes (M3): pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
@@ -181,21 +217,36 @@ static void client_task(void *arg)
             fos_scenes_apply_pending();
         }
 
-        render_once();
+        /* Battery guardrail: when the cell is nearly empty, skip the (costly)
+         * render + panel refresh and sleep long so a low battery can't keep
+         * cycling the display down to a damaging voltage. */
+        int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
+        bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
+        if (battery_critical) {
+            ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
+        } else {
+            render_once();
+        }
 
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
         double scene_interval = frameos_nim_scene_interval();
         if (scene_interval >= 1.0 && scene_interval < interval) {
             interval = (uint32_t)scene_interval;
         }
+        if (battery_critical && interval < FOS_BATTERY_CRITICAL_SLEEP_SEC) {
+            interval = FOS_BATTERY_CRITICAL_SLEEP_SEC;
+        }
+
+        uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
         if (config->deep_sleep && fos_display_present()) {
-            ESP_LOGI(TAG, "deep sleeping for %lu s", (unsigned long)interval);
+            ESP_LOGI(TAG, "deep sleeping for %lu s%s", (unsigned long)sleep_s,
+                     config->wake_schedule ? " (wake-on-schedule)" : "");
             /* USB console drops in deep sleep; that's the point (battery). */
-            esp_deep_sleep((uint64_t)interval * 1000000ULL);
+            esp_deep_sleep((uint64_t)sleep_s * 1000000ULL);
         }
         /* Wait in 1s slices so scene-dispatched "render" events (QuickJS
          * setting the redraw flag) take effect promptly. */
-        uint32_t remaining_ms = interval * 1000;
+        uint32_t remaining_ms = sleep_s * 1000;
         while (remaining_ms > 0) {
             uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
             EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE,

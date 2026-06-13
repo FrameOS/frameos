@@ -8,11 +8,12 @@ bool frameos_nim_init(int width, int height, const char *frame_name)
     (void)width; (void)height; (void)frame_name;
     return false;
 }
-int frameos_nim_render_1bpp(uint8_t *buf, size_t len)
+int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
 {
-    (void)buf; (void)len;
+    (void)buf; (void)len; (void)pixel_format;
     return -1;
 }
+int frameos_nim_render_1bpp(uint8_t *buf, size_t len) { return frameos_nim_render(buf, len, 1); }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
 int frameos_nim_load_scenes(const char *json)
 {

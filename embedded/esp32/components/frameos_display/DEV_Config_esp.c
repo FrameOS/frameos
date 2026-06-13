@@ -19,6 +19,8 @@ static const char *TAG = "dev_config";
 int EPD_RST_PIN = 5;
 int EPD_DC_PIN = 4;
 int EPD_CS_PIN = 3;
+int EPD_CS_M_PIN = 3;
+int EPD_CS_S_PIN = -1;
 int EPD_BUSY_PIN = 6;
 int EPD_PWR_PIN = -1;
 int EPD_MOSI_PIN = 9;
@@ -31,14 +33,18 @@ int EPD_SCLK_PIN = 7;
 static spi_device_handle_t s_spi = NULL;
 static bool s_initialized = false;
 
-void DEV_SetPinConfig(int rst, int dc, int cs, int busy, int sclk, int mosi, int pwr)
+void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr)
 {
     if (s_initialized) {
         ESP_LOGW(TAG, "pin config changed after init; call DEV_Module_Exit first");
     }
     if (rst >= 0) EPD_RST_PIN = rst;
     if (dc >= 0) EPD_DC_PIN = dc;
-    if (cs >= 0) EPD_CS_PIN = cs;
+    if (cs >= 0) {
+        EPD_CS_PIN = cs;
+        EPD_CS_M_PIN = cs;
+    }
+    EPD_CS_S_PIN = cs2;
     if (busy >= 0) EPD_BUSY_PIN = busy;
     if (sclk >= 0) EPD_SCLK_PIN = sclk;
     if (mosi >= 0) EPD_MOSI_PIN = mosi;
@@ -145,13 +151,14 @@ UBYTE DEV_Module_Init(void)
     if (s_initialized) {
         return 0;
     }
-    ESP_LOGI(TAG, "init: rst=%d dc=%d cs=%d busy=%d sck=%d mosi=%d pwr=%d",
-             EPD_RST_PIN, EPD_DC_PIN, EPD_CS_PIN, EPD_BUSY_PIN,
+    ESP_LOGI(TAG, "init: rst=%d dc=%d cs=%d cs2=%d busy=%d sck=%d mosi=%d pwr=%d",
+             EPD_RST_PIN, EPD_DC_PIN, EPD_CS_PIN, EPD_CS_S_PIN, EPD_BUSY_PIN,
              EPD_SCLK_PIN, EPD_MOSI_PIN, EPD_PWR_PIN);
 
     configure_output(EPD_RST_PIN, 1);
     configure_output(EPD_DC_PIN, 0);
     configure_output(EPD_CS_PIN, 1);
+    configure_output(EPD_CS_S_PIN, 1);
     configure_output(EPD_PWR_PIN, 1);
 
     gpio_reset_pin(EPD_BUSY_PIN);
@@ -198,6 +205,7 @@ void DEV_Module_Exit(void)
     }
     spi_bus_free(EPD_SPI_HOST);
     DEV_Digital_Write(EPD_CS_PIN, 0);
+    if (EPD_CS_S_PIN >= 0) DEV_Digital_Write(EPD_CS_S_PIN, 0);
     if (EPD_PWR_PIN >= 0) DEV_Digital_Write(EPD_PWR_PIN, 0);
     DEV_Digital_Write(EPD_DC_PIN, 0);
     DEV_Digital_Write(EPD_RST_PIN, 0);

@@ -153,9 +153,17 @@ function renderDeviceOptions(): JSX.Element[] {
   ))
 }
 
-// Panels with drivers in the ESP32 firmware (embedded/esp32/components/frameos_display)
+const unsupportedEmbeddedWaveshareDevices = new Set([
+  'waveshare.EPD_10in3',
+  'waveshare.EPD_12in48',
+  'waveshare.EPD_12in48b',
+  'waveshare.EPD_12in48b_V2',
+])
+
 const embeddedDevices = [
-  { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" e-ink V2 (800x480, black/white)' },
+  ...(devices
+    .find((group) => group.label === 'Waveshare')
+    ?.options.filter((device) => !unsupportedEmbeddedWaveshareDevices.has(device.value)) ?? []),
   { value: 'web_only', label: 'No display (headless)' },
 ]
 

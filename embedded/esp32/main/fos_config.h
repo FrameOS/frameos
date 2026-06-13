@@ -24,6 +24,7 @@ typedef struct {
     int8_t rst;
     int8_t dc;
     int8_t cs;
+    int8_t cs2; /* second CS for dual-controller panels, -1 = not wired */
     int8_t busy;
     int8_t sck;
     int8_t mosi;
@@ -40,6 +41,9 @@ typedef struct {
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
     bool deep_sleep;               /* deep sleep between refreshes */
+    bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
+    int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
+    float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
     fos_pins_t pins;
 } fos_config_t;
 
@@ -49,6 +53,6 @@ fos_config_t *fos_config(void);
 esp_err_t fos_config_save(void);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
-/* "rst=5,dc=4,cs=3,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
+/* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);

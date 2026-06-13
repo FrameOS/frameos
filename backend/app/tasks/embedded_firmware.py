@@ -31,6 +31,7 @@ from arq import ArqRedis as Redis
 from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
+from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
 from app.models.frame import Frame, update_frame
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
@@ -42,11 +43,57 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 5  # M3: QuickJS interpreted scenes + scene sync
+EMBEDDED_FIRMWARE_VERSION = 8  # enlarged 8MB flash layout with 3840K OTA slots
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
-# Panels the ESP-IDF display component has drivers for (components/frameos_display)
-EMBEDDED_SUPPORTED_PANELS = {"none", "EPD_7in5_V2"}
+# FOSB pixel formats. Keep in sync with fos_pixel_format_t in
+# embedded/esp32/components/frameos_display/include/frameos_display.h.
+FOS_PIXEL_1BPP = 1
+FOS_PIXEL_DUAL_1BPP_RED = 2
+FOS_PIXEL_DUAL_1BPP_YELLOW = 3
+FOS_PIXEL_2BPP_GRAY = 4
+FOS_PIXEL_2BPP_BWYR = 5
+FOS_PIXEL_4BPP_7COLOR = 6
+FOS_PIXEL_4BPP_SPECTRA6 = 7
+FOS_PIXEL_4BPP_GRAY = 8
+EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
+    "Black": FOS_PIXEL_1BPP,
+    "BlackWhiteRed": FOS_PIXEL_DUAL_1BPP_RED,
+    "BlackWhiteYellow": FOS_PIXEL_DUAL_1BPP_YELLOW,
+    "FourGray": FOS_PIXEL_2BPP_GRAY,
+    "BlackWhiteYellowRed": FOS_PIXEL_2BPP_BWYR,
+    "SevenColor": FOS_PIXEL_4BPP_7COLOR,
+    "SpectraSixColor": FOS_PIXEL_4BPP_SPECTRA6,
+    "SixteenGray": FOS_PIXEL_4BPP_GRAY,
+}
+# These Waveshare variants are in the Linux catalog but not the ESP32 e-paper
+# SPI component: IT8951 and the 12.48" family use different controller stacks.
+EMBEDDED_UNSUPPORTED_PANELS = {
+    "EPD_10in3",
+    "EPD_12in48",
+    "EPD_12in48b",
+    "EPD_12in48b_V2",
+}
+EMBEDDED_PANEL_FORMATS = {
+    key: EMBEDDED_PIXEL_FORMAT_BY_COLOR[convert_waveshare_source(key).color_option]
+    for key in get_variant_keys()
+    if key not in EMBEDDED_UNSUPPORTED_PANELS
+    and (
+        get_variant_folder(key) == "ePaper"
+        or key == "EPD_13in3e"
+    )
+    and convert_waveshare_source(key).color_option in EMBEDDED_PIXEL_FORMAT_BY_COLOR
+}
+# Must mirror components/frameos_display/generate_selected_panel.py.
+EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
+# Memory guardrail (M4): the on-device renderer composites into an RGBA pixie
+# buffer (4 B/px), packs it to the selected panel format, and needs headroom
+# for the Nim heap + QuickJS. Keep the reserve in sync with
+# FOS_RENDER_PSRAM_RESERVE in components/frameos_display/frameos_display.c.
+EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
+EMBEDDED_DEFAULT_PSRAM_BYTES = 8 * 1024 * 1024
+EMBEDDED_RENDER_LOCAL = 0
+EMBEDDED_RENDER_REMOTE = 1
 EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS", str(15 * 60))
 )
@@ -89,6 +136,84 @@ def embedded_panel_for_frame(frame: Frame) -> str:
     return "none"
 
 
+def embedded_module_psram_bytes(frame: Frame) -> int:
+    """PSRAM on the target module. Defaults to 8MB (the S3 modules M2 ran on);
+    override per-frame with ``device_config.psramMB`` / ``embedded.psramMB``."""
+    for source in (frame.device_config, frame.embedded):
+        if isinstance(source, dict):
+            mb = source.get("psramMB", source.get("psram_mb"))
+            if isinstance(mb, (int, float)) and not isinstance(mb, bool) and mb > 0:
+                return int(mb * 1024 * 1024)
+    return EMBEDDED_DEFAULT_PSRAM_BYTES
+
+
+def embedded_render_mode_for_frame(frame: Frame) -> int:
+    """Default render mode baked into the firmware image: local unless opted
+    into remote/thin-client mode in device_config or embedded metadata."""
+    for source in (frame.device_config, frame.embedded):
+        if isinstance(source, dict):
+            value = source.get("renderMode", source.get("render_mode"))
+            if isinstance(value, str):
+                normalized = value.strip().lower().replace("-", "_")
+                if normalized in {"remote", "thin_client", "thinclient", "backend"}:
+                    return EMBEDDED_RENDER_REMOTE
+                if normalized in {"local", "on_device", "ondevice"}:
+                    return EMBEDDED_RENDER_LOCAL
+            elif isinstance(value, int) and not isinstance(value, bool):
+                return EMBEDDED_RENDER_REMOTE if value == EMBEDDED_RENDER_REMOTE else EMBEDDED_RENDER_LOCAL
+    return EMBEDDED_RENDER_LOCAL
+
+
+def embedded_pixel_format_for_panel(panel: str) -> int:
+    return EMBEDDED_PANEL_FORMATS.get(panel, FOS_PIXEL_1BPP)
+
+
+def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
+    if pixel_format in (FOS_PIXEL_1BPP,):
+        return ((width + 7) // 8) * height
+    if pixel_format in (FOS_PIXEL_DUAL_1BPP_RED, FOS_PIXEL_DUAL_1BPP_YELLOW):
+        return ((width + 7) // 8) * height * 2
+    if pixel_format in (FOS_PIXEL_2BPP_GRAY, FOS_PIXEL_2BPP_BWYR):
+        return ((width + 3) // 4) * height
+    if pixel_format in (FOS_PIXEL_4BPP_7COLOR, FOS_PIXEL_4BPP_SPECTRA6, FOS_PIXEL_4BPP_GRAY):
+        return ((width + 1) // 2) * height
+    raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
+
+
+def embedded_render_psram_bytes(width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP) -> int:
+    """PSRAM the on-device renderer needs for a width×height panel."""
+    rgba = width * height * 4
+    packed = embedded_buffer_size(width, height, pixel_format)
+    return rgba + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+
+
+def check_embedded_panel_fits_memory(frame: Frame) -> None:
+    """Refuse a panel that can't be rendered on-device within the module PSRAM.
+
+    The firmware applies the same check at boot and falls back to thin-client
+    mode; failing the build early gives the user a clear, actionable error
+    instead of a frame that silently never renders locally.
+    """
+    panel = embedded_panel_for_frame(frame)
+    if panel == "none" or embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE:
+        return
+    from app.drivers.devices import device_dimensions
+
+    dims = device_dimensions(frame.device)
+    if not dims:
+        return
+    width, height = dims
+    need = embedded_render_psram_bytes(width, height, embedded_pixel_format_for_panel(panel))
+    have = embedded_module_psram_bytes(frame)
+    if need > have:
+        raise ValueError(
+            f"Panel {panel} ({width}x{height}) needs ~{need / (1024 * 1024):.1f} MB PSRAM to "
+            f"render on-device but the target module has ~{have // (1024 * 1024)} MB. Pick a "
+            f"smaller panel, a module with more PSRAM (set device_config.psramMB), or run the "
+            f"frame in thin-client mode."
+        )
+
+
 def embedded_wifi_credentials(frame: Frame) -> tuple[str, str]:
     """Wi-Fi from the frame's network settings (same shape as the Pi flows)."""
     network = frame.network if isinstance(frame.network, dict) else {}
@@ -128,16 +253,40 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_API_KEY {c_str(frame.server_api_key)}",
         f"#define FRAMEOS_DEFAULT_FRAME_ID {int(frame.id)}",
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
+        f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",
     ]
     pins = (frame.device_config or {}).get("pins")
     if isinstance(pins, dict):
-        mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "busy": "BUSY",
+        mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
                    "sck": "SCK", "sclk": "SCK", "mosi": "MOSI", "pwr": "PWR"}
         for key, macro in mapping.items():
             value = pins.get(key)
             if isinstance(value, int):
                 lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {value}")
+
+    # Optional power-management settings (M4). Absent → firmware defaults
+    # (no deep sleep, no battery pin); all still overridable from the device.
+    device_config = frame.device_config or {}
+
+    def _config_value(*keys: str) -> object:
+        for key in keys:
+            if key in device_config:
+                return device_config[key]
+        return None
+
+    deep_sleep = _config_value("deepSleep", "deep_sleep")
+    if isinstance(deep_sleep, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_DEEP_SLEEP {1 if deep_sleep else 0}")
+    wake_schedule = _config_value("wakeSchedule", "wake_schedule")
+    if isinstance(wake_schedule, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_WAKE_SCHEDULE {1 if wake_schedule else 0}")
+    battery_pin = _config_value("batteryPin", "battery_pin")
+    if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_PIN {battery_pin}")
+    battery_divider = _config_value("batteryDivider", "battery_divider")
+    if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_DIVIDER {float(battery_divider)}f")
     return "\n".join(lines) + "\n"
 
 
@@ -295,6 +444,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     if not (idf_path / "export.sh").is_file():
         raise ValueError(f"ESP-IDF toolchain not found at {idf_path}")
 
+    check_embedded_panel_fits_memory(frame)
+
     current = latest_embedded_firmware(frame) or {}
     started_at = _utc_now()
     await _set_firmware_status(db, redis, frame, {
@@ -305,8 +456,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "startedAt": started_at,
         "lastHeartbeatAt": started_at,
     })
+    selected_panel = embedded_panel_for_frame(frame)
     await log(db, redis, int(frame.id), "stdout",
-              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path}")
+              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} (panel={selected_panel})")
 
     build_dir = EMBEDDED_PROJECT_DIR / "build"
     # export.sh refuses to run inside a foreign Python venv; scrub venv vars and
@@ -317,6 +469,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     )
     env["IDF_PATH"] = str(idf_path)
     env["IDF_TARGET"] = EMBEDDED_IDF_TARGET
+    env["FRAMEOS_SELECTED_PANEL"] = selected_panel
 
     # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi)
     wifi_ssid, wifi_password = embedded_wifi_credentials(frame)

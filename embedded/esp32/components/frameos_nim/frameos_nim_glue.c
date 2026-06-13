@@ -30,6 +30,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize)
 
 extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name);
+extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern int fos_nim_load_scenes_impl(const char *json);
@@ -51,10 +52,15 @@ bool frameos_nim_init(int width, int height, const char *frame_name)
     return s_nim_ready;
 }
 
-int frameos_nim_render_1bpp(uint8_t *buf, size_t len)
+int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
 {
     if (!s_nim_ready) return -1;
-    return fos_nim_render_1bpp_impl(buf, len);
+    return fos_nim_render_impl(buf, len, pixel_format);
+}
+
+int frameos_nim_render_1bpp(uint8_t *buf, size_t len)
+{
+    return frameos_nim_render(buf, len, 1);
 }
 
 const char *frameos_nim_info(void)

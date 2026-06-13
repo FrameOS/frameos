@@ -12,9 +12,11 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "fos_battery.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
+#include "frameos_display.h"
 
 static const char *TAG = "fos_http";
 
@@ -59,7 +61,7 @@ static bool form_value(const char *body, const char *key, char *out, size_t out_
 
 /* ------------------------------------------------------------------ pages */
 
-static const char *SETUP_PAGE =
+static const char *SETUP_PAGE_HEAD =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>FrameOS setup</title>"
@@ -76,18 +78,34 @@ static const char *SETUP_PAGE =
     "<label>Frame API key</label><input name='api_key'>"
     "<label>Frame ID</label><input name='frame_id' type='number' min='0'>"
     "<label>Panel</label><select name='panel'>"
-    "<option value='none'>None (headless)</option>"
-    "<option value='EPD_7in5_V2'>Waveshare 7.5\" V2 (800x480)</option></select>"
+    "<option value='none'>None (headless)</option>";
+
+static const char *SETUP_PAGE_TAIL =
+    "</select>"
     "<label>Render mode</label><select name='render_mode'>"
     "<option value='0'>On device (Nim runtime)</option>"
     "<option value='1'>Thin client (backend renders)</option></select>"
     "<label>Refresh interval (seconds)</label><input name='interval' type='number' value='300' min='5'>"
+    "<label>Pins</label><input name='pins' placeholder='rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'>"
     "<button type='submit'>Save and reboot</button></form></body></html>";
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
+    char option[192];
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, SETUP_PAGE, HTTPD_RESP_USE_STRLEN);
+    if (httpd_resp_sendstr_chunk(req, SETUP_PAGE_HEAD) != ESP_OK) return ESP_FAIL;
+    for (size_t i = 0; i < fos_display_panel_count(); i++) {
+        snprintf(option, sizeof(option),
+                 "<option value='%s'>Waveshare %s (%dx%d, format %d)</option>",
+                 fos_display_panel_name(i),
+                 fos_display_panel_name(i),
+                 fos_display_panel_width(i),
+                 fos_display_panel_height(i),
+                 (int)fos_display_panel_format(i));
+        if (httpd_resp_sendstr_chunk(req, option) != ESP_OK) return ESP_FAIL;
+    }
+    if (httpd_resp_sendstr_chunk(req, SETUP_PAGE_TAIL) != ESP_OK) return ESP_FAIL;
+    return httpd_resp_sendstr_chunk(req, NULL);
 }
 
 static esp_err_t status_get_handler(httpd_req_t *req)
@@ -103,18 +121,22 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "{\"app\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
         "\"uptimeSec\":%lld,\"heapFree\":%u,\"psramFree\":%u,"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
+        "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
-        "\"intervalSec\":%lu,\"deepSleep\":%s,\"pins\":\"%s\",\"backendUrl\":\"%s\","
-        "\"wifiSsid\":\"%s\"}}",
+        "\"intervalSec\":%lu,\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
+        "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app->project_name, app->version, app->idf_ver, running ? running->label : "?",
         esp_timer_get_time() / 1000000,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
         (int)fos_wifi_state(), fos_wifi_ip(), fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
+        fos_battery_present() ? "true" : "false",
+        fos_battery_millivolts(), fos_battery_percent(),
         (unsigned long)config->frame_id, config->panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec, config->deep_sleep ? "true" : "false",
+        config->wake_schedule ? "true" : "false",
         pins, config->backend_url, config->wifi_ssid);
     if (len < 0 || !json) {
         return httpd_resp_send_500(req);

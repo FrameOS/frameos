@@ -7,7 +7,9 @@ e-ink panels through the same vendor drivers the Raspberry Pi build uses, can
 alternatively run as a thin client fetching backend-rendered bitmaps, and updates
 itself over the air with A/B rollback.
 
-Reference board: Seeed XIAO ESP32-S3 (8MB flash, 8MB octal PSRAM).
+Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
+The firmware uses two 3840K OTA slots, which is the largest practical A/B
+layout on 8MB flash while still leaving a small state partition.
 
 ## Layout
 
@@ -24,11 +26,11 @@ main/                     boot orchestration + platform modules
                           backend's per-frame build) overrides them
 components/
   frameos_display/        DEV_Config on ESP-IDF (spi_master/gpio, runtime pin remap);
-                          vendor EPD_*.c copied at configure time from
-                          frameos/src/drivers/waveshare/ePaper
+                          one selected root Waveshare EPD_*.c symlinked at
+                          configure time and wrapped from generated metadata
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent
-partitions.csv            8MB: nvs + otadata + ota_0/ota_1 (3MB each) + state
+partitions.csv            8MB: nvs + otadata + ota_0/ota_1 (3840K each) + state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 ```
 
@@ -53,7 +55,8 @@ the worker's PATH; without it the firmware builds in thin-client-only mode.
 . ~/esp/esp-idf/export.sh
 ./build_nim.sh             # compile the Nim runtime to C (optional but recommended)
 idf.py set-target esp32s3
-idf.py reconfigure build   # reconfigure picks up new nimcache/generated_config.h
+FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+# reconfigure picks up new nimcache/generated_config.h and the selected panel
 idf.py -p /dev/tty.usbmodem* flash monitor
 ```
 
@@ -61,7 +64,7 @@ Or flash the single merged image produced by `idf.py merge-bin` (what the backen
 serves and the browser flasher writes):
 
 ```bash
-esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 write_flash 0x0 merged-binary.bin
+esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash 0x0 merged-binary.bin
 ```
 
 ## First boot and provisioning
@@ -78,17 +81,54 @@ The USB serial console (115200) is always available and quicker for development:
 frameos> status
 frameos> wifi MySSID MyPassword          # saves and reboots
 frameos> set panel EPD_7in5_V2
-frameos> set pins rst=5,dc=4,cs=3,busy=6,sck=7,mosi=9,pwr=-1
+frameos> set pins rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1
 frameos> set render_mode local           # or: remote (thin client)
 frameos> set deep_sleep 1                # battery mode: deep sleep between refreshes
+frameos> set wake_schedule 1             # align wake to wall-clock interval boundaries
+frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
+frameos> set battery_divider 2.0         # Vbat = Vpin * divider
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
 
+## Power management (M4)
+
+`deep_sleep` powers the chip down between refreshes; with a panel attached the
+render task calls `esp_deep_sleep` and the device cold-boots for the next pass.
+
+`wake_schedule` changes how the sleep duration is computed: with a synced clock
+it aligns the wake to wall-clock interval boundaries (a 1h frame wakes at the
+top of the hour, a 5-minute frame on :00/:05/...), so clock faces update on
+time. Without it (or before SNTP syncs) the time already spent awake this cycle
+— boot, Wi-Fi, render — is subtracted from the interval so the cadence doesn't
+drift by however long a render took.
+
+`battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
+Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
+100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in
+`status` and `GET /status`. Below 3% the render + panel refresh is skipped and
+the device sleeps 6h to keep a low cell from being cycled down to damage. The
+backend can bake these in per-frame via `device_config`:
+`deepSleep`, `wakeSchedule`, `batteryPin`, `batteryDivider`.
+
+## Memory guardrails (M4)
+
+The on-device renderer composites into an RGBA pixie buffer (4 B/px), packs it
+to the selected panel format (1bpp, dual 1bpp, 2bpp gray/color, or 4bpp
+palette/gray), and needs headroom for the Nim heap + QuickJS. At boot the
+firmware compares that requirement against the module's PSRAM
+(`fos_display_render_psram_bytes` vs `heap_caps_get_total_size`) and, if the
+panel won't fit, refuses to start the local renderer and falls back to
+thin-client mode. Backend local-render builds run the same check
+(`check_embedded_panel_fits_memory`, module size from `device_config.psramMB`,
+default 8MB) and fail early with an actionable error; backend-rendered
+thin-client builds are allowed for panels that exceed local PSRAM.
+
 Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (D4),
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,
-in the portal, or per-frame via `deviceConfig.pins` in the backend.
+in the portal, or per-frame via `deviceConfig.pins` in the backend. The 13.3-inch
+Spectra 6 panel (`EPD_13in3e`) has two controllers and requires `cs2`.
 
 When connected, the device serves `GET /status` (heap/PSRAM/Wi-Fi/render stats JSON)
 and `POST /api/action/render` / `POST /api/action/ota` on port 80.
@@ -102,14 +142,16 @@ the previous slot. The device polls `/api/frames/{id}/embedded/ota/manifest` dai
 
 ## Adding a panel
 
-1. Add the vendor `EPD_*.c/h` filenames to `FRAMEOS_PANEL_SOURCES` in
-   `components/frameos_display/CMakeLists.txt` (sources come from
-   `frameos/src/drivers/waveshare/ePaper`).
-2. Add an entry to the `PANELS` table in `components/frameos_display/frameos_display.c`.
-3. Add it to `EMBEDDED_SUPPORTED_PANELS` in `backend/app/tasks/embedded_firmware.py`
-   and the `embeddedDevices` list in `frontend/src/scenes/frames/NewFrame.tsx`.
+1. Add or update the root Waveshare driver wrapper under
+   `frameos/src/drivers/waveshare/...`. The ESP32 generator reads that metadata
+   (`init`, `clear`, `display`, dimensions, color option) and symlinks only the
+   selected root C source/header into the IDF build tree.
+2. If the wrapper is a native Nim port with a separate C fallback, add the source
+   mapping to `components/frameos_display/generate_selected_panel.py`.
+3. If it introduces a new packed pixel layout, add the matching
+   `fos_pixel_format_t`, backend FOSB packer, and Nim dither/pack path.
 4. Bump `EMBEDDED_FIRMWARE_VERSION`.
 
-Buffer formats other than packed 1bpp (4-gray, Spectra 6) need a matching
-`fos_pixel_format_t` and dither path — see `frameos/src/embedded/embedded_main.nim`
-and `drivers/waveshare/waveshare.nim` for the Linux-side equivalents.
+The ESP32 component intentionally compiles only one selected display driver per
+firmware image. Backend builds set `FRAMEOS_SELECTED_PANEL` from the frame's
+device, so changing panel families means rebuilding firmware for that frame.

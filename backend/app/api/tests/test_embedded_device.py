@@ -3,7 +3,11 @@ import struct
 import pytest
 
 from app.models.frame import Frame
-from app.tasks.embedded_firmware import EMBEDDED_FIRMWARE_VERSION, ensure_embedded_frame_defaults
+from app.tasks.embedded_firmware import (
+    EMBEDDED_FIRMWARE_VERSION,
+    FOS_PIXEL_4BPP_SPECTRA6,
+    ensure_embedded_frame_defaults,
+)
 
 
 async def create_embedded_frame(async_client) -> dict:
@@ -67,6 +71,25 @@ async def test_render_returns_fosb_bitmap(async_client, no_auth_client, db):
     assert pixel_format == 1
     assert (width, height) == (800, 480)
     assert len(body) == 12 + (width // 8) * height
+
+
+@pytest.mark.asyncio
+async def test_render_returns_spectra6_fosb_bitmap(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.device = 'waveshare.EPD_7in3e'
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    version, pixel_format, width, height, _ = struct.unpack('<BBHHH', body[4:12])
+    assert version == 1
+    assert pixel_format == FOS_PIXEL_4BPP_SPECTRA6
+    assert (width, height) == (800, 480)
+    assert len(body) == 12 + ((width + 1) // 2) * height
 
 
 @pytest.mark.asyncio

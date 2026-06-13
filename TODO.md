@@ -24,7 +24,9 @@ that assumes Linux gets replaced; everything that's pure Nim or vendor C comes a
   - 1200×825 (10.2"): 4MB — OK with care
   - 1600×1200 (13.3" Spectra 6): 7.7MB — needs 16MB PSRAM or an 8-bit internal format
   - PSRAM is ~5-10× slower than SRAM; large per-pixel ops will be slow.
-- **Flash is fine.** Core runtime + trimmed admin UI + QuickJS (~400KB) fits 16MB with OTA A/B.
+- **Flash targets 8MB modules.** Core runtime + QuickJS now uses enlarged
+  3840K OTA A/B slots so color drivers and future runtime growth do not crowd
+  the update partition.
 
 ## What we give up / replace
 
@@ -132,9 +134,29 @@ that assumes Linux gets replaced; everything that's pure Nim or vendor C comes a
         raw-inflates (`dfDeflate`) on embedded.
 
 ### M4 — make it a product
-- [ ] Battery/deep-sleep modes, wake-on-schedule
-- [ ] Panel matrix beyond the first one; SPI LCDs
-- [ ] Memory guardrails per panel size (refuse panels that don't fit the module's PSRAM)
+- [x] Battery/deep-sleep modes, wake-on-schedule: ADC battery sensing
+      (`fos_battery.c`, configurable pin + divider, Li-ion curve → mV/%, in
+      `status` + `/status`); `wake_schedule` aligns deep-sleep wake to
+      wall-clock interval boundaries (clocks tick on :00) when SNTP-synced,
+      else subtracts time-spent-awake so the period stays ~interval instead of
+      drifting by the render time; critical-battery guard skips the render and
+      sleeps 6h to protect the cell. Backend bakes `deepSleep`/`wakeSchedule`/
+      `batteryPin`/`batteryDivider` from `device_config` into the image.
+- [x] Panel matrix beyond the first one: ESP32 firmware builds compile exactly
+      one selected Waveshare e-paper SPI driver, generated from the root driver
+      metadata and symlinked from `frameos/src/drivers/waveshare` at configure
+      time. The backend `EMBEDDED_SUPPORTED_PANELS`, New Frame list, setup
+      portal, Nim renderer, and backend FOSB endpoint now share the selected
+      panel's packed pixel format: 1bpp B/W, dual-plane red/yellow, 2bpp gray,
+      2bpp BWYR, 4bpp 7-color, 4bpp Spectra 6, and 4bpp/16-gray. Generic SPI
+      e-paper panels from the Waveshare catalog are supported; IT8951/12.48"
+      controller families and SPI LCDs remain outside this ESP32 component.
+- [x] Memory guardrails per panel size: firmware computes RGBA + packed
+      panel-format + runtime headroom and refuses to start the on-device
+      renderer when it exceeds the module PSRAM (`heap_caps_get_total_size`),
+      falling back to thin-client; backend local-render builds run the same
+      check and fail early with a clear error (`check_embedded_panel_fits_memory`,
+      module PSRAM from `device_config`).
 
 ## M0 implementation notes
 

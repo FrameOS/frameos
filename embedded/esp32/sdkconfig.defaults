@@ -7,7 +7,9 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# 8MB flash (Seeed XIAO ESP32-S3 and most S3 modules), OTA A/B layout
+# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
+# Two 3840K app slots leave meaningful headroom for the Nim + QuickJS runtime
+# while preserving rollback.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

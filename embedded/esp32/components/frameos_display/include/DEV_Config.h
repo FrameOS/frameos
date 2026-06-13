@@ -22,6 +22,8 @@
 extern int EPD_RST_PIN;
 extern int EPD_DC_PIN;
 extern int EPD_CS_PIN;
+extern int EPD_CS_M_PIN;
+extern int EPD_CS_S_PIN;
 extern int EPD_BUSY_PIN;
 extern int EPD_PWR_PIN;
 extern int EPD_MOSI_PIN;
@@ -32,7 +34,7 @@ extern int EPD_SCLK_PIN;
 
 /* GPIO remap: call before DEV_Module_Init. -1 leaves a pin unchanged
  * (pwr may be -1 permanently = not wired). */
-void DEV_SetPinConfig(int rst, int dc, int cs, int busy, int sclk, int mosi, int pwr);
+void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr);
 
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
 UBYTE DEV_Digital_Read(UWORD Pin);

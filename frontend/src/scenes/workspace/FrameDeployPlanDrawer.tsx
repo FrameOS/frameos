@@ -1064,7 +1064,7 @@ function EmbeddedFirmwareSection({
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
   const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 write_flash ${
+  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash ${
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'

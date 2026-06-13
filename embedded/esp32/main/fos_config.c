@@ -29,9 +29,13 @@ static void load_defaults(void)
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
+    s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
+    s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
+    s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
     s_config.pins.rst = FRAMEOS_DEFAULT_PIN_RST;
     s_config.pins.dc = FRAMEOS_DEFAULT_PIN_DC;
     s_config.pins.cs = FRAMEOS_DEFAULT_PIN_CS;
+    s_config.pins.cs2 = FRAMEOS_DEFAULT_PIN_CS2;
     s_config.pins.busy = FRAMEOS_DEFAULT_PIN_BUSY;
     s_config.pins.sck = FRAMEOS_DEFAULT_PIN_SCK;
     s_config.pins.mosi = FRAMEOS_DEFAULT_PIN_MOSI;
@@ -87,6 +91,10 @@ esp_err_t fos_config_init(void)
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
+    if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
+    int8_t i8;
+    if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
+    if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
@@ -116,6 +124,9 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
+    nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);
+    nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);
+    nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f));
     char pins[FOS_STR_LEN];
     fos_config_format_pins(&s_config.pins, pins, sizeof(pins));
     nvs_set_str(nvs, "pins", pins);
@@ -157,6 +168,7 @@ esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)
         if (strcmp(tok, "rst") == 0) pins->rst = value;
         else if (strcmp(tok, "dc") == 0) pins->dc = value;
         else if (strcmp(tok, "cs") == 0) pins->cs = value;
+        else if (strcmp(tok, "cs2") == 0) pins->cs2 = value;
         else if (strcmp(tok, "busy") == 0) pins->busy = value;
         else if (strcmp(tok, "sck") == 0) pins->sck = value;
         else if (strcmp(tok, "mosi") == 0) pins->mosi = value;
@@ -168,6 +180,6 @@ esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)
 
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len)
 {
-    snprintf(out, out_len, "rst=%d,dc=%d,cs=%d,busy=%d,sck=%d,mosi=%d,pwr=%d",
-             pins->rst, pins->dc, pins->cs, pins->busy, pins->sck, pins->mosi, pins->pwr);
+    snprintf(out, out_len, "rst=%d,dc=%d,cs=%d,cs2=%d,busy=%d,sck=%d,mosi=%d,pwr=%d",
+             pins->rst, pins->dc, pins->cs, pins->cs2, pins->busy, pins->sck, pins->mosi, pins->pwr);
 }

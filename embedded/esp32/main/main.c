@@ -15,9 +15,11 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 
+#include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_console.h"
@@ -79,11 +81,17 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
+    fos_battery_init(config->battery_pin, config->battery_divider);
+    if (fos_battery_present()) {
+        ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
+    }
+
     xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
 
     fos_display_config_t display_config = {
         .panel = config->panel,
-        .rst = config->pins.rst, .dc = config->pins.dc, .cs = config->pins.cs,
+        .rst = config->pins.rst, .dc = config->pins.dc,
+        .cs = config->pins.cs, .cs2 = config->pins.cs2,
         .busy = config->pins.busy, .sck = config->pins.sck,
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
@@ -91,7 +99,23 @@ void app_main(void)
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
 
-    if (frameos_nim_available()) {
+    /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
+     * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
+     * (the backend renders the bitmap) so the frame still works. */
+    bool local_render_ok = true;
+    if (fos_display_present()) {
+        size_t need = fos_display_render_psram_bytes();
+        size_t have = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+        if (need > have) {
+            ESP_LOGE(TAG, "panel %s needs ~%u KB PSRAM to render on-device but the module has "
+                     "~%u KB; switching to thin-client mode", config->panel,
+                     (unsigned)(need / 1024), (unsigned)(have / 1024));
+            config->render_mode = FOS_RENDER_REMOTE;
+            local_render_ok = false;
+        }
+    }
+
+    if (frameos_nim_available() && local_render_ok) {
         int width = fos_display_present() ? fos_display_width() : 800;
         int height = fos_display_present() ? fos_display_height() : 480;
         char frame_name[64];
@@ -101,6 +125,8 @@ void app_main(void)
         } else {
             ESP_LOGE(TAG, "nim runtime failed to initialize");
         }
+    } else if (frameos_nim_available()) {
+        ESP_LOGW(TAG, "nim runtime compiled in but not started (panel too large for PSRAM)");
     } else {
         ESP_LOGI(TAG, "nim runtime not compiled in (thin-client only)");
     }

@@ -2,7 +2,23 @@ import pytest
 from unittest.mock import patch
 
 from app.models.frame import Frame
-from app.tasks.embedded_firmware import EMBEDDED_FIRMWARE_VERSION
+from app.tasks.embedded_firmware import (
+    EMBEDDED_FIRMWARE_VERSION,
+    EMBEDDED_RENDER_REMOTE,
+    EMBEDDED_SUPPORTED_PANELS,
+    FOS_PIXEL_2BPP_GRAY,
+    FOS_PIXEL_4BPP_7COLOR,
+    FOS_PIXEL_4BPP_SPECTRA6,
+    FOS_PIXEL_DUAL_1BPP_RED,
+    embedded_buffer_size,
+    _generated_config_header,
+    check_embedded_panel_fits_memory,
+    embedded_module_psram_bytes,
+    embedded_panel_for_frame,
+    embedded_pixel_format_for_panel,
+    embedded_render_psram_bytes,
+    embedded_render_mode_for_frame,
+)
 
 
 async def create_embedded_frame(async_client) -> dict:
@@ -158,3 +174,112 @@ async def test_firmware_download_missing_artifact(async_client, db):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
     assert response.status_code == 404
+
+
+# --- M4: panel matrix, memory guardrails, power-setting baking --------------
+
+def test_embedded_panel_matrix_includes_new_panels():
+    # The backend panel set and ESP32 selected-panel generator must stay in sync.
+    # This covers representative formats: 1bpp, dual-plane, 4-gray, 7-color,
+    # and Spectra 6.
+    for panel in ("EPD_7in5_V2", "EPD_7in5", "EPD_5in83", "EPD_4in2_V2",
+                  "EPD_2in9_V2", "EPD_2in66", "EPD_2in13_V4", "EPD_1in54_V2",
+                  "EPD_7in3e", "EPD_4in0e", "EPD_13in3e", "EPD_7in3f",
+                  "EPD_5in65f", "EPD_7in3g", "EPD_10in2b"):
+        assert panel in EMBEDDED_SUPPORTED_PANELS
+        assert embedded_panel_for_frame(Frame(device=f"waveshare.{panel}")) == panel
+    # Unsupported non-generic buses fall back to headless rather than a bad build.
+    assert embedded_panel_for_frame(Frame(device="waveshare.EPD_10in3")) == "none"
+    assert embedded_panel_for_frame(Frame(device="waveshare.EPD_12in48")) == "none"
+
+
+def test_embedded_panel_formats_and_buffer_sizes():
+    assert embedded_pixel_format_for_panel("EPD_2in9_V2") == FOS_PIXEL_2BPP_GRAY
+    assert embedded_pixel_format_for_panel("EPD_4in2_V2") == FOS_PIXEL_2BPP_GRAY
+    assert embedded_pixel_format_for_panel("EPD_10in2b") == FOS_PIXEL_DUAL_1BPP_RED
+    assert embedded_pixel_format_for_panel("EPD_7in3f") == FOS_PIXEL_4BPP_7COLOR
+    assert embedded_pixel_format_for_panel("EPD_7in3e") == FOS_PIXEL_4BPP_SPECTRA6
+    assert embedded_buffer_size(128, 296, FOS_PIXEL_2BPP_GRAY) == ((128 + 3) // 4) * 296
+    assert embedded_buffer_size(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6) == 600 * 1600
+
+
+def test_embedded_render_psram_estimate():
+    # 800x480 RGBA (1.5MB) + default packed 1bpp + ~1.5MB reserve is ~3MB.
+    need = embedded_render_psram_bytes(800, 480)
+    assert 2_900_000 < need < 3_200_000
+
+
+def test_panel_fits_default_8mb_module():
+    # Representative large 1bpp panel fits a stock 8MB S3 module.
+    frame = Frame(device="waveshare.EPD_7in5_V2")
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)  # must not raise
+
+
+def test_panel_too_large_for_small_psram_is_rejected():
+    frame = Frame(device="waveshare.EPD_7in5_V2", device_config={"psramMB": 2})
+    assert embedded_module_psram_bytes(frame) == 2 * 1024 * 1024
+    with pytest.raises(ValueError) as exc:
+        check_embedded_panel_fits_memory(frame)
+    assert "PSRAM" in str(exc.value)
+
+
+def test_large_spectra_panel_requires_16mb_for_local_rendering():
+    frame = Frame(device="waveshare.EPD_13in3e")
+    with pytest.raises(ValueError) as exc:
+        check_embedded_panel_fits_memory(frame)
+    assert "13in3e" in str(exc.value)
+
+    frame.device_config = {"psramMB": 16, "pins": {"cs2": 8}}
+    check_embedded_panel_fits_memory(frame)
+
+
+def test_large_spectra_panel_can_use_thin_client_on_8mb():
+    frame = Frame(device="waveshare.EPD_13in3e", device_config={"renderMode": "remote"})
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+
+
+def test_headless_frame_skips_memory_check():
+    check_embedded_panel_fits_memory(Frame(device="web_only"))  # must not raise
+
+
+def test_generated_config_bakes_power_settings():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        device_config={
+            "deepSleep": True,
+            "wakeSchedule": True,
+            "batteryPin": 2,
+            "batteryDivider": 2.0,
+            "pins": {"cs2": 8},
+        },
+    )
+    header = _generated_config_header(frame)
+    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 0" in header
+    assert "#define FRAMEOS_DEFAULT_DEEP_SLEEP 1" in header
+    assert "#define FRAMEOS_DEFAULT_WAKE_SCHEDULE 1" in header
+    assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 2" in header
+    assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
+
+
+def test_generated_config_omits_absent_power_settings():
+    frame = Frame(id=7, server_host="backend.local", server_port=8989,
+                  server_api_key="key", device="waveshare.EPD_7in5_V2")
+    header = _generated_config_header(frame)
+    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 0" in header
+    assert "FRAMEOS_DEFAULT_DEEP_SLEEP" not in header
+    assert "FRAMEOS_DEFAULT_BATTERY_PIN" not in header
+
+
+def test_generated_config_bakes_remote_render_mode():
+    frame = Frame(id=7, server_host="backend.local", server_port=8989,
+                  server_api_key="key", device="waveshare.EPD_13in3e",
+                  device_config={"renderMode": "remote"})
+    header = _generated_config_header(frame)
+    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header

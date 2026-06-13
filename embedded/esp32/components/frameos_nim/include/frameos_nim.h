@@ -21,8 +21,10 @@ bool frameos_nim_available(void);
 /* One-time init: panel dimensions + frame name. Safe to call when
  * unavailable (returns false). Allocates the Nim heap (PSRAM via malloc). */
 bool frameos_nim_init(int width, int height, const char *frame_name);
-/* Render the current scene into `buf` as packed 1bpp (white=1, MSB first).
+/* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
+int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
+/* Backward-compatible 1bpp entrypoint used by older builds/tests. */
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */
 const char *frameos_nim_info(void);
