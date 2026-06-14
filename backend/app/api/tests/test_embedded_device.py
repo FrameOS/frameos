@@ -1,4 +1,5 @@
 import io
+import socket
 import struct
 
 import pytest
@@ -208,6 +209,41 @@ async def test_media_proxy_requires_device_auth(async_client, no_auth_client, db
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/media?url=https://example.com/image.png')
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1/image.png",
+    "http://10.0.0.4/image.png",
+    "http://localhost/image.png",
+    "http://frame.local/image.png",
+    "http://[::1]/image.png",
+])
+async def test_media_proxy_rejects_private_media_urls(async_client, no_auth_client, db, url):
+    frame = await device_frame(async_client, db)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/media',
+        params={'url': url},
+        headers=auth(frame),
+    )
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == "Media URL host is not allowed"
+
+
+@pytest.mark.asyncio
+async def test_media_proxy_rejects_hosts_that_resolve_private(monkeypatch):
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.168.1.20", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(Exception) as exc:
+        await embedded_device._fetch_embedded_media_source("https://private.example/image.png")
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert exc.value.detail == "Media URL host is not allowed"
 
 
 @pytest.mark.asyncio

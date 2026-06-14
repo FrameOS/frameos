@@ -24,14 +24,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
+import socket
 import struct
 from asyncio import get_running_loop
 from datetime import datetime, timezone
 from http import HTTPStatus
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import Depends, Header, HTTPException
@@ -62,6 +64,7 @@ DEFAULT_WIDTH = 800
 DEFAULT_HEIGHT = 480
 EMBEDDED_MEDIA_MAX_SOURCE_BYTES = 16 * 1024 * 1024
 EMBEDDED_MEDIA_TIMEOUT_SECONDS = 45.0
+EMBEDDED_MEDIA_MAX_REDIRECTS = 5
 EMBEDDED_MEDIA_FORMAT = "BMP"
 EMBEDDED_MEDIA_MAX_OUTPUT_WIDTH = 400
 EMBEDDED_MEDIA_MAX_OUTPUT_HEIGHT = 240
@@ -125,26 +128,87 @@ def _validate_embedded_media_url(url: str) -> str:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL must be HTTP or HTTPS")
     if len(url) > 4096:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL is too long")
+    _reject_private_embedded_media_host(parsed.hostname or "")
     return url
 
 
+def _is_public_ip_literal(hostname: str) -> bool | None:
+    try:
+        return ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        return None
+
+
+def _reject_private_embedded_media_host(hostname: str) -> None:
+    host = hostname.strip().lower().rstrip(".")
+    if not host:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is missing")
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
+
+    public_literal = _is_public_ip_literal(host)
+    if public_literal is False:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
+
+
+async def _ensure_embedded_media_host_resolves_public(url: str) -> None:
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    _reject_private_embedded_media_host(hostname)
+    if _is_public_ip_literal(hostname) is not None:
+        return
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    loop = get_running_loop()
+    try:
+        infos = await loop.run_in_executor(
+            None,
+            lambda: socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM),
+        )
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host could not be resolved") from exc
+
+    addresses = {info[4][0] for info in infos if info and info[4]}
+    if not addresses:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host could not be resolved")
+    if any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
+
+
 async def _fetch_embedded_media_source(url: str) -> bytes:
+    current_url = _validate_embedded_media_url(url)
     timeout = httpx.Timeout(EMBEDDED_MEDIA_TIMEOUT_SECONDS, connect=10.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async with client.stream("GET", url, headers={"Accept-Encoding": "identity"}) as response:
-                response.raise_for_status()
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in response.aiter_bytes():
-                    total += len(chunk)
-                    if total > EMBEDDED_MEDIA_MAX_SOURCE_BYTES:
-                        raise HTTPException(
-                            status_code=HTTPStatus.PAYLOAD_TOO_LARGE,
-                            detail=f"Source image exceeds {EMBEDDED_MEDIA_MAX_SOURCE_BYTES} bytes",
-                        )
-                    chunks.append(chunk)
-                return b"".join(chunks)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            for _ in range(EMBEDDED_MEDIA_MAX_REDIRECTS + 1):
+                await _ensure_embedded_media_host_resolves_public(current_url)
+                async with client.stream("GET", current_url, headers={"Accept-Encoding": "identity"}) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise HTTPException(
+                                status_code=HTTPStatus.BAD_GATEWAY,
+                                detail="Source image redirect did not include a Location header",
+                            )
+                        current_url = _validate_embedded_media_url(urljoin(str(response.url), location))
+                        continue
+
+                    response.raise_for_status()
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > EMBEDDED_MEDIA_MAX_SOURCE_BYTES:
+                            raise HTTPException(
+                                status_code=HTTPStatus.PAYLOAD_TOO_LARGE,
+                                detail=f"Source image exceeds {EMBEDDED_MEDIA_MAX_SOURCE_BYTES} bytes",
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Source image exceeded {EMBEDDED_MEDIA_MAX_REDIRECTS} redirects",
+            )
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:
