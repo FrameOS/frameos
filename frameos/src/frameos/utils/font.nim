@@ -44,16 +44,20 @@ proc getTypeface*(font: string, assetsPath: string): Typeface =
     # and scarce internal heap pressure.
     return getDefaultTypeface()
   else:
+    # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
+    if "/" in font or ".." in font or "~" in font:
+      raise newException(ValueError, "Invalid font name")
+
+    # Missing custom fonts use the default face. Do this before taking the
+    # typeface lock because getDefaultTypeface uses the same lock.
+    let fontPath = assetsPath & "/fonts/" & font
+    if not fileExists(fontPath):
+      return getDefaultTypeface()
+
     if not typefaces.hasKey(font):
-      # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
-      if "/" in font or ".." in font or "~" in font:
-        raise newException(ValueError, "Invalid font name")
       withLock typefaceLock:
         if not typefaces.hasKey(font):
-          if fileExists(assetsPath & "/fonts/" & font):
-            typefaces[font] = parseTtf(readFile(assetsPath & "/fonts/" & font))
-          else:
-            typefaces[font] = getDefaultTypeface()
+          typefaces[font] = parseTtf(readFile(fontPath))
     return typefaces[font]
 
 proc newFont*(typeface: Typeface, size: float, color: Color): Font =
