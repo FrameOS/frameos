@@ -1268,7 +1268,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
-              <AlternativesSection onSelect={setDeployDrawerView} />
+              {!isEmbeddedFrame ? <AlternativesSection onSelect={setDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">
                   <FrameBootstrapAction frame={frame} />

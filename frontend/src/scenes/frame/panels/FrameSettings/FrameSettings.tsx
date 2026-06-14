@@ -154,7 +154,7 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
 }
 
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
-const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024
+const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 
 type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pins']>
 type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
@@ -1708,7 +1708,7 @@ export function FrameSettings({
             tooltip={
               <>
                 Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-                larger calendar feeds, images, or APIs. ESP32 frames default to 2 MiB to avoid large PSRAM allocations.
+                larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
               </>
             }
           >

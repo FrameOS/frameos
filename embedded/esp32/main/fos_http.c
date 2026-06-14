@@ -33,6 +33,8 @@ static fos_action_cb s_render_cb = NULL;
 static fos_action_cb s_ota_cb = NULL;
 
 static esp_err_t scenes_post_handler(httpd_req_t *req);
+static void log_http_command(httpd_req_t *req, const char *event_name, size_t body_len);
+static void log_http_command_from_path(httpd_req_t *req, size_t body_len);
 
 void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now)
 {
@@ -811,6 +813,7 @@ static esp_err_t action_handler(httpd_req_t *req)
     if (!cb) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "action not available");
     }
+    log_http_command_from_path(req, 0);
     cb();
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
@@ -957,6 +960,7 @@ static esp_err_t frame_detail_get_handler(httpd_req_t *req)
 
 static esp_err_t reload_post_handler(httpd_req_t *req)
 {
+    log_http_command(req, "reload", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");
@@ -986,6 +990,17 @@ static void log_http_command(httpd_req_t *req, const char *event_name, size_t bo
     free(escaped_event);
     frameos_nim_log_hook(log_line);
     frameos_nim_flush_logs();
+}
+
+static void log_http_command_from_path(httpd_req_t *req, size_t body_len)
+{
+    char path[256];
+    if (!copy_request_path(req, path, sizeof(path))) {
+        log_http_command(req, "http", body_len);
+        return;
+    }
+    const char *slash = strrchr(path, '/');
+    log_http_command(req, slash && slash[1] ? slash + 1 : path, body_len);
 }
 
 static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
@@ -1145,6 +1160,7 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
     if (!has_scene || !scene_id[0]) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing scene_id");
     }
+    log_http_command(req, "setCurrentScene", (size_t)total);
     esp_err_t err = fos_scenes_select(scene_id);
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, esp_err_to_name(err));
@@ -1177,6 +1193,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     }
     body[total] = '\0';
 
+    log_http_command(req, "uploadScenes", (size_t)total);
     esp_err_t err = store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
@@ -1190,6 +1207,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
 /* Force a backend scenes sync on the next render pass. */
 static esp_err_t scenes_sync_handler(httpd_req_t *req)
 {
+    log_http_command(req, "scenes_sync", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");
