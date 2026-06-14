@@ -58,6 +58,10 @@ async def test_render_requires_device_auth(async_client, no_auth_client, db):
         f'/api/frames/{frame.id}/embedded/render',
         headers={'Authorization': 'Bearer wrong-key'})
     assert response.status_code == 401
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render',
+        headers={'Authorization': f'Token {frame.server_api_key}'})
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

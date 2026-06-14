@@ -3,16 +3,15 @@
 The microcontroller authenticates with its ``server_api_key`` as a Bearer
 token (same scheme as ``/api/log``). Three endpoints:
 
-- ``GET /api/frames/{id}/embedded/render`` — the M1 thin-client bitmap. The
-  backend's per-frame scene rendering for embedded is intentionally a stub
-  (scenes render on-device via the Nim runtime); this returns a placeholder
-  card dithered and packed in the panel's wire format.
+- ``GET /api/frames/{id}/embedded/render`` — a diagnostic thin-client bitmap.
+  Normal scenes render on-device via the Nim runtime; this route gives remote
+  render mode a simple end-to-end bitmap in the panel's wire format.
 - ``GET /api/frames/{id}/embedded/ota/manifest`` — sha256/size of the latest
   OTA app image so the device can decide whether to update.
 - ``GET /api/frames/{id}/embedded/ota/download`` — the OTA app image
   (``frameos_esp32.bin``, not the merged flash image).
 - ``GET /api/frames/{id}/embedded/scenes`` — the frame's scenes as a JSON
-  array (M3 interpreted scenes: QuickJS + AOT app library on-device). The
+  array (interpreted scenes: QuickJS + AOT app library on-device). The
   ETag is the payload's sha256; devices poll with ``If-None-Match`` and get
   304 when nothing changed, so hot scene updates need no reflash.
 
@@ -98,7 +97,7 @@ def _embedded_frame_from_bearer(db: Session, frame_id: int, authorization: str |
     if not authorization:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     parts = authorization.split(" ")
-    if len(parts) != 2:
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Invalid Authorization header")
     frame = db.query(Frame).filter_by(server_api_key=parts[1]).first()
     if not frame or int(frame.id) != frame_id:
@@ -262,11 +261,11 @@ def _pack_palette(image, palette: list[tuple[int, int, int]], bits: int) -> byte
     return bytes(out)
 
 
-def render_embedded_placeholder(frame: Frame, width: int, height: int, pixel_format: int) -> bytes:
-    """Stub render: a readable placeholder card, packed in the panel format.
+def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pixel_format: int) -> bytes:
+    """Readable diagnostic card packed in the panel format.
 
-    Real scene rendering happens on-device (Nim runtime). This exists so the
-    thin-client mode has something correct to fetch end to end.
+    Real scene rendering happens on-device in local mode. This exists so
+    thin-client mode has a deterministic bitmap to fetch end to end.
     """
     from PIL import Image, ImageDraw
 
@@ -290,7 +289,7 @@ def render_embedded_placeholder(frame: Frame, width: int, height: int, pixel_for
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     draw.text((32, height * 0.30), "FrameOS", fill=(0, 0, 0))
     draw.text((32, height * 0.40), name, fill=(0, 0, 0))
-    draw.text((32, height * 0.50), f"Backend-rendered placeholder - {stamp}", fill=(0, 0, 0))
+    draw.text((32, height * 0.50), f"Backend diagnostic bitmap - {stamp}", fill=(0, 0, 0))
     draw.text((32, height * 0.60), "Scenes render on-device in local mode", fill=(0, 0, 0))
 
     if pixel_format == FOS_PIXEL_1BPP:
@@ -326,7 +325,7 @@ async def api_embedded_device_render(
     frame = _embedded_frame_from_bearer(db, id, authorization)
     width, height = embedded_render_dimensions(frame)
     pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
-    packed = render_embedded_placeholder(frame, width, height, pixel_format)
+    packed = render_embedded_diagnostic_bitmap(frame, width, height, pixel_format)
     expected = embedded_buffer_size(width, height, pixel_format)
     if len(packed) != expected:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
