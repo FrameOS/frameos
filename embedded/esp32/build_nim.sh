@@ -61,6 +61,9 @@ if [[ -n "${FRAMEOS_PIXIE_PATH:-}" ]]; then
     echo "using FRAMEOS_PIXIE_PATH=$FRAMEOS_PIXIE_PATH"
 fi
 
+echo "generating FrameOS app loaders"
+FRAMEOS_ROOT_DIR="$FRAMEOS_DIR" python3 "$FRAMEOS_DIR/tools/makeapploaders.py"
+
 cd "$FRAMEOS_DIR"
 # shellcheck disable=SC2086
 nim c \

@@ -54,7 +54,7 @@ debug: apploaders drivers maybe-driver-libraries maybe-scene-libraries
 	lldb ./build/frameos
 
 apploaders:
-	FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+	FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
 
 cross-list:
 	python3 ../backend/bin/cross list
