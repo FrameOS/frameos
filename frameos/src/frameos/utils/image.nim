@@ -35,6 +35,9 @@ when defined(frameosEmbedded):
 
 var runtimeImageEngine = ""
 
+proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
+    offsetY: int = 0, blendMode: BlendMode = OverwriteBlend) {.raises: [PixieError].}
+
 proc setRuntimeImageEngine*(imageEngine: string) =
   let normalized = imageEngine.normalize.toLowerAscii()
   runtimeImageEngine =
@@ -196,8 +199,15 @@ when defined(frameosEmbedded):
     let format = embeddedImageFormat(data, len)
     if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
       GC_fullCollect()
-      decodeJpegScaledInto(data, len, target)
-      return target
+      when compiles(decodeJpegScaledInto(data, len, target)):
+        decodeJpegScaledInto(data, len, target)
+        return target
+      else:
+        if len <= EmbeddedMaxDirectDecodeCopyBytes:
+          target.scaleAndDrawImage(decodeImageWithFallback(copyImageBuffer(data, len)), "cover")
+          return target
+        raise newException(PixieError,
+          &"Direct on-device JPEG scaling requires the embedded Pixie checkout; fetched {len div 1024}K")
     decodeImageWithFallback(data, len)
 
   proc decodeImageWithFallback*(data: var string, target: Image): Image =
@@ -206,8 +216,15 @@ when defined(frameosEmbedded):
     let format = embeddedImageFormat(data.cstring, data.len)
     if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
       GC_fullCollect()
-      decodeJpegScaledInto(data, target)
-      return target
+      when compiles(decodeJpegScaledInto(data, target)):
+        decodeJpegScaledInto(data, target)
+        return target
+      else:
+        if data.len <= EmbeddedMaxDirectDecodeCopyBytes:
+          target.scaleAndDrawImage(decodeImageWithFallback(data), "cover")
+          return target
+        raise newException(PixieError,
+          &"Direct on-device JPEG scaling requires the embedded Pixie checkout; fetched {data.len div 1024}K")
     decodeImageWithFallback(data)
 
   proc httpErrorDetail(response: BoundedHttpBufferResponse): string =

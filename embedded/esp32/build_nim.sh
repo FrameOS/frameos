@@ -25,10 +25,24 @@ mkdir -p "$NIMCACHE"
 # Compiled-scene parameters from the backend (e.g. "-d:frameosSceneName=clock
 # -d:frameosSceneBackground=#000000"); empty for a generic image.
 EXTRA_NIM_FLAGS="${FRAMEOS_EXTRA_NIM_FLAGS:-}"
+if [[ -z "${FRAMEOS_PIXIE_PATH:-}" ]]; then
+    LOCAL_PIXIE_PATH="$(cd "$REPO_ROOT/.." && pwd)/pixie"
+    if [[ -d "$LOCAL_PIXIE_PATH/src/pixie" ]]; then
+        export FRAMEOS_PIXIE_PATH="$LOCAL_PIXIE_PATH"
+    fi
+fi
 if [[ -n "${FRAMEOS_PIXIE_PATH:-}" ]]; then
     if [[ ! -d "$FRAMEOS_PIXIE_PATH/src/pixie" ]]; then
         echo "FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/" >&2
         exit 1
+    fi
+    echo "using FRAMEOS_PIXIE_PATH=$FRAMEOS_PIXIE_PATH"
+else
+    LOCKED_PIXIE_SHA1="$(cd "$FRAMEOS_DIR" && python3 -c 'import json; print(json.load(open("nimble.lock"))["packages"]["pixie"]["checksums"]["sha1"])')"
+    if [[ ! -f "$FRAMEOS_DIR/nimble.paths" ]] || ! grep -q "pixie-.*-$LOCKED_PIXIE_SHA1" "$FRAMEOS_DIR/nimble.paths"; then
+        command -v nimble >/dev/null || { echo "nimble not found on PATH and nimble.paths must be refreshed" >&2; exit 1; }
+        echo "refreshing nimble.paths for locked pixie $LOCKED_PIXIE_SHA1"
+        (cd "$FRAMEOS_DIR" && nimble setup --silent)
     fi
 fi
 

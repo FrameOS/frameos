@@ -90,6 +90,26 @@ jobs:
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
 
+      - name: FrameOS ESP32 Nim compile
+        if: ${{ matrix.shard == 1 }}
+        run: |
+          cd frameos
+          nim c \
+            --compileOnly \
+            --os:freertos \
+            --cpu:esp \
+            --mm:orc \
+            --threads:off \
+            --exceptions:goto \
+            --noMain \
+            --opt:size \
+            -d:release \
+            -d:useMalloc \
+            -d:noSignalHandler \
+            -d:frameosEmbedded \
+            --nimcache:/tmp/frameos-esp32-nimcache \
+            src/embedded/embedded_main.nim
+
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest

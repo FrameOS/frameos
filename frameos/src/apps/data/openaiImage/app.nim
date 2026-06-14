@@ -209,14 +209,20 @@ proc get*(self: App, context: ExecutionContext): Image =
       let bytes = cast[ptr UncheckedArray[uint8]](unsafeAddr imageDataBody[0])
       if imageDataBody.len > 2 and bytes[0] == 0xFF'u8 and bytes[1] == 0xD8'u8:
         if context.hasImage and not context.image.isNil:
-          decodeJpegScaledInto(imageDataBody, context.image)
-          result = context.image
+          when compiles(decodeJpegScaledInto(imageDataBody, context.image)):
+            decodeJpegScaledInto(imageDataBody, context.image)
+            result = context.image
+          else:
+            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len, context.image)
         else:
-          result = decodeJpegScaled(
-            imageDataBody,
-            imageWidth,
-            imageHeight
-          )
+          when compiles(decodeJpegScaled(imageDataBody, imageWidth, imageHeight)):
+            result = decodeJpegScaled(
+              imageDataBody,
+              imageWidth,
+              imageHeight
+            )
+          else:
+            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len)
       else:
         result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len)
     else:

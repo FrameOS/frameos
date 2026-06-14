@@ -151,8 +151,8 @@
     },
     "pixie": {
       "version": "6.1.0",
-      "vcsRevision": "de230f6d061d0b6d6288fc7988de753f22cdd366",
-      "url": "https://github.com/treeform/pixie",
+      "vcsRevision": "9d060309db0c22ee2eb217d99bc26ecb53f919b1",
+      "url": "https://github.com/mariusandra/pixie",
       "downloadMethod": "git",
       "dependencies": [
         "vmath",
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "c55039a4ec400a6197b12c6c645dcb8bef45c019"
+        "sha1": "ed7a66aea39c41c12ffbe851faa9f02b2f9ed6c7"
       }
     }
   },
