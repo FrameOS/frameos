@@ -28,9 +28,36 @@ proc maxHttpResponseBytes*(self: AppRoot): int {.inline.} =
   else:
     DefaultMaxHttpResponseBytes
 
+when defined(frameosEmbedded):
+  const EmbeddedMinImageResponseBytes* = 6 * 1024 * 1024
+
+proc maxImageResponseBytes*(config: FrameConfig): int {.inline.} =
+  let configured = config.maxHttpResponseBytes()
+  when defined(frameosEmbedded):
+    max(configured, EmbeddedMinImageResponseBytes)
+  else:
+    configured
+
+proc maxImageResponseBytes*(self: AppRoot): int {.inline.} =
+  if self != nil:
+    self.frameConfig.maxImageResponseBytes()
+  else:
+    when defined(frameosEmbedded):
+      max(DefaultMaxHttpResponseBytes, EmbeddedMinImageResponseBytes)
+    else:
+      DefaultMaxHttpResponseBytes
+
+proc embeddedImageProxyFallbackEnabled*(config: FrameConfig): bool {.inline.} =
+  if config == nil:
+    return false
+  when defined(frameosEmbedded):
+    if config.settings != nil and config.settings{"embedded"}{"imageProxyFallback"}.getBool(false):
+      return true
+  config.imageProxyFallback
+
 proc embeddedMediaProxyBaseUrl*(config: FrameConfig): string {.inline.} =
   when defined(frameosEmbedded):
-    if config != nil and config.settings != nil:
+    if config != nil and config.embeddedImageProxyFallbackEnabled() and config.settings != nil:
       return config.settings{"embedded"}{"mediaProxyBaseUrl"}.getStr()
   ""
 
@@ -40,34 +67,53 @@ proc embeddedMediaProxyBaseUrl*(self: AppRoot): string {.inline.} =
   else:
     ""
 
-proc ensureEmbeddedServiceSettings*(config: FrameConfig) =
+proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true): bool =
   when defined(frameosEmbedded):
     if config == nil:
-      return
+      return false
     if config.settings == nil or config.settings.kind != JObject:
       config.settings = %*{}
     if config.settings{"embedded"} == nil or config.settings{"embedded"}.kind != JObject:
       config.settings["embedded"] = %*{}
     let embedded = config.settings["embedded"]
-    if embedded{"settingsLoaded"}.getBool(false):
-      return
     let url = embedded{"settingsUrl"}.getStr()
     if url.len == 0:
-      return
-    let body = boundedGetContent(url, timeoutMs = 10000, maxBytes = 16 * 1024,
-                                 maxSeconds = 12)
-    let fetched = parseJson(body)
-    if fetched.kind == JObject:
-      for key, value in fetched.pairs:
-        if key != "embedded":
-          config.settings[key] = value
-    embedded["settingsLoaded"] = %true
+      return false
+    try:
+      let body = boundedGetContent(url, timeoutMs = 10000, maxBytes = 16 * 1024,
+                                   maxSeconds = 12)
+      let fetched = parseJson(body)
+      if fetched.kind == JObject:
+        for key, value in fetched.pairs:
+          if key == "embedded" and value.kind == JObject:
+            for embeddedKey, embeddedValue in value.pairs:
+              if embeddedKey notin ["mediaProxyBaseUrl", "settingsUrl"]:
+                embedded[embeddedKey] = embeddedValue
+          else:
+            config.settings[key] = value
+      embedded["settingsLoaded"] = %true
+      return true
+    except CatchableError:
+      if raiseOnError:
+        raise
+      return false
   else:
-    discard
+    return false
+
+proc ensureEmbeddedServiceSettings*(config: FrameConfig) =
+  discard config.loadEmbeddedServiceSettings(raiseOnError = true)
+
+proc refreshEmbeddedServiceSettings*(config: FrameConfig): bool =
+  config.loadEmbeddedServiceSettings(raiseOnError = false)
 
 proc ensureEmbeddedServiceSettings*(self: AppRoot) =
   if self != nil:
     self.frameConfig.ensureEmbeddedServiceSettings()
+
+proc refreshEmbeddedServiceSettings*(self: AppRoot): bool =
+  if self != nil:
+    return self.frameConfig.refreshEmbeddedServiceSettings()
+  false
 
 proc appName(self: AppRoot): string =
   if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName

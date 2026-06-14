@@ -279,6 +279,7 @@ static esp_err_t render_once(void)
     current_scene_id(scene_id, sizeof(scene_id));
     log_render_event("render:scene", scene_id, "rendering", mode, s_render_count + 1,
                      0, width, height, format, buf_len, ESP_OK);
+    frameos_nim_flush_logs();
 
     uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) buf = malloc(buf_len);

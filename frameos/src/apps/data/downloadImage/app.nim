@@ -15,12 +15,28 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
+    when defined(frameosEmbedded):
+      discard self.refreshEmbeddedServiceSettings()
     let url = self.appConfig.url
-    let (image, imageData) = downloadImageWithData(
-      url,
-      maxBytes = self.maxHttpResponseBytes(),
-      proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
-    )
+    let (image, imageData) =
+      when defined(frameosEmbedded):
+        let target =
+          if context.hasImage and not context.image.isNil:
+            context.image
+          else:
+            newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
+        downloadImageWithDataInto(
+          url,
+          target,
+          maxBytes = self.maxImageResponseBytes(),
+          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+        )
+      else:
+        downloadImageWithData(
+          url,
+          maxBytes = self.maxImageResponseBytes(),
+          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+        )
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{
         "url": url,

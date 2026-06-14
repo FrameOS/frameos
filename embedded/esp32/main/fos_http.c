@@ -963,6 +963,31 @@ static esp_err_t reload_post_handler(httpd_req_t *req)
     return httpd_resp_send(req, "{\"status\":\"ok\",\"queued\":true}", HTTPD_RESP_USE_STRLEN);
 }
 
+static void log_http_command(httpd_req_t *req, const char *event_name, size_t body_len)
+{
+    char path[256];
+    if (!copy_request_path(req, path, sizeof(path))) {
+        strlcpy(path, req->uri, sizeof(path));
+    }
+    char *escaped_path = json_escape_dup(path);
+    char *escaped_event = json_escape_dup(event_name);
+    if (!escaped_path || !escaped_event) {
+        free(escaped_path);
+        free(escaped_event);
+        return;
+    }
+
+    char log_line[640];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"http:command\",\"source\":\"esp32\",\"method\":\"POST\","
+             "\"path\":\"%s\",\"command\":\"%s\",\"bodyBytes\":%u}",
+             escaped_path, escaped_event, (unsigned)body_len);
+    free(escaped_path);
+    free(escaped_event);
+    frameos_nim_log_hook(log_line);
+    frameos_nim_flush_logs();
+}
+
 static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
 {
     if (!event_name || !event_name[0]) {
@@ -976,6 +1001,7 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
     }
     if (err != ESP_OK) return httpd_resp_send_500(req);
     const char *payload = body && body[0] ? body : "{}";
+    log_http_command(req, event_name, body ? strlen(body) : 0);
 
     bool ok = true;
     if (strcmp(event_name, "render") == 0) {

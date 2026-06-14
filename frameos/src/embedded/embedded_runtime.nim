@@ -105,6 +105,7 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     settings["embedded"] = %*{
       "mediaProxyBaseUrl": &"{normalizedBackendUrl}/api/frames/{frameId}/embedded/media",
       "settingsUrl": &"{normalizedBackendUrl}/api/frames/{frameId}/embedded/settings",
+      "imageProxyFallback": false,
     }
   frameConfig = FrameConfig(
     name: name,
@@ -114,6 +115,7 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     device: "embedded",
     deviceConfig: DeviceConfig(pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)),
     maxHttpResponseBytes: httpResponseLimit,
+    imageProxyFallback: false,
     rotate: 0,
     flip: "",
     scalingMode: "cover",

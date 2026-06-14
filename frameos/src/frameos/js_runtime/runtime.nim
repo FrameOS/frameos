@@ -94,10 +94,18 @@ proc jsQuote(s: string): string =
   result = result.replace("\\", "\\\\").replace("\"", "\\\"")
   result = result.replace("\n", "\\n").replace("\r", "\\r")
 
+proc normalizeExpressionSnippet(source: string): string =
+  ## The UI has historically saved some expression snippets with a trailing
+  ## comma/semicolon. They are invalid once wrapped as an arrow expression.
+  result = source.strip()
+  while result.len > 0 and result[^1] in {',', ';'}:
+    result.setLen(result.len - 1)
+    result = result.strip()
+
 proc getCodeSnippet(node: DiagramNode): string =
   ## Prefer codeJS, fall back to code; empty string if none.
   if node.data.hasKey("codeJS") and node.data["codeJS"].kind == JString:
-    return node.data["codeJS"].getStr()
+    return normalizeExpressionSnippet(node.data["codeJS"].getStr())
   elif node.data.hasKey("code") and node.data["code"].kind == JString:
     return node.data["code"].getStr()
   ""

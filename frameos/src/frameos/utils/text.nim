@@ -281,12 +281,13 @@ proc drawText*(
 ) =
   ## Draw the prepared layout into `image`, honoring padding and optional border.
   let pad = layout.opts.padding
-  if layout.opts.borderWidth > 0 and layout.borderTypeset.isSome:
-    image.strokeText(
-      layout.borderTypeset.get(),
-      translate(vec2(pad + offsetX, pad + offsetY)),
-      strokeWidth = float(layout.opts.borderWidth) * layout.fontScaleRatio
-    )
+  when not defined(frameosEmbedded):
+    if layout.opts.borderWidth > 0 and layout.borderTypeset.isSome:
+      image.strokeText(
+        layout.borderTypeset.get(),
+        translate(vec2(pad + offsetX, pad + offsetY)),
+        strokeWidth = float(layout.opts.borderWidth) * layout.fontScaleRatio
+      )
   image.fillText(
     layout.textTypeset,
     translate(vec2(pad + offsetX, pad + offsetY))

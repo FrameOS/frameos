@@ -32,6 +32,7 @@ type
     deviceConfig*: DeviceConfig
     metricsInterval*: float
     maxHttpResponseBytes*: int
+    imageProxyFallback*: bool
     rotate*: int
     flip*: string
     scalingMode*: string

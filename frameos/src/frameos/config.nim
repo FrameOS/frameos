@@ -261,6 +261,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
     metricsInterval: data{"metricsInterval"}.getFloat(),
     maxHttpResponseBytes: data{"maxHttpResponseBytes"}.getInt(DefaultMaxHttpResponseBytes),
+    imageProxyFallback: data{"imageProxyFallback"}.getBool(false),
     rotate: data{"rotate"}.getInt(),
     flip: data{"flip"}.getStr(""),
     scalingMode: data{"scalingMode"}.getStr(),
@@ -314,6 +315,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.deviceConfig = source.deviceConfig
   target.metricsInterval = source.metricsInterval
   target.maxHttpResponseBytes = source.maxHttpResponseBytes
+  target.imageProxyFallback = source.imageProxyFallback
   target.rotate = source.rotate
   target.flip = source.flip
   target.scalingMode = source.scalingMode

@@ -18,10 +18,11 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeGalleryDownload(url: string, maxBytes: int, proxyBaseUrl: string): Image =
+proc fakeGalleryDownload(url: string, maxBytes: int, proxyBaseUrl: string, target: Image): Image =
   galleryHookUrl = url
   galleryHookMaxBytes = maxBytes
   galleryHookProxyBaseUrl = proxyBaseUrl
+  check target.isNil
   newImage(2, 3)
 
 suite "data/frameOSGallery app":
@@ -45,7 +46,7 @@ suite "data/frameOSGallery app":
       scene: FrameScene(logger: newLogger(logs)),
       frameConfig: FrameConfig(
         maxHttpResponseBytes: 1234,
-        settings: %*{"embedded": {"mediaProxyBaseUrl": "http://proxy.local/image"}}
+        settings: %*{"embedded": {"mediaProxyBaseUrl": "http://proxy.local/image", "imageProxyFallback": true}}
       ),
       appConfig: AppConfig(category: "other", categoryOther: "nature")
     )

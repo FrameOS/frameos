@@ -348,9 +348,13 @@ def embedded_scenes_payload(frame: Frame) -> bytes:
 
 def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     frame_settings = get_frame_json(db, frame).get("settings") or {}
+    payload = {
+        "embedded": {
+            "imageProxyFallback": bool(frame.image_proxy_fallback),
+        },
+    }
     if not isinstance(frame_settings, dict):
-        return {}
-    payload = {}
+        return payload
     for key in ("openAI", "unsplash"):
         value = frame_settings.get(key)
         if isinstance(value, dict):

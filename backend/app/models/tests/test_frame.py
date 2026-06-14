@@ -217,6 +217,18 @@ async def test_get_frame_json_includes_max_http_response_bytes(_mock_publish, db
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_image_proxy_fallback(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    data = get_frame_json(db, frame)
+    assert data["imageProxyFallback"] is False
+
+    frame.image_proxy_fallback = True
+    data = get_frame_json(db, frame)
+    assert data["imageProxyFallback"] is True
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
     frame.width = None

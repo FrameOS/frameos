@@ -83,6 +83,7 @@ class FrameBase(BaseModel):
     interval: float
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
+    image_proxy_fallback: Optional[bool] = None
     scaling_mode: Optional[str]
     image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     rotate: Optional[int]
@@ -162,6 +163,7 @@ class FrameUpdateRequest(BaseModel):
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
     max_http_response_bytes: Optional[int] = None
+    image_proxy_fallback: Optional[bool] = None
     log_to_file: Optional[str] = None
     assets_path: Optional[str] = None
     save_assets: Any = None

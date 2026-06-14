@@ -74,11 +74,25 @@ proc get*(self: App, context: ExecutionContext): Image =
     let realImageUrl = &"{imageUrl}&w={width}&h={height}&fit=crop&crop=faces,edges"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {realImageUrl}")
-    let (downloadedImage, imageData) = downloadImageWithData(
-      realImageUrl,
-      maxBytes = self.maxHttpResponseBytes(),
-      proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
-    )
+    let (downloadedImage, imageData) =
+      when defined(frameosEmbedded):
+        let target =
+          if context.hasImage and not context.image.isNil:
+            context.image
+          else:
+            newImage(width, height)
+        downloadImageWithDataInto(
+          realImageUrl,
+          target,
+          maxBytes = self.maxImageResponseBytes(),
+          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+        )
+      else:
+        downloadImageWithData(
+          realImageUrl,
+          maxBytes = self.maxImageResponseBytes(),
+          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+        )
 
     if self.appConfig.metadataStateKey != "":
       let description = json{"description"}.getStr(json{"alt_description"}.getStr(""))

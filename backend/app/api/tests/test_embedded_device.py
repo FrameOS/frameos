@@ -178,9 +178,24 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
 
     assert response.status_code == 200, response.text
     assert response.json() == {
+        'embedded': {'imageProxyFallback': False},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
+
+
+@pytest.mark.asyncio
+async def test_settings_returns_image_proxy_fallback_toggle(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.image_proxy_fallback = True
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+
+    assert response.status_code == 200, response.text
+    assert response.json()['embedded'] == {'imageProxyFallback': True}
 
 
 @pytest.mark.asyncio

@@ -260,6 +260,7 @@ class Frame(Base):
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
+    image_proxy_fallback = mapped_column(Boolean, nullable=False, default=False)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
     image_engine = mapped_column(String(32), nullable=True)  # empty and pixie use Pixie; imagemagick uses ImageMagick
     rotate = mapped_column(Integer, nullable=True)
@@ -325,6 +326,7 @@ class Frame(Base):
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+            'image_proxy_fallback': bool(self.image_proxy_fallback),
             'scaling_mode': self.scaling_mode,
             'image_engine': self.image_engine,
             'rotate': self.rotate,
@@ -425,6 +427,7 @@ async def new_frame(
         height=dimensions[1] if dimensions else None,
         interval=interval or 300,
         max_http_response_bytes=DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+        image_proxy_fallback=False,
         status="uninitialized",
         scenes=[],
         apps=[],
@@ -557,6 +560,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+        "imageProxyFallback": bool(frame.image_proxy_fallback),
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
         "imageEngine": frame.image_engine or "",

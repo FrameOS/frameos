@@ -300,9 +300,12 @@ function DeployBuildOptionsSection({
 }: {
   frame: FrameType
   frameForm: Partial<FrameType>
-}): JSX.Element {
+}): JSX.Element | null {
   const { setFrameFormValues, touchFrameFormField } = useActions(frameLogic({ frameId: frame.id }))
   const mode = frameForm.mode ?? frame.mode ?? 'rpios'
+  if (mode === 'embedded') {
+    return null
+  }
   const isBuildroot = mode === 'buildroot'
   const rpios = {
     ...(frame.rpios ?? {}),

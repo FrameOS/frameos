@@ -655,7 +655,8 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
         .method = http_method,
         .timeout_ms = timeout_ms > 0 ? timeout_ms : 30000,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 4096,
+        .buffer_size = 1024,
+        .buffer_size_tx = 4096,
         .max_redirection_count = 5,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -703,13 +704,25 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
                                    content_length, (unsigned)nim_copy_limit);
     }
 
-    /* Grow in PSRAM; bodies can be multi-MB images. */
+    /* Grow in PSRAM; bodies can be multi-MB images. Large image responses can
+     * arrive with an under-reported Content-Length, so reserve the expected
+     * image budget up front instead of needing two large buffers during growth. */
     size_t cap = (content_length > 0) ? (size_t)content_length : 16384;
+    if (nim_copy_limit > (2u * 1024u * 1024u) &&
+        content_length > (1024u * 1024u) &&
+        cap < (3u * 1024u * 1024u)) {
+        cap = 3u * 1024u * 1024u;
+    }
     if (cap > nim_copy_limit) cap = nim_copy_limit;
     if (cap < 1024) cap = 1024;
     uint8_t *buf = heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (buf == NULL) buf = malloc(cap + 1);
     if (buf == NULL) {
+        ESP_LOGW(TAG, "%s: out of memory allocating HTTP response buffer: cap=%u internal=%u psram=%u largest_psram=%u",
+                 url, (unsigned)cap,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         *out_status = 0;
@@ -727,22 +740,36 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
                 return http_error_response(out_status, out_len, "response exceeded %u bytes",
                                            (unsigned)nim_copy_limit);
             }
-            size_t new_cap = cap * 2;
+            size_t new_cap = (cap >= (1024u * 1024u)) ? (cap + 512u * 1024u) : (cap * 2u);
             if (new_cap > nim_copy_limit) new_cap = nim_copy_limit;
-            uint8_t *new_buf = heap_caps_realloc(buf, new_cap + 1,
-                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (new_buf == NULL) new_buf = realloc(buf, new_cap + 1);
+            uint8_t *new_buf = heap_caps_malloc(new_cap + 1,
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (new_buf == NULL) new_buf = malloc(new_cap + 1);
             if (new_buf == NULL) {
+                ESP_LOGW(TAG, "%s: out of memory growing HTTP response buffer: total=%u cap=%u new_cap=%u internal=%u psram=%u largest_psram=%u",
+                         url, (unsigned)total, (unsigned)cap, (unsigned)new_cap,
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
                 fos_nim_http_free(buf);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
-                return http_error_response(out_status, out_len, "out of memory growing HTTP response buffer");
+                return http_error_response(out_status, out_len,
+                                           "out of memory growing HTTP response buffer: total=%u cap=%u new=%u largest_psram=%u",
+                                           (unsigned)total, (unsigned)cap, (unsigned)new_cap,
+                                           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
             }
+            if (total > 0) memcpy(new_buf, buf, total);
+            fos_nim_http_free(buf);
             buf = new_buf;
             cap = new_cap;
         }
         int r = esp_http_client_read(client, (char *)buf + total, cap - total);
         if (r < 0) {
+            ESP_LOGW(TAG, "%s %s: response read failed, internal=%u psram=%u",
+                     method ? method : "GET", url,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             fos_nim_http_free(buf);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);

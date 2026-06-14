@@ -13,6 +13,7 @@ import frameos/utils/font
 import frameos/utils/http_client
 when defined(frameosEmbedded):
   import pixie/fileformats/bmp
+  import pixie/fileformats/jpeg
   import pixie/fileformats/png
 when not defined(frameosEmbedded):
   # No child processes on FreeRTOS: ImageMagick/exiftool fallbacks are
@@ -28,7 +29,9 @@ const ImageEngineImageMagick* = "imagemagick"
 when defined(frameosEmbedded):
   const EmbeddedSmallDecodeCopyBytes = 512 * 1024
   const EmbeddedMaxDirectDecodeCopyBytes = 2 * 1024 * 1024
-  const EmbeddedMaxDirectRgbaBytes = 3 * 1024 * 1024
+  const EmbeddedMaxDirectPngBytes = 768 * 1024
+  const EmbeddedMaxDirectRgbaBytes = 5 * 1024 * 1024
+  const EmbeddedMaxRemoteSourceWidth = 800
 
 var runtimeImageEngine = ""
 
@@ -161,12 +164,17 @@ when defined(frameosEmbedded):
       raise newException(PixieError, "Unsupported image file format: empty response")
     let format = embeddedImageFormat(data, len)
     if len > 8 and equalMem(data, pngSignature[0].unsafeAddr, 8):
+      if len > EmbeddedMaxDirectPngBytes:
+        raise newException(PixieError,
+          &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {len div 1024}K")
       guardEmbeddedDirectDecode(data, len, format)
+      GC_fullCollect()
       return decodePng(data, len).convertToImage()
     if len > 14:
       let bytes = cast[ptr UncheckedArray[uint8]](data)
       if bytes[0] == 'B'.uint8 and bytes[1] == 'M'.uint8:
         guardEmbeddedDirectDecode(data, len, format)
+        GC_fullCollect()
         return decodeDib(bytes[14].unsafeAddr, len - 14)
     if format in ["JPEG", "GIF"]:
       guardEmbeddedDirectDecode(data, len, format)
@@ -182,6 +190,26 @@ when defined(frameosEmbedded):
     raise newException(PixieError,
       &"Direct on-device decode for {format} images over {EmbeddedSmallDecodeCopyBytes div 1024}K needs a low-memory decoder; fetched {len div 1024}K")
 
+  proc decodeImageWithFallback*(data: pointer, len: int, target: Image): Image =
+    if data == nil or len <= 0:
+      raise newException(PixieError, "Unsupported image file format: empty response")
+    let format = embeddedImageFormat(data, len)
+    if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
+      GC_fullCollect()
+      decodeJpegScaledInto(data, len, target)
+      return target
+    decodeImageWithFallback(data, len)
+
+  proc decodeImageWithFallback*(data: var string, target: Image): Image =
+    if data.len <= 0:
+      raise newException(PixieError, "Unsupported image file format: empty response")
+    let format = embeddedImageFormat(data.cstring, data.len)
+    if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
+      GC_fullCollect()
+      decodeJpegScaledInto(data, target)
+      return target
+    decodeImageWithFallback(data)
+
   proc httpErrorDetail(response: BoundedHttpBufferResponse): string =
     if response.body == nil or response.bodyLen <= 0:
       return ""
@@ -192,26 +220,6 @@ when defined(frameosEmbedded):
     if response.bodyLen > copyLen:
       snippet.add("...")
     ": " & snippet
-
-  proc embeddedRemoteImageShouldPreferProxy(url: string, proxyBaseUrl: string): bool =
-    if proxyBaseUrl.strip().len == 0:
-      return false
-    if not (url.startsWith("http://") or url.startsWith("https://")):
-      return false
-
-    var path = ""
-    try:
-      path = parseUri(url).path.toLowerAscii()
-    except CatchableError:
-      path = url.toLowerAscii()
-
-    if path.endsWith(".png") or path.endsWith(".bmp"):
-      return false
-
-    # JPEG/GIF/WebP and extensionless CDN URLs can make pixie's embedded
-    # decoders allocate large transient buffers before they can raise a
-    # catchable error. The backend media endpoint resizes and returns BMP.
-    true
 
 proc readImageWithFallback*(path: string): Image =
   if useImageMagick():
@@ -237,6 +245,26 @@ proc decodeDataUrl*(dataUrl: string): Image =
       decodeUrl(dataBody)
   return decodeImageWithFallback(decodedData)
 
+proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
+  if not dataUrl.startsWith("data:"):
+    raise newException(ValueError, "Invalid data URL.")
+  let commaIndex = dataUrl.find(',')
+  if commaIndex == -1:
+    raise newException(ValueError, "Invalid data URL.")
+  let header = dataUrl[5 ..< commaIndex]
+  var dataBody = dataUrl[commaIndex + 1 .. ^1]
+  let headerParts = if header.len > 0: header.split(';') else: @[""]
+  let isBase64 = headerParts.anyIt(it == "base64")
+  var decodedData =
+    if isBase64:
+      dataBody.decode
+    else:
+      decodeUrl(dataBody)
+  when defined(frameosEmbedded):
+    if not target.isNil and decodedData.len > 0:
+      return decodeImageWithFallback(decodedData, target)
+  return decodeImageWithFallback(decodedData)
+
 proc proxiedImageUrl*(url: string, proxyBaseUrl = ""): string =
   let proxy = proxyBaseUrl.strip()
   if proxy.len > 0 and (url.startsWith("http://") or url.startsWith("https://")):
@@ -244,51 +272,120 @@ proc proxiedImageUrl*(url: string, proxyBaseUrl = ""): string =
   url
 
 when defined(frameosEmbedded):
-  proc downloadImageFromResolvedBuffer(url: string, maxBytes: int):
+  proc upsertQueryParam(query, key, value: string): string =
+    var parts = if query.len > 0: query.split('&') else: @[]
+    var updated = false
+    for part in parts.mitems:
+      let equals = part.find('=')
+      let partKey = if equals >= 0: part[0 ..< equals] else: part
+      if partKey == key:
+        part = encodeUrl(key) & "=" & encodeUrl(value)
+        updated = true
+    if not updated:
+      parts.add(encodeUrl(key) & "=" & encodeUrl(value))
+    parts.join("&")
+
+  proc embeddedSizedRemoteImageUrl(url: string, target: Image): string =
+    if target.isNil or target.width <= 0 or target.height <= 0:
+      return url
+    var parsed: Uri
+    try:
+      parsed = parseUri(url)
+    except CatchableError:
+      return url
+    if parsed.scheme notin ["http", "https"]:
+      return url
+
+    case parsed.hostname.toLowerAscii()
+    of "images.unsplash.com":
+      let requestedWidth = min(target.width, EmbeddedMaxRemoteSourceWidth)
+      let requestedHeight = min(target.height, EmbeddedMaxRemoteSourceWidth)
+      parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
+      parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
+      parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
+      if parsed.query.find("auto=") < 0:
+        parsed.query = upsertQueryParam(parsed.query, "auto", "format")
+      return $parsed
+    else:
+      return url
+
+  proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
+      headers: seq[SimpleHttpHeader] = @[]):
       tuple[image: Image, data: string] =
-    var response = boundedRequestBuffer(url, maxBytes = maxBytes)
+    var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     try:
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
-      result = (decodeImageWithFallback(response.body, response.bodyLen), "")
+      let image =
+        if not target.isNil:
+          decodeImageWithFallback(response.body, response.bodyLen, target)
+        else:
+          decodeImageWithFallback(response.body, response.bodyLen)
+      result = (image, "")
     finally:
       response.freeHttpBufferResponse()
 
-  proc downloadImageFromBuffer(url: string, maxBytes: int, proxyBaseUrl = ""):
+  proc downloadImageFromBuffer(url: string, maxBytes: int, proxyBaseUrl = "", target: Image = nil,
+      headers: seq[SimpleHttpHeader] = @[]):
       tuple[image: Image, data: string] =
-    let fallbackUrl = proxiedImageUrl(url, proxyBaseUrl)
-    if embeddedRemoteImageShouldPreferProxy(url, proxyBaseUrl) and fallbackUrl != url:
-      return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes)
-
+    let directUrl = embeddedSizedRemoteImageUrl(url, target)
+    let fallbackUrl = proxiedImageUrl(directUrl, proxyBaseUrl)
     try:
-      return downloadImageFromResolvedBuffer(url, maxBytes)
+      return downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers)
     except CatchableError:
-      if fallbackUrl != url:
+      if fallbackUrl != directUrl:
         try:
-          return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes)
+          return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes, target, headers)
         except CatchableError as proxyError:
           raise proxyError
       raise
 
-proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, proxyBaseUrl = ""): Image =
+proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, proxyBaseUrl = "",
+    headers: seq[SimpleHttpHeader] = @[]): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl).image
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, headers = headers).image
   else:
-    let content = boundedGetContent(proxiedImageUrl(url, proxyBaseUrl), maxBytes = maxBytes)
+    let response = boundedRequestWithHeaders(proxiedImageUrl(url, proxyBaseUrl),
+      headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    let content = response.body
     result = decodeImageWithFallback(content)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
-    proxyBaseUrl = ""): tuple[image: Image, data: string] =
+    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
   if url.startsWith("data:"):
     let image = decodeDataUrl(url)
     return (image, "")
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl)
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, headers = headers)
   else:
-    let content = boundedGetContent(proxiedImageUrl(url, proxyBaseUrl), maxBytes = maxBytes)
+    let response = boundedRequestWithHeaders(proxiedImageUrl(url, proxyBaseUrl),
+      headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    let content = response.body
     result = (decodeImageWithFallback(content), content)
+
+proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
+    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): Image =
+  if url.startsWith("data:"):
+    return decodeDataUrlInto(url, target)
+  when defined(frameosEmbedded):
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, target, headers).image
+  else:
+    return downloadImage(url, maxBytes = maxBytes, proxyBaseUrl = proxyBaseUrl, headers = headers)
+
+proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
+    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
+  if url.startsWith("data:"):
+    return (decodeDataUrlInto(url, target), "")
+  when defined(frameosEmbedded):
+    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, target, headers)
+  else:
+    return downloadImageWithData(url, maxBytes = maxBytes, proxyBaseUrl = proxyBaseUrl, headers = headers)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:
@@ -447,6 +544,8 @@ proc writeError*(image: Image, width, height: int, message: string) =
   image.fillText(types, translate(vec2(padding, padding)))
 
 proc renderError*(width, height: int, message: string): Image =
+  when defined(frameosEmbedded):
+    GC_fullCollect()
   result = newImage(width, height)
   result.fill(parseHtmlColor("#ffffff"))
   writeError(result, width, height, message)

@@ -25,6 +25,12 @@ mkdir -p "$NIMCACHE"
 # Compiled-scene parameters from the backend (e.g. "-d:frameosSceneName=clock
 # -d:frameosSceneBackground=#000000"); empty for a generic image.
 EXTRA_NIM_FLAGS="${FRAMEOS_EXTRA_NIM_FLAGS:-}"
+if [[ -n "${FRAMEOS_PIXIE_PATH:-}" ]]; then
+    if [[ ! -d "$FRAMEOS_PIXIE_PATH/src/pixie" ]]; then
+        echo "FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/" >&2
+        exit 1
+    fi
+fi
 
 cd "$FRAMEOS_DIR"
 # shellcheck disable=SC2086

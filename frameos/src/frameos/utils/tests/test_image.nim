@@ -58,6 +58,27 @@ suite "image helpers":
         check image.width == 8
         check image.height == 8
 
+    test "embedded pointer decoder scales JPEGs into a target image":
+      let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"
+      if fileExists(fixture):
+        let data = readFile(fixture)
+        let target = newImage(4, 3)
+        let image = decodeImageWithFallback(data.cstring, data.len, target)
+        check image.width == 4
+        check image.height == 3
+        check image == target
+
+    test "embedded string decoder releases JPEG bytes before filling target image":
+      let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"
+      if fileExists(fixture):
+        var data = readFile(fixture)
+        let target = newImage(5, 4)
+        let image = decodeImageWithFallback(data, target)
+        check image.width == 5
+        check image.height == 4
+        check image == target
+        check data.len == 0
+
   test "decodeSvgWithFallback defaults to pixie and honors target dimensions":
     let image = decodeSvgWithFallback(
       """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#ff0000"/></svg>""",

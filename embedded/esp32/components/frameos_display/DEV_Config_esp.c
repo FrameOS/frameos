@@ -64,11 +64,8 @@ UBYTE DEV_Digital_Read(UWORD Pin)
 void DEV_Delay_ms(UDOUBLE xms)
 {
     if (xms == 0) return;
-    if (xms < portTICK_PERIOD_MS) {
-        esp_rom_delay_us(xms * 1000);
-    } else {
-        vTaskDelay(pdMS_TO_TICKS(xms));
-    }
+    TickType_t ticks = pdMS_TO_TICKS(xms);
+    vTaskDelay(ticks > 0 ? ticks : 1);
 }
 
 void DEV_SPI_WriteByte(UBYTE Value)
