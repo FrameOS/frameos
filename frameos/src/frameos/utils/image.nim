@@ -282,12 +282,6 @@ proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
       return decodeImageWithFallback(decodedData, target)
   return decodeImageWithFallback(decodedData)
 
-proc proxiedImageUrl*(url: string, proxyBaseUrl = ""): string =
-  let proxy = proxyBaseUrl.strip()
-  if proxy.len > 0 and (url.startsWith("http://") or url.startsWith("https://")):
-    return proxy & "?url=" & encodeUrl(url)
-  url
-
 when defined(frameosEmbedded):
   proc upsertQueryParam(query, key, value: string): string =
     var parts = if query.len > 0: query.split('&') else: @[]
@@ -342,67 +336,55 @@ when defined(frameosEmbedded):
     finally:
       response.freeHttpBufferResponse()
 
-  proc downloadImageFromBuffer(url: string, maxBytes: int, proxyBaseUrl = "", target: Image = nil,
+  proc downloadImageFromBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[]):
       tuple[image: Image, data: string] =
     let directUrl = embeddedSizedRemoteImageUrl(url, target)
-    let fallbackUrl = proxiedImageUrl(directUrl, proxyBaseUrl)
-    try:
-      return downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers)
-    except CatchableError:
-      if fallbackUrl != directUrl:
-        try:
-          return downloadImageFromResolvedBuffer(fallbackUrl, maxBytes, target, headers)
-        except CatchableError as proxyError:
-          raise proxyError
-      raise
+    downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers)
 
-proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, proxyBaseUrl = "",
-    headers: seq[SimpleHttpHeader] = @[]): Image =
+proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[SimpleHttpHeader] = @[]): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, headers = headers).image
+    return downloadImageFromBuffer(url, maxBytes, headers = headers).image
   else:
-    let response = boundedRequestWithHeaders(proxiedImageUrl(url, proxyBaseUrl),
-      headers = headers, maxBytes = maxBytes)
+    let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
     let content = response.body
     result = decodeImageWithFallback(content)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
-    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
+    headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
   if url.startsWith("data:"):
     let image = decodeDataUrl(url)
     return (image, "")
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, headers = headers)
+    return downloadImageFromBuffer(url, maxBytes, headers = headers)
   else:
-    let response = boundedRequestWithHeaders(proxiedImageUrl(url, proxyBaseUrl),
-      headers = headers, maxBytes = maxBytes)
+    let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
     let content = response.body
     result = (decodeImageWithFallback(content), content)
 
 proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
-    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): Image =
+    headers: seq[SimpleHttpHeader] = @[]): Image =
   if url.startsWith("data:"):
     return decodeDataUrlInto(url, target)
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, target, headers).image
+    return downloadImageFromBuffer(url, maxBytes, target, headers).image
   else:
-    return downloadImage(url, maxBytes = maxBytes, proxyBaseUrl = proxyBaseUrl, headers = headers)
+    return downloadImage(url, maxBytes = maxBytes, headers = headers)
 
 proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
-    proxyBaseUrl = "", headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
+    headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
   if url.startsWith("data:"):
     return (decodeDataUrlInto(url, target), "")
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, proxyBaseUrl, target, headers)
+    return downloadImageFromBuffer(url, maxBytes, target, headers)
   else:
-    return downloadImageWithData(url, maxBytes = maxBytes, proxyBaseUrl = proxyBaseUrl, headers = headers)
+    return downloadImageWithData(url, maxBytes = maxBytes, headers = headers)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:

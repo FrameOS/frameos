@@ -80,7 +80,6 @@ export interface FrameType {
   interval: number
   metrics_interval: number
   max_http_response_bytes?: number
-  image_proxy_fallback?: boolean
   scaling_mode: string
   image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number

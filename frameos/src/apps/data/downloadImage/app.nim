@@ -15,8 +15,6 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
-    when defined(frameosEmbedded):
-      discard self.refreshEmbeddedServiceSettings()
     let url = self.appConfig.url
     let (image, imageData) =
       when defined(frameosEmbedded):
@@ -28,14 +26,12 @@ proc get*(self: App, context: ExecutionContext): Image =
         downloadImageWithDataInto(
           url,
           target,
-          maxBytes = self.maxImageResponseBytes(),
-          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+          maxBytes = self.maxImageResponseBytes()
         )
       else:
         downloadImageWithData(
           url,
-          maxBytes = self.maxImageResponseBytes(),
-          proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+          maxBytes = self.maxImageResponseBytes()
         )
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{

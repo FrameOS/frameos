@@ -164,14 +164,12 @@ proc get*(self: App, context: ExecutionContext): Image =
             downloadImageWithDataInto(
               imageUrl,
               target,
-              maxBytes = self.maxImageResponseBytes(),
-              proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+              maxBytes = self.maxImageResponseBytes()
             )
           else:
             downloadImageWithData(
               imageUrl,
-              maxBytes = self.maxImageResponseBytes(),
-              proxyBaseUrl = self.embeddedMediaProxyBaseUrl()
+              maxBytes = self.maxImageResponseBytes()
             )
         imageDataBody = downloadedData
         if self.appConfig.metadataStateKey != "":

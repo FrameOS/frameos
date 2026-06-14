@@ -1,11 +1,7 @@
-import io
-import socket
 import struct
 
 import pytest
-from PIL import Image
 
-from app.api import embedded_device
 from app.models.frame import Frame
 from app.models.settings import Settings
 from app.tasks.embedded_firmware import (
@@ -41,13 +37,6 @@ async def device_frame(async_client, db) -> Frame:
 
 def auth(frame: Frame) -> dict:
     return {'Authorization': f'Bearer {frame.server_api_key}'}
-
-
-def image_bytes(width: int = 1200, height: int = 800) -> bytes:
-    image = Image.new("RGB", (width, height), (64, 128, 192))
-    out = io.BytesIO()
-    image.save(out, format="PNG")
-    return out.getvalue()
 
 
 @pytest.mark.asyncio
@@ -184,124 +173,10 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
 
     assert response.status_code == 200, response.text
     assert response.json() == {
-        'embedded': {'imageProxyFallback': False},
         'homeAssistant': {'accessToken': 'not-for-esp'},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
-
-
-@pytest.mark.asyncio
-async def test_settings_returns_image_proxy_fallback_toggle(async_client, no_auth_client, db):
-    frame = await device_frame(async_client, db)
-    frame.image_proxy_fallback = True
-    db.add(frame)
-    db.commit()
-
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
-
-    assert response.status_code == 200, response.text
-    assert response.json()['embedded'] == {'imageProxyFallback': True}
-
-
-@pytest.mark.asyncio
-async def test_media_proxy_requires_device_auth(async_client, no_auth_client, db):
-    frame = await device_frame(async_client, db)
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/media?url=https://example.com/image.png')
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("url", [
-    "http://127.0.0.1/image.png",
-    "http://10.0.0.4/image.png",
-    "http://localhost/image.png",
-    "http://frame.local/image.png",
-    "http://[::1]/image.png",
-])
-async def test_media_proxy_rejects_private_media_urls(async_client, no_auth_client, db, url):
-    frame = await device_frame(async_client, db)
-
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/media',
-        params={'url': url},
-        headers=auth(frame),
-    )
-
-    assert response.status_code == 400
-    assert response.json()['detail'] == "Media URL host is not allowed"
-
-
-@pytest.mark.asyncio
-async def test_media_proxy_rejects_hosts_that_resolve_private(monkeypatch):
-    def fake_getaddrinfo(*_args, **_kwargs):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.168.1.20", 443))]
-
-    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-
-    with pytest.raises(Exception) as exc:
-        await embedded_device._fetch_embedded_media_source("https://private.example/image.png")
-
-    assert getattr(exc.value, "status_code", None) == 400
-    assert exc.value.detail == "Media URL host is not allowed"
-
-
-@pytest.mark.asyncio
-async def test_media_proxy_resizes_gallery_image(async_client, no_auth_client, db, monkeypatch):
-    frame = await device_frame(async_client, db)
-    frame.device = 'waveshare.EPD_7in3e'
-    db.add(frame)
-    db.commit()
-    seen_urls = []
-
-    async def fake_fetch(url: str) -> bytes:
-        seen_urls.append(url)
-        return image_bytes()
-
-    monkeypatch.setattr(embedded_device, "_fetch_embedded_media_source", fake_fetch)
-
-    response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/embedded/media?gallery_category=cute', headers=auth(frame))
-    assert response.status_code == 200, response.text
-    assert response.headers["content-type"] == "image/bmp"
-    assert response.headers["x-frameos-output-format"] == "BMP"
-    assert response.headers["x-frameos-output-width"] == "400"
-    assert response.headers["x-frameos-output-height"] == "240"
-    assert response.headers["x-frameos-frame-width"] == "800"
-    assert response.headers["x-frameos-frame-height"] == "480"
-    assert seen_urls == ["https://gallery.frameos.net/image?category=cute"]
-    with Image.open(io.BytesIO(response.content)) as image:
-        assert image.size == (400, 240)
-        assert image.format == "BMP"
-
-
-@pytest.mark.asyncio
-async def test_media_proxy_honors_bounded_output_size(async_client, no_auth_client, db, monkeypatch):
-    frame = await device_frame(async_client, db)
-    frame.device = 'waveshare.EPD_7in3e'
-    db.add(frame)
-    db.commit()
-
-    async def fake_fetch(url: str) -> bytes:
-        return image_bytes()
-
-    monkeypatch.setattr(embedded_device, "_fetch_embedded_media_source", fake_fetch)
-
-    response = await no_auth_client.get(
-        (
-            f'/api/frames/{frame.id}/embedded/media?url=https://example.com/image.png'
-            '&output_width=300&output_height=200'
-        ),
-        headers=auth(frame),
-    )
-    assert response.status_code == 200, response.text
-    assert response.headers["x-frameos-output-width"] == "300"
-    assert response.headers["x-frameos-output-height"] == "200"
-    with Image.open(io.BytesIO(response.content)) as image:
-        assert image.size == (300, 200)
-        assert image.format == "BMP"
 
 
 @pytest.mark.asyncio

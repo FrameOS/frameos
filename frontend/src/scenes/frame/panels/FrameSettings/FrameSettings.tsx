@@ -1739,13 +1739,6 @@ export function FrameSettings({
           >
             <NumberTextInput name="max_http_response_bytes" placeholder={maxHttpResponsePlaceholder} />
           </Field>
-          <Field
-            name="image_proxy_fallback"
-            label="Image proxy fallback"
-            tooltip="Try direct image downloads first. If decoding or downloading fails, use the backend media proxy only when this is enabled."
-          >
-            <Switch name="image_proxy_fallback" fullWidth />
-          </Field>
           <Field name="scaling_mode" label="Scaling mode">
             <Select
               name="scaling_mode"

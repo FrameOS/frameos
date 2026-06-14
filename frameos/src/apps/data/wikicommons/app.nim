@@ -254,9 +254,6 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.frameConfig.debug:
       self.log(&"Downloading Wikimedia Commons image: {commonsImage.imageUrl}")
 
-    when defined(frameosEmbedded):
-      discard self.refreshEmbeddedServiceSettings()
-
     let (downloadedImage, imageData) =
       when defined(frameosEmbedded):
         let target =
@@ -268,14 +265,12 @@ proc get*(self: App, context: ExecutionContext): Image =
           commonsImage.imageUrl,
           target,
           maxBytes = self.maxImageResponseBytes(),
-          proxyBaseUrl = self.embeddedMediaProxyBaseUrl(),
           headers = imageHeaders()
         )
       else:
         downloadImageWithData(
           commonsImage.imageUrl,
           maxBytes = self.maxImageResponseBytes(),
-          proxyBaseUrl = self.embeddedMediaProxyBaseUrl(),
           headers = imageHeaders()
         )
 

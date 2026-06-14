@@ -47,26 +47,6 @@ proc maxImageResponseBytes*(self: AppRoot): int {.inline.} =
     else:
       DefaultMaxHttpResponseBytes
 
-proc embeddedImageProxyFallbackEnabled*(config: FrameConfig): bool {.inline.} =
-  if config == nil:
-    return false
-  when defined(frameosEmbedded):
-    if config.settings != nil and config.settings{"embedded"}{"imageProxyFallback"}.getBool(false):
-      return true
-  config.imageProxyFallback
-
-proc embeddedMediaProxyBaseUrl*(config: FrameConfig): string {.inline.} =
-  when defined(frameosEmbedded):
-    if config != nil and config.embeddedImageProxyFallbackEnabled() and config.settings != nil:
-      return config.settings{"embedded"}{"mediaProxyBaseUrl"}.getStr()
-  ""
-
-proc embeddedMediaProxyBaseUrl*(self: AppRoot): string {.inline.} =
-  if self != nil:
-    self.frameConfig.embeddedMediaProxyBaseUrl()
-  else:
-    ""
-
 proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true): bool =
   when defined(frameosEmbedded):
     if config == nil:
@@ -87,7 +67,7 @@ proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true): boo
         for key, value in fetched.pairs:
           if key == "embedded" and value.kind == JObject:
             for embeddedKey, embeddedValue in value.pairs:
-              if embeddedKey notin ["mediaProxyBaseUrl", "settingsUrl"]:
+              if embeddedKey != "settingsUrl":
                 embedded[embeddedKey] = embeddedValue
           else:
             config.settings[key] = value

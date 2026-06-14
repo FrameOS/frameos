@@ -41,17 +41,6 @@ suite "frameos app helpers":
     else:
       check maxImageResponseBytes(FrameConfig(maxHttpResponseBytes: 1234)) == 1234
 
-  when defined(frameosEmbedded):
-    test "embedded media proxy URL is gated by image proxy fallback":
-      let config = FrameConfig(
-        imageProxyFallback: false,
-        settings: %*{"embedded": {"mediaProxyBaseUrl": "http://backend/media"}}
-      )
-      check config.embeddedMediaProxyBaseUrl() == ""
-
-      config.settings["embedded"]["imageProxyFallback"] = %true
-      check config.embeddedMediaProxyBaseUrl() == "http://backend/media"
-
   test "cleanFilename strips invalid chars and collapses spaces":
     check cleanFilename("hello   world") == "hello world"
     check cleanFilename("a/b:c*d?e\"f<g>h|i") == "abcdefghi"

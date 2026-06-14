@@ -1,7 +1,7 @@
 """Device-facing endpoints for embedded (ESP32) frames.
 
 The microcontroller authenticates with its ``server_api_key`` as a Bearer
-token (same scheme as ``/api/log``). Three endpoints:
+token (same scheme as ``/api/log``). Device endpoints:
 
 - ``GET /api/frames/{id}/embedded/render`` — a diagnostic thin-client bitmap.
   Normal scenes render on-device via the Nim runtime; this route gives remote
@@ -23,22 +23,14 @@ u16, then the packed payload bytes for that format.
 from __future__ import annotations
 
 import hashlib
-import io
-import ipaddress
 import json
 import os
-import re
-import socket
 import struct
-from asyncio import get_running_loop
 from datetime import datetime, timezone
 from http import HTTPStatus
-from urllib.parse import urljoin, urlparse
 
-import httpx
 from fastapi import Depends, Header, HTTPException
 from fastapi.responses import FileResponse, Response
-from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -62,13 +54,6 @@ from . import api_public
 
 DEFAULT_WIDTH = 800
 DEFAULT_HEIGHT = 480
-EMBEDDED_MEDIA_MAX_SOURCE_BYTES = 16 * 1024 * 1024
-EMBEDDED_MEDIA_TIMEOUT_SECONDS = 45.0
-EMBEDDED_MEDIA_MAX_REDIRECTS = 5
-EMBEDDED_MEDIA_FORMAT = "BMP"
-EMBEDDED_MEDIA_MAX_OUTPUT_WIDTH = 400
-EMBEDDED_MEDIA_MAX_OUTPUT_HEIGHT = 240
-GALLERY_CATEGORY_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 BWYR_PALETTE = [
     (57, 48, 57),
@@ -117,145 +102,6 @@ def embedded_render_dimensions(frame: Frame) -> tuple[int, int]:
     if frame.width and frame.height:
         return int(frame.width), int(frame.height)
     return DEFAULT_WIDTH, DEFAULT_HEIGHT
-
-
-def _validate_embedded_media_url(url: str) -> str:
-    url = (url or "").strip()
-    if not url:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing media URL")
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL must be HTTP or HTTPS")
-    if len(url) > 4096:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL is too long")
-    _reject_private_embedded_media_host(parsed.hostname or "")
-    return url
-
-
-def _is_public_ip_literal(hostname: str) -> bool | None:
-    try:
-        return ipaddress.ip_address(hostname).is_global
-    except ValueError:
-        return None
-
-
-def _reject_private_embedded_media_host(hostname: str) -> None:
-    host = hostname.strip().lower().rstrip(".")
-    if not host:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is missing")
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
-
-    public_literal = _is_public_ip_literal(host)
-    if public_literal is False:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
-
-
-async def _ensure_embedded_media_host_resolves_public(url: str) -> None:
-    parsed = urlparse(url)
-    hostname = parsed.hostname or ""
-    _reject_private_embedded_media_host(hostname)
-    if _is_public_ip_literal(hostname) is not None:
-        return
-
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    loop = get_running_loop()
-    try:
-        infos = await loop.run_in_executor(
-            None,
-            lambda: socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM),
-        )
-    except socket.gaierror as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host could not be resolved") from exc
-
-    addresses = {info[4][0] for info in infos if info and info[4]}
-    if not addresses:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host could not be resolved")
-    if any(not ipaddress.ip_address(address).is_global for address in addresses):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Media URL host is not allowed")
-
-
-async def _fetch_embedded_media_source(url: str) -> bytes:
-    current_url = _validate_embedded_media_url(url)
-    timeout = httpx.Timeout(EMBEDDED_MEDIA_TIMEOUT_SECONDS, connect=10.0)
-    try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            for _ in range(EMBEDDED_MEDIA_MAX_REDIRECTS + 1):
-                await _ensure_embedded_media_host_resolves_public(current_url)
-                async with client.stream("GET", current_url, headers={"Accept-Encoding": "identity"}) as response:
-                    if response.is_redirect:
-                        location = response.headers.get("location")
-                        if not location:
-                            raise HTTPException(
-                                status_code=HTTPStatus.BAD_GATEWAY,
-                                detail="Source image redirect did not include a Location header",
-                            )
-                        current_url = _validate_embedded_media_url(urljoin(str(response.url), location))
-                        continue
-
-                    response.raise_for_status()
-                    chunks: list[bytes] = []
-                    total = 0
-                    async for chunk in response.aiter_bytes():
-                        total += len(chunk)
-                        if total > EMBEDDED_MEDIA_MAX_SOURCE_BYTES:
-                            raise HTTPException(
-                                status_code=HTTPStatus.PAYLOAD_TOO_LARGE,
-                                detail=f"Source image exceeds {EMBEDDED_MEDIA_MAX_SOURCE_BYTES} bytes",
-                            )
-                        chunks.append(chunk)
-                    return b"".join(chunks)
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_GATEWAY,
-                detail=f"Source image exceeded {EMBEDDED_MEDIA_MAX_REDIRECTS} redirects",
-            )
-    except HTTPException:
-        raise
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_GATEWAY,
-            detail=f"Source image request failed with HTTP {exc.response.status_code}",
-        ) from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Source image request failed: {exc}") from exc
-
-
-def _render_embedded_media(image_bytes: bytes, width: int, height: int, fit: str) -> bytes:
-    try:
-        with Image.open(io.BytesIO(image_bytes)) as source:
-            image = ImageOps.exif_transpose(source).convert("RGB")
-            if fit == "contain":
-                contained = ImageOps.contain(image, (width, height), Image.Resampling.LANCZOS)
-                canvas = Image.new("RGB", (width, height), "white")
-                canvas.paste(contained, ((width - contained.width) // 2, (height - contained.height) // 2))
-                image = canvas
-            else:
-                image = ImageOps.fit(image, (width, height), Image.Resampling.LANCZOS, centering=(0.5, 0.5))
-            out = io.BytesIO()
-            image.save(out, format=EMBEDDED_MEDIA_FORMAT)
-            return out.getvalue()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Source image could not be decoded: {exc}") from exc
-
-
-def embedded_media_output_dimensions(
-    frame_width: int,
-    frame_height: int,
-    requested_width: int | None = None,
-    requested_height: int | None = None,
-) -> tuple[int, int]:
-    if requested_width and requested_width > 0 and requested_height and requested_height > 0:
-        return (
-            max(1, min(int(requested_width), frame_width, EMBEDDED_MEDIA_MAX_OUTPUT_WIDTH)),
-            max(1, min(int(requested_height), frame_height, EMBEDDED_MEDIA_MAX_OUTPUT_HEIGHT)),
-        )
-
-    scale = min(
-        EMBEDDED_MEDIA_MAX_OUTPUT_WIDTH / max(1, frame_width),
-        EMBEDDED_MEDIA_MAX_OUTPUT_HEIGHT / max(1, frame_height),
-        1.0,
-    )
-    return max(1, round(frame_width * scale)), max(1, round(frame_height * scale))
 
 
 def _nearest_palette_index(rgb: tuple[int, int, int], palette: list[tuple[int, int, int]]) -> int:
@@ -411,11 +257,7 @@ def embedded_scenes_payload(frame: Frame) -> bytes:
 
 def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     frame_settings = get_frame_json(db, frame).get("settings") or {}
-    payload = {
-        "embedded": {
-            "imageProxyFallback": bool(frame.image_proxy_fallback),
-        },
-    }
+    payload: dict = {}
     if not isinstance(frame_settings, dict):
         return payload
     for key in ("homeAssistant", "openAI", "unsplash"):
@@ -449,46 +291,6 @@ async def api_embedded_device_settings(
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     return embedded_settings_payload(db, frame)
-
-
-@api_public.get("/frames/{id:int}/embedded/media")
-async def api_embedded_device_media(
-    id: int,
-    url: str | None = None,
-    gallery_category: str | None = None,
-    fit: str = "cover",
-    output_width: int | None = None,
-    output_height: int | None = None,
-    db: Session = Depends(get_db),
-    authorization: str = Header(None),
-):
-    frame = _embedded_frame_from_bearer(db, id, authorization)
-    if gallery_category:
-        if not GALLERY_CATEGORY_RE.match(gallery_category):
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid gallery category")
-        source_url = f"https://gallery.frameos.net/image?category={gallery_category}"
-    else:
-        source_url = _validate_embedded_media_url(url or "")
-    source = await _fetch_embedded_media_source(source_url)
-    frame_width, frame_height = embedded_render_dimensions(frame)
-    width, height = embedded_media_output_dimensions(frame_width, frame_height, output_width, output_height)
-    fit_mode = "contain" if fit == "contain" else "cover"
-    content = await get_running_loop().run_in_executor(
-        None, _render_embedded_media, source, width, height, fit_mode
-    )
-    return Response(
-        content=content,
-        media_type="image/bmp",
-        headers={
-            "Cache-Control": "no-store",
-            "X-FrameOS-Source-Bytes": str(len(source)),
-            "X-FrameOS-Output-Format": EMBEDDED_MEDIA_FORMAT,
-            "X-FrameOS-Output-Width": str(width),
-            "X-FrameOS-Output-Height": str(height),
-            "X-FrameOS-Frame-Width": str(frame_width),
-            "X-FrameOS-Frame-Height": str(frame_height),
-        },
-    )
 
 
 @api_public.get("/frames/{id:int}/embedded/ota/manifest")
