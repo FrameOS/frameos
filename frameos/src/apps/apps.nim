@@ -1,9 +1,11 @@
 import frameos/types
+import apps/data/beRecycle/app_loader as data_beRecycle_loader
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
 import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
 import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
+import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
@@ -32,20 +34,14 @@ import apps/render/split/app_loader as render_split_loader
 import apps/render/svg/app_loader as render_svg_loader
 import apps/render/text/app_loader as render_text_loader
 when not defined(frameosEmbedded):
-  # Excluded from embedded builds: some apps spawn child processes,
-  # and some import std/httpclient directly (no std/net on FreeRTOS).
-  import apps/data/beRecycle/app_loader as data_beRecycle_loader
+  # Excluded from embedded builds: these apps depend on host-only
+  # runtime features such as child processes and external binaries.
   import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
-  import apps/data/haSensor/app_loader as data_haSensor_loader
   import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
-  of "data/beRecycle":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
-    else:
-      data_beRecycle_loader.init(node, scene)
+  of "data/beRecycle": data_beRecycle_loader.init(node, scene)
   of "data/chromiumScreenshot":
     when defined(frameosEmbedded):
       raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
@@ -56,11 +52,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/downloadUrl": data_downloadUrl_loader.init(node, scene)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.init(node, scene)
   of "data/frameOSGallery": data_frameOSGallery_loader.init(node, scene)
-  of "data/haSensor":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
-    else:
-      data_haSensor_loader.init(node, scene)
+  of "data/haSensor": data_haSensor_loader.init(node, scene)
   of "data/icalJson": data_icalJson_loader.init(node, scene)
   of "data/localImage": data_localImage_loader.init(node, scene)
   of "data/log": data_log_loader.init(node, scene)
@@ -97,11 +89,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   case keyword:
-  of "data/beRecycle":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
-    else:
-      data_beRecycle_loader.setField(app, field, value)
+  of "data/beRecycle": data_beRecycle_loader.setField(app, field, value)
   of "data/chromiumScreenshot":
     when defined(frameosEmbedded):
       raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
@@ -112,11 +100,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/downloadUrl": data_downloadUrl_loader.setField(app, field, value)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.setField(app, field, value)
   of "data/frameOSGallery": data_frameOSGallery_loader.setField(app, field, value)
-  of "data/haSensor":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
-    else:
-      data_haSensor_loader.setField(app, field, value)
+  of "data/haSensor": data_haSensor_loader.setField(app, field, value)
   of "data/icalJson": data_icalJson_loader.setField(app, field, value)
   of "data/localImage": data_localImage_loader.setField(app, field, value)
   of "data/log": data_log_loader.setField(app, field, value)
@@ -169,11 +153,7 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   case keyword:
-  of "data/beRecycle":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/beRecycle' is not available on embedded builds")
-    else:
-      data_beRecycle_loader.get(app, context)
+  of "data/beRecycle": data_beRecycle_loader.get(app, context)
   of "data/chromiumScreenshot":
     when defined(frameosEmbedded):
       raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
@@ -184,11 +164,7 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/downloadUrl": data_downloadUrl_loader.get(app, context)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.get(app, context)
   of "data/frameOSGallery": data_frameOSGallery_loader.get(app, context)
-  of "data/haSensor":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/haSensor' is not available on embedded builds")
-    else:
-      data_haSensor_loader.get(app, context)
+  of "data/haSensor": data_haSensor_loader.get(app, context)
   of "data/icalJson": data_icalJson_loader.get(app, context)
   of "data/localImage": data_localImage_loader.get(app, context)
   of "data/log": data_log_loader.get(app, context)

@@ -418,7 +418,7 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     }
     if not isinstance(frame_settings, dict):
         return payload
-    for key in ("openAI", "unsplash"):
+    for key in ("homeAssistant", "openAI", "unsplash"):
         value = frame_settings.get(key)
         if isinstance(value, dict):
             payload[key] = value
@@ -505,6 +505,7 @@ async def api_embedded_device_ota_manifest(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No OTA image available")
     return {
         "sha256": firmware.get("otaSha256"),
+        "elfSha256": firmware.get("otaElfSha256"),
         "size": firmware.get("otaSize"),
         "firmwareVersion": firmware.get("firmwareVersion"),
     }

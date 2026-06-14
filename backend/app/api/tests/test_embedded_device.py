@@ -166,6 +166,7 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
         'nodes': [
             {'type': 'app', 'data': {'keyword': 'data/openaiImage'}},
             {'type': 'app', 'data': {'keyword': 'data/unsplash'}},
+            {'type': 'app', 'data': {'keyword': 'data/haSensor'}},
         ],
         'edges': [],
         'settings': {'refreshInterval': 60},
@@ -184,6 +185,7 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
     assert response.status_code == 200, response.text
     assert response.json() == {
         'embedded': {'imageProxyFallback': False},
+        'homeAssistant': {'accessToken': 'not-for-esp'},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
@@ -326,6 +328,7 @@ async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, 
         'path': str(ota_file),
         'otaPath': str(ota_file),
         'otaSha256': 'ab' * 32,
+        'otaElfSha256': 'cd' * 32,
         'otaSize': ota_file.stat().st_size,
         'panel': embedded_panel_for_frame(frame),
         'configHash': embedded_firmware_config_hash(frame),
@@ -339,6 +342,7 @@ async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, 
     assert response.status_code == 200, response.text
     manifest = response.json()
     assert manifest['sha256'] == 'ab' * 32
+    assert manifest['elfSha256'] == 'cd' * 32
     assert manifest['size'] == ota_file.stat().st_size
 
     response = await no_auth_client.get(

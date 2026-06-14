@@ -6,6 +6,7 @@ import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
   ChevronRightIcon,
+  CloudArrowUpIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
   XMarkIcon,
@@ -1058,10 +1059,12 @@ function EmbeddedFirmwareSection({
   frame,
   onBack,
   onDownload,
+  onOtaUpdate,
 }: {
   frame: FrameType
   onBack?: () => void
   onDownload: () => void
+  onOtaUpdate: () => void
 }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const firmware = frame.embedded?.firmware
@@ -1103,6 +1106,24 @@ function EmbeddedFirmwareSection({
           on demand, so the first flash can take a minute.
         </div>
         <EmbeddedWebFlasher frame={frame} />
+      </div>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+            <div className="frame-tool-muted mt-1 text-sm leading-5">
+              Build the latest app image, then ask the frame to pull it from this backend and reboot.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOtaUpdate}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            {building ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+            {building ? 'Finish build & update' : 'Update over the air'}
+          </button>
+        </div>
       </div>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
@@ -1161,7 +1182,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
-  const { cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } = useActions(framesModel)
+  const { applyEmbeddedFirmwareOta, cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } =
+    useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
@@ -1255,6 +1277,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
               onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
+              onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
             />
           ) : activeDeployDrawerView === 'sdCard' ? (
             <BuildrootSdCardSection
@@ -1390,7 +1413,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   onClick={() => setDeployDrawerView('embedded')}
                   className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
-                  Flash firmware
+                  Firmware
                 </button>
               ) : (
                 <button

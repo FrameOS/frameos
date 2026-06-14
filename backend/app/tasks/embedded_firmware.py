@@ -43,7 +43,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 20  # Size-tuned default image: shared Ubuntu font + trimmed diagnostics
+EMBEDDED_FIRMWARE_VERSION = 21  # 8MB OTA A/B layout with 1MB state partition
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -496,8 +496,12 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
                 "error": "The generated firmware was built from older embedded frame settings",
             }
     path = firmware.get("path")
-    if firmware.get("status") == "ready" and isinstance(path, str) and not Path(path).is_file():
-        return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
+    if firmware.get("status") == "ready":
+        if not isinstance(path, str) or not Path(path).is_file():
+            return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
+        ota_path = firmware.get("otaPath")
+        if not isinstance(ota_path, str) or not Path(ota_path).is_file():
+            return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
     return firmware
 
 
@@ -713,6 +717,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     ota_bin = build_dir / "frameos_esp32.bin"
     if not ota_bin.is_file():
         raise ValueError(f"Build succeeded but {ota_bin} was not produced")
+    ota_elf = build_dir / "frameos_esp32.elf"
+    if not ota_elf.is_file():
+        raise ValueError(f"Build succeeded but {ota_elf} was not produced")
 
     artifact_dir = embedded_artifact_dir()
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -741,6 +748,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "otaPath": str(ota_artifact_path),
         "otaSize": ota_artifact_path.stat().st_size,
         "otaSha256": _sha256(ota_artifact_path),
+        "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
         "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",

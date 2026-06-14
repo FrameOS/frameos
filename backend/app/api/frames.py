@@ -2689,6 +2689,39 @@ async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(ge
     return FileResponse(path, media_type="application/octet-stream", filename=filename)
 
 
+@api_project.post("/frames/{id:int}/embedded/firmware/ota")
+async def api_frame_embedded_firmware_ota(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("OTA updates are only available for embedded frames")
+
+    firmware = await refresh_embedded_firmware_status(db, redis, frame)
+    ota_path = firmware.get("otaPath") if isinstance(firmware, dict) else None
+    if not firmware or firmware.get("status") != "ready":
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready OTA firmware image for this frame")
+    if not isinstance(ota_path, str) or not os.path.isfile(ota_path):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated OTA firmware file not found")
+
+    try:
+        device_payload = await _forward_frame_request(frame, redis, path="/api/action/ota", method="POST")
+    except HTTPException:
+        await log(db, redis, id, "stderr", "Failed to request ESP32 OTA update")
+        raise
+
+    await log(db, redis, id, "stdout", "Requested ESP32 OTA update")
+    return {
+        "message": "OTA update requested",
+        "firmware": firmware,
+        "device": device_payload,
+    }
+
+
 @api_project.get("/frames/{id:int}/deploy_plan")
 async def api_frame_deploy_plan(
     id: int,

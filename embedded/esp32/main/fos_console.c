@@ -12,6 +12,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "fos_battery.h"
 #include "fos_client.h"
@@ -270,9 +271,17 @@ esp_err_t fos_console_start(void)
     repl_config.max_cmdline_length = 512;
     repl_config.task_stack_size = 8192;
 
+    esp_err_t err = ESP_OK;
+#if CONFIG_ESP_CONSOLE_UART
+    esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    err = esp_console_new_repl_uart(&hw_config, &repl_config, &repl);
+#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     esp_console_dev_usb_serial_jtag_config_t hw_config =
         ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
-    esp_err_t err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
+    err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
+#else
+    err = ESP_ERR_NOT_SUPPORTED;
+#endif
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
         return err;

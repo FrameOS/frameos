@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.models.frame import Frame
 from app.tasks.embedded_firmware import (
@@ -125,6 +125,7 @@ async def test_firmware_endpoints_reject_non_embedded_frames(async_client):
         ('GET', f'/api/frames/{frame_id}/embedded/firmware'),
         ('POST', f'/api/frames/{frame_id}/embedded/firmware'),
         ('GET', f'/api/frames/{frame_id}/embedded/firmware/download'),
+        ('POST', f'/api/frames/{frame_id}/embedded/firmware/ota'),
     ]:
         response = await async_client.request(method, url)
         assert response.status_code == 400, url
@@ -173,6 +174,10 @@ async def test_firmware_download(async_client, db, tmp_path):
             'path': str(artifact),
             'panel': 'EPD_7in5_V2',
             'configHash': embedded_firmware_config_hash(stored),
+            'otaPath': str(artifact),
+            'otaSha256': 'ab' * 32,
+            'otaElfSha256': 'cd' * 32,
+            'otaSize': artifact.stat().st_size,
         },
     }
     db.add(stored)
@@ -224,6 +229,54 @@ async def test_firmware_download_missing_artifact(async_client, db):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_firmware_ota_requires_ready_artifact(async_client):
+    frame = await create_embedded_frame(async_client)
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_firmware_ota_requests_device_update(async_client, db, tmp_path):
+    frame = await create_embedded_frame(async_client)
+
+    artifact = tmp_path / 'frameos-esp32-s3.bin'
+    ota_artifact = tmp_path / 'frameos-esp32-s3-ota.bin'
+    artifact.write_bytes(b'flash-image')
+    ota_artifact.write_bytes(b'\xe9ota-image')
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {
+        'platform': 'esp32-s3',
+        'firmware': {
+            'status': 'ready',
+            'platform': 'esp32-s3',
+            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+            'filename': 'frameos-esp32-s3.bin',
+            'path': str(artifact),
+            'size': artifact.stat().st_size,
+            'sha256': '11' * 32,
+            'panel': 'EPD_7in5_V2',
+            'configHash': embedded_firmware_config_hash(stored),
+            'otaPath': str(ota_artifact),
+            'otaSha256': '22' * 32,
+            'otaElfSha256': '33' * 32,
+            'otaSize': ota_artifact.stat().st_size,
+        },
+    }
+    db.add(stored)
+    db.commit()
+
+    with patch('app.api.frames._forward_frame_request', new_callable=AsyncMock) as forward:
+        forward.return_value = {'ok': True}
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+
+    assert response.status_code == 200, response.text
+    assert response.json()['message'] == 'OTA update requested'
+    forward.assert_awaited_once()
+    assert forward.await_args.kwargs['path'] == '/api/action/ota'
+    assert forward.await_args.kwargs['method'] == 'POST'
 
 
 # --- M4: panel matrix, memory guardrails, power-setting baking --------------

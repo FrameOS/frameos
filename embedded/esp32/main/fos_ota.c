@@ -7,6 +7,7 @@
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
+#include "esp_app_desc.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
@@ -19,9 +20,21 @@
 static const char *TAG = "fos_ota";
 static char s_auth_header[FOS_STR_LEN + 16];
 
+typedef struct {
+    char sha[80];
+    char elf_sha[80];
+} ota_manifest_t;
+
 static bool ota_supported(void)
 {
     return esp_ota_get_next_update_partition(NULL) != NULL;
+}
+
+static bool elf_sha_matches_manifest(const char *running_elf_sha, const char *manifest_elf_sha)
+{
+    size_t running_len = strlen(running_elf_sha);
+    if (running_len < 8 || running_len > strlen(manifest_elf_sha)) return false;
+    return strncmp(running_elf_sha, manifest_elf_sha, running_len) == 0;
 }
 
 static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
@@ -63,8 +76,8 @@ static void store_applied_sha(const char *sha)
     nvs_close(nvs);
 }
 
-/* GET the manifest; returns the artifact sha256 in `sha` or an error. */
-static esp_err_t fetch_manifest_sha(const fos_config_t *config, char *sha, size_t sha_len)
+/* GET the manifest; returns the app artifact hash and the built ELF hash. */
+static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *manifest)
 {
     char url[FOS_URL_LEN + 96];
     snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/ota/manifest",
@@ -79,6 +92,8 @@ static esp_err_t fetch_manifest_sha(const fos_config_t *config, char *sha, size_
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (!client) return ESP_FAIL;
     esp_http_client_set_header(client, "Authorization", s_auth_header);
+    manifest->sha[0] = '\0';
+    manifest->elf_sha[0] = '\0';
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -87,7 +102,7 @@ static esp_err_t fetch_manifest_sha(const fos_config_t *config, char *sha, size_
     }
     esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
-    char body[512];
+    char body[768];
     int read = esp_http_client_read(client, body, sizeof(body) - 1);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
@@ -104,7 +119,11 @@ static esp_err_t fetch_manifest_sha(const fos_config_t *config, char *sha, size_
         cJSON_Delete(json);
         return ESP_FAIL;
     }
-    strlcpy(sha, sha_item->valuestring, sha_len);
+    strlcpy(manifest->sha, sha_item->valuestring, sizeof(manifest->sha));
+    const cJSON *elf_sha_item = cJSON_GetObjectItem(json, "elfSha256");
+    if (cJSON_IsString(elf_sha_item) && strlen(elf_sha_item->valuestring) >= 32) {
+        strlcpy(manifest->elf_sha, elf_sha_item->valuestring, sizeof(manifest->elf_sha));
+    }
     cJSON_Delete(json);
     return ESP_OK;
 }
@@ -126,30 +145,52 @@ esp_err_t fos_ota_check_and_apply(void)
     }
     snprintf(s_auth_header, sizeof(s_auth_header), "Bearer %s", config->api_key);
 
-    char manifest_sha[80];
-    esp_err_t err = fetch_manifest_sha(config, manifest_sha, sizeof(manifest_sha));
+    ota_manifest_t manifest;
+    esp_err_t err = fetch_manifest(config, &manifest);
     if (err != ESP_OK) {
         return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
     }
 
+    char running_elf_sha[80];
+    running_elf_sha[0] = '\0';
+    esp_app_get_elf_sha256(running_elf_sha, sizeof(running_elf_sha));
+
     char applied_sha[80];
-    if (load_applied_sha(applied_sha, sizeof(applied_sha)) != ESP_OK || !applied_sha[0]) {
-        /* First contact after a USB flash: assume the running image is the
-         * latest backend build and just record it. */
-        ESP_LOGI(TAG, "recording current OTA baseline %.*s…", 12, manifest_sha);
-        store_applied_sha(manifest_sha);
+    bool has_applied_sha = load_applied_sha(applied_sha, sizeof(applied_sha)) == ESP_OK && applied_sha[0];
+    bool manifest_has_elf_sha = manifest.elf_sha[0] != '\0';
+    bool running_matches_manifest = manifest_has_elf_sha &&
+        running_elf_sha[0] != '\0' &&
+        elf_sha_matches_manifest(running_elf_sha, manifest.elf_sha);
+
+    if (running_matches_manifest) {
+        if (!has_applied_sha || strcmp(applied_sha, manifest.sha) != 0) {
+            ESP_LOGI(TAG, "recording current OTA baseline %.*s…", 12, manifest.sha);
+            store_applied_sha(manifest.sha);
+        } else {
+            ESP_LOGI(TAG, "firmware up to date (%.*s…)", 12, manifest.sha);
+        }
         return ESP_OK;
     }
-    if (strcmp(applied_sha, manifest_sha) == 0) {
-        ESP_LOGI(TAG, "firmware up to date (%.*s…)", 12, manifest_sha);
+
+    if (!manifest_has_elf_sha && has_applied_sha && strcmp(applied_sha, manifest.sha) == 0) {
+        ESP_LOGI(TAG, "firmware up to date (%.*s…)", 12, manifest.sha);
+        return ESP_OK;
+    }
+    if (manifest_has_elf_sha && !running_elf_sha[0] &&
+        has_applied_sha && strcmp(applied_sha, manifest.sha) == 0) {
+        ESP_LOGW(TAG, "running ELF hash unavailable; trusting stored OTA baseline %.*s…", 12, manifest.sha);
         return ESP_OK;
     }
 
     char url[FOS_URL_LEN + 96];
     snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/ota/download",
              config->backend_url, (unsigned long)config->frame_id);
-    ESP_LOGI(TAG, "updating %.*s… -> %.*s… from %s",
-             12, applied_sha, 12, manifest_sha, url);
+    if (has_applied_sha) {
+        ESP_LOGI(TAG, "updating %.*s… -> %.*s… from %s",
+                 12, applied_sha, 12, manifest.sha, url);
+    } else {
+        ESP_LOGI(TAG, "applying OTA image %.*s… from %s", 12, manifest.sha, url);
+    }
 
     esp_http_client_config_t http_config = {
         .url = url,
@@ -182,7 +223,7 @@ esp_err_t fos_ota_check_and_apply(void)
         ESP_LOGE(TAG, "OTA finish failed: %s", esp_err_to_name(err));
         return err;
     }
-    store_applied_sha(manifest_sha);
+    store_applied_sha(manifest.sha);
     ESP_LOGI(TAG, "OTA update applied, rebooting into new image");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();

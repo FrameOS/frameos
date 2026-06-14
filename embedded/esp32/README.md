@@ -7,9 +7,9 @@ vendor drivers the Raspberry Pi build uses, and can alternatively run as a thin
 client fetching backend-rendered bitmaps.
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
-The default 8MB profile disables OTA updates and uses one 7744K app slot,
-leaving a 384K state partition. Production 16MB modules can use the optional
-OTA profile with two 7872K app slots and 512K state.
+The default 8MB profile supports OTA updates with two 3520K app slots and a
+1M SPIFFS state partition for scenes/user data. Production 16MB modules can
+use the optional OTA profile with two 7872K app slots and 512K state.
 
 ## Layout
 
@@ -30,7 +30,7 @@ components/
                           configure time and wrapped from generated metadata
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent
-partitions.csv            8MB: nvs + phy + factory app (7744K) + state
+partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (7872K each) + state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 ```
@@ -72,6 +72,17 @@ serves and the browser flasher writes):
 ```bash
 esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash 0x0 merged-binary.bin
 ```
+
+CI uses the same full-image path, including Nim runtime generation, ESP-IDF
+`build merge-bin`, partition/size checks, and an optional QEMU boot smoke:
+
+```bash
+FRAMEOS_ESP32_QEMU=1 bash embedded/esp32/ci_build_image.sh
+```
+
+With `FRAMEOS_ESP32_QEMU=1`, the script adds `sdkconfig.qemu.defaults` to route
+logs to UART0 and avoid QEMU's PSRAM path; the default build profile remains
+USB Serial/JTAG with octal PSRAM enabled.
 
 ## First boot and provisioning
 
@@ -144,11 +155,13 @@ native ESP-IDF HTTPS on the configured `https_proxy.port` (8443 by default).
 
 ## OTA
 
-The default 8MB flash profile has no inactive app partition, so OTA checks are
-disabled at runtime and firmware is updated by USB/browser flashing the merged
-image. This reclaims almost 4MB for the app binary.
+The default 8MB flash profile has an A/B OTA partition table: two 3520K app
+slots (about 3.44MiB each) and a 1M `/state` SPIFFS partition at the end of
+flash for scenes and other user data. The current size-tuned firmware fits in
+either OTA slot, so devices can update through `esp_https_ota` instead of only
+USB/browser flashing the merged image.
 
-For production 16MB flash, build with the optional OTA defaults:
+For production 16MB flash, build with the optional larger OTA defaults:
 
 ```bash
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.16mb-ota" \

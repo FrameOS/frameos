@@ -1,0 +1,14 @@
+# QEMU captures UART0 with `idf.py qemu -serial mon:stdio`; the production
+# XIAO ESP32-S3 default remains USB Serial/JTAG in sdkconfig.defaults.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+
+# Keep the normal firmware quiet, but make the QEMU smoke observable enough to
+# prove the bootloader selected ota_0 and app_main reached FrameOS startup.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# The shipping profile uses octal PSRAM. QEMU's ESP32-S3 support is useful for
+# a boot smoke, but keeping PSRAM out of the emulated build lets app_main run
+# far enough to verify the FrameOS startup path instead of hanging after the
+# bootloader loads the OTA image.
+# CONFIG_SPIRAM is not set

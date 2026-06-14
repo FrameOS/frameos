@@ -64,12 +64,12 @@ proc run*(self: App, context: ExecutionContext) =
 
 
 def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
-    app_dir = tmp_path / "src" / "apps" / "data" / "haSensor"
+    app_dir = tmp_path / "src" / "apps" / "data" / "rstpSnapshot"
     app_dir.mkdir(parents=True)
     (app_dir / "config.json").write_text(
         """
 {
-  "name": "Home Assistant Sensor",
+  "name": "RTSP Snapshot",
   "category": "data",
   "fields": []
 }
@@ -80,6 +80,6 @@ def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
     apps_nim = write_apps_nim(str(tmp_path))
 
     assert "when not defined(frameosEmbedded):" in apps_nim
-    assert "  import apps/data/haSensor/app_loader as data_haSensor_loader" in apps_nim
-    assert 'of "data/haSensor":\n    when defined(frameosEmbedded):' in apps_nim
-    assert "App 'data/haSensor' is not available on embedded builds" in apps_nim
+    assert "  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader" in apps_nim
+    assert 'of "data/rstpSnapshot":\n    when defined(frameosEmbedded):' in apps_nim
+    assert "App 'data/rstpSnapshot' is not available on embedded builds" in apps_nim

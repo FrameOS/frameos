@@ -77,8 +77,13 @@ RUN apt-get update \
       flex \
       git \
       gperf \
+      libgcrypt20 \
       libffi-dev \
+      libglib2.0-0 \
+      libpixman-1-0 \
+      libsdl2-2.0-0 \
       libssl-dev \
+      libslirp0 \
       libusb-1.0-0 \
       ninja-build \
       python3 \
@@ -96,8 +101,10 @@ RUN set -eux; \
     git clone --depth 1 --branch "${ESP_IDF_VERSION}" --recursive --shallow-submodules \
       https://github.com/espressif/esp-idf.git "${IDF_PATH}"; \
     "${IDF_PATH}/install.sh" "${ESP_IDF_TARGET}"; \
+    python "${IDF_PATH}/tools/idf_tools.py" install qemu-xtensa; \
     . "${IDF_PATH}/export.sh" >/dev/null 2>&1; \
     idf.py --version; \
+    qemu-system-xtensa --version; \
     rm -rf "${IDF_TOOLS_PATH}/dist"
 
 FROM nim-toolchain AS app-builder
@@ -159,6 +166,13 @@ RUN set -eux; \
     tar -xf /tmp/quickjs-source.tar.xz -C /tmp/quickjs-source; \
     quickjs_source_root="/tmp/quickjs-source/quickjs-${QUICKJS_VERSION}"; \
     make -C "${quickjs_source_root}" qjs libquickjs.a; \
+    for quickjs_file in \
+      LICENSE VERSION \
+      quickjs.c dtoa.c libregexp.c libunicode.c cutils.c \
+      quickjs.h quickjs-libc.h cutils.h list.h dtoa.h libregexp.h libregexp-opcode.h libunicode.h libunicode-table.h quickjs-atom.h quickjs-opcode.h; \
+    do \
+      cp -a "${quickjs_source_root}/${quickjs_file}" "/app/frameos/quickjs/${quickjs_file}"; \
+    done; \
     cp -a "${quickjs_source_root}/quickjs.h" /app/frameos/quickjs/quickjs.h; \
     cp -a "${quickjs_source_root}/quickjs-libc.h" /app/frameos/quickjs/quickjs-libc.h; \
     cp -a "${quickjs_source_root}/quickjs.h" /app/frameos/quickjs/include/quickjs/quickjs.h; \
@@ -244,8 +258,13 @@ RUN set -eux; \
       gnupg \
       gperf \
       iputils-ping \
+      libgcrypt20 \
       libffi-dev \
+      libglib2.0-0 \
+      libpixman-1-0 \
+      libsdl2-2.0-0 \
       libssl-dev \
+      libslirp0 \
       libusb-1.0-0 \
       mtools \
       ninja-build \
@@ -268,6 +287,8 @@ COPY --from=nim-toolchain /opt/nim /opt/nim
 COPY --from=esp-idf-toolchain /opt/esp /opt/esp
 COPY --from=app-builder /root/.nimble /root/.nimble
 COPY --from=python-deps /app/backend/.venv /app/backend/.venv
+
+RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
 
 COPY docker-entrypoint.sh versions.json ./
 COPY backend backend

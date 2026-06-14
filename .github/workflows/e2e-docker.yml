@@ -20,6 +20,19 @@ jobs:
         run: |
           docker build -t frameos .
 
+      - name: Build and boot ESP32 firmware image
+        timeout-minutes: 60
+        run: |
+          docker run --rm \
+            -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            frameos \
+            bash -lc '
+              set -euo pipefail
+              bash embedded/esp32/ci_build_image.sh
+              FRAMEOS_ESP32_QEMU=1 FRAMEOS_ESP32_BUILD_DIR=build-ci-qemu \
+                bash embedded/esp32/ci_build_image.sh
+            '
+
       - name: Run Docker container
         run: |
           docker run -d \

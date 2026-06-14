@@ -7,20 +7,21 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # CONFIG_APP_COMPILE_TIME_DATE is not set
+CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
 # CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
 # CONFIG_MBEDTLS_ERROR_STRINGS is not set
 
-# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), no-OTA layout.
-# A single 7744K app slot leaves room for the Nim + QuickJS runtime and
-# multi-format image decoding on small modules. Production 16MB builds can use
-# partitions_ota_16mb.csv to restore A/B rollback with two 7872K app slots.
+# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
+# The default table gives each OTA slot 3520K (3.44MiB) and keeps a 1M
+# SPIFFS state partition for scenes/user data. Production 16MB builds can use
+# partitions_ota_16mb.csv for two 7872K app slots.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# OTA rollback is disabled in the default 8MB profile because there is no
-# inactive app partition. fos_ota.c detects this and no-ops OTA checks.
-# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set
+# OTA rollback: a freshly updated image must mark itself valid after booting,
+# otherwise the bootloader rolls back to the previous slot on the next reset.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # 8MB octal PSRAM (XIAO ESP32-S3). Big allocations (framebuffers, Nim heap)
 # go to PSRAM via malloc; small/hot ones stay in internal SRAM.

@@ -765,6 +765,7 @@ export interface FrameEmbeddedConfig {
     panel?: string
     otaPath?: string
     otaSha256?: string
+    otaElfSha256?: string
     otaSize?: number
     queuedAt?: string
     startedAt?: string

@@ -9,14 +9,12 @@ export interface CompatibilityResult {
 const supported: CompatibilityResult = { supported: true }
 
 const embeddedUnavailableApps: Record<string, string> = {
-  'data/beRecycle': 'Uses Nim std/httpclient networking that is not ported to ESP32 yet.',
   'data/chromiumScreenshot': 'Requires Playwright/Chromium and child processes.',
-  'data/haSensor': 'Requires Home Assistant service settings that are not available in ESP32 firmware.',
   'data/localImage': 'Requires local assets or mounted files, which ESP32 frames do not support yet.',
   'data/rstpSnapshot': 'Requires FFmpeg and child processes.',
 }
 
-const embeddedIgnoredSettings = new Set(['frameOS', 'openAI', 'unsplash'])
+const embeddedIgnoredSettings = new Set(['frameOS', 'homeAssistant', 'openAI', 'unsplash'])
 
 function unsupported(reason: string): CompatibilityResult {
   return { supported: false, reason }

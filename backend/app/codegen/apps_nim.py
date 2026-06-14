@@ -9,9 +9,7 @@ from typing import Optional
 # from ..models.apps import get_apps_from_scenes
 
 EMBEDDED_UNAVAILABLE_APPS = {
-    "data/beRecycle",
     "data/chromiumScreenshot",
-    "data/haSensor",
     "data/rstpSnapshot",
 }
 
@@ -153,8 +151,8 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
 
     if embedded_unavailable_imports:
         imports.append("when not defined(frameosEmbedded):")
-        imports.append("  # Excluded from embedded builds: some apps spawn child processes,")
-        imports.append("  # and some import std/httpclient directly (no std/net on FreeRTOS).")
+        imports.append("  # Excluded from embedded builds: these apps depend on host-only")
+        imports.append("  # runtime features such as child processes and external binaries.")
         imports.extend(f"  {import_line}" for import_line in embedded_unavailable_imports)
 
     # 2) case branches

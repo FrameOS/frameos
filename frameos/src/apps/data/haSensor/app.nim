@@ -1,4 +1,4 @@
-import json, strformat, options, strutils, times, httpclient
+import json, strformat, options, strutils, times
 import frameos/apps
 import frameos/types
 import frameos/runtime_diagnostics
@@ -45,12 +45,12 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   if self.json.isSome and self.lastFetchAt + MinimumFetchIntervalSeconds > epochTime():
     return copy(self.json.get())
 
-  let headers = newHttpHeaders([
-        ("Authorization", "Bearer " & accessToken),
-        ("Accept", "application/json"),
-        ("Accept-Encoding", "identity"),
-        ("Connection", "close")
-  ])
+  let headers: seq[SimpleHttpHeader] = @[
+    (name: "Authorization", value: "Bearer " & accessToken),
+    (name: "Accept", value: "application/json"),
+    (name: "Accept-Encoding", value: "identity"),
+    (name: "Connection", value: "close"),
+  ]
   var slashlessUrl = haUrl
   slashlessUrl.removeSuffix("/")
   let url = &"{slashlessUrl}/api/states/{self.appConfig.entityId}"
@@ -58,11 +58,14 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     self.log("Fetching Home Assistant status from " & url)
 
   try:
-    let responseBody = boundedGetContent(url,
+    let response = boundedRequestWithHeaders(url,
       headers = headers,
       timeoutMs = RequestTimeoutMs,
       maxBytes = self.maxHttpResponseBytes(),
       maxSeconds = MaxResponseSeconds)
+    if response.code >= 400:
+      return self.error "Error fetching Home Assistant status: HTTP " & response.status & ": " & response.body
+    let responseBody = response.body
     let responseJson = parseJson(responseBody)
     self.json = some(copy(responseJson))
     self.lastFetchAt = epochTime()
