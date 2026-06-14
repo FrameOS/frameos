@@ -560,7 +560,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
-        "imageProxyFallback": bool(frame.image_proxy_fallback),
+        "imageProxyFallback": bool(getattr(frame, "image_proxy_fallback", False)),
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
         "imageEngine": frame.image_engine or "",
