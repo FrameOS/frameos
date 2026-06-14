@@ -8,6 +8,13 @@ from typing import Optional
 # from ..models.frame import Frame
 # from ..models.apps import get_apps_from_scenes
 
+EMBEDDED_UNAVAILABLE_APPS = {
+    "data/beRecycle",
+    "data/chromiumScreenshot",
+    "data/haSensor",
+    "data/rstpSnapshot",
+}
+
 
 def _alias_from_id(app_id: str) -> str:
     """
@@ -78,6 +85,22 @@ def _app_capabilities(app_dir: Path, config: dict) -> set[str]:
     return capabilities
 
 
+def _app_call_case(app_id: str, call: str) -> str:
+    if app_id not in EMBEDDED_UNAVAILABLE_APPS:
+        return f'  of "{app_id}": {call}'
+
+    error = f"App '{app_id}' is not available on embedded builds"
+    return "\n".join(
+        [
+            f'  of "{app_id}":',
+            "    when defined(frameosEmbedded):",
+            f'      raise newException(ValueError, "{error}")',
+            "    else:",
+            f"      {call}",
+        ]
+    )
+
+
 def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
     Generate src/apps/apps.nim with a registry covering all discovered apps.
@@ -108,6 +131,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     imports: list[str] = [
         "import frameos/types",
     ]
+    embedded_unavailable_imports: list[str] = []
     used_aliases: set[str] = set()
     items = []
 
@@ -120,8 +144,18 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
             alias = f"{alias_base}_{n}"
             n += 1
         used_aliases.add(alias)
-        imports.append(f"import {mod} as {alias}")
+        import_line = f"import {mod} as {alias}"
+        if app_id in EMBEDDED_UNAVAILABLE_APPS:
+            embedded_unavailable_imports.append(import_line)
+        else:
+            imports.append(import_line)
         items.append((app_id, alias, app_capabilities.get(app_id, set())))
+
+    if embedded_unavailable_imports:
+        imports.append("when not defined(frameosEmbedded):")
+        imports.append("  # Excluded from embedded builds: some apps spawn child processes,")
+        imports.append("  # and some import std/httpclient directly (no std/net on FreeRTOS).")
+        imports.extend(f"  {import_line}" for import_line in embedded_unavailable_imports)
 
     # 2) case branches
     init_cases = []
@@ -130,13 +164,13 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     get_cases  = []
 
     for app_id, alias, capabilities in items:
-        init_cases.append(f'  of "{app_id}": {alias}.init(node, scene)')
-        set_cases.append(f'  of "{app_id}": {alias}.setField(app, field, value)')
+        init_cases.append(_app_call_case(app_id, f"{alias}.init(node, scene)"))
+        set_cases.append(_app_call_case(app_id, f"{alias}.setField(app, field, value)"))
 
         if "run" in capabilities:
-            run_cases.append(f'  of "{app_id}": {alias}.run(app, context)')
+            run_cases.append(_app_call_case(app_id, f"{alias}.run(app, context)"))
         if "get" in capabilities:
-            get_cases.append(f'  of "{app_id}": {alias}.get(app, context)')
+            get_cases.append(_app_call_case(app_id, f"{alias}.get(app, context)"))
 
     init_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')
     set_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')

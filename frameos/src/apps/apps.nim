@@ -19,14 +19,6 @@ import apps/data/unsplash/app_loader as data_unsplash_loader
 import apps/data/weather/app_loader as data_weather_loader
 import apps/data/wikicommons/app_loader as data_wikicommons_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
-when not defined(frameosEmbedded):
-  # Excluded from the embedded build: chromiumScreenshot/rstpSnapshot spawn
-  # child processes; the rest import std/httpclient directly (no std/net on
-  # FreeRTOS — porting them to utils/http_client would bring them back).
-  import apps/data/beRecycle/app_loader as data_beRecycle_loader
-  import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
-  import apps/data/haSensor/app_loader as data_haSensor_loader
-  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
@@ -39,6 +31,13 @@ import apps/render/opacity/app_loader as render_opacity_loader
 import apps/render/split/app_loader as render_split_loader
 import apps/render/svg/app_loader as render_svg_loader
 import apps/render/text/app_loader as render_text_loader
+when not defined(frameosEmbedded):
+  # Excluded from embedded builds: some apps spawn child processes,
+  # and some import std/httpclient directly (no std/net on FreeRTOS).
+  import apps/data/beRecycle/app_loader as data_beRecycle_loader
+  import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
+  import apps/data/haSensor/app_loader as data_haSensor_loader
+  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
