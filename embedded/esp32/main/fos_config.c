@@ -31,6 +31,10 @@ static void load_defaults(void)
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
+    s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
+    s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
+    strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
+    strlcpy(s_config.tls_server_key, FRAMEOS_DEFAULT_TLS_SERVER_KEY, sizeof(s_config.tls_server_key));
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
@@ -106,6 +110,8 @@ esp_err_t fos_config_init(void)
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
+    if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
+    if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
     int8_t i8;
@@ -116,10 +122,11 @@ esp_err_t fos_config_init(void)
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s buttons=%u wifi=%s backend=%s",
+    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u buttons=%u wifi=%s backend=%s",
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
              (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
+             s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
              (unsigned)s_config.gpio_button_count,
              s_config.wifi_ssid[0] ? s_config.wifi_ssid : "(unset)",
              s_config.backend_url[0] ? s_config.backend_url : "(unset)");
@@ -143,6 +150,8 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
+    nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
+    nvs_set_u32(nvs, "tls_port", s_config.tls_port);
     nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
     nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);
     nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);

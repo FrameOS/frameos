@@ -15,6 +15,7 @@
 
 #define FOS_STR_LEN 128
 #define FOS_URL_LEN 256
+#define FOS_TLS_PEM_LEN 4096
 #define FOS_GPIO_BUTTONS_MAX 8
 #define FOS_GPIO_BUTTON_LABEL_LEN 32
 #define FOS_GPIO_BUTTONS_SPEC_LEN 384
@@ -52,6 +53,10 @@ typedef struct {
     uint32_t interval_sec;         /* refresh interval */
     uint32_t max_http_response_bytes;
     bool server_send_logs;         /* upload runtime/render logs to backend */
+    bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
+    uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
+    char tls_server_cert[FOS_TLS_PEM_LEN];
+    char tls_server_key[FOS_TLS_PEM_LEN];
     bool deep_sleep;               /* deep sleep between refreshes */
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */

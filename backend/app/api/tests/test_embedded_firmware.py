@@ -47,7 +47,11 @@ async def test_new_embedded_frame(async_client):
     assert frame['mode'] == 'embedded'
     assert frame['embedded']['platform'] == 'esp32-s3'
     assert frame['agent']['agentEnabled'] is False
-    assert frame['https_proxy']['enable'] is False
+    assert frame['https_proxy']['enable'] is True
+    assert frame['https_proxy']['port'] == 8443
+    assert 'BEGIN CERTIFICATE' in frame['https_proxy']['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in frame['https_proxy']['certs']['server_key']
+    assert 'BEGIN CERTIFICATE' in frame['https_proxy']['certs']['client_ca']
     assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame['device_config']['pins']['cs'] == 3
     assert frame['device_config']['pins']['cs2'] == -1
@@ -87,7 +91,10 @@ async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     assert stored.mode == 'embedded'
     assert stored.embedded['platform'] == 'esp32-s3'
     assert stored.agent['agentEnabled'] is False
-    assert stored.https_proxy['enable'] is False
+    assert stored.https_proxy['enable'] is True
+    assert stored.https_proxy['port'] == 8443
+    assert 'BEGIN CERTIFICATE' in stored.https_proxy['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in stored.https_proxy['certs']['server_key']
     assert stored.log_to_file is None
     assert stored.network['wifiSSID'] == 'Test WiFi'
     assert stored.network['wifiPassword'] == 'secret1234'
@@ -338,6 +345,32 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
     assert f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES}" in header
     assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1" in header
+    assert "#define FRAMEOS_DEFAULT_TLS_ENABLE 0" in header
+    assert "#define FRAMEOS_DEFAULT_TLS_PORT 8443" in header
+
+
+def test_generated_config_bakes_tls_settings():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        https_proxy={
+            "enable": True,
+            "port": 9443,
+            "certs": {
+                "server": "-----BEGIN CERTIFICATE-----\nserver\n-----END CERTIFICATE-----\n",
+                "server_key": "-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----\n",
+                "client_ca": "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
+            },
+        },
+    )
+    header = _generated_config_header(frame)
+    assert "#define FRAMEOS_DEFAULT_TLS_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_TLS_PORT 9443" in header
+    assert 'FRAMEOS_DEFAULT_TLS_SERVER_CERT "-----BEGIN CERTIFICATE-----\\nserver\\n-----END CERTIFICATE-----\\n"' in header
+    assert 'FRAMEOS_DEFAULT_TLS_SERVER_KEY "-----BEGIN RSA PRIVATE KEY-----\\nkey\\n-----END RSA PRIVATE KEY-----\\n"' in header
 
 
 def test_generated_config_bakes_hostname_from_frame_host():

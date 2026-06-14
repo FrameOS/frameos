@@ -32,9 +32,16 @@ def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
 def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
     proxy = dict(https_proxy or {})
     certs = dict(proxy.get('certs') or {})
+    try:
+        port = int(proxy.get('port') or 8443)
+    except (TypeError, ValueError):
+        port = 8443
+    if port < 1 or port > 65535:
+        port = 8443
 
     return {
         **proxy,
+        'port': port,
         'certs': {
             'server': certs.get('server', ''),
             'server_key': certs.get('server_key', ''),

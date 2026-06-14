@@ -15,6 +15,8 @@
 #include "frameos_display.h"
 
 void fos_client_start(void);
+/* Allow the render loop to run after startup has reserved its stack. */
+void fos_client_resume(void);
 /* Trigger an immediate render from another task (HTTP action, console). */
 void fos_client_render_now(void);
 /* Stats for /status & console. */

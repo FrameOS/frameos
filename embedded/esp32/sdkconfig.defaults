@@ -27,16 +27,20 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 # XIAO's PSRAM is not on the same supply rail quirk as some devkits; ignore
 # the bootup test failing on boards without PSRAM instead of aborting.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 # HTTPS renders happen after Nim/QuickJS have consumed most internal SRAM.
 # Put mbedTLS' large dynamic buffers in PSRAM so image/data apps can fetch
 # public HTTPS APIs reliably on 8MB PSRAM boards.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+# CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is not set
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
 
 # Wi-Fi provisioning portal posts can carry long headers/forms

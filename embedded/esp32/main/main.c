@@ -162,6 +162,9 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
     fos_console_start();
+    /* Reserve the large render stack before Wi-Fi/TLS/httpd consume internal
+     * RAM. The task waits until fos_client_resume() below. */
+    fos_client_start();
 
     bool online = false;
     if (fos_config_wifi_ready()) {
@@ -195,7 +198,7 @@ void app_main(void)
     }
 
     /* Render loop runs in both cases: local mode works fully offline. */
-    fos_client_start();
+    fos_client_resume();
     if (fos_buttons_start() != ESP_OK) {
         ESP_LOGW(TAG, "GPIO buttons unavailable");
     }

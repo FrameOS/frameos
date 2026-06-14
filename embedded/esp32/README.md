@@ -74,7 +74,8 @@ Unprovisioned devices start a captive portal: join the `FrameOS-XXXX` Wi-Fi netw
 and any page redirects to the setup form (Wi-Fi, backend URL, frame ID/API key,
 panel, render mode). Backend-built images arrive fully provisioned via
 `main/generated_config.h`, including Wi-Fi from the frame's per-frame `network`
-settings (the same place the Pi flows keep it).
+settings (the same place the Pi flows keep it) and optional native HTTPS using
+the same per-frame certificate material as Raspberry Pi Caddy proxies.
 
 The USB serial console (115200) is always available and quicker for development:
 
@@ -132,7 +133,9 @@ in the portal, or per-frame via `deviceConfig.pins` in the backend. The 13.3-inc
 Spectra 6 panel (`EPD_13in3e`) has two controllers and requires `cs2`.
 
 When connected, the device serves `GET /status` (heap/PSRAM/Wi-Fi/render stats JSON)
-and `POST /api/action/render` / `POST /api/action/ota` on port 80.
+and `POST /api/action/render` / `POST /api/action/ota` on port 80. If
+`https_proxy.enable` is baked into the image, the same API is also served over
+native ESP-IDF HTTPS on the configured `https_proxy.port` (8443 by default).
 
 ## OTA
 

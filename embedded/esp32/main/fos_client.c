@@ -28,6 +28,8 @@
 static const char *TAG = "fos_client";
 
 #define RENDER_NOW_BIT BIT0
+#define START_RENDER_LOOP_BIT BIT1
+#define CLIENT_TASK_STACK_BYTES 40960
 
 /* Below this charge we stop rendering and sleep long to protect the cell. */
 #define FOS_BATTERY_CRITICAL_PCT 3
@@ -315,6 +317,10 @@ static esp_err_t render_once(void)
         store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
+        if (s_render_count == 1) {
+            ESP_LOGI(TAG, "render task stack free at low-water mark: %u bytes",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
     current_scene_id(scene_id, sizeof(scene_id));
@@ -353,6 +359,7 @@ static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
+    xEventGroupWaitBits(s_events, START_RENDER_LOOP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     while (true) {
         int64_t cycle_start = esp_timer_get_time();
 
@@ -415,7 +422,42 @@ void fos_client_start(void)
     if (s_events) return;
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
+    if (!s_events || !s_snapshot_lock) {
+        ESP_LOGE(TAG, "render task init failed: event group or snapshot lock unavailable");
+        if (s_events) {
+            vEventGroupDelete(s_events);
+            s_events = NULL;
+        }
+        if (s_snapshot_lock) {
+            vSemaphoreDelete(s_snapshot_lock);
+            s_snapshot_lock = NULL;
+        }
+        return;
+    }
     /* Nim render + pixie + the QuickJS interpreter share this stack; QuickJS
-     * is capped at 20KB (fos_qjs_glue.c), 48KB leaves room beneath it. */
-    xTaskCreate(client_task, "fos_client", 49152, NULL, 5, NULL);
+     * is capped at 20KB (fos_qjs_glue.c), 40KB leaves room beneath it. The
+     * stack must stay in internal RAM because scene loading reads SPIFFS while
+     * the flash cache may be disabled; reserve it early, then resume after
+     * HTTP/HTTPS have started. */
+    BaseType_t created = xTaskCreate(client_task, "fos_client", CLIENT_TASK_STACK_BYTES,
+                                     NULL, 5, NULL);
+    if (created != pdPASS) {
+        ESP_LOGE(TAG, "render task start failed: internal=%u psram=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        vEventGroupDelete(s_events);
+        vSemaphoreDelete(s_snapshot_lock);
+        s_events = NULL;
+        s_snapshot_lock = NULL;
+    } else {
+        ESP_LOGI(TAG, "render task allocated");
+    }
+}
+
+void fos_client_resume(void)
+{
+    if (s_events) {
+        xEventGroupSetBits(s_events, START_RENDER_LOOP_BIT);
+        ESP_LOGI(TAG, "render task started");
+    }
 }

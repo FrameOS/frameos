@@ -55,6 +55,11 @@ static int cmd_status(int argc, char **argv)
     printf("wifi:        ssid=\"%s\" state=%d ip=%s rssi=%d\n",
            config->wifi_ssid, (int)fos_wifi_state(), fos_wifi_ip(), fos_wifi_rssi());
     printf("backend:     %s\n", config->backend_url[0] ? config->backend_url : "(unset)");
+    printf("https:       %s port=%u cert=%s key=%s\n",
+           config->tls_enable ? "enabled" : "disabled",
+           (unsigned)config->tls_port,
+           config->tls_server_cert[0] ? "yes" : "no",
+           config->tls_server_key[0] ? "yes" : "no");
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");

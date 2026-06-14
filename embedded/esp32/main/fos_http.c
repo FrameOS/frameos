@@ -9,6 +9,7 @@
 #include "esp_app_desc.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
+#include "esp_https_server.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -27,7 +28,8 @@
 
 static const char *TAG = "fos_http";
 
-static httpd_handle_t s_server = NULL;
+static httpd_handle_t s_http_server = NULL;
+static httpd_handle_t s_https_server = NULL;
 static bool s_portal_mode = false;
 static fos_action_cb s_render_cb = NULL;
 static fos_action_cb s_ota_cb = NULL;
@@ -356,6 +358,17 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     }
     if (send_input(req, "Backend URL", "backend", "text", config->backend_url,
                    " placeholder='https://backend.example.com'") != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "<label for='tls_enable'>HTTPS API</label><select id='tls_enable' name='tls_enable'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Enabled (using backend-provisioned certificate)", config->tls_enable) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Disabled", !config->tls_enable) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    snprintf(field, sizeof(field), "%u", (unsigned)config->tls_port);
+    if (send_input(req, "HTTPS port", "tls_port", "number", field, " min='1' max='65535'") != ESP_OK) return ESP_FAIL;
+    if (config->tls_enable && (!config->tls_server_cert[0] || !config->tls_server_key[0])) {
+        if (sendstr(req, "<p class='muted'>HTTPS is enabled but no certificate is stored. Generate TLS material in the backend and flash a frame-specific build.</p>") != ESP_OK) {
+            return ESP_FAIL;
+        }
+    }
     if (send_input(req, "Frame API key", "api_key", "password", "",
                    " autocomplete='off' placeholder='Leave blank to keep current key'") != ESP_OK) {
         return ESP_FAIL;
@@ -488,7 +501,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
-        "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
+        "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
+        "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app_name, app_version, idf_version, partition,
         esp_timer_get_time() / 1000000,
@@ -510,6 +524,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec, config->server_send_logs ? "true" : "false",
+        config->tls_enable ? "true" : "false", s_https_server ? "true" : "false", (unsigned)config->tls_port,
         config->deep_sleep ? "true" : "false",
         config->wake_schedule ? "true" : "false",
         pins_json, backend, ssid);
@@ -784,6 +799,11 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
         strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
     }
     if (form_value(body, "backend", value, sizeof(value))) strlcpy(config->backend_url, value, sizeof(config->backend_url));
+    if (form_value(body, "tls_enable", value, sizeof(value))) config->tls_enable = atoi(value) != 0;
+    if (form_value(body, "tls_port", value, sizeof(value))) {
+        long port = strtol(value, NULL, 10);
+        if (port >= 1 && port <= 65535) config->tls_port = (uint16_t)port;
+    }
     if (form_value(body, "api_key", value, sizeof(value)) && value[0]) {
         strlcpy(config->api_key, value, sizeof(config->api_key));
     }
@@ -1228,25 +1248,13 @@ static esp_err_t probe_handler(httpd_req_t *req)
     return portal_redirect_handler(req, 0);
 }
 
-esp_err_t fos_http_start(bool portal_mode)
+static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 {
-    if (s_server) return ESP_OK;
-    s_portal_mode = portal_mode;
-
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 32;
-    config.max_open_sockets = 7;
-    config.backlog_conn = 8;
-    config.recv_wait_timeout = 5;
-    config.send_wait_timeout = 5;
-    config.lru_purge_enable = true;
-    config.stack_size = 8192;
-    config.uri_match_fn = httpd_uri_match_wildcard;
-    esp_err_t err = httpd_start(&s_server, &config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(err));
-        return err;
-    }
+    esp_err_t err = ESP_OK;
+#define REGISTER_ROUTE(route) do { \
+        err = httpd_register_uri_handler(server, &(route)); \
+        if (err != ESP_OK) return err; \
+    } while (0)
 
     const httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = root_get_handler};
     const httpd_uri_t ping = {.uri = "/ping", .method = HTTP_GET, .handler = ping_get_handler};
@@ -1261,26 +1269,26 @@ esp_err_t fos_http_start(bool portal_mode)
     const httpd_uri_t setup = {.uri = "/api/setup", .method = HTTP_POST, .handler = setup_post_handler};
     const httpd_uri_t scenes_info = {.uri = "/api/scenes", .method = HTTP_GET, .handler = scenes_get_handler};
     const httpd_uri_t scene_state = {.uri = "/api/scene-state", .method = HTTP_GET, .handler = scene_state_get_handler};
-    httpd_register_uri_handler(s_server, &root);
-    httpd_register_uri_handler(s_server, &ping);
-    httpd_register_uri_handler(s_server, &status);
-    httpd_register_uri_handler(s_server, &image);
-    httpd_register_uri_handler(s_server, &state);
-    httpd_register_uri_handler(s_server, &states);
-    httpd_register_uri_handler(s_server, &uploaded);
-    httpd_register_uri_handler(s_server, &api_apps);
-    httpd_register_uri_handler(s_server, &api_frames);
-    httpd_register_uri_handler(s_server, &preview);
-    httpd_register_uri_handler(s_server, &setup);
-    httpd_register_uri_handler(s_server, &scenes_info);
-    httpd_register_uri_handler(s_server, &scene_state);
+    REGISTER_ROUTE(root);
+    REGISTER_ROUTE(ping);
+    REGISTER_ROUTE(status);
+    REGISTER_ROUTE(image);
+    REGISTER_ROUTE(state);
+    REGISTER_ROUTE(states);
+    REGISTER_ROUTE(uploaded);
+    REGISTER_ROUTE(api_apps);
+    REGISTER_ROUTE(api_frames);
+    REGISTER_ROUTE(preview);
+    REGISTER_ROUTE(setup);
+    REGISTER_ROUTE(scenes_info);
+    REGISTER_ROUTE(scene_state);
 
     httpd_uri_t render = {.uri = "/api/action/render", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_render_cb};
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};
     httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
-    httpd_register_uri_handler(s_server, &render);
-    httpd_register_uri_handler(s_server, &ota);
-    httpd_register_uri_handler(s_server, &scene);
+    REGISTER_ROUTE(render);
+    REGISTER_ROUTE(ota);
+    REGISTER_ROUTE(scene);
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
     httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};
@@ -1289,13 +1297,13 @@ esp_err_t fos_http_start(bool portal_mode)
     httpd_uri_t event = {.uri = "/event/*", .method = HTTP_POST, .handler = event_post_handler};
     httpd_uri_t frame_api_get = {.uri = "/api/frames/*", .method = HTTP_GET, .handler = frame_api_get_handler};
     httpd_uri_t frame_api_post = {.uri = "/api/frames/*", .method = HTTP_POST, .handler = frame_api_post_handler};
-    httpd_register_uri_handler(s_server, &scenes);
-    httpd_register_uri_handler(s_server, &scenes_sync);
-    httpd_register_uri_handler(s_server, &upload_scenes);
-    httpd_register_uri_handler(s_server, &reload);
-    httpd_register_uri_handler(s_server, &event);
-    httpd_register_uri_handler(s_server, &frame_api_get);
-    httpd_register_uri_handler(s_server, &frame_api_post);
+    REGISTER_ROUTE(scenes);
+    REGISTER_ROUTE(scenes_sync);
+    REGISTER_ROUTE(upload_scenes);
+    REGISTER_ROUTE(reload);
+    REGISTER_ROUTE(event);
+    REGISTER_ROUTE(frame_api_get);
+    REGISTER_ROUTE(frame_api_post);
 
     if (portal_mode) {
         static const char *probes[] = {
@@ -1304,19 +1312,95 @@ esp_err_t fos_http_start(bool portal_mode)
         };
         for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
             httpd_uri_t probe = {.uri = probes[i], .method = HTTP_GET, .handler = probe_handler};
-            httpd_register_uri_handler(s_server, &probe);
+            REGISTER_ROUTE(probe);
         }
-        httpd_register_err_handler(s_server, HTTPD_404_NOT_FOUND, portal_redirect_handler);
+        err = httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, portal_redirect_handler);
+        if (err != ESP_OK) return err;
+    }
+
+    return ESP_OK;
+#undef REGISTER_ROUTE
+}
+
+static void configure_httpd_defaults(httpd_config_t *config)
+{
+    config->max_uri_handlers = 32;
+    config->max_open_sockets = 7;
+    config->backlog_conn = 8;
+    config->recv_wait_timeout = 5;
+    config->send_wait_timeout = 5;
+    config->lru_purge_enable = true;
+    config->stack_size = 8192;
+#if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    config->task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+#endif
+    config->uri_match_fn = httpd_uri_match_wildcard;
+}
+
+esp_err_t fos_http_start(bool portal_mode)
+{
+    if (s_http_server || s_https_server) return ESP_OK;
+    s_portal_mode = portal_mode;
+
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    configure_httpd_defaults(&config);
+    esp_err_t err = httpd_start(&s_http_server, &config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = register_routes(s_http_server, portal_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "http route registration failed: %s", esp_err_to_name(err));
+        httpd_stop(s_http_server);
+        s_http_server = NULL;
+        return err;
     }
 
     ESP_LOGI(TAG, "http server up (%s mode)", portal_mode ? "portal" : "status");
+    if (!portal_mode) {
+        fos_config_t *frame_config = fos_config();
+        bool has_tls_material = frame_config->tls_server_cert[0] && frame_config->tls_server_key[0];
+        if (frame_config->tls_enable && has_tls_material) {
+            httpd_ssl_config_t tls_config = HTTPD_SSL_CONFIG_DEFAULT();
+            configure_httpd_defaults(&tls_config.httpd);
+            tls_config.httpd.max_open_sockets = 4;
+            tls_config.httpd.stack_size = 12288;
+            tls_config.port_secure = frame_config->tls_port > 0 ? frame_config->tls_port : 8443;
+            tls_config.servercert = (const uint8_t *)frame_config->tls_server_cert;
+            tls_config.servercert_len = strlen(frame_config->tls_server_cert) + 1;
+            tls_config.prvtkey_pem = (const uint8_t *)frame_config->tls_server_key;
+            tls_config.prvtkey_len = strlen(frame_config->tls_server_key) + 1;
+
+            err = httpd_ssl_start(&s_https_server, &tls_config);
+            if (err == ESP_OK) {
+                err = register_routes(s_https_server, false);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "https route registration failed: %s", esp_err_to_name(err));
+                    httpd_ssl_stop(s_https_server);
+                    s_https_server = NULL;
+                } else {
+                    ESP_LOGI(TAG, "https server up on port %u", (unsigned)tls_config.port_secure);
+                }
+            } else {
+                ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));
+            }
+        } else if (frame_config->tls_enable) {
+            ESP_LOGW(TAG, "https requested but TLS certificate or key is missing");
+        }
+    }
     return ESP_OK;
 }
 
 void fos_http_stop(void)
 {
-    if (s_server) {
-        httpd_stop(s_server);
-        s_server = NULL;
+    if (s_https_server) {
+        httpd_ssl_stop(s_https_server);
+        s_https_server = NULL;
+    }
+    if (s_http_server) {
+        httpd_stop(s_http_server);
+        s_http_server = NULL;
     }
 }

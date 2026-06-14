@@ -1219,27 +1219,28 @@ export function FrameSettings({
           </Field>
         </div>
 
-        {!isEmbeddedMode ? (
-          <>
-            <H6 id="frame-http-api-section">
-              HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="frame_port"
-                label="HTTP port on frame"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
-                    <p>
-                      Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure
-                      communication.
-                    </p>
-                  </div>
-                }
-              >
-                <TextInput name="frame_port" placeholder="8787" required />
-              </Field>
+        <H6 id="frame-http-api-section">
+          HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="frame_port"
+            label="HTTP port on frame"
+            tooltip={
+              <div className="space-y-2">
+                <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                <p>
+                  {isEmbeddedMode
+                    ? 'ESP32 keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
+                    : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
+                </p>
+              </div>
+            }
+          >
+            <TextInput name="frame_port" placeholder={isEmbeddedMode ? '80' : '8787'} required />
+          </Field>
+          {!isEmbeddedMode ? (
+            <>
               <Field
                 name="frame_access"
                 label="HTTP access level"
@@ -1292,8 +1293,12 @@ export function FrameSettings({
                   required
                 />
               </Field>
-            </div>
+            </>
+          ) : null}
+        </div>
 
+        {!isEmbeddedMode ? (
+          <>
             <H6 id="frame-settings-admin">Frame admin panel (BETA)</H6>
             <p className="pl-2 @md:pl-8 text-sm text-gray-500">
               Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still
@@ -1344,55 +1349,69 @@ export function FrameSettings({
                 </>
               ) : null}
             </div>
-            <H6 id="frame-http-proxy-section">
-              HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
+          </>
+        ) : null}
+
+        <H6 id="frame-http-proxy-section">
+          {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
+          <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="https_proxy.enable"
+            label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
+            tooltip={
+              isEmbeddedMode
+                ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
+                : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
+            }
+          >
+            {({ value, onChange }) => (
+              <Switch
                 name="https_proxy.enable"
-                label="HTTPS proxy via Caddy"
-                tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
-              >
-                {({ value, onChange }) => (
-                  <Switch
-                    name="https_proxy.enable"
-                    value={value}
-                    onChange={(enableTls) => {
-                      if (enableTls) {
-                        verifyTlsCertificates()
-                      }
-                      onChange(enableTls)
-                    }}
-                    fullWidth
-                  />
-                )}
-              </Field>
-              {tlsEnabled ? (
-                <>
+                value={value}
+                onChange={(enableTls) => {
+                  if (enableTls) {
+                    verifyTlsCertificates()
+                  }
+                  onChange(enableTls)
+                }}
+                fullWidth
+              />
+            )}
+          </Field>
+          {tlsEnabled ? (
+            <>
               <Field
                 name="https_proxy.port"
                 label="HTTPS port"
                 tooltip={
                   <div className="space-y-2">
-                    <p>The port Caddy listens on for HTTPS connections.</p>
+                    <p>
+                      {isEmbeddedMode
+                        ? 'The port the ESP32 HTTPS server listens on.'
+                        : 'The port Caddy listens on for HTTPS connections.'}
+                    </p>
                     <p>It's best if this ends with *443.</p>
                   </div>
                 }
               >
                 <NumberTextInput name="https_proxy.port" placeholder="8443" />
               </Field>
-              <Field
-                name="https_proxy.expose_only_port"
-                label="Expose only HTTPS port"
-                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
-              >
-                <Switch name="https_proxy.expose_only_port" fullWidth />
-              </Field>
+              {!isEmbeddedMode ? (
+                <Field
+                  name="https_proxy.expose_only_port"
+                  label="Expose only HTTPS port"
+                  tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+                >
+                  <Switch name="https_proxy.expose_only_port" fullWidth />
+                </Field>
+              ) : null}
               <Field
                 name="https_proxy.certs.client_ca"
                 label="HTTPS backend CA certificate"
                 labelRight={
-                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                  <Button color="secondary" size="small" onClick={() => generateTlsCertificates()}>
                     Regenerate
                   </Button>
                 }
@@ -1409,7 +1428,11 @@ export function FrameSettings({
               <Field
                 name="https_proxy.certs.server"
                 label="HTTPS frame certificate"
-                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+                tooltip={
+                  isEmbeddedMode
+                    ? 'PEM certificate baked into the ESP32 firmware for native HTTPS on this frame.'
+                    : 'PEM certificate used by Caddy for HTTPS on this frame.'
+                }
                 secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
                 hint={getCertificateHint(
                   'Server certificate',
@@ -1422,7 +1445,11 @@ export function FrameSettings({
               <Field
                 name="https_proxy.certs.server_key"
                 label={<div>HTTPS frame private key</div>}
-                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+                tooltip={
+                  isEmbeddedMode
+                    ? 'PEM private key baked into the ESP32 firmware for native HTTPS on this frame. Keep this secret.'
+                    : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
+                }
                 secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
               >
                 <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
@@ -1430,8 +1457,6 @@ export function FrameSettings({
             </>
           ) : null}
         </div>
-          </>
-        ) : null}
 
         <H6 id="frame-settings-network">Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
