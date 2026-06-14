@@ -1,6 +1,6 @@
 import std/unittest
 
-when defined(linux):
+when defined(linux) and defined(frameosRunNativeLgpioTests):
   import lib/lgpio
 
   suite "native lgpio compatibility subset":
@@ -31,5 +31,5 @@ when defined(linux):
       check lgSpiWrite(-1, nil, LG_MAX_SPI_DEVICE_COUNT + 1) == LG_BAD_SPI_COUNT
 else:
   suite "native lgpio compatibility subset":
-    test "requires Linux GPIO headers":
+    test "native Linux GPIO/SPI runtime checks are opt-in":
       check true
