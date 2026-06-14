@@ -11,7 +11,6 @@ import uri
 
 import frameos/utils/font
 import frameos/utils/http_client
-import frameos/utils/text
 when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
@@ -541,7 +540,7 @@ proc writeError*(image: Image, width, height: int, message: string) =
       vAlign = MiddleAlign,
     )
   when defined(frameosEmbedded):
-    image.fillTextApproxStroke(borderTypes, vec2(padding, padding), 2)
+    image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2, lineJoin = RoundJoin)
   else:
     image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
   image.fillText(types, translate(vec2(padding, padding)))
