@@ -30,7 +30,7 @@
 # - This module has no dependency on App or ExecutionContext.
 # - Keep using pixie’s Typeface/Font/Arrangement primitives.
 
-import strutils, unicode, options
+import strutils, unicode, options, math
 import pixie
 import frameos/utils/font
 
@@ -92,6 +92,33 @@ proc layoutBoundsTopLeft*(arrangement: Arrangement): Vec2 {.raises: [].} =
         let rect = arrangement.selectionRects[i]
         result.x = min(result.x, rect.x)
         result.y = min(result.y, rect.y)
+
+const StrokeOffsetDirections = [
+  (-1, 0), (1, 0), (0, -1), (0, 1),
+  (-1, -1), (1, -1), (-1, 1), (1, 1)
+]
+
+proc fillTextApproxStroke*(
+  image: Image,
+  arrangement: Arrangement,
+  origin: Vec2,
+  strokeWidth: float
+) =
+  ## Cheap text outline fallback for embedded targets where pixie's path
+  ## strokeText path is too expensive or unavailable.
+  if strokeWidth <= 0:
+    return
+  let radius = max(1, ceil(strokeWidth).int)
+  for step in 1 .. radius:
+    let amount = step.float32
+    for (dx, dy) in StrokeOffsetDirections:
+      image.fillText(
+        arrangement,
+        translate(vec2(
+          origin.x + dx.float32 * amount,
+          origin.y + dy.float32 * amount
+        ))
+      )
 
 # ---------- Rich text (caret) or plain spans
 
@@ -281,16 +308,24 @@ proc drawText*(
 ) =
   ## Draw the prepared layout into `image`, honoring padding and optional border.
   let pad = layout.opts.padding
-  when not defined(frameosEmbedded):
-    if layout.opts.borderWidth > 0 and layout.borderTypeset.isSome:
+  let origin = vec2(pad + offsetX, pad + offsetY)
+  if layout.opts.borderWidth > 0 and layout.borderTypeset.isSome:
+    let strokeWidth = float(layout.opts.borderWidth) * layout.fontScaleRatio
+    when defined(frameosEmbedded):
+      image.fillTextApproxStroke(
+        layout.borderTypeset.get(),
+        origin,
+        strokeWidth
+      )
+    else:
       image.strokeText(
         layout.borderTypeset.get(),
-        translate(vec2(pad + offsetX, pad + offsetY)),
-        strokeWidth = float(layout.opts.borderWidth) * layout.fontScaleRatio
+        translate(origin),
+        strokeWidth = strokeWidth
       )
   image.fillText(
     layout.textTypeset,
-    translate(vec2(pad + offsetX, pad + offsetY))
+    translate(origin)
   )
 
 proc measureTightImage*(layout: TextLayoutResult): (int, int) =

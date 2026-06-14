@@ -11,6 +11,7 @@ import uri
 
 import frameos/utils/font
 import frameos/utils/http_client
+import frameos/utils/text
 when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
@@ -531,15 +532,17 @@ proc writeError*(image: Image, width, height: int, message: string) =
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-  when not defined(frameosEmbedded):
-    let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
-    let borderTypes = typeset(
-        spans = [newSpan(message, borderFont)],
-        bounds = vec2(width.toFloat() - 2 * padding,
-        height.toFloat() - 2 * padding),
-        hAlign = CenterAlign,
-        vAlign = MiddleAlign,
-      )
+  let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+  let borderTypes = typeset(
+      spans = [newSpan(message, borderFont)],
+      bounds = vec2(width.toFloat() - 2 * padding,
+      height.toFloat() - 2 * padding),
+      hAlign = CenterAlign,
+      vAlign = MiddleAlign,
+    )
+  when defined(frameosEmbedded):
+    image.fillTextApproxStroke(borderTypes, vec2(padding, padding), 2)
+  else:
     image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
   image.fillText(types, translate(vec2(padding, padding)))
 
