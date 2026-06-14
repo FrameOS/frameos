@@ -1,7 +1,7 @@
 """Build flashable firmware images for embedded (ESP32) frames.
 
-M1/M2 (see repo-root TODO.md): the firmware runs the FrameOS embedded
-runtime — Wi-Fi provisioning, the Nim renderer (pixie on PSRAM), a Waveshare
+The firmware runs the FrameOS embedded runtime: Wi-Fi provisioning, the Nim
+renderer (pixie on PSRAM), a Waveshare
 e-ink driver, thin-client fetch, and OTA A/B updates. The build bakes
 per-frame defaults into ``main/generated_config.h`` (backend URL, API key,
 panel, pins), cross-compiles the Nim runtime via ``build_nim.sh`` when nim is

@@ -1,10 +1,10 @@
 # FrameOS ESP32 firmware
 
-FrameOS for ESP32-S3 microcontrollers (milestones M1+M2 in the repo-root `TODO.md`).
-The firmware provisions Wi-Fi over a captive portal or the serial console, renders
-scenes **on-device** with the Nim runtime (pixie in PSRAM), drives Waveshare SPI
-e-ink panels through the same vendor drivers the Raspberry Pi build uses, can
-alternatively run as a thin client fetching backend-rendered bitmaps.
+FrameOS for ESP32-S3 microcontrollers. The firmware provisions Wi-Fi over a
+captive portal or the serial console, renders scenes **on-device** with the Nim
+runtime (pixie in PSRAM), drives Waveshare SPI e-ink panels through the same
+vendor drivers the Raspberry Pi build uses, and can alternatively run as a thin
+client fetching backend-rendered bitmaps.
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
 The default 8MB profile disables OTA updates and uses one 7744K app slot,
