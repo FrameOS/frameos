@@ -117,7 +117,7 @@ fos_pixel_format_t fos_display_panel_format(size_t index)
 /* Headroom beyond the two framebuffers for the Nim heap, QuickJS (capped at
  * 4MB but typically far less), pixie temporaries (fonts, gradients) and
  * allocator fragmentation. Empirically ~1.5MB is comfortable for the 800x480
- * scenes M2/M3 verified on an 8MB module. */
+ * scenes have been verified on an 8MB module. */
 #define FOS_RENDER_PSRAM_RESERVE (1536u * 1024u)
 
 size_t fos_display_render_psram_bytes(void)

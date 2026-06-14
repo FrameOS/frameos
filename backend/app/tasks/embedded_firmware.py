@@ -150,7 +150,7 @@ def embedded_panel_for_frame(frame: Frame) -> str:
 
 
 def embedded_module_psram_bytes(frame: Frame) -> int:
-    """PSRAM on the target module. Defaults to 8MB (the S3 modules M2 ran on);
+    """PSRAM on the target module. Defaults to 8MB (current ESP32-S3 dev modules);
     override per-frame with ``device_config.psramMB`` / ``embedded.psramMB``."""
     for source in (frame.device_config, frame.embedded):
         if isinstance(source, dict):
@@ -620,9 +620,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
     generated_header.write_text(generated_config)
 
-    # Compiled-scene parameters: bake the frame's first scene into the Nim
-    # build. Full scene-graph codegen for Xtensa is the M3 follow-up; for now
-    # the name and background color flow through as compile-time defines.
+    # Fallback demo-scene parameters: interpreted scenes are loaded at runtime,
+    # but these defines give the built-in demo a frame-specific name/color.
     scenes = frame.scenes if isinstance(frame.scenes, list) else []
     if scenes and isinstance(scenes[0], dict):
         # The flags expand unquoted in build_nim.sh, so reduce values to a
@@ -639,8 +638,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
             f"-d:frameosSceneBackground={background}"
         )
 
-    # Cross-compile the Nim runtime (M2: on-device rendering). If nim is not
-    # installed on the worker the firmware still builds, thin-client only.
+    # Cross-compile the Nim runtime. If nim is not installed on the worker the
+    # firmware still builds, thin-client only.
     nim_step = ""
     if shutil.which("nim"):
         nim_step = "./build_nim.sh && "

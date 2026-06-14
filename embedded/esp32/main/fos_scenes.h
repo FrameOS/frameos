@@ -1,5 +1,5 @@
 /*
- * Interpreted-scene storage and sync (M3).
+ * Interpreted-scene storage and sync.
  *
  * Scenes are the backend's scenes.json array, stored on the `state` SPIFFS
  * partition (/state/scenes.json) so they survive reboots and deep sleep,

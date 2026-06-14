@@ -1170,7 +1170,7 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
     return httpd_resp_send(req, "{\"ok\":true,\"queued\":true}", HTTPD_RESP_USE_STRLEN);
 }
 
-/* Local scene push (M3): accept a scenes.json array, persist it to /state
+/* Local scene push: accept a scenes.json array, persist it to /state
  * and apply it on the next render — hot scene update over the LAN without
  * touching the backend. */
 static esp_err_t scenes_post_handler(httpd_req_t *req)

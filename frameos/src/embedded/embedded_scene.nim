@@ -1,17 +1,14 @@
-# The built-in embedded scene: what a frame shows when scenes haven't been
-# pushed yet (and the M2 proof that pixie renders on the metal).
-#
-# The compiled-scene pipeline (backend) can replace this module with
-# generated code from a real FrameOS scene graph before cross-compiling.
+# The built-in embedded scene: what a frame shows before interpreted scenes
+# have been pushed or loaded.
 
 import std/[strformat, times]
 import pixie
 
 const fontData = staticRead("../../assets/copied/fonts/LiberationSans-Regular.ttf")
 
-# Compiled-scene parameters: the backend's firmware build extracts these from
+# Fallback-scene parameters: the backend firmware build extracts these from
 # the frame's scene JSON and passes them as -d: defines (see build_nim.sh and
-# backend embedded_firmware.py). Full scene-graph codegen is the M3 follow-up.
+# backend embedded_firmware.py).
 const frameosSceneName {.strdefine.}: string = "default"
 const frameosSceneBackground {.strdefine.}: string = "#ffffff"
 

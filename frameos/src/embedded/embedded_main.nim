@@ -1,5 +1,4 @@
-# FrameOS embedded runtime (M2: Nim core on the metal; M3: interpreted
-# scenes via QuickJS).
+# FrameOS embedded runtime: Nim renderer plus interpreted scenes via QuickJS.
 #
 # Compiled with `--os:freertos --cpu:esp --compileOnly` into C and built as
 # the ESP-IDF component embedded/esp32/components/frameos_nim (see

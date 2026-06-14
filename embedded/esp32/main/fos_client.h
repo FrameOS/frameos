@@ -1,7 +1,7 @@
 /*
  * The frame loop. Two render modes:
- *  - local: the Nim runtime renders the scene on-device (M2)
- *  - remote: thin client fetches a backend-prerendered bitmap (M1)
+ *  - local: the Nim runtime renders interpreted scenes on-device
+ *  - remote: thin client fetches a backend diagnostic bitmap
  * Either way the bits end up in fos_display_blit(), then we wait out the
  * refresh interval (deep sleep if configured).
  */

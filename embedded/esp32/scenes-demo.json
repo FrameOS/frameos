@@ -1,7 +1,7 @@
 [
   {
-    "id": "m3-quickjs-demo",
-    "name": "M3 QuickJS Demo",
+    "id": "quickjs-demo",
+    "name": "QuickJS Demo",
     "settings": {
       "refreshInterval": 120,
       "backgroundColor": "#000000",

@@ -1,4 +1,4 @@
-# FrameOS embedded scene runtime (M3: interpreted scenes via QuickJS).
+# FrameOS embedded scene runtime for interpreted scenes via QuickJS.
 #
 # Owns the interpreted-scene lifecycle on the ESP32: scenes arrive as the
 # same JSON the backend ships to Linux frames (seq[FrameSceneInput]), get

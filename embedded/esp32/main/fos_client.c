@@ -356,7 +356,7 @@ static void client_task(void *arg)
     while (true) {
         int64_t cycle_start = esp_timer_get_time();
 
-        /* Interpreted scenes (M3): pick up backend changes and any payload
+        /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {

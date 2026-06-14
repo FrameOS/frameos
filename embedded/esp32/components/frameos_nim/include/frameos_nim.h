@@ -1,5 +1,5 @@
 /*
- * C surface of the FrameOS Nim runtime (M2: Nim core on the metal).
+ * C surface of the FrameOS Nim runtime.
  *
  * The real implementation is Nim code from frameos/src/embedded compiled to C
  * (see build_nim.sh) and dropped into this component's nimcache/ directory.
@@ -38,10 +38,10 @@ const char *frameos_nim_scene_state_json(void);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
 
-/* M3: interpreted scenes. Install scenes from JSON (the backend's
- * scenes.json array format); code nodes run on QuickJS, app nodes on the
- * AOT-compiled standard library. Returns the number of scenes loaded
- * (0 = bad payload or runtime unavailable). Hot-swaps live scenes. */
+/* Install interpreted scenes from JSON (the backend's scenes.json array
+ * format); code nodes run on QuickJS, app nodes on the AOT-compiled standard
+ * library. Returns the number of scenes loaded (0 = bad payload or runtime
+ * unavailable). Hot-swaps live scenes. */
 int frameos_nim_load_scenes(const char *json);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
 double frameos_nim_scene_interval(void);
