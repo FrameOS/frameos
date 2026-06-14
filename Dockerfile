@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.6
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+ARG ESP_IDF_VERSION=v5.5.4
+ARG ESP_IDF_TARGET=esp32s3
 
 FROM ${PYTHON_IMAGE} AS nim-toolchain
 
@@ -52,6 +54,51 @@ RUN set -eux; \
 ENV PATH="/opt/nim/bin:${PATH}"
 
 RUN nim --version && nimble --version
+
+FROM ${PYTHON_IMAGE} AS esp-idf-toolchain
+
+ARG ESP_IDF_VERSION
+ARG ESP_IDF_TARGET
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV IDF_PATH=/opt/esp/esp-idf
+ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      bison \
+      build-essential \
+      ca-certificates \
+      ccache \
+      cmake \
+      dfu-util \
+      flex \
+      git \
+      gperf \
+      libffi-dev \
+      libssl-dev \
+      libusb-1.0-0 \
+      ninja-build \
+      python3 \
+      python3-pip \
+      python3-setuptools \
+      python3-venv \
+      wget \
+      xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# This stage intentionally builds for the target Docker platform. Multi-arch
+# images get matching native Linux ESP-IDF host tools in each runtime image.
+RUN set -eux; \
+    mkdir -p "$(dirname "${IDF_PATH}")" "${IDF_TOOLS_PATH}"; \
+    git clone --depth 1 --branch "${ESP_IDF_VERSION}" --recursive --shallow-submodules \
+      https://github.com/espressif/esp-idf.git "${IDF_PATH}"; \
+    "${IDF_PATH}/install.sh" "${ESP_IDF_TARGET}"; \
+    . "${IDF_PATH}/export.sh" >/dev/null 2>&1; \
+    idf.py --version; \
+    rm -rf "${IDF_TOOLS_PATH}/dist"
 
 FROM nim-toolchain AS app-builder
 
@@ -172,6 +219,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
 ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
+ENV IDF_PATH=/opt/esp/esp-idf
+ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app
@@ -179,14 +228,30 @@ WORKDIR /app
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+      bash \
+      bison \
+      build-essential \
       ca-certificates \
+      ccache \
+      cmake \
       curl \
+      dfu-util \
       dosfstools \
       e2fsprogs \
+      flex \
       genimage \
+      git \
       gnupg \
+      gperf \
       iputils-ping \
+      libffi-dev \
+      libssl-dev \
+      libusb-1.0-0 \
       mtools \
+      ninja-build \
+      python3-pip \
+      python3-setuptools \
+      python3-venv \
       redis-server; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://download.docker.com/linux/debian/gpg \
@@ -200,11 +265,13 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
+COPY --from=esp-idf-toolchain /opt/esp /opt/esp
 COPY --from=app-builder /root/.nimble /root/.nimble
 COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 
 COPY docker-entrypoint.sh versions.json ./
 COPY backend backend
+COPY embedded embedded
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json

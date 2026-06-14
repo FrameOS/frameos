@@ -50,6 +50,11 @@ The backend finds the toolchain via the `IDF_PATH` env var, falling back to
 `~/esp/esp-idf`. The on-device Nim runtime additionally needs `nim` (>= 2.2) on
 the worker's PATH; without it the firmware builds in thin-client-only mode.
 
+The FrameOS Docker image includes ESP-IDF at `/opt/esp/esp-idf`, native ESP-IDF
+host tools under `/opt/esp/idf-tools`, and the Nim toolchain, so firmware builds
+started from the packaged backend run inside the container without mounting a
+separate host toolchain.
+
 ## Build and flash by hand
 
 ```bash

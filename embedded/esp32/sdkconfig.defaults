@@ -5,7 +5,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Smaller, quieter image
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
-CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+# CONFIG_APP_COMPILE_TIME_DATE is not set
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
+# CONFIG_MBEDTLS_ERROR_STRINGS is not set
 
 # 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), no-OTA layout.
 # A single 7744K app slot leaves room for the Nim + QuickJS runtime and

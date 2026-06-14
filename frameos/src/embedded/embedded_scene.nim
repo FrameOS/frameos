@@ -3,8 +3,7 @@
 
 import std/[strformat, times]
 import pixie
-
-const fontData = staticRead("../../assets/copied/fonts/LiberationSans-Regular.ttf")
+import frameos/utils/font as fontUtils
 
 # Fallback-scene parameters: the backend firmware build extracts these from
 # the frame's scene JSON and passes them as -d: defines (see build_nim.sh and
@@ -15,7 +14,7 @@ const frameosSceneBackground {.strdefine.}: string = "#ffffff"
 var typeface: Typeface
 
 proc initScene*() =
-  typeface = parseTtf(fontData)
+  typeface = fontUtils.getDefaultTypeface()
 
 proc newFont(size: float32; color: Color): Font =
   result = newFont(typeface)
