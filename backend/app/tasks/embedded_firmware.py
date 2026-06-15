@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -35,6 +36,7 @@ from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, 
 from app.models.frame import DEFAULT_MAX_HTTP_RESPONSE_BYTES, Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
+from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -43,7 +45,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 21  # 8MB OTA A/B layout with 1MB state partition
+EMBEDDED_FIRMWARE_VERSION = 25  # Pull-side OTA checks from the ESP32 render loop
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -111,7 +113,13 @@ EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS", str(15 * 60))
 )
 ACTIVE_FIRMWARE_STATUSES = {"queued", "building"}
+ACTIVE_OTA_STATUSES = {"queued", "requesting"}
 ACTIVE_ARQ_JOB_STATUSES = {JobStatus.deferred, JobStatus.queued, JobStatus.in_progress}
+EMBEDDED_REQUIRED_SDKCONFIG = {
+    # Formatting an empty SPIFFS state partition happens inside app_main on
+    # first boot. The ESP-IDF default stack is too small for that path.
+    "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
+}
 
 # idf.py builds are not safe to run concurrently in the same build directory
 _build_lock = asyncio.Lock()
@@ -137,6 +145,41 @@ def embedded_idf_path() -> Path:
 
 def embedded_toolchain_available() -> bool:
     return (embedded_idf_path() / "export.sh").is_file()
+
+
+def _read_sdkconfig_values(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.startswith("CONFIG_") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value.strip()
+    return values
+
+
+def _missing_required_sdkconfig(path: Path) -> dict[str, str]:
+    values = _read_sdkconfig_values(path)
+    return {
+        key: value
+        for key, value in EMBEDDED_REQUIRED_SDKCONFIG.items()
+        if values.get(key) != value
+    }
+
+
+def _reset_stale_embedded_sdkconfig(build_dir: Path) -> dict[str, str]:
+    sdkconfig_path = EMBEDDED_PROJECT_DIR / "sdkconfig"
+    missing = _missing_required_sdkconfig(sdkconfig_path)
+    if not missing or not sdkconfig_path.exists():
+        return {}
+    sdkconfig_path.unlink()
+    sdkconfig_old_path = EMBEDDED_PROJECT_DIR / "sdkconfig.old"
+    if sdkconfig_old_path.exists():
+        sdkconfig_old_path.unlink()
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    return missing
 
 
 def embedded_pixie_path() -> Path | None:
@@ -571,6 +614,144 @@ async def start_embedded_firmware(
     return True, latest_embedded_firmware(frame) or metadata
 
 
+def _new_ota_update_request() -> dict[str, Any]:
+    requested_at = _utc_now()
+    return {
+        "id": secure_token(12),
+        "status": "queued",
+        "requestedAt": requested_at,
+        "updatedAt": requested_at,
+    }
+
+
+def _ota_update_request_active(firmware: dict[str, Any] | None) -> bool:
+    ota_update = firmware.get("otaUpdate") if isinstance(firmware, dict) else None
+    return isinstance(ota_update, dict) and ota_update.get("status") in ACTIVE_OTA_STATUSES
+
+
+def _decode_frame_http_payload(body: bytes, headers: dict[str, str]) -> Any:
+    content_type = headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        try:
+            return json.loads(body.decode("utf-8", errors="replace"))
+        except Exception:
+            pass
+    return body.decode("utf-8", errors="replace")
+
+
+def _truncate_ota_error(body: bytes) -> str:
+    text = body.decode("utf-8", errors="replace").strip()
+    if len(text) > 240:
+        return f"{text[:240]}..."
+    return text
+
+
+async def _set_ota_update(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    firmware: dict[str, Any],
+    ota_update: dict[str, Any],
+) -> dict[str, Any]:
+    updated = {**firmware, "otaUpdate": {**ota_update, "updatedAt": _utc_now()}}
+    await _set_firmware_status(db, redis, frame, updated)
+    return updated
+
+
+async def request_embedded_firmware_ota(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    ota_update: dict[str, Any] | None = None,
+) -> Any:
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    firmware = latest_embedded_firmware(frame) or {}
+    ota_path = firmware.get("otaPath")
+    if firmware.get("status") != "ready":
+        raise ValueError("No ready OTA firmware image for this frame")
+    if not isinstance(ota_path, str) or not Path(ota_path).is_file():
+        raise ValueError("Generated OTA firmware file not found")
+
+    request = ota_update if isinstance(ota_update, dict) else firmware.get("otaUpdate")
+    if not isinstance(request, dict):
+        request = _new_ota_update_request()
+    request = {**request, "status": "requesting", "startedAt": request.get("startedAt") or _utc_now()}
+    firmware = await _set_ota_update(db, redis, frame, firmware, request)
+    await log(db, redis, int(frame.id), "stdout", "Requesting ESP32 OTA update")
+
+    try:
+        status, body, headers = await _fetch_frame_http_bytes(
+            frame,
+            redis,
+            path="/api/action/ota",
+            method="POST",
+        )
+    except Exception as exc:
+        error = str(exc)
+        request = {**request, "status": "error", "error": error, "completedAt": _utc_now()}
+        await _set_ota_update(db, redis, frame, firmware, request)
+        await log(db, redis, int(frame.id), "stderr", f"Failed to request ESP32 OTA update: {error}")
+        raise ValueError(error)
+
+    if status != 200:
+        detail = _truncate_ota_error(body) or "no response body"
+        error = f"HTTP {status}: {detail}"
+        request = {**request, "status": "error", "error": error, "completedAt": _utc_now()}
+        await _set_ota_update(db, redis, frame, firmware, request)
+        await log(db, redis, int(frame.id), "stderr", f"Failed to request ESP32 OTA update: {error}")
+        raise ValueError(error)
+
+    request = {**request, "status": "requested", "completedAt": _utc_now(), "error": None}
+    await _set_ota_update(db, redis, frame, firmware, request)
+    await log(db, redis, int(frame.id), "stdout", "Requested ESP32 OTA update")
+    return _decode_frame_http_payload(body, headers)
+
+
+async def request_or_queue_embedded_firmware_ota(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    force: bool = False,
+) -> tuple[str, dict[str, Any], Any | None]:
+    firmware = await refresh_embedded_firmware_status(db, redis, frame) or {}
+    if firmware.get("status") == "ready" and not force:
+        payload = await request_embedded_firmware_ota(db, redis, frame)
+        frame = get_fresh_frame(db, int(frame.id)) or frame
+        return "OTA update requested", latest_embedded_firmware(frame) or firmware, payload
+
+    if not firmware or firmware.get("status") != "ready" or force:
+        await start_embedded_firmware(db, redis, frame, force=force)
+
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    firmware = latest_embedded_firmware(frame) or {}
+    ota_update = _new_ota_update_request()
+    firmware = await _set_ota_update(db, redis, frame, firmware, ota_update)
+
+    if firmware.get("status") == "ready":
+        payload = await request_embedded_firmware_ota(db, redis, frame, ota_update)
+        frame = get_fresh_frame(db, int(frame.id)) or frame
+        return "OTA update requested", latest_embedded_firmware(frame) or firmware, payload
+
+    await log(db, redis, int(frame.id), "stdout", "Queued ESP32 OTA update; waiting for firmware image")
+    return "OTA update queued", firmware, None
+
+
+async def request_pending_embedded_firmware_ota(db: Session, redis: Redis, frame: Frame) -> bool:
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    firmware = latest_embedded_firmware(frame) or {}
+    if not _ota_update_request_active(firmware):
+        return False
+    try:
+        await request_embedded_firmware_ota(db, redis, frame, firmware.get("otaUpdate"))
+    except ValueError:
+        # request_embedded_firmware_ota already records the concrete error
+        # in both frame metadata and the frame logs. Keep the build itself
+        # marked ready so the user can retry OTA without rebuilding.
+        return False
+    return True
+
+
 async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str | None = None):
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
@@ -674,9 +855,15 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     # generated_config.h and a fresh nimcache require a CMake reconfigure: the
     # component globs nimcache/*.c at configure time.
     command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
-               'idf.py reconfigure >/dev/null && idf.py build merge-bin')
+               'idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults reconfigure >/dev/null && idf.py build merge-bin')
 
     async with _build_lock:
+        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir)
+        if reset_sdkconfig:
+            reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
+            await log(db, redis, int(frame.id), "stdout",
+                      f"Regenerating ESP32 sdkconfig for required defaults: {reset_keys}")
+
         process = await asyncio.create_subprocess_exec(
             "bash", "-c", command,
             cwd=str(EMBEDDED_PROJECT_DIR),
@@ -707,6 +894,11 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     if returncode != 0:
         tail = "\n".join(output_tail[-20:])
         raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
+
+    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig")
+    if missing_sdkconfig:
+        missing = ", ".join(f"{key}={value}" for key, value in sorted(missing_sdkconfig.items()))
+        raise ValueError(f"ESP32 sdkconfig is missing required defaults after build: {missing}")
 
     merged_bin = build_dir / "merged-binary.bin"
     if not merged_bin.is_file():
@@ -756,6 +948,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     await log(db, redis, int(frame.id), "stdout",
               f"ESP32-S3 firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
+    await request_pending_embedded_firmware_ota(db, redis, frame)
+
 
 async def _firmware_queue_job_active(redis: Redis, firmware: dict[str, Any]) -> bool:
     job_id = firmware.get("queueJobId")
@@ -797,11 +991,15 @@ def _firmware_request_matches(frame: Frame, request_id: str) -> bool:
 
 
 def _preserved_queue_metadata(firmware: dict[str, Any]) -> dict[str, Any]:
-    return {
+    preserved = {
         key: firmware[key]
         for key in ("requestId", "queueJobId", "queuedAt")
         if isinstance(firmware.get(key), str) and firmware.get(key)
     }
+    ota_update = firmware.get("otaUpdate")
+    if isinstance(ota_update, dict):
+        preserved["otaUpdate"] = ota_update
+    return preserved
 
 
 async def _set_firmware_status(db: Session, redis: Redis, frame: Frame, firmware: dict[str, Any]) -> None:

@@ -59,8 +59,10 @@ static bool s_log_upload_enabled = false;
 
 #define FOS_NIM_LOG_MAX_LINE 1536
 #define FOS_NIM_LOG_MAX_PENDING 128
-#define FOS_NIM_LOG_BATCH_MAX 32
-#define FOS_NIM_LOG_BODY_MAX (32 * 1024)
+#define FOS_NIM_LOG_BATCH_MAX 8
+#define FOS_NIM_LOG_BODY_MAX (8 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_FREE (48 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK (16 * 1024)
 
 typedef struct fos_nim_log_node {
     struct fos_nim_log_node *next;
@@ -115,6 +117,19 @@ static void ensure_log_lock(void)
             ESP_LOGW("fos_nim_log", "failed to create log upload mutex");
         }
     }
+}
+
+static bool log_upload_heap_ready(void)
+{
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal < FOS_NIM_LOG_MIN_INTERNAL_FREE ||
+        largest_internal < FOS_NIM_LOG_MIN_INTERNAL_BLOCK) {
+        ESP_LOGD("fos_nim_log", "deferring log upload: internal=%u largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal);
+        return false;
+    }
+    return true;
 }
 
 bool frameos_nim_init(int width, int height, const char *frame_name,
@@ -510,8 +525,14 @@ void frameos_nim_flush_logs(void)
     if (!s_log_upload_enabled || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
         return;
     }
+    if (!log_upload_heap_ready()) {
+        return;
+    }
 
     while (true) {
+        if (!log_upload_heap_ready()) {
+            break;
+        }
         size_t count = 0;
         size_t dropped = 0;
         fos_nim_log_node_t *batch = pop_log_batch(&count, &dropped);

@@ -90,6 +90,7 @@ file_size() {
 }
 
 require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
+require_line '^CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192$' "$SDKCONFIG_PATH"
 require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="8MB"$' "$SDKCONFIG_PATH"
 require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"$' "$SDKCONFIG_PATH"
 if [[ "$QEMU_SMOKE" == "1" ]]; then
@@ -168,4 +169,5 @@ fi
 
 require_line 'Loaded app from partition at offset 0x10000' "$QEMU_LOG"
 require_line 'cpu_start: Multicore app|Project name:[[:space:]]+frameos_esp32' "$QEMU_LOG"
+require_line 'frameos: FrameOS .* booting from ota_0' "$QEMU_LOG"
 echo "ESP32 QEMU smoke loaded ota_0 and reached app startup"

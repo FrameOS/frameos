@@ -103,12 +103,6 @@ const pendingEmbeddedFirmwareDownloads = new Set<number>()
 const embeddedFirmwareStatusPollsInFlight = new Set<number>()
 const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
-const EMBEDDED_FIRMWARE_OTA_POLL_INTERVAL_MS = 3000
-const EMBEDDED_FIRMWARE_OTA_TIMEOUT_MS = 10 * 60 * 1000
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
-}
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
   try {
@@ -259,46 +253,6 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
   } finally {
     embeddedFirmwareStatusPollsInFlight.delete(frameId)
   }
-}
-
-async function fetchEmbeddedFirmwareStatus(frameId: number): Promise<EmbeddedFirmware | null> {
-  const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware`)
-  if (!response.ok) {
-    throw new Error(await responseErrorDetail(response, 'Failed to fetch firmware status'))
-  }
-  const data = await response.json()
-  return (data?.firmware as EmbeddedFirmware | undefined) ?? null
-}
-
-async function ensureEmbeddedFirmwareReadyForOta(frameId: number, force: boolean): Promise<EmbeddedFirmware> {
-  const startedAt = Date.now()
-  const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    throw new Error(await responseErrorDetail(response, 'Failed to start firmware build'))
-  }
-
-  const data = await response.json()
-  let firmware = (data?.firmware as EmbeddedFirmware | undefined) ?? null
-  while (firmware?.status !== 'ready') {
-    if (firmware?.status === 'error' || firmware?.status === 'missing' || firmware?.status === 'stale') {
-      throw new Error(firmware.error || 'Firmware build failed')
-    }
-    if (Date.now() - startedAt > EMBEDDED_FIRMWARE_OTA_TIMEOUT_MS) {
-      throw new Error('Timed out waiting for firmware build')
-    }
-    longRunningTasksModel.actions.updateTaskProgress({
-      frameId,
-      kind: 'embeddedOta',
-      progressCurrent: null,
-      progressTotal: null,
-      detail: embeddedFirmwareProgressDetail(startedAt),
-    })
-    await sleep(EMBEDDED_FIRMWARE_OTA_POLL_INTERVAL_MS)
-    firmware = await fetchEmbeddedFirmwareStatus(frameId)
-  }
-  return firmware
 }
 
 function startEmbeddedFirmwareProgress(frameId: number): void {
@@ -738,7 +692,6 @@ export const framesModel = kea<framesModelType>([
       })
 
       try {
-        await ensureEmbeddedFirmwareReadyForOta(id, force)
         longRunningTasksModel.actions.updateTaskProgress({
           frameId: id,
           kind: 'embeddedOta',
@@ -746,15 +699,18 @@ export const framesModel = kea<framesModelType>([
           progressTotal: null,
           detail: 'Requesting OTA update',
         })
-        const response = await apiFetch(`/api/frames/${id}/embedded/firmware/ota`, { method: 'POST' })
+        const response = await apiFetch(`/api/frames/${id}/embedded/firmware/ota${force ? '?force=1' : ''}`, {
+          method: 'POST',
+        })
         if (!response.ok) {
           throw new Error(await responseErrorDetail(response, 'Failed to request OTA update'))
         }
+        const data = await response.json()
         longRunningTasksModel.actions.finishTask({
           frameId: id,
           kind: 'embeddedOta',
           status: 'success',
-          detail: 'OTA update requested',
+          detail: data?.message || 'OTA update requested',
         })
         actions.loadFrame(id)
       } catch (error) {

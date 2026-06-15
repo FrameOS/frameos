@@ -15,6 +15,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -27,6 +28,7 @@
 #include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_status_screen.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -57,14 +59,26 @@ static void heartbeat_task(void *arg)
 
 static void ota_task_oneshot(void *arg)
 {
-    fos_ota_check_and_apply();
+    ESP_LOGI(TAG, "manual OTA task started");
+    esp_err_t err = fos_ota_check_and_apply();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "manual OTA check completed without reboot");
+    } else {
+        ESP_LOGW(TAG, "manual OTA check failed: %s", esp_err_to_name(err));
+    }
     vTaskDelete(NULL);
 }
 
 static void action_ota_now(void)
 {
     /* Don't block the httpd worker for a whole download. */
-    xTaskCreate(ota_task_oneshot, "fos_ota_now", 8192, NULL, 4, NULL);
+    ESP_LOGI(TAG, "manual OTA requested");
+    BaseType_t created = xTaskCreate(ota_task_oneshot, "fos_ota_now", 8192, NULL, 4, NULL);
+    if (created != pdPASS) {
+        ESP_LOGE(TAG, "manual OTA task start failed: internal=%u psram=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
 }
 
 static void action_render_now(void)
@@ -119,6 +133,11 @@ void app_main(void)
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
 
+    /* Reserve the large render stack before Nim/QuickJS, SPIFFS, Wi-Fi/TLS and
+     * httpd consume internal RAM. The task waits until fos_client_resume()
+     * below, so starting it early only claims the stack. */
+    fos_client_start();
+
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
      * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
      * (the backend renders the bitmap) so the frame still works. */
@@ -162,9 +181,6 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
     fos_console_start();
-    /* Reserve the large render stack before Wi-Fi/TLS/httpd consume internal
-     * RAM. The task waits until fos_client_resume() below. */
-    fos_client_start();
 
     bool online = false;
     if (fos_config_wifi_ready()) {
@@ -195,6 +211,7 @@ void app_main(void)
         s_blink_period_ms = 400;
         fos_wifi_start_portal();
         fos_http_start(true);
+        fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
     }
 
     /* Render loop runs in both cases: local mode works fully offline. */

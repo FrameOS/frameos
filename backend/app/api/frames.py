@@ -126,6 +126,7 @@ from app.tasks.embedded_firmware import (
     latest_embedded_firmware,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
+    request_or_queue_embedded_firmware_ota,
     start_embedded_firmware,
 )
 from app.tasks.buildroot_image import (
@@ -2692,6 +2693,7 @@ async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(ge
 @api_project.post("/frames/{id:int}/embedded/firmware/ota")
 async def api_frame_embedded_firmware_ota(
     id: int,
+    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2701,22 +2703,18 @@ async def api_frame_embedded_firmware_ota(
     if (frame.mode or "rpios") != "embedded":
         _bad_request("OTA updates are only available for embedded frames")
 
-    firmware = await refresh_embedded_firmware_status(db, redis, frame)
-    ota_path = firmware.get("otaPath") if isinstance(firmware, dict) else None
-    if not firmware or firmware.get("status") != "ready":
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready OTA firmware image for this frame")
-    if not isinstance(ota_path, str) or not os.path.isfile(ota_path):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated OTA firmware file not found")
-
     try:
-        device_payload = await _forward_frame_request(frame, redis, path="/api/action/ota", method="POST")
-    except HTTPException:
-        await log(db, redis, id, "stderr", "Failed to request ESP32 OTA update")
-        raise
+        message, firmware, device_payload = await request_or_queue_embedded_firmware_ota(
+            db,
+            redis,
+            frame,
+            force=force,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
 
-    await log(db, redis, id, "stdout", "Requested ESP32 OTA update")
     return {
-        "message": "OTA update requested",
+        "message": message,
         "firmware": firmware,
         "device": device_payload,
     }

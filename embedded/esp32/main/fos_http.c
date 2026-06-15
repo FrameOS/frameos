@@ -28,6 +28,11 @@
 
 static const char *TAG = "fos_http";
 
+#define FOS_HTTPS_MAX_OPEN_SOCKETS 1
+#define FOS_HTTPS_BACKLOG_CONN 1
+#define FOS_HTTPS_MIN_INTERNAL_FREE (96 * 1024)
+#define FOS_HTTPS_MIN_INTERNAL_BLOCK (24 * 1024)
+
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
 static bool s_portal_mode = false;
@@ -42,6 +47,19 @@ void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now)
 {
     s_render_cb = render_now;
     s_ota_cb = ota_now;
+}
+
+static bool https_heap_ready(void)
+{
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal < FOS_HTTPS_MIN_INTERNAL_FREE ||
+        largest_internal < FOS_HTTPS_MIN_INTERNAL_BLOCK) {
+        ESP_LOGW(TAG, "https server skipped: internal=%u largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal);
+        return false;
+    }
+    return true;
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -1363,28 +1381,34 @@ esp_err_t fos_http_start(bool portal_mode)
         fos_config_t *frame_config = fos_config();
         bool has_tls_material = frame_config->tls_server_cert[0] && frame_config->tls_server_key[0];
         if (frame_config->tls_enable && has_tls_material) {
-            httpd_ssl_config_t tls_config = HTTPD_SSL_CONFIG_DEFAULT();
-            configure_httpd_defaults(&tls_config.httpd);
-            tls_config.httpd.max_open_sockets = 4;
-            tls_config.httpd.stack_size = 12288;
-            tls_config.port_secure = frame_config->tls_port > 0 ? frame_config->tls_port : 8443;
-            tls_config.servercert = (const uint8_t *)frame_config->tls_server_cert;
-            tls_config.servercert_len = strlen(frame_config->tls_server_cert) + 1;
-            tls_config.prvtkey_pem = (const uint8_t *)frame_config->tls_server_key;
-            tls_config.prvtkey_len = strlen(frame_config->tls_server_key) + 1;
+            if (https_heap_ready()) {
+                httpd_ssl_config_t tls_config = HTTPD_SSL_CONFIG_DEFAULT();
+                configure_httpd_defaults(&tls_config.httpd);
+                /* TLS sockets cost ~40KB each before route handlers allocate
+                 * their own response buffers. Keep this tiny on ESP32-S3 so a
+                 * browser cannot starve the renderer or AES write path. */
+                tls_config.httpd.max_open_sockets = FOS_HTTPS_MAX_OPEN_SOCKETS;
+                tls_config.httpd.backlog_conn = FOS_HTTPS_BACKLOG_CONN;
+                tls_config.httpd.stack_size = 12288;
+                tls_config.port_secure = frame_config->tls_port > 0 ? frame_config->tls_port : 8443;
+                tls_config.servercert = (const uint8_t *)frame_config->tls_server_cert;
+                tls_config.servercert_len = strlen(frame_config->tls_server_cert) + 1;
+                tls_config.prvtkey_pem = (const uint8_t *)frame_config->tls_server_key;
+                tls_config.prvtkey_len = strlen(frame_config->tls_server_key) + 1;
 
-            err = httpd_ssl_start(&s_https_server, &tls_config);
-            if (err == ESP_OK) {
-                err = register_routes(s_https_server, false);
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "https route registration failed: %s", esp_err_to_name(err));
-                    httpd_ssl_stop(s_https_server);
-                    s_https_server = NULL;
+                err = httpd_ssl_start(&s_https_server, &tls_config);
+                if (err == ESP_OK) {
+                    err = register_routes(s_https_server, false);
+                    if (err != ESP_OK) {
+                        ESP_LOGE(TAG, "https route registration failed: %s", esp_err_to_name(err));
+                        httpd_ssl_stop(s_https_server);
+                        s_https_server = NULL;
+                    } else {
+                        ESP_LOGI(TAG, "https server up on port %u", (unsigned)tls_config.port_secure);
+                    }
                 } else {
-                    ESP_LOGI(TAG, "https server up on port %u", (unsigned)tls_config.port_secure);
+                    ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));
                 }
-            } else {
-                ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));
             }
         } else if (frame_config->tls_enable) {
             ESP_LOGW(TAG, "https requested but TLS certificate or key is missing");

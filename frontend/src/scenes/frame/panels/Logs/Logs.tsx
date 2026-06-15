@@ -8,7 +8,13 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Spinner } from '../../../../components/Spinner'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
+import {
+  embeddedUsbLogsModel,
+  isEmbeddedUsbLogStreamOpen,
+  startEmbeddedUsbLogStream,
+} from '../../../../models/embeddedUsbLogsModel'
 
 function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
@@ -304,6 +310,9 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   if (type === 'build') {
     return theme === 'dark' ? 'text-yellow-200' : 'text-amber-700'
   }
+  if (type === 'usb') {
+    return theme === 'dark' ? 'text-emerald-200' : 'text-emerald-700'
+  }
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
 }
 
@@ -312,6 +321,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const { theme: workspaceTheme } = useValues(workspaceLogic)
   const { logs, filteredLogs, logSearch, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
   const { downloadLog, downloadFullLog, setLogSearch } = useActions(logsLogic({ frameId }))
+  const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
+  const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
   const [atBottom, setAtBottom] = useState(true)
   const [expandedMetricLogIds, setExpandedMetricLogIds] = useState<number[]>([])
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -319,7 +330,25 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
-  const virtuosoKey = searchActive ? `search:${logSearch.trim()}` : 'all'
+  const visibleBaseLogCount = logs.length
+  const virtuosoKey = compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
+  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const usbLogStreamState = usbLogStreamStatesByFrameId[frameId]
+  const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
+  const usbLogStreamBusy =
+    usbLogStreamState?.status === 'selecting' ||
+    usbLogStreamState?.status === 'connecting' ||
+    usbLogStreamState?.status === 'stopping'
+  const usbLogButtonLabel =
+    usbLogStreamState?.status === 'selecting'
+      ? 'Select USB port'
+      : usbLogStreamState?.status === 'connecting'
+      ? 'Opening USB logs'
+      : usbLogStreamState?.status === 'stopping'
+      ? 'Stopping USB logs'
+      : usbLogStreamOpen
+      ? 'Stop USB logs'
+      : 'Stream USB logs'
 
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
@@ -394,6 +423,10 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     setExpandedMetricLogIds((ids) => (ids.includes(logId) ? ids.filter((id) => id !== logId) : [...ids, logId]))
   }
 
+  const streamUsbLogs = async (): Promise<void> => {
+    await startEmbeddedUsbLogStream(frameId)
+  }
+
   const menuItems = [
     {
       label: 'Download log',
@@ -459,12 +492,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             fullScreen ? 'logs-filter-toolbar-floating gap-2' : 'flex-wrap gap-3 px-1 pb-2 pr-12'
           )}
         >
-          <label
-            className={clsx(
-              'relative block min-w-0',
-              fullScreen ? 'flex-1' : 'flex-[1_1_14rem] @md:max-w-2xl'
-            )}
-          >
+          <label className={clsx('relative block min-w-0', fullScreen ? 'flex-1' : 'flex-[1_1_14rem] @md:max-w-2xl')}>
             <span className="sr-only">Search logs</span>
             <MagnifyingGlassIcon
               className={clsx(
@@ -508,8 +536,33 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
               renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
             )}
           >
-            {searchActive ? `${visibleLogs.length} of ${logs.length} lines` : `${logs.length} lines`}
+            {searchActive ? `${visibleLogs.length} of ${visibleBaseLogCount} lines` : `${visibleBaseLogCount} lines`}
           </div>
+          {webSerialSupported ? (
+            <button
+              type="button"
+              onClick={usbLogStreamOpen ? () => stopUsbLogStream(frameId) : streamUsbLogs}
+              disabled={usbLogStreamBusy}
+              className={clsx(
+                'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40',
+                fullScreen ? 'h-8' : 'h-10'
+              )}
+            >
+              {usbLogStreamState?.status === 'selecting' || usbLogStreamState?.status === 'connecting' ? (
+                <Spinner className="h-4 w-4" />
+              ) : usbLogStreamOpen ? (
+                <StopCircleIcon className="h-4 w-4" />
+              ) : (
+                <CommandLineIcon className="h-4 w-4" />
+              )}
+              {usbLogButtonLabel}
+            </button>
+          ) : null}
+          {usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
+            <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
+              {usbLogStreamState.error}
+            </div>
+          ) : null}
         </div>
       )}
       <Virtuoso
@@ -581,6 +634,13 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             logLine = (
               <>
                 <span className={renderTheme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[AGENT]'}</span>{' '}
+                {logLine}
+              </>
+            )
+          } else if (log.type === 'usb') {
+            logLine = (
+              <>
+                <span className={renderTheme === 'dark' ? 'text-emerald-300' : 'text-emerald-700'}>{'[USB]'}</span>{' '}
                 {logLine}
               </>
             )

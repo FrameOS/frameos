@@ -19,6 +19,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# app_main mounts and may format SPIFFS during first boot. ESP-IDF's default
+# 3584-byte main task stack can overflow in that path before FrameOS reaches
+# Wi-Fi or OTA rollback validation.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # OTA rollback: a freshly updated image must mark itself valid after booting,
 # otherwise the bootloader rolls back to the previous slot on the next reset.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

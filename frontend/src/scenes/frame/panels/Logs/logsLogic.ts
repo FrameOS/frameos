@@ -6,6 +6,7 @@ import { socketLogic } from '../../../socketLogic'
 
 import type { logsLogicType } from './logsLogicType'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { embeddedUsbLogsModel } from '../../../../models/embeddedUsbLogsModel'
 
 export interface LogsLogicProps {
   frameId: number
@@ -26,6 +27,18 @@ function hasLogId(logs: LogType[], id: number): boolean {
     }
   }
   return false
+}
+
+function mergeLogsById(logs: LogType[], extraLogs: LogType[]): LogType[] {
+  const ids = new Set(logs.map((log) => log.id))
+  const merged = [...logs]
+  for (const log of extraLogs) {
+    if (!ids.has(log.id)) {
+      ids.add(log.id)
+      merged.push(log)
+    }
+  }
+  return merged.slice(-MAX_LOG_LINES)
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {
@@ -104,7 +117,8 @@ export const logsLogic = kea<logsLogicType>([
             // Live lines may have streamed in over the websocket while the
             // fetch was in flight; keep them instead of clobbering, dedup by id.
             const fetchedIds = new Set(fetched.map((log) => log.id))
-            const streamedDuringFetch = values.logs.filter((log) => !fetchedIds.has(log.id))
+            const usbLogs = embeddedUsbLogsModel.values.usbLogsByFrameId[props.frameId] ?? []
+            const streamedDuringFetch = mergeLogsById(values.logs, usbLogs).filter((log) => !fetchedIds.has(log.id))
             return [...fetched, ...streamedDuringFetch].slice(-MAX_LOG_LINES)
           } catch (error) {
             console.error(error)
@@ -191,6 +205,11 @@ export const logsLogic = kea<logsLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     [socketLogic.actionTypes.newLog]: ({ log }) => {
+      if (log.frame_id === props.frameId) {
+        actions.appendLog(log)
+      }
+    },
+    [embeddedUsbLogsModel.actionTypes.appendUsbLog]: ({ log }) => {
       if (log.frame_id === props.frameId) {
         actions.appendLog(log)
       }

@@ -1067,6 +1067,7 @@ function EmbeddedFirmwareSection({
   onOtaUpdate: () => void
 }): JSX.Element {
   const [copied, setCopied] = useState(false)
+  const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
   const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
@@ -1074,6 +1075,7 @@ function EmbeddedFirmwareSection({
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'
+  const otaBuilding = building && !browserFlashBusy
 
   const copyFlashCommand = (): void => {
     copy(flashCommand)
@@ -1102,10 +1104,10 @@ function EmbeddedFirmwareSection({
       </div>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built
-          on demand, so the first flash can take a minute.
+          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
+          demand, so the first flash can take a minute.
         </div>
-        <EmbeddedWebFlasher frame={frame} />
+        <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
       </div>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1118,10 +1120,11 @@ function EmbeddedFirmwareSection({
           <button
             type="button"
             onClick={onOtaUpdate}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            disabled={browserFlashBusy}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
-            {building ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {building ? 'Finish build & update' : 'Update over the air'}
+            {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+            {otaBuilding ? 'Finish build & update' : 'Update over the air'}
           </button>
         </div>
       </div>
@@ -1200,8 +1203,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const activeDeployDrawerView = directSdCardFirstInstall
     ? 'sdCard'
     : isEmbeddedFrame && !embeddedFastDeployReady
-      ? 'embedded'
-      : deployDrawerView
+    ? 'embedded'
+    : deployDrawerView
   const closeOnlyDrawerView = directSdCardFirstInstall || (isEmbeddedFrame && !embeddedFastDeployReady)
   const canDeployAgent = true
   const canCopyBootstrapScript = !isBuildrootFrame

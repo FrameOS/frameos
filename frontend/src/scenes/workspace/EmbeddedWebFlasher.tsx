@@ -1,9 +1,19 @@
-import { useState } from 'react'
-import { BoltIcon } from '@heroicons/react/24/outline'
+import { useEffect, useState } from 'react'
+import { BoltIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
+import { useActions, useValues } from 'kea'
+import type { Transport as EspTransport } from 'esptool-js'
 
 import { Spinner } from '../../components/Spinner'
+import {
+  embeddedUsbLogStreamSessionPort,
+  embeddedUsbLogsModel,
+  isEmbeddedUsbLogStreamOpen,
+  startEmbeddedUsbLogStream,
+  stopEmbeddedUsbLogStream,
+} from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { workspaceLogic } from './workspaceLogic'
 
 type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
 
@@ -62,24 +72,59 @@ async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer())
 }
 
-export function EmbeddedWebFlasher({ frame }: { frame: FrameType }): JSX.Element {
+export function EmbeddedWebFlasher({
+  frame,
+  onBusyChange,
+}: {
+  frame: FrameType
+  onBusyChange?: (busy: boolean) => void
+}): JSX.Element {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
+  const { openFrameTool } = useActions(workspaceLogic)
+  const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
+  const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
   const flashOffset = parseInt(frame.embedded?.firmware?.flashOffset || '0x0', 16) || 0
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
+  const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
+  const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
+  const usbLogStreamBusy =
+    usbLogStreamState?.status === 'selecting' ||
+    usbLogStreamState?.status === 'connecting' ||
+    usbLogStreamState?.status === 'stopping'
+
+  useEffect(() => {
+    onBusyChange?.(busy)
+  }, [busy, onBusyChange])
+
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+  }, [onBusyChange])
 
   const flash = async (): Promise<void> => {
-    // Must run inside the click gesture, before any other await
-    const port = await navigator.serial.requestPort()
-    // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
-    const { ESPLoader, Transport } = await import('esptool-js')
-    const transport = new Transport(port, false)
+    let port: SerialPort | null = null
+    let transport: EspTransport | null = null
+    let streamLogsAfterFlash = false
+    setPhase('connecting')
     setProgress(null)
+    setMessage('Selecting USB port')
     try {
-      setPhase('connecting')
+      // Must run inside the click gesture, before any other await
+      const activeLogPort = embeddedUsbLogStreamSessionPort(frame.id)
+      port = activeLogPort ? await stopEmbeddedUsbLogStream(frame.id) : await navigator.serial.requestPort()
+      if (!port) {
+        setPhase('idle')
+        setMessage(null)
+        return
+      }
+
+      // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
+      const { ESPLoader, Transport } = await import('esptool-js')
+      transport = new Transport(port, false)
+
       setMessage('Connecting to the board')
       const loader = new ESPLoader({ transport, baudrate: 460800 })
       const chip = await loader.main()
@@ -115,6 +160,7 @@ export function EmbeddedWebFlasher({ frame }: { frame: FrameType }): JSX.Element
       setPhase('done')
       setProgress(null)
       setMessage('Firmware flashed. The board is rebooting.')
+      streamLogsAfterFlash = true
     } catch (error) {
       setPhase('error')
       setProgress(null)
@@ -123,16 +169,29 @@ export function EmbeddedWebFlasher({ frame }: { frame: FrameType }): JSX.Element
         /No port selected/i.test(detail)
           ? null
           : /Failed to open serial port/i.test(detail)
-            ? 'Could not open the serial port. Close other serial monitors and try again.'
-            : detail
+          ? 'Could not open the serial port. Close other serial monitors and try again.'
+          : detail
       )
       if (/No port selected/i.test(detail)) {
         setPhase('idle')
       }
     } finally {
-      try {
-        await transport.disconnect()
-      } catch (error) {}
+      if (transport) {
+        try {
+          await transport.disconnect()
+        } catch (error) {}
+      }
+      if (streamLogsAfterFlash && port) {
+        await startEmbeddedUsbLogStream(frame.id, port)
+        openFrameTool(frame.id, 'logs')
+      }
+    }
+  }
+
+  const streamUsbLogs = async (): Promise<void> => {
+    const started = await startEmbeddedUsbLogStream(frame.id)
+    if (started) {
+      openFrameTool(frame.id, 'logs')
     }
   }
 
@@ -147,15 +206,36 @@ export function EmbeddedWebFlasher({ frame }: { frame: FrameType }): JSX.Element
 
   return (
     <div className="space-y-2">
-      <button
-        type="button"
-        onClick={flash}
-        disabled={busy}
-        className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-      >
-        {busy ? <Spinner color="white" /> : <BoltIcon className="h-4 w-4" />}
-        {phase === 'flashing' && progress !== null ? `Flashing ${progress}%` : busy ? 'Flashing' : 'Flash from browser'}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={flash}
+          disabled={busy}
+          className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        >
+          {busy ? <Spinner color="white" /> : <BoltIcon className="h-4 w-4" />}
+          {phase === 'flashing' && progress !== null
+            ? `Flashing ${progress}%`
+            : busy
+            ? 'Flashing'
+            : 'Flash from browser'}
+        </button>
+        <button
+          type="button"
+          onClick={usbLogStreamOpen ? () => stopUsbLogStream(frame.id) : streamUsbLogs}
+          disabled={busy || usbLogStreamBusy}
+          className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        >
+          {usbLogStreamState?.status === 'selecting' || usbLogStreamState?.status === 'connecting' ? (
+            <Spinner />
+          ) : usbLogStreamOpen ? (
+            <StopCircleIcon className="h-4 w-4" />
+          ) : (
+            <CommandLineIcon className="h-4 w-4" />
+          )}
+          {usbLogStreamOpen ? 'Stop USB logs' : 'Stream USB logs'}
+        </button>
+      </div>
       {phase === 'flashing' && progress !== null ? (
         <div className="frameos-inset h-2 w-full overflow-hidden rounded-full border">
           <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
@@ -167,12 +247,15 @@ export function EmbeddedWebFlasher({ frame }: { frame: FrameType }): JSX.Element
             phase === 'error'
               ? 'text-xs font-semibold text-red-500'
               : phase === 'done'
-                ? 'text-xs font-semibold text-green-600'
-                : 'frame-tool-muted text-xs leading-5'
+              ? 'text-xs font-semibold text-green-600'
+              : 'frame-tool-muted text-xs leading-5'
           }
         >
           {message}
         </div>
+      ) : null}
+      {usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
+        <div className="text-xs font-semibold text-red-500">{usbLogStreamState.error}</div>
       ) : null}
     </div>
   )

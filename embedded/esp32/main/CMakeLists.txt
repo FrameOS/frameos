@@ -7,6 +7,7 @@ idf_component_register(
         "fos_http.c"
         "fos_client.c"
         "fos_ota.c"
+        "fos_status_screen.c"
         "fos_console.c"
         "fos_scenes.c"
         "fos_battery.c"

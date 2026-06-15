@@ -26,6 +26,8 @@ from app.tasks.embedded_firmware import (
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
     ensure_embedded_frame_defaults,
+    request_pending_embedded_firmware_ota,
+    _reset_stale_embedded_sdkconfig,
 )
 
 
@@ -232,10 +234,16 @@ async def test_firmware_download_missing_artifact(async_client, db):
 
 
 @pytest.mark.asyncio
-async def test_firmware_ota_requires_ready_artifact(async_client):
+async def test_firmware_ota_queues_build_when_artifact_not_ready(async_client):
     frame = await create_embedded_frame(async_client)
-    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
-    assert response.status_code == 404
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+
+    assert response.status_code == 200, response.text
+    firmware = response.json()['firmware']
+    assert response.json()['message'] == 'OTA update queued'
+    assert firmware['status'] == 'queued'
+    assert firmware['otaUpdate']['status'] == 'queued'
 
 
 @pytest.mark.asyncio
@@ -268,15 +276,63 @@ async def test_firmware_ota_requests_device_update(async_client, db, tmp_path):
     db.add(stored)
     db.commit()
 
-    with patch('app.api.frames._forward_frame_request', new_callable=AsyncMock) as forward:
-        forward.return_value = {'ok': True}
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch_frame:
+        fetch_frame.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
 
     assert response.status_code == 200, response.text
     assert response.json()['message'] == 'OTA update requested'
-    forward.assert_awaited_once()
-    assert forward.await_args.kwargs['path'] == '/api/action/ota'
-    assert forward.await_args.kwargs['method'] == 'POST'
+    assert response.json()['device'] == {'ok': True}
+    assert response.json()['firmware']['otaUpdate']['status'] == 'requested'
+    fetch_frame.assert_awaited_once()
+    assert fetch_frame.await_args.kwargs['path'] == '/api/action/ota'
+    assert fetch_frame.await_args.kwargs['method'] == 'POST'
+
+
+@pytest.mark.asyncio
+async def test_pending_firmware_ota_requests_device_when_build_becomes_ready(db, redis, tmp_path, async_client):
+    frame = await create_embedded_frame(async_client)
+
+    artifact = tmp_path / 'frameos-esp32-s3.bin'
+    ota_artifact = tmp_path / 'frameos-esp32-s3-ota.bin'
+    artifact.write_bytes(b'flash-image')
+    ota_artifact.write_bytes(b'\xe9ota-image')
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {
+        'platform': 'esp32-s3',
+        'firmware': {
+            'status': 'ready',
+            'platform': 'esp32-s3',
+            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+            'filename': 'frameos-esp32-s3.bin',
+            'path': str(artifact),
+            'size': artifact.stat().st_size,
+            'sha256': '11' * 32,
+            'panel': 'EPD_7in5_V2',
+            'configHash': embedded_firmware_config_hash(stored),
+            'otaPath': str(ota_artifact),
+            'otaSha256': '22' * 32,
+            'otaElfSha256': '33' * 32,
+            'otaSize': ota_artifact.stat().st_size,
+            'otaUpdate': {
+                'id': 'pending-ota',
+                'status': 'queued',
+                'requestedAt': '2026-06-15T00:00:00+00:00',
+            },
+        },
+    }
+    db.add(stored)
+    db.commit()
+
+    with patch('app.tasks.embedded_firmware._fetch_frame_http_bytes', new_callable=AsyncMock) as fetch_frame:
+        fetch_frame.return_value = (200, b'{"ok":true}', {'content-type': 'application/json'})
+        requested = await request_pending_embedded_firmware_ota(db, redis, stored)
+
+    assert requested is True
+    fetch_frame.assert_awaited_once()
+    db.expire_all()
+    updated = db.get(Frame, frame['id'])
+    assert updated.embedded['firmware']['otaUpdate']['status'] == 'requested'
 
 
 # --- M4: panel matrix, memory guardrails, power-setting baking --------------
@@ -504,3 +560,35 @@ def test_ready_firmware_is_stale_when_panel_changes(tmp_path):
     firmware = latest_embedded_firmware(frame)
     assert firmware["status"] == "stale"
     assert "different embedded panel" in firmware["error"]
+
+
+def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
+    sdkconfig = tmp_path / "sdkconfig"
+    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
+    sdkconfig_old = tmp_path / "sdkconfig.old"
+    sdkconfig_old.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "stale.o").write_text("old", encoding="utf-8")
+
+    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
+        missing = _reset_stale_embedded_sdkconfig(build_dir)
+
+    assert missing == {"CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192"}
+    assert not sdkconfig.exists()
+    assert not sdkconfig_old.exists()
+    assert not build_dir.exists()
+
+
+def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
+    sdkconfig = tmp_path / "sdkconfig"
+    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n", encoding="utf-8")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
+        missing = _reset_stale_embedded_sdkconfig(build_dir)
+
+    assert missing == {}
+    assert sdkconfig.exists()
+    assert build_dir.exists()

@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
@@ -24,6 +25,17 @@ typedef struct {
     char sha[80];
     char elf_sha[80];
 } ota_manifest_t;
+
+static const char *wifi_state_name(fos_wifi_state_t state)
+{
+    switch (state) {
+        case FOS_WIFI_OFFLINE: return "offline";
+        case FOS_WIFI_CONNECTING: return "connecting";
+        case FOS_WIFI_CONNECTED: return "connected";
+        case FOS_WIFI_PORTAL: return "portal";
+        default: return "unknown";
+    }
+}
 
 static bool ota_supported(void)
 {
@@ -82,6 +94,7 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
     char url[FOS_URL_LEN + 96];
     snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/ota/manifest",
              config->backend_url, (unsigned long)config->frame_id);
+    ESP_LOGI(TAG, "checking OTA manifest: %s", url);
 
     esp_http_client_config_t http_config = {
         .url = url,
@@ -90,33 +103,42 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
         .buffer_size = 2048,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (!client) return ESP_FAIL;
+    if (!client) {
+        ESP_LOGE(TAG, "OTA manifest client init failed");
+        return ESP_FAIL;
+    }
     esp_http_client_set_header(client, "Authorization", s_auth_header);
     manifest->sha[0] = '\0';
     manifest->elf_sha[0] = '\0';
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "OTA manifest connect failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
         return err;
     }
-    esp_http_client_fetch_headers(client);
+    int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
     char body[768];
     int read = esp_http_client_read(client, body, sizeof(body) - 1);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     if (status != 200 || read <= 0) {
-        ESP_LOGI(TAG, "no OTA manifest (HTTP %d)", status);
+        ESP_LOGI(TAG, "no OTA manifest (HTTP %d, length=%lld, read=%d)",
+                 status, content_length, read);
         return ESP_ERR_NOT_FOUND;
     }
     body[read] = '\0';
 
     cJSON *json = cJSON_Parse(body);
-    if (!json) return ESP_FAIL;
+    if (!json) {
+        ESP_LOGW(TAG, "OTA manifest parse failed");
+        return ESP_FAIL;
+    }
     const cJSON *sha_item = cJSON_GetObjectItem(json, "sha256");
     if (!cJSON_IsString(sha_item) || strlen(sha_item->valuestring) < 32) {
         cJSON_Delete(json);
+        ESP_LOGW(TAG, "OTA manifest missing sha256");
         return ESP_FAIL;
     }
     strlcpy(manifest->sha, sha_item->valuestring, sizeof(manifest->sha));
@@ -125,11 +147,17 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
         strlcpy(manifest->elf_sha, elf_sha_item->valuestring, sizeof(manifest->elf_sha));
     }
     cJSON_Delete(json);
+    ESP_LOGI(TAG, "OTA manifest received: image=%.*s… elf=%s%.*s",
+             12, manifest->sha,
+             manifest->elf_sha[0] ? "" : "(none)",
+             manifest->elf_sha[0] ? 12 : 0,
+             manifest->elf_sha);
     return ESP_OK;
 }
 
 esp_err_t fos_ota_check_and_apply(void)
 {
+    ESP_LOGI(TAG, "OTA check started");
     if (!ota_supported()) {
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; skipping OTA check");
         return ESP_ERR_NOT_SUPPORTED;
@@ -140,7 +168,14 @@ esp_err_t fos_ota_check_and_apply(void)
         ESP_LOGW(TAG, "no backend configured, skipping OTA check");
         return ESP_ERR_INVALID_STATE;
     }
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+    if (!config->api_key[0]) {
+        ESP_LOGW(TAG, "no frame API key configured, skipping OTA check");
+        return ESP_ERR_INVALID_STATE;
+    }
+    fos_wifi_state_t wifi_state = fos_wifi_state();
+    if (wifi_state != FOS_WIFI_CONNECTED) {
+        ESP_LOGW(TAG, "Wi-Fi state=%s; OTA requires connected station mode",
+                 wifi_state_name(wifi_state));
         return ESP_ERR_INVALID_STATE;
     }
     snprintf(s_auth_header, sizeof(s_auth_header), "Bearer %s", config->api_key);
@@ -148,6 +183,9 @@ esp_err_t fos_ota_check_and_apply(void)
     ota_manifest_t manifest;
     esp_err_t err = fetch_manifest(config, &manifest);
     if (err != ESP_OK) {
+        if (err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGW(TAG, "OTA manifest check failed: %s", esp_err_to_name(err));
+        }
         return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
     }
 
@@ -205,19 +243,33 @@ esp_err_t fos_ota_check_and_apply(void)
     };
 
     esp_https_ota_handle_t handle = NULL;
+    ESP_LOGI(TAG, "OTA begin: internal=%u psram=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     err = esp_https_ota_begin(&ota_config, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "OTA begin failed: %s", esp_err_to_name(err));
         return err;
     }
+    ESP_LOGI(TAG, "OTA download started: size=%d bytes",
+             esp_https_ota_get_image_size(handle));
+    int last_progress_bucket = -1;
     while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-        /* keep pulling */
+        int read = esp_https_ota_get_image_len_read(handle);
+        int bucket = read / (256 * 1024);
+        if (bucket != last_progress_bucket && read > 0) {
+            last_progress_bucket = bucket;
+            ESP_LOGI(TAG, "OTA download progress: %d/%d bytes",
+                     read, esp_https_ota_get_image_size(handle));
+        }
     }
     if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
         ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(err));
         esp_https_ota_abort(handle);
         return err == ESP_OK ? ESP_FAIL : err;
     }
+    ESP_LOGI(TAG, "OTA download complete: %d bytes",
+             esp_https_ota_get_image_len_read(handle));
     err = esp_https_ota_finish(handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "OTA finish failed: %s", esp_err_to_name(err));
@@ -236,7 +288,11 @@ static void ota_task(void *arg)
     if (interval_hours == 0) interval_hours = 24;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(interval_hours * 3600u * 1000u));
-        fos_ota_check_and_apply();
+        ESP_LOGI(TAG, "periodic OTA check waking");
+        esp_err_t err = fos_ota_check_and_apply();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "periodic OTA check failed: %s", esp_err_to_name(err));
+        }
     }
 }
 
