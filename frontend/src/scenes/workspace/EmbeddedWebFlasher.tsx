@@ -136,13 +136,16 @@ export function EmbeddedWebFlasher({
       const firmware = await downloadFirmware(downloadUrl)
 
       setPhase('flashing')
-      setMessage(`Flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
+      setMessage(`Erasing flash and flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
       await loader.writeFlash({
         fileArray: [{ data: firmware, address: flashOffset }],
-        flashSize: 'keep',
+        flashSize: '8MB',
         flashMode: 'keep',
         flashFreq: 'keep',
-        eraseAll: false,
+        // Browser flashing is our "known good" provisioning path. Erase first so
+        // stale NVS, old RF calibration, or cached scenes from an earlier
+        // partition layout cannot override the freshly baked frame defaults.
+        eraseAll: true,
         compress: true,
         reportProgress: (_fileIndex, written, total) => {
           setProgress(total > 0 ? Math.round((written / total) * 100) : null)

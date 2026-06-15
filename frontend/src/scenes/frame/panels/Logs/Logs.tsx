@@ -9,6 +9,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Spinner } from '../../../../components/Spinner'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
 import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
+import { EMBEDDED_ESP32_S3 } from '../../../../devices'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 import {
   embeddedUsbLogsModel,
@@ -317,7 +318,7 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
 }
 
 export function Logs({ fullScreen = false, compact = false, className }: LogsProps = {}) {
-  const { frameId } = useValues(frameLogic)
+  const { frame, frameId } = useValues(frameLogic)
   const { theme: workspaceTheme } = useValues(workspaceLogic)
   const { logs, filteredLogs, logSearch, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
   const { downloadLog, downloadFullLog, setLogSearch } = useActions(logsLogic({ frameId }))
@@ -333,6 +334,9 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const visibleBaseLogCount = logs.length
   const virtuosoKey = compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const isEsp32Frame =
+    frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3
+  const showUsbLogControls = isEsp32Frame && webSerialSupported
   const usbLogStreamState = usbLogStreamStatesByFrameId[frameId]
   const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
   const usbLogStreamBusy =
@@ -538,7 +542,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           >
             {searchActive ? `${visibleLogs.length} of ${visibleBaseLogCount} lines` : `${visibleBaseLogCount} lines`}
           </div>
-          {webSerialSupported ? (
+          {showUsbLogControls ? (
             <button
               type="button"
               onClick={usbLogStreamOpen ? () => stopUsbLogStream(frameId) : streamUsbLogs}
@@ -558,7 +562,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
               {usbLogButtonLabel}
             </button>
           ) : null}
-          {usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
+          {showUsbLogControls && usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
             <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
               {usbLogStreamState.error}
             </div>
