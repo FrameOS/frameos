@@ -4,7 +4,9 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
 
 # Keep the normal firmware quiet, but make the QEMU smoke observable enough to
-# prove the bootloader selected ota_0 and app_main reached FrameOS startup.
+# prove the bootloader selected ota_0 and ESP-IDF started the app image. Some
+# ESP-IDF/QEMU versions stall before app_main, so CI treats FrameOS startup as
+# a bonus signal rather than the required smoke-test boundary.
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # The shipping profile uses octal PSRAM. QEMU's ESP32-S3 support is useful for

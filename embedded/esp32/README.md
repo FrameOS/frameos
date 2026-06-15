@@ -82,7 +82,9 @@ FRAMEOS_ESP32_QEMU=1 bash embedded/esp32/ci_build_image.sh
 
 With `FRAMEOS_ESP32_QEMU=1`, the script adds `sdkconfig.qemu.defaults` to route
 logs to UART0 and avoid QEMU's PSRAM path; the default build profile remains
-USB Serial/JTAG with octal PSRAM enabled.
+USB Serial/JTAG with octal PSRAM enabled. The QEMU smoke verifies that the
+bootloader selects `ota_0` and ESP-IDF starts the `frameos_esp32` app image;
+when QEMU reaches `app_main`, the script reports that stronger signal too.
 
 ## First boot and provisioning
 

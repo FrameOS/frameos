@@ -225,6 +225,12 @@ async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, 
     assert response.status_code == 200
     assert response.content == b'\xe9firmware-bytes'
 
+    response = await no_auth_client.head(
+        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
+    assert response.status_code == 200
+    assert response.headers['content-length'] == str(ota_file.stat().st_size)
+    assert response.content == b''
+
 
 @pytest.mark.asyncio
 async def test_generated_config_uses_frame_network_wifi(async_client, db):

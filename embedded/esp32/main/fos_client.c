@@ -32,7 +32,6 @@ static const char *TAG = "fos_client";
 #define RENDER_NOW_BIT BIT0
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
-#define FOS_OTA_RENDER_CHECK_MIN_MS (60 * 1000)
 
 /* Below this charge we stop rendering and sleep long to protect the cell. */
 #define FOS_BATTERY_CRITICAL_PCT 3
@@ -54,7 +53,6 @@ static int s_last_frame_height = 0;
 static fos_pixel_format_t s_last_frame_format = FOS_PIXEL_1BPP;
 static uint32_t s_last_frame_render_count = 0;
 static int64_t s_last_frame_render_ms = 0;
-static int64_t s_last_ota_check_us = 0;
 
 uint32_t fos_client_render_count(void) { return s_render_count; }
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
@@ -360,25 +358,6 @@ static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
     return interval - (uint32_t)elapsed_s;
 }
 
-static void check_ota_before_render(void)
-{
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
-        return;
-    }
-    int64_t now = esp_timer_get_time();
-    if (s_last_ota_check_us != 0 &&
-        now - s_last_ota_check_us < (int64_t)FOS_OTA_RENDER_CHECK_MIN_MS * 1000) {
-        return;
-    }
-    s_last_ota_check_us = now;
-
-    ESP_LOGI(TAG, "render-loop OTA check");
-    esp_err_t err = fos_ota_check_and_apply();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "render-loop OTA check failed: %s", esp_err_to_name(err));
-    }
-}
-
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -404,8 +383,11 @@ static void client_task(void *arg)
         if (battery_critical) {
             ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
         } else {
-            check_ota_before_render();
-            render_once();
+            if (fos_ota_busy()) {
+                ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
+            } else {
+                render_once();
+            }
         }
 
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;

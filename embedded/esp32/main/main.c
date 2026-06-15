@@ -57,27 +57,12 @@ static void heartbeat_task(void *arg)
     }
 }
 
-static void ota_task_oneshot(void *arg)
-{
-    ESP_LOGI(TAG, "manual OTA task started");
-    esp_err_t err = fos_ota_check_and_apply();
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "manual OTA check completed without reboot");
-    } else {
-        ESP_LOGW(TAG, "manual OTA check failed: %s", esp_err_to_name(err));
-    }
-    vTaskDelete(NULL);
-}
-
 static void action_ota_now(void)
 {
-    /* Don't block the httpd worker for a whole download. */
-    ESP_LOGI(TAG, "manual OTA requested");
-    BaseType_t created = xTaskCreate(ota_task_oneshot, "fos_ota_now", 8192, NULL, 4, NULL);
-    if (created != pdPASS) {
-        ESP_LOGE(TAG, "manual OTA task start failed: internal=%u psram=%u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    ESP_LOGW(TAG, "manual OTA requested");
+    esp_err_t err = fos_ota_request_check();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "manual OTA request failed: %s", esp_err_to_name(err));
     }
 }
 
@@ -133,11 +118,6 @@ void app_main(void)
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
 
-    /* Reserve the large render stack before Nim/QuickJS, SPIFFS, Wi-Fi/TLS and
-     * httpd consume internal RAM. The task waits until fos_client_resume()
-     * below, so starting it early only claims the stack. */
-    fos_client_start();
-
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
      * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
      * (the backend renders the bitmap) so the frame still works. */
@@ -153,6 +133,37 @@ void app_main(void)
             local_render_ok = false;
         }
     }
+
+    ESP_ERROR_CHECK(fos_wifi_init());
+    fos_http_set_actions(action_render_now, action_ota_now);
+
+    bool online = false;
+    if (fos_config_wifi_ready()) {
+        online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
+        if (!online) {
+            ESP_LOGW(TAG, "Wi-Fi unreachable; starting provisioning portal");
+        }
+    } else {
+        ESP_LOGI(TAG, "no Wi-Fi configured; starting provisioning portal");
+    }
+
+    if (online) {
+        fos_wifi_sync_time(SNTP_TIMEOUT_MS);
+        /* Network up = this image is good; cancel any pending rollback. */
+        fos_ota_mark_boot_valid();
+        if (fos_ota_boot_request_pending()) {
+            esp_err_t ota_err = fos_ota_run_boot_request();
+            if (ota_err != ESP_OK) {
+                ESP_LOGW(TAG, "boot OTA request failed: %s", esp_err_to_name(ota_err));
+            }
+        }
+    }
+
+    /* Reserve the large render stack before Nim/QuickJS, SPIFFS and httpd
+     * consume internal RAM, but after early-boot OTA had a chance to run with
+     * the leanest possible task set. The task waits until fos_client_resume()
+     * below, so starting it here only claims the stack. */
+    fos_client_start();
 
     if (frameos_nim_available() && local_render_ok) {
         int width = fos_display_present() ? fos_display_width() : 800;
@@ -178,24 +189,9 @@ void app_main(void)
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
 
-    ESP_ERROR_CHECK(fos_wifi_init());
-    fos_http_set_actions(action_render_now, action_ota_now);
     fos_console_start();
 
-    bool online = false;
-    if (fos_config_wifi_ready()) {
-        online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
-        if (!online) {
-            ESP_LOGW(TAG, "Wi-Fi unreachable; starting provisioning portal");
-        }
-    } else {
-        ESP_LOGI(TAG, "no Wi-Fi configured; starting provisioning portal");
-    }
-
     if (online) {
-        fos_wifi_sync_time(SNTP_TIMEOUT_MS);
-        /* Network up = this image is good; cancel any pending rollback. */
-        fos_ota_mark_boot_valid();
         frameos_nim_set_log_upload_enabled(true);
         log_bootup_event(true);
         fos_http_start(false);

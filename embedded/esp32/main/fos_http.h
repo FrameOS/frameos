@@ -11,6 +11,7 @@
 typedef void (*fos_action_cb)(void);
 
 esp_err_t fos_http_start(bool portal_mode);
+bool fos_http_is_running(void);
 void fos_http_stop(void);
 /* Wired by main: "render now" and "check OTA now" triggers. */
 void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now);

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "cJSON.h"
@@ -13,13 +14,29 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs.h"
 
 #include "fos_config.h"
+#include "fos_http.h"
 #include "fos_wifi.h"
 
 static const char *TAG = "fos_ota";
+#define FOS_OTA_MAX_ATTEMPTS 64
+#define FOS_OTA_HTTP_TIMEOUT_MS 15000
+#define FOS_OTA_RECONNECT_TIMEOUT_MS 30000
+#define FOS_OTA_REQUEST_SIZE (512 * 1024)
+#define FOS_OTA_RETRY_DELAY_MS 1000
+#define FOS_OTA_WIFI_SETTLE_MS 3000
+#define FOS_OTA_BOOT_REQUEST_KEY "ota_req"
+
 static char s_auth_header[FOS_STR_LEN + 16];
+static StaticSemaphore_t s_ota_lock_storage;
+static SemaphoreHandle_t s_ota_lock = NULL;
+static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_ota_task_handle = NULL;
+static volatile bool s_ota_busy = false;
 
 typedef struct {
     char sha[80];
@@ -42,6 +59,53 @@ static bool ota_supported(void)
     return esp_ota_get_next_update_partition(NULL) != NULL;
 }
 
+static bool load_boot_request(void)
+{
+    nvs_handle_t nvs;
+    uint8_t value = 0;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return false;
+    esp_err_t err = nvs_get_u8(nvs, FOS_OTA_BOOT_REQUEST_KEY, &value);
+    nvs_close(nvs);
+    return err == ESP_OK && value == 1;
+}
+
+static esp_err_t store_boot_request(bool pending)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("frameos", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    if (pending) {
+        err = nvs_set_u8(nvs, FOS_OTA_BOOT_REQUEST_KEY, 1);
+    } else {
+        err = nvs_erase_key(nvs, FOS_OTA_BOOT_REQUEST_KEY);
+        if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    }
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    return err;
+}
+
+static bool wait_for_wifi_connected(uint32_t timeout_ms)
+{
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+        if (esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    return true;
+}
+
+static SemaphoreHandle_t ota_lock(void)
+{
+    if (s_ota_lock != NULL) return s_ota_lock;
+    taskENTER_CRITICAL(&s_ota_lock_mux);
+    if (s_ota_lock == NULL) {
+        s_ota_lock = xSemaphoreCreateMutexStatic(&s_ota_lock_storage);
+    }
+    taskEXIT_CRITICAL(&s_ota_lock_mux);
+    return s_ota_lock;
+}
+
 static bool elf_sha_matches_manifest(const char *running_elf_sha, const char *manifest_elf_sha)
 {
     size_t running_len = strlen(running_elf_sha);
@@ -52,6 +116,62 @@ static bool elf_sha_matches_manifest(const char *running_elf_sha, const char *ma
 static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
 {
     return esp_http_client_set_header(client, "Authorization", s_auth_header);
+}
+
+static esp_err_t perform_ota_download(const esp_https_ota_config_t *ota_config,
+                                      int attempt, int max_attempts,
+                                      size_t *resume_bytes)
+{
+    esp_https_ota_handle_t handle = NULL;
+    ESP_LOGW(TAG, "OTA attempt %d/%d begin: resume=%u internal=%u psram=%u wifi=%s",
+             attempt, max_attempts,
+             (unsigned)(resume_bytes ? *resume_bytes : 0),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             wifi_state_name(fos_wifi_state()));
+
+    esp_err_t err = esp_https_ota_begin(ota_config, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "OTA begin failed on attempt %d/%d: %s",
+                 attempt, max_attempts, esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGW(TAG, "OTA download started: size=%d bytes",
+             esp_https_ota_get_image_size(handle));
+    int last_progress_bucket = resume_bytes ? (int)(*resume_bytes / (256 * 1024)) : -1;
+    while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+        int read = esp_https_ota_get_image_len_read(handle);
+        if (resume_bytes && read > 0 && (size_t)read > *resume_bytes) {
+            *resume_bytes = (size_t)read;
+        }
+        int bucket = read / (256 * 1024);
+        if (bucket != last_progress_bucket && read > 0) {
+            last_progress_bucket = bucket;
+            ESP_LOGW(TAG, "OTA download progress: %d/%d bytes",
+                     read, esp_https_ota_get_image_size(handle));
+        }
+    }
+    int read = esp_https_ota_get_image_len_read(handle);
+    if (resume_bytes && read > 0 && (size_t)read > *resume_bytes) {
+        *resume_bytes = (size_t)read;
+    }
+    if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
+        ESP_LOGW(TAG, "OTA download failed on attempt %d/%d at %u bytes: %s",
+                 attempt, max_attempts, (unsigned)(resume_bytes ? *resume_bytes : 0),
+                 esp_err_to_name(err == ESP_OK ? ESP_FAIL : err));
+        esp_https_ota_abort(handle);
+        return err == ESP_OK ? ESP_FAIL : err;
+    }
+
+    ESP_LOGW(TAG, "OTA download complete: %d bytes",
+             esp_https_ota_get_image_len_read(handle));
+    err = esp_https_ota_finish(handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "OTA finish failed on attempt %d/%d: %s",
+                 attempt, max_attempts, esp_err_to_name(err));
+    }
+    return err;
 }
 
 void fos_ota_mark_boot_valid(void)
@@ -155,7 +275,7 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
     return ESP_OK;
 }
 
-esp_err_t fos_ota_check_and_apply(void)
+static esp_err_t ota_check_and_apply_locked(void)
 {
     ESP_LOGI(TAG, "OTA check started");
     if (!ota_supported()) {
@@ -232,75 +352,160 @@ esp_err_t fos_ota_check_and_apply(void)
 
     esp_http_client_config_t http_config = {
         .url = url,
-        .timeout_ms = 60000,
+        .timeout_ms = FOS_OTA_HTTP_TIMEOUT_MS,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .keep_alive_enable = true,
-        .buffer_size = 4096,
+        .keep_alive_enable = false,
+        .buffer_size = 2048,
+        .buffer_size_tx = 1024,
     };
-    esp_https_ota_config_t ota_config = {
+    esp_https_ota_config_t base_ota_config = {
         .http_config = &http_config,
         .http_client_init_cb = ota_http_init_cb,
+        .partial_http_download = true,
+        .max_http_request_size = FOS_OTA_REQUEST_SIZE,
     };
 
-    esp_https_ota_handle_t handle = NULL;
-    ESP_LOGI(TAG, "OTA begin: internal=%u psram=%u",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    err = esp_https_ota_begin(&ota_config, &handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "OTA begin failed: %s", esp_err_to_name(err));
-        return err;
-    }
-    ESP_LOGI(TAG, "OTA download started: size=%d bytes",
-             esp_https_ota_get_image_size(handle));
-    int last_progress_bucket = -1;
-    while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-        int read = esp_https_ota_get_image_len_read(handle);
-        int bucket = read / (256 * 1024);
-        if (bucket != last_progress_bucket && read > 0) {
-            last_progress_bucket = bucket;
-            ESP_LOGI(TAG, "OTA download progress: %d/%d bytes",
-                     read, esp_https_ota_get_image_size(handle));
+    bool stopped_http = false;
+    esp_err_t last_err = ESP_FAIL;
+    size_t resume_bytes = 0;
+    for (int attempt = 1; attempt <= FOS_OTA_MAX_ATTEMPTS; attempt++) {
+        if (!wait_for_wifi_connected(attempt == 1 ? 5000 : FOS_OTA_RECONNECT_TIMEOUT_MS)) {
+            last_err = ESP_ERR_INVALID_STATE;
+            ESP_LOGW(TAG, "OTA attempt %d/%d skipped: Wi-Fi state=%s",
+                     attempt, FOS_OTA_MAX_ATTEMPTS, wifi_state_name(fos_wifi_state()));
+            continue;
+        }
+        if (attempt > 1) {
+            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_WIFI_SETTLE_MS));
+        }
+
+        if (!stopped_http && fos_http_is_running()) {
+            ESP_LOGI(TAG, "stopping local HTTP server for OTA headroom: internal=%u psram=%u",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            fos_http_stop();
+            stopped_http = true;
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        esp_https_ota_config_t ota_config = base_ota_config;
+        ota_config.ota_resumption = resume_bytes > 0;
+        ota_config.ota_image_bytes_written = resume_bytes;
+        last_err = perform_ota_download(&ota_config, attempt, FOS_OTA_MAX_ATTEMPTS,
+                                        &resume_bytes);
+        if (last_err == ESP_OK) {
+            store_applied_sha(manifest.sha);
+            ESP_LOGW(TAG, "OTA update applied, rebooting into new image");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+            return ESP_OK;
+        }
+
+        if (attempt < FOS_OTA_MAX_ATTEMPTS) {
+            ESP_LOGW(TAG, "OTA attempt %d/%d failed: %s; retrying after reconnect from %u bytes",
+                     attempt, FOS_OTA_MAX_ATTEMPTS, esp_err_to_name(last_err),
+                     (unsigned)resume_bytes);
+            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_RETRY_DELAY_MS));
         }
     }
-    if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
-        ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(err));
-        esp_https_ota_abort(handle);
-        return err == ESP_OK ? ESP_FAIL : err;
+
+    ESP_LOGE(TAG, "OTA failed after %d attempts: %s",
+             FOS_OTA_MAX_ATTEMPTS, esp_err_to_name(last_err));
+    if (stopped_http) {
+        fos_http_start(false);
     }
-    ESP_LOGI(TAG, "OTA download complete: %d bytes",
-             esp_https_ota_get_image_len_read(handle));
-    err = esp_https_ota_finish(handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "OTA finish failed: %s", esp_err_to_name(err));
-        return err;
+    return last_err;
+}
+
+esp_err_t fos_ota_check_and_apply(void)
+{
+    SemaphoreHandle_t lock = ota_lock();
+    if (lock == NULL) {
+        ESP_LOGE(TAG, "OTA lock unavailable");
+        return ESP_ERR_NO_MEM;
     }
-    store_applied_sha(manifest.sha);
-    ESP_LOGI(TAG, "OTA update applied, rebooting into new image");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK;
+    if (xSemaphoreTake(lock, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "OTA check already in progress; skipping concurrent request");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_ota_busy = true;
+    esp_err_t err = ota_check_and_apply_locked();
+    s_ota_busy = false;
+    xSemaphoreGive(lock);
+    return err;
+}
+
+bool fos_ota_busy(void)
+{
+    return s_ota_busy;
+}
+
+bool fos_ota_boot_request_pending(void)
+{
+    return load_boot_request();
+}
+
+esp_err_t fos_ota_run_boot_request(void)
+{
+    if (!load_boot_request()) return ESP_OK;
+
+    ESP_LOGW(TAG, "boot OTA request found; checking before runtime startup");
+    esp_err_t clear_err = store_boot_request(false);
+    if (clear_err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to clear boot OTA request: %s", esp_err_to_name(clear_err));
+    }
+    return fos_ota_check_and_apply();
 }
 
 static void ota_task(void *arg)
 {
     uint32_t interval_hours = (uint32_t)(uintptr_t)arg;
     if (interval_hours == 0) interval_hours = 24;
+    TickType_t interval_ticks = pdMS_TO_TICKS(interval_hours * 3600u * 1000u);
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(interval_hours * 3600u * 1000u));
-        ESP_LOGI(TAG, "periodic OTA check waking");
+        uint32_t notifications = ulTaskNotifyTake(pdTRUE, interval_ticks);
+        bool manual = notifications > 0;
+        if (manual) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+        ESP_LOGW(TAG, "%s OTA check waking", manual ? "manual" : "periodic");
         esp_err_t err = fos_ota_check_and_apply();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "periodic OTA check failed: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "%s OTA check failed: %s",
+                     manual ? "manual" : "periodic", esp_err_to_name(err));
         }
     }
 }
 
 void fos_ota_start_periodic_task(uint32_t interval_hours)
 {
+    if (s_ota_task_handle != NULL) return;
     if (!ota_supported()) {
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; periodic OTA disabled");
         return;
     }
-    xTaskCreate(ota_task, "fos_ota", 8192, (void *)(uintptr_t)interval_hours, 4, NULL);
+    BaseType_t created = xTaskCreate(ota_task, "fos_ota", 8192,
+                                     (void *)(uintptr_t)interval_hours, 4,
+                                     &s_ota_task_handle);
+    if (created != pdPASS) {
+        s_ota_task_handle = NULL;
+        ESP_LOGE(TAG, "OTA task start failed: internal=%u psram=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
+}
+
+esp_err_t fos_ota_request_check(void)
+{
+    if (!ota_supported()) return ESP_ERR_NOT_SUPPORTED;
+    esp_err_t err = store_boot_request(true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to store OTA request: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGW(TAG, "OTA requested; rebooting into early updater");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
 }

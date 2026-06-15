@@ -313,6 +313,7 @@ async def api_embedded_device_ota_manifest(
     }
 
 
+@api_public.head("/frames/{id:int}/embedded/ota/download")
 @api_public.get("/frames/{id:int}/embedded/ota/download")
 async def api_embedded_device_ota_download(
     id: int,

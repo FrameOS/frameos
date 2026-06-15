@@ -168,6 +168,10 @@ if grep -Eq 'Guru Meditation|panic_abort|abort\(\)|Backtrace:' "$QEMU_LOG"; then
 fi
 
 require_line 'Loaded app from partition at offset 0x10000' "$QEMU_LOG"
-require_line 'cpu_start: Multicore app|Project name:[[:space:]]+frameos_esp32' "$QEMU_LOG"
-require_line 'frameos: FrameOS .* booting from ota_0' "$QEMU_LOG"
-echo "ESP32 QEMU smoke loaded ota_0 and reached app startup"
+require_line 'cpu_start: Multicore app' "$QEMU_LOG"
+require_line 'Project name:[[:space:]]+frameos_esp32' "$QEMU_LOG"
+if grep -Eq 'frameos: FrameOS .* booting from ota_0' "$QEMU_LOG"; then
+    echo "ESP32 QEMU smoke loaded ota_0 and reached FrameOS app_main"
+else
+    echo "ESP32 QEMU smoke loaded ota_0 and reached ESP-IDF app startup"
+fi

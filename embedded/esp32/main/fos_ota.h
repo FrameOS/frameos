@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "esp_err.h"
 
 /* Mark the running image valid (cancels pending rollback). Call once per
@@ -14,5 +17,10 @@ void fos_ota_mark_boot_valid(void);
 /* GET the backend OTA manifest, compare it to the running image, download the
  * app image to the inactive OTA slot when needed, and reboot on success. */
 esp_err_t fos_ota_check_and_apply(void);
+bool fos_ota_busy(void);
+bool fos_ota_boot_request_pending(void);
+esp_err_t fos_ota_run_boot_request(void);
 /* Background task that checks every interval_hours. */
 void fos_ota_start_periodic_task(uint32_t interval_hours);
+/* Request an early-boot OTA check and reboot into it. */
+esp_err_t fos_ota_request_check(void);

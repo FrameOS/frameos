@@ -210,7 +210,7 @@ static int cmd_render(int argc, char **argv)
 
 static int cmd_ota(int argc, char **argv)
 {
-    esp_err_t err = fos_ota_check_and_apply();
+    esp_err_t err = fos_ota_request_check();
     printf("ota: %s\n", esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
 }

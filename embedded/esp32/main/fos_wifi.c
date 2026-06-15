@@ -94,6 +94,16 @@ static void apply_hostname(esp_netif_t *netif)
     }
 }
 
+static void disable_power_save(void)
+{
+    esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "wifi power save disabled");
+    } else {
+        ESP_LOGW(TAG, "failed to disable wifi power save: %s", esp_err_to_name(err));
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -175,6 +185,7 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    disable_power_save();
     ESP_LOGI(TAG, "connecting to \"%s\"", config->wifi_ssid);
 
     EventBits_t bits = xEventGroupWaitBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
@@ -258,6 +269,7 @@ esp_err_t fos_wifi_start_portal(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(keep_sta_retrying ? WIFI_MODE_APSTA : WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    disable_power_save();
     s_portal_active = true;
     s_portal_sta_retry = keep_sta_retrying;
     s_state = FOS_WIFI_PORTAL;

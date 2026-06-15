@@ -468,6 +468,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     fos_config_t *config = fos_config();
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
+    char elf_sha[80];
+    elf_sha[0] = '\0';
+    esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     char pins[FOS_STR_LEN];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
     int preview_width = 0, preview_height = 0;
@@ -506,13 +509,16 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     char *json = NULL;
     int len = asprintf(&json,
-        "{\"app\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
+        "{\"app\":\"%s\",\"version\":\"%s\",\"elfSha256\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
         "\"uptimeSec\":%lld,"
         "\"board\":{\"target\":\"esp32-s3\",\"module\":\"Seeed XIAO ESP32-S3 class\",\"display\":\"%s\"},"
         "\"memory\":{\"internalFree\":%u,\"psramFree\":%u,\"psramTotal\":%u},"
         "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
+        "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
+        "\"resumable\":true,\"bootRequestSupported\":true,"
+        "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
@@ -522,7 +528,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
         "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
-        app_name, app_version, idf_version, partition,
+        app_name, app_version, elf_sha, idf_version, partition,
         esp_timer_get_time() / 1000000,
         panel,
         (unsigned)internal_free, (unsigned)psram_free, (unsigned)psram_total,
@@ -531,6 +537,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
         (unsigned)storage.ota_slot_bytes, (unsigned)storage.ota_bytes,
         (unsigned)storage.state_bytes,
+        storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
         fos_battery_present() ? "true" : "false",
@@ -1027,7 +1034,6 @@ static void log_http_command(httpd_req_t *req, const char *event_name, size_t bo
     free(escaped_path);
     free(escaped_event);
     frameos_nim_log_hook(log_line);
-    frameos_nim_flush_logs();
 }
 
 static void log_http_command_from_path(httpd_req_t *req, size_t body_len)
@@ -1415,6 +1421,11 @@ esp_err_t fos_http_start(bool portal_mode)
         }
     }
     return ESP_OK;
+}
+
+bool fos_http_is_running(void)
+{
+    return s_http_server != NULL || s_https_server != NULL;
 }
 
 void fos_http_stop(void)
