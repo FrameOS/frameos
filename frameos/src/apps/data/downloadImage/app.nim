@@ -3,6 +3,7 @@ import pixie
 import options
 import frameos/apps
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/image
 
 type
@@ -16,23 +17,11 @@ type
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
-    let (image, imageData) =
-      when defined(frameosEmbedded):
-        let target =
-          if context.hasImage and not context.image.isNil:
-            context.image
-          else:
-            newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
-        downloadImageWithDataInto(
-          url,
-          target,
-          maxBytes = self.maxImageResponseBytes()
-        )
-      else:
-        downloadImageWithData(
-          url,
-          maxBytes = self.maxImageResponseBytes()
-        )
+    let (image, imageData) = self.downloadImageWithDataForContext(
+      context,
+      url,
+      maxBytes = self.maxImageResponseBytes()
+    )
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{
         "url": url,
@@ -47,6 +36,5 @@ proc get*(self: App, context: ExecutionContext): Image =
   except CatchableError as e:
     let detail = if e.msg.len > 0: e.msg else: "unknown error"
     self.logError "An error occurred while downloading the image: " & detail
-    return renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
+    return renderError(self.contextImageWidth(context), self.contextImageHeight(context),
         "An error occurred while downloading the image.\n" & detail)

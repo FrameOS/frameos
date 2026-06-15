@@ -3,6 +3,7 @@ import std/[json, options, random, sequtils, strformat, strutils, times, uri]
 import frameos/apps
 import frameos/hal/entropy
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/utils/image
 
@@ -43,8 +44,7 @@ proc init*(self: App) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
 proc commonsHeaders(): seq[SimpleHttpHeader] =
   @[
@@ -245,8 +245,8 @@ proc fetchImageForMode(self: App, thumbnailWidth: int): CommonsImage =
     raise newException(ValueError, "Invalid Wikimedia Commons mode: " & self.appConfig.mode)
 
 proc get*(self: App, context: ExecutionContext): Image =
-  let width = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
-  let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+  let width = self.contextImageWidth(context)
+  let height = self.contextImageHeight(context)
 
   try:
     let commonsImage = self.fetchImageForMode(max(max(width, height), 1))
@@ -254,25 +254,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.frameConfig.debug:
       self.log(&"Downloading Wikimedia Commons image: {commonsImage.imageUrl}")
 
-    let (downloadedImage, imageData) =
-      when defined(frameosEmbedded):
-        let target =
-          if context.hasImage and not context.image.isNil:
-            context.image
-          else:
-            newImage(width, height)
-        downloadImageWithDataInto(
-          commonsImage.imageUrl,
-          target,
-          maxBytes = self.maxImageResponseBytes(),
-          headers = imageHeaders()
-        )
-      else:
-        downloadImageWithData(
-          commonsImage.imageUrl,
-          maxBytes = self.maxImageResponseBytes(),
-          headers = imageHeaders()
-        )
+    let (downloadedImage, imageData) = self.downloadImageWithDataForContext(
+      context,
+      commonsImage.imageUrl,
+      maxBytes = self.maxImageResponseBytes(),
+      headers = imageHeaders(),
+      fallbackWidth = width,
+      fallbackHeight = height
+    )
 
     if self.appConfig.metadataStateKey != "":
       self.scene.state[self.appConfig.metadataStateKey] = %*{

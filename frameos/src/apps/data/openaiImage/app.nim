@@ -5,6 +5,7 @@ import base64
 import strutils
 import frameos/apps
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/utils/image
 
@@ -28,8 +29,7 @@ type
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
 when defined(frameosEmbedded):
   proc bestEmbeddedGptImage2Size(width, height: int): string =
@@ -52,8 +52,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   if apiKey == "":
     return self.error(context, "Please provide an OpenAI API key in the settings.")
 
-  let imageWidth = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
-  let imageHeight = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+  let imageWidth = self.contextImageWidth(context)
+  let imageHeight = self.contextImageHeight(context)
   let defaultSize = "1024x1024"
   let dalle3Sizes = @["1024x1024", "1792x1024", "1024x1792"]
   let dalle2Sizes = @["256x256", "512x512", "1024x1024"]
@@ -154,23 +154,13 @@ proc get*(self: App, context: ExecutionContext): Image =
         let imageUrl = imageNode{"url"}.getStr
         if imageUrl == "":
           return self.error(context, "No image data returned from OpenAI.")
-        let (downloadedImage, downloadedData) =
-          when defined(frameosEmbedded):
-            let target =
-              if context.hasImage and not context.image.isNil:
-                context.image
-              else:
-                newImage(imageWidth, imageHeight)
-            downloadImageWithDataInto(
-              imageUrl,
-              target,
-              maxBytes = self.maxImageResponseBytes()
-            )
-          else:
-            downloadImageWithData(
-              imageUrl,
-              maxBytes = self.maxImageResponseBytes()
-            )
+        let (downloadedImage, downloadedData) = self.downloadImageWithDataForContext(
+          context,
+          imageUrl,
+          maxBytes = self.maxImageResponseBytes(),
+          fallbackWidth = imageWidth,
+          fallbackHeight = imageHeight
+        )
         imageDataBody = downloadedData
         if self.appConfig.metadataStateKey != "":
           var metadata = %*{
@@ -206,12 +196,13 @@ proc get*(self: App, context: ExecutionContext): Image =
       GC_fullCollect()
       let bytes = cast[ptr UncheckedArray[uint8]](unsafeAddr imageDataBody[0])
       if imageDataBody.len > 2 and bytes[0] == 0xFF'u8 and bytes[1] == 0xD8'u8:
-        if context.hasImage and not context.image.isNil:
-          when compiles(decodeJpegScaledInto(imageDataBody, context.image)):
-            decodeJpegScaledInto(imageDataBody, context.image)
-            result = context.image
+        let target = context.contextImage()
+        if not target.isNil:
+          when compiles(decodeJpegScaledInto(imageDataBody, target)):
+            decodeJpegScaledInto(imageDataBody, target)
+            result = target
           else:
-            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len, context.image)
+            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len, target)
         else:
           when compiles(decodeJpegScaled(imageDataBody, imageWidth, imageHeight)):
             result = decodeJpegScaled(

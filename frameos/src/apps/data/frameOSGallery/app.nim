@@ -1,17 +1,14 @@
 import pixie, strformat, json
 import frameos/apps
 import frameos/types
-import frameos/utils/image
+import frameos/utils/app_images
 
 const BASE_URL = "https://gallery.frameos.net/image"
 
 type GalleryDownloadHook* = proc(url: string, maxBytes: int, target: Image): Image
 
 proc defaultGalleryDownload(url: string, maxBytes: int, target: Image): Image =
-  when defined(frameosEmbedded):
-    if not target.isNil:
-      return downloadImageInto(url, target, maxBytes = maxBytes)
-  downloadImage(url, maxBytes = maxBytes)
+  downloadImageForTarget(url, maxBytes, target)
 
 var galleryDownloadHook*: GalleryDownloadHook = defaultGalleryDownload
 
@@ -36,5 +33,5 @@ proc get*(self: App, context: ExecutionContext): Image =
   let category = self.appConfig.resolvedCategory()
   self.log(%*{"category": category})
   let url = galleryUrl(category)
-  let target = if context.hasImage: context.image else: nil
+  let target = context.contextImage()
   result = galleryDownloadHook(url, self.maxImageResponseBytes(), target)

@@ -5,6 +5,7 @@ import strformat
 import strutils
 import frameos/apps
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/utils/image
 
@@ -24,8 +25,7 @@ proc init*(self: App) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
 proc get*(self: App, context: ExecutionContext): Image =
   self.ensureEmbeddedServiceSettings()
@@ -33,8 +33,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   if apiKey == "":
     return self.error(context, "Please provide an Unsplash API key in the settings.")
 
-  let width = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
-  let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+  let width = self.contextImageWidth(context)
+  let height = self.contextImageHeight(context)
   let search = self.appConfig.search
   let orientation = if self.appConfig.orientation == "auto":
                       if height > width: "portrait"
@@ -74,23 +74,13 @@ proc get*(self: App, context: ExecutionContext): Image =
     let realImageUrl = &"{imageUrl}&w={width}&h={height}&fit=crop&crop=faces,edges"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {realImageUrl}")
-    let (downloadedImage, imageData) =
-      when defined(frameosEmbedded):
-        let target =
-          if context.hasImage and not context.image.isNil:
-            context.image
-          else:
-            newImage(width, height)
-        downloadImageWithDataInto(
-          realImageUrl,
-          target,
-          maxBytes = self.maxImageResponseBytes()
-        )
-      else:
-        downloadImageWithData(
-          realImageUrl,
-          maxBytes = self.maxImageResponseBytes()
-        )
+    let (downloadedImage, imageData) = self.downloadImageWithDataForContext(
+      context,
+      realImageUrl,
+      maxBytes = self.maxImageResponseBytes(),
+      fallbackWidth = width,
+      fallbackHeight = height
+    )
 
     if self.appConfig.metadataStateKey != "":
       let description = json{"description"}.getStr(json{"alt_description"}.getStr(""))
