@@ -68,6 +68,15 @@ frameos/buildroot/sources
 frameos/buildroot/dl
 frameos/*.admin_session_salt
 frameos/state/*.json
+embedded/esp32/build/
+embedded/esp32/build-*/
+embedded/esp32/managed_components/
+embedded/esp32/dependencies.lock
+embedded/esp32/sdkconfig
+embedded/esp32/sdkconfig.old
+embedded/esp32/main/generated_config.h
+embedded/esp32/components/frameos_nim/nimcache/
+embedded/esp32/.cache/
 e2e/tmp
 e2e/frameos
 e2e/generated

@@ -16,6 +16,10 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
   discard frameOS
   addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
 
+proc setPinOverrides*(pins: PinOverrides) =
+  waveshareConfig.DEV_SetPinConfig(pins.rst.cint, pins.dc.cint, pins.cs.cint,
+    pins.busy.cint, pins.sclk.cint, pins.mosi.cint, pins.pwr.cint)
+
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")

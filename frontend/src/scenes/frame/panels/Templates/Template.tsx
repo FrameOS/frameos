@@ -18,6 +18,7 @@ import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
+import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 
 interface TemplateProps {
   template: TemplateType
@@ -29,6 +30,7 @@ interface TemplateProps {
   editTemplate?: (template: TemplateType) => void
   installedTemplatesByName: Record<string, boolean>
   templateDragData?: FrameosTemplateDragData
+  compatibility?: CompatibilityResult
 }
 
 export function TemplateRow({
@@ -41,6 +43,7 @@ export function TemplateRow({
   saveRemoteAsLocal,
   installedTemplatesByName,
   templateDragData,
+  compatibility,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
@@ -79,18 +82,27 @@ export function TemplateRow({
     () => getMissingSecretSettingKeys(secretSettings, savedSettings),
     [savedSettings, secretSettings]
   )
+  const unsupported = compatibility?.supported === false
+  const unsupportedReason = compatibility?.reason ?? 'This scene is not supported on ESP32 frames.'
+  const canInstall = !unsupported
 
   return (
     <div
-      draggable={Boolean(templateDragData)}
+      draggable={Boolean(templateDragData) && canInstall}
       onDragStart={(event) => {
+        if (!canInstall) {
+          event.preventDefault()
+          return
+        }
         if (templateDragData) {
           setFrameosTemplateDragData(event.dataTransfer, templateDragData)
         }
       }}
+      title={unsupported ? unsupportedReason : undefined}
       className={clsx(
         'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
-        templateDragData && 'cursor-grab active:cursor-grabbing'
+        templateDragData && canInstall && 'cursor-grab active:cursor-grabbing',
+        unsupported && 'opacity-60 grayscale'
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -98,7 +110,7 @@ export function TemplateRow({
           <div
             className={clsx(
               'h-[90px] w-[90px] flex-shrink-0 rounded-2xl border border-slate-500/20 bg-cover bg-center',
-              templateDragData && 'cursor-grab active:cursor-grabbing'
+              templateDragData && canInstall && 'cursor-grab active:cursor-grabbing'
             )}
             style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
           />
@@ -115,7 +127,8 @@ export function TemplateRow({
                   size="small"
                   color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
                   onClick={() => applyTemplate(template)}
-                  title="Add scene"
+                  disabled={!canInstall}
+                  title={unsupported ? unsupportedReason : 'Add scene'}
                 >
                   {!installedTemplatesByName[template.name] ? (
                     <FolderPlusIcon className="w-5 h-5" />
@@ -137,6 +150,9 @@ export function TemplateRow({
                   size="small"
                   color="secondary"
                   onClick={() => {
+                    if (!canInstall) {
+                      return
+                    }
                     if (trySceneFields.length === 0) {
                       resetTrySceneState({})
                       submitTrySceneState()
@@ -144,8 +160,8 @@ export function TemplateRow({
                     }
                     openTrySceneModal()
                   }}
-                  disabled={!frameId}
-                  title="Preview this interpreted scene on the frame"
+                  disabled={!frameId || !canInstall}
+                  title={unsupported ? unsupportedReason : 'Preview this interpreted scene on the frame'}
                 >
                   <EyeIcon className="w-5 h-5" />
                 </Button>
@@ -163,6 +179,8 @@ export function TemplateRow({
                                 } onto frame`
                               : 'Add onto frame',
                           onClick: () => applyTemplate(template),
+                          disabled: !canInstall,
+                          title: unsupported ? unsupportedReason : undefined,
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
                         },
                       ]
@@ -212,6 +230,11 @@ export function TemplateRow({
           <div className="flex items-center gap-2 w-full justify-between">
             {template.description ? <div className="frame-tool-muted text-sm">{template.description}</div> : null}
           </div>
+          {unsupported ? (
+            <div className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+              Not supported on ESP32: {unsupportedReason}
+            </div>
+          ) : null}
           {missingSecretSettings.size ? (
             <div className="flex flex-wrap gap-2 pt-1">
               {secretSettings

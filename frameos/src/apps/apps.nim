@@ -1,6 +1,5 @@
 import frameos/types
 import apps/data/beRecycle/app_loader as data_beRecycle_loader
-import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
@@ -18,7 +17,6 @@ import apps/data/prettyJson/app_loader as data_prettyJson_loader
 import apps/data/qr/app_loader as data_qr_loader
 import apps/data/resizeImage/app_loader as data_resizeImage_loader
 import apps/data/rotateImage/app_loader as data_rotateImage_loader
-import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 import apps/data/unsplash/app_loader as data_unsplash_loader
 import apps/data/weather/app_loader as data_weather_loader
 import apps/data/wikicommons/app_loader as data_wikicommons_loader
@@ -35,11 +33,20 @@ import apps/render/opacity/app_loader as render_opacity_loader
 import apps/render/split/app_loader as render_split_loader
 import apps/render/svg/app_loader as render_svg_loader
 import apps/render/text/app_loader as render_text_loader
+when not defined(frameosEmbedded):
+  # Excluded from embedded builds: these apps depend on host-only
+  # runtime features such as child processes and external binaries.
+  import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
+  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.init(node, scene)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.init(node, scene)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.init(node, scene)
   of "data/clock": data_clock_loader.init(node, scene)
   of "data/downloadImage": data_downloadImage_loader.init(node, scene)
   of "data/downloadUrl": data_downloadUrl_loader.init(node, scene)
@@ -57,7 +64,11 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/qr": data_qr_loader.init(node, scene)
   of "data/resizeImage": data_resizeImage_loader.init(node, scene)
   of "data/rotateImage": data_rotateImage_loader.init(node, scene)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.init(node, scene)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.init(node, scene)
   of "data/unsplash": data_unsplash_loader.init(node, scene)
   of "data/weather": data_weather_loader.init(node, scene)
   of "data/wikicommons": data_wikicommons_loader.init(node, scene)
@@ -79,7 +90,11 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.setField(app, field, value)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.setField(app, field, value)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.setField(app, field, value)
   of "data/clock": data_clock_loader.setField(app, field, value)
   of "data/downloadImage": data_downloadImage_loader.setField(app, field, value)
   of "data/downloadUrl": data_downloadUrl_loader.setField(app, field, value)
@@ -97,7 +112,11 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/qr": data_qr_loader.setField(app, field, value)
   of "data/resizeImage": data_resizeImage_loader.setField(app, field, value)
   of "data/rotateImage": data_rotateImage_loader.setField(app, field, value)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.setField(app, field, value)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.setField(app, field, value)
   of "data/unsplash": data_unsplash_loader.setField(app, field, value)
   of "data/weather": data_weather_loader.setField(app, field, value)
   of "data/wikicommons": data_wikicommons_loader.setField(app, field, value)
@@ -135,7 +154,11 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.get(app, context)
-  of "data/chromiumScreenshot": data_chromiumScreenshot_loader.get(app, context)
+  of "data/chromiumScreenshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    else:
+      data_chromiumScreenshot_loader.get(app, context)
   of "data/clock": data_clock_loader.get(app, context)
   of "data/downloadImage": data_downloadImage_loader.get(app, context)
   of "data/downloadUrl": data_downloadUrl_loader.get(app, context)
@@ -153,7 +176,11 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/qr": data_qr_loader.get(app, context)
   of "data/resizeImage": data_resizeImage_loader.get(app, context)
   of "data/rotateImage": data_rotateImage_loader.get(app, context)
-  of "data/rstpSnapshot": data_rstpSnapshot_loader.get(app, context)
+  of "data/rstpSnapshot":
+    when defined(frameosEmbedded):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    else:
+      data_rstpSnapshot_loader.get(app, context)
   of "data/unsplash": data_unsplash_loader.get(app, context)
   of "data/weather": data_weather_loader.get(app, context)
   of "data/wikicommons": data_wikicommons_loader.get(app, context)

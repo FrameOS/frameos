@@ -130,14 +130,22 @@ async def _fetch_frame_http_bytes(
     *,
     path: str,
     method: str = "GET",
+    body: bytes | str | None = None,
+    headers: Optional[dict[str, str]] = None,
 ) -> tuple[int, bytes, dict[str, str]]:
     """Fetch *path* from the frame returning (status, body-bytes, headers)."""
     if await _use_agent(frame, redis):
+        agent_body: str | None
+        if isinstance(body, bytes):
+            agent_body = body.decode("latin1")
+        else:
+            agent_body = body
         resp = await http_get_on_frame(
             frame.id,
             _build_frame_path(frame, path, method),
             method=method,
-            headers=_auth_headers(frame),
+            body=agent_body,
+            headers=_auth_headers(frame, headers),
             redis=redis,
         )
         if isinstance(resp, dict):
@@ -154,7 +162,7 @@ async def _fetch_frame_http_bytes(
         raise HTTPException(status_code=500, detail="Bad agent response")
 
     url = _build_frame_url(frame, path, method)
-    hdrs = _auth_headers(frame)
+    hdrs = _auth_headers(frame, headers)
     verify = _httpx_verify(frame)
     timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
     attempts = max(1, FRAME_HTTP_RETRIES)
@@ -166,6 +174,7 @@ async def _fetch_frame_http_bytes(
                         method,
                         url,
                         headers=hdrs,
+                        content=body,
                         timeout=FRAME_HTTP_TIMEOUT,
                     )
                     break

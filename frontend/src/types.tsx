@@ -16,7 +16,7 @@ export interface FrameType {
   id: number
   project_id: number
   name: string
-  mode?: 'rpios' | 'buildroot'
+  mode?: 'rpios' | 'buildroot' | 'embedded'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -62,6 +62,19 @@ export interface FrameType {
     vcom?: number
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
+    psramMB?: number
+    renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    pins?: {
+      rst?: number
+      dc?: number
+      cs?: number
+      cs2?: number
+      busy?: number
+      sck?: number
+      sclk?: number
+      mosi?: number
+      pwr?: number
+    }
   }
   color?: string
   interval: number
@@ -121,6 +134,7 @@ export interface FrameType {
   error_behavior?: FrameErrorBehavior
   palette?: Palette
   buildroot?: FrameBuildrootConfig
+  embedded?: FrameEmbeddedConfig
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
@@ -141,8 +155,8 @@ export interface FrameMountpointsConfig {
   items?: FrameMountpointConfig[]
 }
 
-export type FrameMode = 'rpios' | 'buildroot' | 'import'
-export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script'
+export type FrameMode = 'rpios' | 'buildroot' | 'embedded' | 'import'
+export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script' | 'embedded'
 export interface NewFrameFormType {
   mode: FrameMode
   install_method?: FrameInstallMethod
@@ -732,4 +746,30 @@ export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: FrameCrossCompilationOptionValue
   compilationMode?: FrameCompilationModeOptionValue
+}
+
+export interface FrameEmbeddedConfig {
+  platform?: string
+  firmware?: {
+    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
+    requestId?: string
+    queueJobId?: string
+    platform?: string
+    filename?: string
+    path?: string
+    size?: number
+    sha256?: string
+    flashOffset?: string
+    downloadUrl?: string
+    panel?: string
+    otaPath?: string
+    otaSha256?: string
+    otaElfSha256?: string
+    otaSize?: number
+    queuedAt?: string
+    startedAt?: string
+    lastHeartbeatAt?: string
+    completedAt?: string
+    error?: string
+  }
 }

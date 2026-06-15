@@ -1,6 +1,6 @@
 # import chrono
 import json
-import os
+import frameos/hal/clock
 import times
 import frameos/types
 import frameos/channels
@@ -71,9 +71,9 @@ proc start*(self: Scheduler) =
     let now2 = now()
     if now2.minute == dt.minute:
       let secondsToSleep = 60 - now2.second
-      sleep(secondsToSleep * 1000)
+      sleepMs(secondsToSleep * 1000)
     else:
-      sleep(200) # the clock moved mid-iteration; re-check soon without spinning
+      sleepMs(200) # the clock moved mid-iteration; re-check soon without spinning
 
 proc createThreadRunner(frameOS: FrameOS) {.thread.} =
   var scheduler = Scheduler(

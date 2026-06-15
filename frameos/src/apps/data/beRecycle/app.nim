@@ -4,7 +4,6 @@ import options
 import json
 import strutils
 import chrono
-import httpclient
 import frameos/apps
 import frameos/types
 import frameos/utils/http_client
@@ -30,7 +29,7 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
-    headers: HttpHeaders
+    headers: seq[SimpleHttpHeader]
     expiresAt: string
 
   AddressIds = object
@@ -42,17 +41,27 @@ var
   beRecycleAuthenticateHook*: BeRecycleAuthenticateHook = nil
   beRecycleFetchCollectionsHook*: BeRecycleFetchCollectionsHook = nil
 
+proc fetchBody(self: App, url: string, httpMethod = "GET", body = ""): string =
+  let response = boundedRequestWithHeaders(url,
+    httpMethod = httpMethod,
+    body = body,
+    headers = self.headers,
+    maxBytes = self.maxHttpResponseBytes())
+  if response.code >= 400:
+    raise newException(IOError, "HTTP " & response.status & ": " & response.body)
+  response.body
+
 proc authenticate(self: App) =
-  self.headers = newHttpHeaders([
-    ("User-Agent", USER_AGENT),
-    ("x-consumer", X_CONSUMER),
-    ("x-secret", if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET)
-  ])
+  self.headers = @[
+    (name: "User-Agent", value: USER_AGENT),
+    (name: "x-consumer", value: X_CONSUMER),
+    (name: "x-secret", value: if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET),
+  ]
   let url = API_ENDPOINT & "/access-token"
-  let atResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
+  let atResp = self.fetchBody(url)
   let atRespJson = parseJson(atResp)
   if atRespJson.hasKey("accessToken"):
-    self.headers.add("Authorization", atRespJson["accessToken"].getStr())
+    self.headers.add((name: "Authorization", value: atRespJson["accessToken"].getStr()))
     # TODO: refetch if expired
     self.expiresAt = atRespJson["expiresAt"].getStr()
   else:
@@ -60,7 +69,7 @@ proc authenticate(self: App) =
 
 proc fetchAddressIds(self: App): AddressIds =
   let url = API_ENDPOINT & "/zipcodes?q=" & $self.appConfig.postalCode
-  let zipResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
+  let zipResp = self.fetchBody(url)
   let zipJson = parseJson(zipResp)
   var zipId = ""
 
@@ -73,7 +82,7 @@ proc fetchAddressIds(self: App): AddressIds =
     raise newException(ValueError, "Could not find the right zip code.")
 
   let streetUrl = API_ENDPOINT & "/streets?q=" & self.appConfig.streetName & "&zipcodes=" & zipId
-  let streetResp = boundedPostContent(streetUrl, "", headers = self.headers, maxBytes = self.maxHttpResponseBytes())
+  let streetResp = self.fetchBody(streetUrl, httpMethod = "POST")
   let streetJson = parseJson(streetResp)
   var streetId = ""
 
@@ -89,7 +98,7 @@ proc fetchAddressIds(self: App): AddressIds =
 proc fetchCollections(self: App, addressIds: AddressIds, fromDate: string, toDate: string): JsonNode =
   let url = API_ENDPOINT & "/collections?zipcodeId=" & addressIds.zip & "&streetId=" & addressIds.street &
       "&houseNumber=" & $addressIds.housenumber & "&fromDate=" & fromDate & "&untilDate=" & toDate & "&size=200"
-  let collectionResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
+  let collectionResp = self.fetchBody(url)
   let collections = parseJson(collectionResp)
 
   if collections.hasKey("items"):

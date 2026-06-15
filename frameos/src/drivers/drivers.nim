@@ -13,10 +13,21 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
     vcom: 0.0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
+    pins: driverContext.PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
   if not sourceDeviceConfig.isNil:
     deviceConfig.vcom = sourceDeviceConfig.vcom
     deviceConfig.httpUploadUrl = sourceDeviceConfig.httpUploadUrl
+    if not sourceDeviceConfig.pins.isNil:
+      deviceConfig.pins = driverContext.PinOverrides(
+        rst: sourceDeviceConfig.pins.rst,
+        dc: sourceDeviceConfig.pins.dc,
+        cs: sourceDeviceConfig.pins.cs,
+        busy: sourceDeviceConfig.pins.busy,
+        sclk: sourceDeviceConfig.pins.sclk,
+        mosi: sourceDeviceConfig.pins.mosi,
+        pwr: sourceDeviceConfig.pins.pwr,
+      )
     for header in sourceDeviceConfig.httpUploadHeaders:
       deviceConfig.httpUploadHeaders.add(driverContext.HttpHeaderPair(
         name: header.name,

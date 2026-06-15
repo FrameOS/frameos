@@ -1,4 +1,9 @@
-import json, pixie, locks, tables, options, asyncdispatch, mummy
+when defined(frameosEmbedded):
+  # No mummy (epoll/threads) or asyncdispatch on FreeRTOS; the embedded
+  # firmware serves HTTP through esp_http_server on the C side instead.
+  import json, pixie, locks, tables, options
+else:
+  import json, pixie, locks, tables, options, asyncdispatch, mummy
 import frameos/ids
 export ids
 import frameos/js_runtime/burrito
@@ -139,10 +144,15 @@ type
     name*: string
     value*: string
 
+  PinOverrides* = ref object
+    ## GPIO remap for SPI panel drivers; -1 = keep the driver's default pin.
+    rst*, dc*, cs*, busy*, sclk*, mosi*, pwr*: int
+
   DeviceConfig* = ref object
     vcom*: float # used for the 10.3" display
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
+    pins*: PinOverrides
 
   SerializedLog* = object
     timestamp*: float
@@ -152,8 +162,11 @@ type
   Logger* = ref object
     frameConfig*: FrameConfig
     lock*: Lock
-    thread*: Thread[FrameConfig]
-    channel*: Channel[SerializedLog]
+    when not defined(frameosEmbedded):
+      # The logger thread + channel only exist on OS-threaded builds; the
+      # embedded build logs synchronously through a C hook.
+      thread*: Thread[FrameConfig]
+      channel*: Channel[SerializedLog]
     log*: proc (payload: JsonNode)
     enabled*: bool
     enable*: proc ()
@@ -328,7 +341,8 @@ type
     scenes*: Table[SceneId, FrameScene]
     currentSceneId*: SceneId
     lastRenderAt*: float
-    sleepFuture*: Option[Future[void]]
+    when not defined(frameosEmbedded):
+      sleepFuture*: Option[Future[void]]
     isRendering*: bool = false
     triggerRenderNext*: bool = false
     forceSceneReload*: bool = false
@@ -340,11 +354,14 @@ type
 
   ConnectionsState* = ref object
     lock*: Lock
-    items*: seq[WebSocket]
+    when not defined(frameosEmbedded):
+      items*: seq[WebSocket]
 
   Server* = ref object
     frameConfig*: FrameConfig
-    mummy*: mummy.Server
+    when not defined(frameosEmbedded):
+      # esp_http_server handles HTTP on the embedded firmware's C side.
+      mummy*: mummy.Server
     httpWorkerThreads*: int
     runner*: RunnerControl
     url*: string

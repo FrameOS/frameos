@@ -1,4 +1,5 @@
 import json, locks, random, times
+import frameos/hal/entropy
 
 type
   RuntimeDiagnosticsState = object
@@ -30,7 +31,7 @@ const BootIdAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 const BootIdLength = 8
 
 proc generateRuntimeBootId(): string =
-  randomize()
+  randomizeSafe()
   result = newString(BootIdLength)
   for index in 0..<BootIdLength:
     result[index] = BootIdAlphabet[rand(BootIdAlphabet.high)]

@@ -158,6 +158,29 @@ suite "interpreter error paths":
       check scene.state{"bucket"}.getStr() == ""
       check eventPayload(store, "interpreter:dispatch:ignored").isNil
 
+  test "codeJS expression with trailing comma is normalized":
+    let sceneId = "tests/interpreter-errors/codejs-trailing-comma".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "codeJS trailing comma",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "code", %*{
+          "codeArgs": [],
+          "codeOutputs": [%*{"name": "text", "type": "string"}],
+          "codeJS": "`hello ${1 + 1}`,"
+        })
+      ],
+      edges: @[]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      let value = scene.getDataNode(10.NodeId, ctx(scene, "render"))
+      check value.kind == fkString
+      check value.asString() == "hello 2"
+      check eventPayload(store, "interpreter:jsCompileError").isNil
+
   test "render dispatch from render event is ignored to avoid immediate self loop":
     clearEventChannel()
     let sceneId = "tests/interpreter-errors/render-self-dispatch".SceneId

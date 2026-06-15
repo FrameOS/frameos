@@ -36,6 +36,7 @@ export function NewNodePicker() {
 
   const x = newNodePicker?.screenX ?? 0
   const y = newNodePicker?.screenY ?? 0
+  const firstEnabledOption = newNodeOptions.find((option) => !option.disabledReason)
 
   return (
     <Menu key={newNodePickerIndex}>
@@ -71,12 +72,12 @@ export function NewNodePicker() {
                         if (activeOptions && activeOptions.length > 0) {
                           return // The button click will handle the selection
                         }
-                        if (e.key === 'Enter' && Object.keys(newNodeOptions).length >= 1) {
+                        if (e.key === 'Enter' && firstEnabledOption) {
                           e.preventDefault()
                           close()
                           closeNewNodePicker()
                           if (newNodePicker) {
-                            selectNewNodeOption(newNodePicker, newNodeOptions[0])
+                            selectNewNodeOption(newNodePicker, firstEnabledOption)
                           }
                         }
                       }}
@@ -91,11 +92,16 @@ export function NewNodePicker() {
                             href="#"
                             className={clsx(
                               'frameos-dropdown-item px-4 py-1 text-sm flex gap-2',
-                              active && 'frameos-dropdown-item-active'
+                              active && !option.disabledReason && 'frameos-dropdown-item-active',
+                              option.disabledReason && 'cursor-not-allowed opacity-50'
                             )}
+                            title={option.disabledReason}
                             data-active-menu-selection={active ? true : undefined}
                             onClick={(e) => {
                               e.preventDefault()
+                              if (option.disabledReason) {
+                                return
+                              }
                               close()
                               closeNewNodePicker()
                               if (newNodePicker) {

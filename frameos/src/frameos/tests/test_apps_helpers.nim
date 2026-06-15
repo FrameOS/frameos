@@ -35,6 +35,11 @@ suite "frameos app helpers":
     check maxHttpResponseBytes(FrameConfig(maxHttpResponseBytes: 0)) == DefaultMaxHttpResponseBytes
     check maxHttpResponseBytes(AppRoot(frameConfig: FrameConfig(maxHttpResponseBytes: 5678))) == 5678
     check maxHttpResponseBytes(AppRoot()) == DefaultMaxHttpResponseBytes
+    when defined(frameosEmbedded):
+      check maxImageResponseBytes(FrameConfig(maxHttpResponseBytes: 1234)) == EmbeddedMinImageResponseBytes
+      check maxImageResponseBytes(FrameConfig(maxHttpResponseBytes: EmbeddedMinImageResponseBytes + 1)) == EmbeddedMinImageResponseBytes + 1
+    else:
+      check maxImageResponseBytes(FrameConfig(maxHttpResponseBytes: 1234)) == 1234
 
   test "cleanFilename strips invalid chars and collapses spaces":
     check cleanFilename("hello   world") == "hello world"

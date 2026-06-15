@@ -17,9 +17,10 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeGalleryDownload(url: string, maxBytes: int): Image =
+proc fakeGalleryDownload(url: string, maxBytes: int, target: Image): Image =
   galleryHookUrl = url
   galleryHookMaxBytes = maxBytes
+  check target.isNil
   newImage(2, 3)
 
 suite "data/frameOSGallery app":
@@ -40,7 +41,9 @@ suite "data/frameOSGallery app":
       nodeId: 11.NodeId,
       nodeName: "data/frameOSGallery",
       scene: FrameScene(logger: newLogger(logs)),
-      frameConfig: FrameConfig(maxHttpResponseBytes: 1234),
+      frameConfig: FrameConfig(
+        maxHttpResponseBytes: 1234
+      ),
       appConfig: AppConfig(category: "other", categoryOther: "nature")
     )
 

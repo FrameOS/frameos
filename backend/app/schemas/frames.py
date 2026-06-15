@@ -105,6 +105,7 @@ class FrameBase(BaseModel):
     error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]]
     buildroot: Optional[Dict[str, Any]] = None
+    embedded: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
@@ -119,7 +120,7 @@ class FramesListResponse(BaseModel):
     frames: List[FrameBase]
 
 class FrameCreateRequest(BaseModel):
-    mode: Optional[Literal["rpios", "buildroot"]] = None
+    mode: Optional[Literal["rpios", "buildroot", "embedded"]] = None
     name: str
     frame_host: str
     server_host: str
@@ -134,7 +135,7 @@ class FrameCreateRequest(BaseModel):
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
-    mode: Optional[Literal["rpios", "buildroot"]] = None
+    mode: Optional[Literal["rpios", "buildroot", "embedded"]] = None
     name: Optional[str] = None
     frame_host: Optional[str] = None
     frame_port: Optional[int] = None
@@ -180,6 +181,7 @@ class FrameUpdateRequest(BaseModel):
     error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
+    embedded: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None

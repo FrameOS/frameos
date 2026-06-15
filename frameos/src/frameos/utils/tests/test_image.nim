@@ -4,6 +4,9 @@ import pixie/fileformats/png
 
 import ../image
 
+when defined(frameosEmbedded):
+  import std/os
+
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.data[image.dataIndex(x, y)]
 
@@ -45,6 +48,36 @@ suite "image helpers":
       discard decodeDataUrl("http://example.com/not-a-data-url")
     expect(ValueError):
       discard decodeDataUrl("data:image/png;base64")
+
+  when defined(frameosEmbedded):
+    test "embedded pointer decoder accepts guarded small JPEGs":
+      let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"
+      if fileExists(fixture):
+        let data = readFile(fixture)
+        let image = decodeImageWithFallback(data.cstring, data.len)
+        check image.width == 8
+        check image.height == 8
+
+    test "embedded pointer decoder scales JPEGs into a target image":
+      let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"
+      if fileExists(fixture):
+        let data = readFile(fixture)
+        let target = newImage(4, 3)
+        let image = decodeImageWithFallback(data.cstring, data.len, target)
+        check image.width == 4
+        check image.height == 3
+        check image == target
+
+    test "embedded string decoder releases JPEG bytes before filling target image":
+      let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"
+      if fileExists(fixture):
+        var data = readFile(fixture)
+        let target = newImage(5, 4)
+        let image = decodeImageWithFallback(data, target)
+        check image.width == 5
+        check image.height == 4
+        check image == target
+        check data.len == 0
 
   test "decodeSvgWithFallback defaults to pixie and honors target dimensions":
     let image = decodeSvgWithFallback(

@@ -3,6 +3,7 @@ import { AppNodeData } from '../../types'
 
 import type { frameEditorsLogicType } from './frameEditorsLogicType'
 import { frameLogic } from './frameLogic'
+import { sceneExecutionForFrame } from '../../utils/sceneExecution'
 
 // Tracks what is being edited in a frame's workspace: which editors (scene
 // diagram, scene JSON, app source) are open, which one is active, and the
@@ -135,8 +136,10 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
       (s) => [s.frameForm, s.selectedSceneId],
       (frameForm, selectedSceneId): boolean =>
         !!selectedSceneId &&
-        (frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)?.settings?.execution ?? 'compiled') ===
-          'interpreted',
+        sceneExecutionForFrame(
+          frameForm?.scenes?.find((scene) => scene.id === selectedSceneId),
+          frameForm?.mode
+        ) === 'interpreted',
     ],
   })),
   listeners(({ cache }) => ({

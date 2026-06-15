@@ -83,12 +83,32 @@ jobs:
           nimble assets
           nimble build_quickjs --silent
           nimble setup
-          FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+          FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
 
       - name: FrameOS nim tests
         run: |
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
+
+      - name: FrameOS ESP32 Nim compile
+        if: ${{ matrix.shard == 1 }}
+        run: |
+          cd frameos
+          nim c \
+            --compileOnly \
+            --os:freertos \
+            --cpu:esp \
+            --mm:orc \
+            --threads:off \
+            --exceptions:goto \
+            --noMain \
+            --opt:size \
+            -d:release \
+            -d:useMalloc \
+            -d:noSignalHandler \
+            -d:frameosEmbedded \
+            --nimcache:/tmp/frameos-esp32-nimcache \
+            src/embedded/embedded_main.nim
 
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)

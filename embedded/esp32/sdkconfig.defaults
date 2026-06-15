@@ -1,0 +1,61 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# USB Serial/JTAG console (the S3 devkit's built-in USB port)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Smaller, quieter image
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+# CONFIG_APP_COMPILE_TIME_DATE is not set
+CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
+# CONFIG_MBEDTLS_ERROR_STRINGS is not set
+
+# 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
+# The default table gives each OTA slot 3520K (3.44MiB) and keeps a 1M
+# SPIFFS state partition for scenes/user data. Production 16MB builds can use
+# partitions_ota_16mb.csv for two 7872K app slots.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# app_main mounts and may format SPIFFS during first boot. ESP-IDF's default
+# 3584-byte main task stack can overflow in that path before FrameOS reaches
+# Wi-Fi or OTA rollback validation.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# OTA rollback: a freshly updated image must mark itself valid after booting,
+# otherwise the bootloader rolls back to the previous slot on the next reset.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# 8MB octal PSRAM (XIAO ESP32-S3). Big allocations (framebuffers, Nim heap)
+# go to PSRAM via malloc; small/hot ones stay in internal SRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
+# XIAO's PSRAM is not on the same supply rail quirk as some devkits; ignore
+# the bootup test failing on boards without PSRAM instead of aborting.
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_HTTPS_SERVER_ENABLE=y
+# HTTPS renders happen after Nim/QuickJS have consumed most internal SRAM.
+# Put mbedTLS' large dynamic buffers in PSRAM so image/data apps can fetch
+# public HTTPS APIs reliably on 8MB PSRAM boards.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+# CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is not set
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+
+# Wi-Fi provisioning portal posts can carry long headers/forms
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=1024
+
+# The Nim render task does real work; don't trip the watchdog on long e-ink
+# refreshes (the busy-wait yields, but first renders can be slow).
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30

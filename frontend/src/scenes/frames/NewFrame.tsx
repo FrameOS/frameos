@@ -5,9 +5,17 @@ import {
   ArrowLeftIcon,
   ArrowUpTrayIcon,
   CommandLineIcon,
+  CpuChipIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
+import {
+  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_ESP32_S3,
+  devices,
+  buildrootPlatforms,
+  embeddedPlatforms,
+  rpiOSPlatforms,
+} from '../../devices'
 import { newFrameForm } from './newFrameForm'
 import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
@@ -116,6 +124,17 @@ function setInstallMethodValues(
       rememberWifi: true,
     }
   }
+  if (installMethod === 'embedded') {
+    return {
+      install_method: installMethod,
+      mode: 'embedded',
+      platform: EMBEDDED_ESP32_S3,
+      frame_host: '',
+      device: 'waveshare.EPD_7in5_V2',
+      network: defaultWifiNetwork(savedSettings),
+      rememberWifi: true,
+    }
+  }
   if (installMethod === 'script') {
     return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
   }
@@ -134,8 +153,31 @@ function renderDeviceOptions(): JSX.Element[] {
   ))
 }
 
+const unsupportedEmbeddedWaveshareDevices = new Set([
+  'waveshare.EPD_10in3',
+  'waveshare.EPD_12in48',
+  'waveshare.EPD_12in48b',
+  'waveshare.EPD_12in48b_V2',
+])
+
+const embeddedDevices = [
+  ...(devices
+    .find((group) => group.label === 'Waveshare')
+    ?.options.filter((device) => !unsupportedEmbeddedWaveshareDevices.has(device.value)) ?? []),
+  { value: 'web_only', label: 'No display (headless)' },
+]
+
+function renderEmbeddedDeviceOptions(): JSX.Element[] {
+  return embeddedDevices.map((device) => (
+    <option key={device.value} value={device.value}>
+      {device.label}
+    </option>
+  ))
+}
+
 function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[] {
-  const platforms = installMethod === 'sd_card' ? buildrootPlatforms : rpiOSPlatforms
+  const platforms =
+    installMethod === 'sd_card' ? buildrootPlatforms : installMethod === 'embedded' ? embeddedPlatforms : rpiOSPlatforms
   return platforms.map((platform) => (
     <option key={platform.value} value={platform.value}>
       {platform.label}
@@ -151,6 +193,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'script') {
     return 'Install with a script'
+  }
+  if (installMethod === 'embedded') {
+    return 'Flash embedded device'
   }
   if (installMethod === 'import') {
     return 'Import frame'
@@ -232,6 +277,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Run one command on the device."
             >
               <CommandLineIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
+              title="Flash ESP32 (EXPERIMENTAL)"
+              description="Build firmware for an ESP32 and flash it over USB."
+            >
+              <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
@@ -497,6 +549,76 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             )}
           </div>
 
+          <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiSSID ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
+              }
+              placeholder="Home WiFi"
+              autoComplete="off"
+            />
+          </FormField>
+          <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiPassword ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiPassword: event.target.value })
+              }
+              placeholder="Network password"
+              type="password"
+              autoComplete="new-password"
+            />
+          </FormField>
+          <Field name="rememberWifi">
+            <Checkbox label="Remember wifi details for next time" />
+          </Field>
+          <div className="flex gap-2 pt-2">
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </Form>
+      ) : addFrameMode === 'embedded' ? (
+        <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            Build a firmware image for an ESP32 microcontroller and flash it over USB serial or from the browser. The
+            firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the air.
+          </p>
+          <FormField label="Name" error={newFrameErrors.name}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.name ?? ''}
+              onChange={(event) => setNewFrameValue('name', event.target.value)}
+              placeholder="Kitchen Frame"
+              required
+            />
+          </FormField>
+          <FormField label="Platform" error={newFrameErrors.platform}>
+            <select
+              className={selectClassName()}
+              value={newFrame.platform ?? ''}
+              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+            >
+              {renderPlatformOptions('embedded')}
+            </select>
+          </FormField>
+          <FormField label="Display panel">
+            <select
+              className={selectClassName()}
+              value={newFrame.device ?? 'waveshare.EPD_7in5_V2'}
+              onChange={(event) => setNewFrameValue('device', event.target.value)}
+            >
+              {renderEmbeddedDeviceOptions()}
+            </select>
+          </FormField>
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
             <input
               className={textInputClassName()}

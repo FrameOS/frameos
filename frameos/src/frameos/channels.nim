@@ -28,6 +28,43 @@ when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})
+elif defined(frameosEmbedded):
+  # Single-task embedded runtime: no OS threads, so no Nim channels. Logs and
+  # events go straight through hooks that the embedded runtime installs (logs
+  # end up at ESP_LOGI via the firmware's C log hook; events trigger renders).
+  import json
+  import options
+  import frameos/ids
+  import frameos/driver_abi
+
+  type
+    EmbeddedLogHook* = proc(payload: JsonNode) {.gcsafe, nimcall.}
+    EmbeddedEventHook* = proc(sceneId: Option[SceneId], event: string,
+                             payload: JsonNode) {.gcsafe, nimcall.}
+
+  var embeddedLogHook*: EmbeddedLogHook
+  var embeddedEventHook*: EmbeddedEventHook
+
+  proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
+    discard
+
+  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
+    if not embeddedEventHook.isNil:
+      embeddedEventHook(none(SceneId), event, payload)
+
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+    if not embeddedEventHook.isNil:
+      embeddedEventHook(scene, event, payload)
+
+  proc log*(eventPayload: JsonNode) {.gcsafe.} =
+    if not embeddedLogHook.isNil:
+      embeddedLogHook(eventPayload)
+
+  proc debug*(message: string) =
+    log(%*{"event": "debug", "message": message})
+
+  proc triggerServerRender*() =
+    discard
 else:
   import json
   import options

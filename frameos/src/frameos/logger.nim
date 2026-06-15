@@ -3,8 +3,9 @@ import std/atomics
 
 import frameos/channels
 import frameos/types
-import frameos/utils/process
-from frameos/utils/http_client import setSocketSendRecvTimeouts
+import frameos/hal/files as halFiles
+import frameos/hal/processes
+from frameos/hal/net_client import setSocketSendRecvTimeouts
 
 const GzipLogTimeoutMs = 10 * 60 * 1000
 
@@ -31,11 +32,11 @@ var threadInitDone = false
 var thread: Thread[FrameConfig]
 
 proc gzipLogFile(path: string) =
-  if path.len == 0 or path.endsWith(".gz") or not fileExists(path):
+  if path.len == 0 or path.endsWith(".gz") or not storedFileExists(path):
     return
   var target = path & ".gz"
   var suffix = 1
-  while fileExists(target):
+  while storedFileExists(target):
     target = path & "." & $suffix & ".gz"
     suffix += 1
   let command = if target == path & ".gz":
@@ -47,7 +48,7 @@ proc gzipLogFile(path: string) =
     echo "Error gzipping log file: gzip exited with " & $gzipResult.exitCode & " for " & path
   elif target != path & ".gz":
     try:
-      removeFile(path)
+      removeStoredFile(path)
     except OSError as e:
       echo "Error removing compressed log file: " & e.msg
 
@@ -62,14 +63,7 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, t
       if lastLogFilePath.len > 0 and lastLogFilePath != file:
         gzipLogFile(lastLogFilePath)
       lastLogFilePath = file
-      # File is not GC-managed: a write failure (ENOSPC) must still close the
-      # handle, or every failing log line leaks an fd until the process hits
-      # the descriptor limit and loses its sockets.
-      let logFile = open(file, fmAppend)
-      try:
-        logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
-      finally:
-        logFile.close()
+      appendTextLine(file, loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine)
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 

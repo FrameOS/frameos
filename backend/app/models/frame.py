@@ -32,9 +32,16 @@ def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
 def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
     proxy = dict(https_proxy or {})
     certs = dict(proxy.get('certs') or {})
+    try:
+        port = int(proxy.get('port') or 8443)
+    except (TypeError, ValueError):
+        port = 8443
+    if port < 1 or port > 65535:
+        port = 8443
 
     return {
         **proxy,
+        'port': port,
         'certs': {
             'server': certs.get('server', ''),
             'server_key': certs.get('server_key', ''),
@@ -229,7 +236,7 @@ class Frame(Base):
     id = mapped_column(Integer, primary_key=True)
     project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     name = mapped_column(String(256), nullable=False)
-    mode = mapped_column(String(32), nullable=True) # rpios, buildroot
+    mode = mapped_column(String(32), nullable=True) # rpios, buildroot, embedded
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
@@ -283,6 +290,7 @@ class Frame(Base):
     error_behavior = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
+    embedded = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
     terminal_history = mapped_column(JSON, nullable=True, default=list)
 
@@ -346,6 +354,7 @@ class Frame(Base):
             'error_behavior': normalize_error_behavior(self.error_behavior),
             'palette': self.palette,
             'buildroot': self.buildroot,
+            'embedded': self.embedded,
             'rpios': self.rpios,
             'terminal_history': self.terminal_history,
             'last_successful_deploy': self.last_successful_deploy,

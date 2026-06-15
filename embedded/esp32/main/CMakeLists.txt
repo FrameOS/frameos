@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "fos_buttons.c"
+        "fos_config.c"
+        "fos_wifi.c"
+        "fos_http.c"
+        "fos_client.c"
+        "fos_ota.c"
+        "fos_status_screen.c"
+        "fos_console.c"
+        "fos_scenes.c"
+        "fos_battery.c"
+    PRIV_REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        esp_adc
+        esp_http_server
+        esp_https_server
+        esp_http_client
+        esp_https_ota
+        esp-tls
+        app_update
+        spi_flash
+        json
+        console
+        driver
+        spiffs
+        frameos_display
+        frameos_nim
+)

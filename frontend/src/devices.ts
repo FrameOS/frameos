@@ -139,7 +139,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_12in48b', label: 'Waveshare 12.48" (B) 1304x984 Black/White/Red' },
       { value: 'waveshare.EPD_12in48b_V2', label: 'Waveshare 12.48" (B V2) 1304x984 Black/White/Red' },
       { value: 'waveshare.EPD_13in3b', label: 'Waveshare 13.3" (B) 960x680 Black/White/Red' },
-      { value: 'waveshare.EPD_13in3k', label: 'Waveshare 13.3" (K) 960x680 Black/White' },
+      { value: 'waveshare.EPD_13in3k', label: 'Waveshare 13.3" (K) 960x680 4 Grayscale' },
       { value: 'waveshare.EPD_13in3e', label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' },
     ],
   },
@@ -216,6 +216,10 @@ export const buildrootPlatforms: Option[] = [
   { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
 ]
 
+export const EMBEDDED_ESP32_S3 = 'esp32-s3'
+
+export const embeddedPlatforms: Option[] = [{ value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' }]
+
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },
   { value: 'pi.zerow', label: 'Raspberry Pi Zero W' },
@@ -230,4 +234,5 @@ export const rpiOSPlatforms: Option[] = [
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
   { value: 'buildroot', label: 'Buildroot (beta)' },
+  { value: 'embedded', label: 'ESP32' },
 ]

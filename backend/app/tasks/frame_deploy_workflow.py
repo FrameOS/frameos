@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
+import json
 import os
 import shlex
 from typing import Any
@@ -326,6 +327,9 @@ class FrameDeployWorkflow:
             raise RuntimeError(f"Deploy already in progress for frame {self.frame.id}")
         try:
             if plan.mode == "fast":
+                if (getattr(self.frame, "mode", None) or "rpios") == "embedded":
+                    await self._execute_embedded_fast(plan)
+                    return
                 await self._execute_fast(plan)
                 return
             if plan.mode == "full":
@@ -345,6 +349,27 @@ class FrameDeployWorkflow:
         frame_dict: dict[str, Any],
         previous_frameos_version: str | None,
     ) -> FrameDeployPlan:
+        if (getattr(self.frame, "mode", None) or "rpios") == "embedded":
+            fast_plan = await self._plan_fast(
+                frame_dict=dict(frame_dict),
+                previous_frameos_version=previous_frameos_version,
+            )
+            return FrameDeployPlan(
+                mode="combined",
+                frame_id=int(self.frame.id),
+                frame_name=self.frame.name,
+                build_id=self.deployer.build_id,
+                frame_dict=fast_plan.frame_dict,
+                previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+                fast_deploy=fast_plan.fast_deploy,
+                full_deploy=None,
+                notes=[
+                    "Embedded fast deploy uploads the interpreted scene payload over HTTP, then asks the frame to reload.",
+                    "Embedded firmware flashing is handled by the browser flasher instead of the Linux deploy workflow.",
+                    *fast_plan.notes,
+                ],
+            )
+
         fast_plan = await self._plan_fast(frame_dict=dict(frame_dict), previous_frameos_version=previous_frameos_version)
         full_plan = await self._plan_full(frame_dict=dict(frame_dict), previous_frameos_version=previous_frameos_version)
 
@@ -368,6 +393,32 @@ class FrameDeployWorkflow:
         )
 
     async def _plan_fast(self, *, frame_dict: dict[str, Any], previous_frameos_version: str | None) -> FrameDeployPlan:
+        if (getattr(self.frame, "mode", None) or "rpios") == "embedded":
+            frame_dict["mode"] = "embedded"
+            if isinstance(previous_frameos_version, str):
+                frame_dict["frameos_version"] = previous_frameos_version
+            else:
+                frame_dict["frameos_version"] = current_frameos_version()
+            previous_commands = self._previous_frameos_commands()
+            if previous_commands:
+                frame_dict["frameos_commands"] = previous_commands
+            return FrameDeployPlan(
+                mode="fast",
+                frame_id=int(self.frame.id),
+                frame_name=self.frame.name,
+                build_id=self.deployer.build_id,
+                frame_dict=frame_dict,
+                previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+                fast_deploy=FastDeployPlan(
+                    reload_supported=True,
+                    tls_settings_changed=False,
+                    action="http_upload_scenes_reload",
+                ),
+                notes=[
+                    "Embedded target: fast deploy uploads scenes over HTTP and reloads the on-device runtime.",
+                ],
+            )
+
         distro = await self.deployer.get_distro()
         await self._sync_frame_mode_with_detected_distro(distro)
         frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
@@ -651,6 +702,66 @@ class FrameDeployWorkflow:
             ),
             notes=notes,
         )
+
+    async def _execute_embedded_fast(self, plan: FrameDeployPlan) -> None:
+        frame = self.frame
+        frame.status = "deploying"
+        await update_frame(self.db, self.redis, frame)
+
+        try:
+            if not getattr(frame, "last_log_at", None):
+                raise RuntimeError(
+                    "Embedded fast deploy is available after the device has sent at least one boot or render log."
+                )
+            if not plan.fast_deploy:
+                raise RuntimeError("Fast deploy plan missing")
+
+            scenes = frame.scenes if isinstance(frame.scenes, list) else []
+            payload = json.dumps(scenes, separators=(",", ":")).encode("utf-8")
+            await log(
+                self.db,
+                self.redis,
+                int(frame.id),
+                "stdinfo",
+                f"{icon} Uploading {len(scenes)} scene(s) to embedded frame over HTTP",
+            )
+            status, body, _headers = await _fetch_frame_http_bytes(
+                frame,
+                self.redis,
+                path="/uploadScenes",
+                method="POST",
+                body=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            if status >= 300:
+                message = body.decode("utf-8", errors="replace")
+                raise RuntimeError(f"Scene upload failed with status {status}: {message}")
+
+            status, body, _headers = await _fetch_frame_http_bytes(
+                frame,
+                self.redis,
+                path="/reload",
+                method="POST",
+            )
+            if status >= 300:
+                message = body.decode("utf-8", errors="replace")
+                raise RuntimeError(f"Reload failed with status {status}: {message}")
+
+            frame.status = "starting"
+            frame.last_successful_deploy = plan.frame_dict
+            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            await update_frame(self.db, self.redis, frame)
+            await log(
+                self.db,
+                self.redis,
+                int(frame.id),
+                "stdinfo",
+                f"{icon} Embedded fast deploy complete; reload queued",
+            )
+        except Exception:
+            frame.status = "uninitialized"
+            await update_frame(self.db, self.redis, frame)
+            raise
 
     async def _execute_fast(self, plan: FrameDeployPlan) -> None:
         frame = self.frame

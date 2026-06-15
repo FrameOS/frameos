@@ -215,7 +215,7 @@
           "config": {
             "gap": "20",
             "height_ratios": "85 15",
-            "margin": "20",
+            "margin": "20 40 20 40",
             "rows": "2"
           },
           "keyword": "render/split"

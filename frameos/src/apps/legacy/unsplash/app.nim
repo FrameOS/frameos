@@ -68,7 +68,7 @@ proc run*(self: App, context: ExecutionContext) =
   else:
     if self.frameConfig.debug:
       self.log("Downloading image")
-    unsplashImage = some(downloadImage(url, maxBytes = self.frameConfig.maxHttpResponseBytes()))
+    unsplashImage = some(downloadImage(url, maxBytes = self.frameConfig.maxImageResponseBytes()))
     if self.frameConfig.debug:
       self.log("Image downloaded")
 

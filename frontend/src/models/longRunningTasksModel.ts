@@ -12,6 +12,8 @@ export type LongRunningTaskKind =
   | 'agentDeploy'
   | 'agentRestart'
   | 'buildrootImage'
+  | 'embeddedFirmware'
+  | 'embeddedOta'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 
 export interface LongRunningTaskLog {

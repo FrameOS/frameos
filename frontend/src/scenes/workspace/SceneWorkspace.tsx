@@ -45,6 +45,7 @@ import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
+import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -71,19 +72,20 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
 ]
 
-function sceneIsCompiled(scene: FrameScene | null): boolean {
-  return !!scene && scene.settings?.execution !== 'interpreted'
+function sceneIsCompiled(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): boolean {
+  return sceneIsCompiledForFrame(scene, frameMode)
 }
 
-function sceneUtilityDefinitions(scene: FrameScene | null): UtilityDefinition[] {
-  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene))
+function sceneUtilityDefinitions(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): UtilityDefinition[] {
+  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
 }
 
 function sceneUtilityDefinition(
   panel: WorkspaceUtilityPanel | null,
-  scene: FrameScene | null
+  scene: FrameScene | null,
+  frameMode?: FrameType['mode'] | null
 ): UtilityDefinition | null {
-  return sceneUtilityDefinitions(scene).find((definition) => definition.panel === panel) ?? null
+  return sceneUtilityDefinitions(scene, frameMode).find((definition) => definition.panel === panel) ?? null
 }
 
 function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
@@ -205,7 +207,7 @@ function SceneSelector({
               const sceneStatusTitle = [active ? 'Active scene' : 'Inactive scene', changeStatusLabel]
                 .filter(Boolean)
                 .join(' · ')
-              const compiled = sceneIsCompiled(scene)
+              const compiled = sceneIsCompiled(scene, frame.mode)
 
               return (
                 <div
@@ -455,11 +457,17 @@ function SceneNodeTreeConnectors({
   )
 }
 
-function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
+function UtilityToolbar({
+  scene,
+  frameMode,
+}: {
+  scene: FrameScene | null
+  frameMode?: FrameType['mode'] | null
+}): JSX.Element {
   const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
   const { closeChatDrawer, closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
   const utilityPanelIsVisible = !chatDrawerSelection
-  const definitions = sceneUtilityDefinitions(scene)
+  const definitions = sceneUtilityDefinitions(scene, frameMode)
 
   return (
     <div className="scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
@@ -492,10 +500,12 @@ function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
 
 function SceneDiagramOverlay({
   frameId,
+  frameMode,
   scene,
   sceneId,
 }: {
   frameId: number
+  frameMode?: FrameType['mode'] | null
   scene: FrameScene | null
   sceneId: string | null
 }): JSX.Element {
@@ -528,7 +538,7 @@ function SceneDiagramOverlay({
           >
             <SparklesIcon className="h-5 w-5" />
           </button>
-          <UtilityToolbar scene={scene} />
+          <UtilityToolbar scene={scene} frameMode={frameMode} />
         </div>
       </div>
     </div>
@@ -670,10 +680,18 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
   )
 }
 
-function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
+function UtilityDrawer({
+  frameId,
+  scene,
+  frameMode,
+}: {
+  frameId: number
+  scene: FrameScene | null
+  frameMode?: FrameType['mode'] | null
+}): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel } = useActions(workspaceLogic)
-  const activeDefinition = sceneUtilityDefinition(utilityPanel, scene)
+  const activeDefinition = sceneUtilityDefinition(utilityPanel, scene, frameMode)
   const drawerContextLabel = scene?.name || 'Untitled scene'
 
   if (!utilityPanel || !activeDefinition) {
@@ -725,10 +743,12 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
 
 function SceneCanvas({
   frameId,
+  frameMode,
   selectedScene,
   selectedSceneId,
 }: {
   frameId: number
+  frameMode?: FrameType['mode'] | null
   selectedScene: FrameScene | null
   selectedSceneId: string | null
 }): JSX.Element {
@@ -776,7 +796,7 @@ function SceneCanvas({
     >
       <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
-      <SceneDiagramOverlay frameId={frameId} scene={selectedScene} sceneId={selectedSceneId} />
+        <SceneDiagramOverlay frameId={frameId} frameMode={frameMode} scene={selectedScene} sceneId={selectedSceneId} />
     </div>
   )
 }
@@ -830,7 +850,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const resolvedSceneId =
     selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId) ? selectedSceneId : scenes[0]?.id ?? null
   const selectedScene = scenes.find((scene) => scene.id === resolvedSceneId) ?? null
-  const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene)
+  const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene, frame.mode)
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -856,11 +876,16 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
             deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : activeUtilityDefinition ? (
-              <UtilityDrawer frameId={frameId} scene={selectedScene} />
+              <UtilityDrawer frameId={frameId} scene={selectedScene} frameMode={frame.mode} />
             ) : null
           }
         >
-          <SceneCanvas frameId={frame.id} selectedScene={selectedScene} selectedSceneId={resolvedSceneId} />
+          <SceneCanvas
+            frameId={frame.id}
+            frameMode={frame.mode}
+            selectedScene={selectedScene}
+            selectedSceneId={resolvedSceneId}
+          />
         </FrameosShell>
         <EditTemplateModal />
         <RenameSceneModal frameId={frameId} />

@@ -82,23 +82,30 @@
 
 import std/[tables, macros, json, strutils, os]
 
-const
-  quickjsPath = when defined(windows):
-    "quickjs/libquickjs.a"
-  else:
-    "quickjs/libquickjs.a"
-
-{.passC: "-I.".} # Add current directory to include path for local headers
-{.passL: quickjsPath.}
-{.passL: "-lm".}
-
-# Link QuickJS standard library (contains std and os modules)
-when fileExists("quickjs/libquickjs.libc.a"):
-  {.passL: "quickjs/libquickjs.libc.a".}
-else:
-  # If separate libc library doesn't exist, the std/os modules
-  # should be included in the main libquickjs.a
+when defined(frameosEmbedded):
+  # The ESP-IDF build compiles QuickJS as the frameos_quickjs component and
+  # provides the include path for quickjs/quickjs.h; Nim only emits C here, so
+  # no passL/passC. quickjs-libc (std/os modules, POSIX handlers) is not
+  # available on FreeRTOS and is compiled out below.
   discard
+else:
+  const
+    quickjsPath = when defined(windows):
+      "quickjs/libquickjs.a"
+    else:
+      "quickjs/libquickjs.a"
+
+  {.passC: "-I.".} # Add current directory to include path for local headers
+  {.passL: quickjsPath.}
+  {.passL: "-lm".}
+
+  # Link QuickJS standard library (contains std and os modules)
+  when fileExists("quickjs/libquickjs.libc.a"):
+    {.passL: "quickjs/libquickjs.libc.a".}
+  else:
+    # If separate libc library doesn't exist, the std/os modules
+    # should be included in the main libquickjs.a
+    discard
 
 type
   JSRuntime* {.importc: "struct JSRuntime", header: "quickjs/quickjs.h".} = object
@@ -122,22 +129,23 @@ type
   JSCFunctionData* = proc(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst, magic: cint,
       data: ptr JSValue): JSValue {.cdecl.}
 
-# Standard library module bindings from quickjs-libc.h
-{.push importc, header: "quickjs/quickjs-libc.h".}
+# Standard library module bindings from quickjs-libc.h (not built on embedded)
+when not defined(frameosEmbedded):
+  {.push importc, header: "quickjs/quickjs-libc.h".}
 
-proc js_init_module_std*(ctx: ptr JSContext, module_name: cstring): ptr JSModuleDef
-proc js_init_module_os*(ctx: ptr JSContext, module_name: cstring): ptr JSModuleDef
-proc js_std_add_helpers*(ctx: ptr JSContext, argc: cint, argv: ptr cstring)
-proc js_std_init_handlers*(rt: ptr JSRuntime)
-proc js_std_free_handlers*(rt: ptr JSRuntime)
-proc js_std_await*(ctx: ptr JSContext, val: JSValue): JSValue
-proc js_std_loop*(ctx: ptr JSContext)
-proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer,
-    attributes: JSValueConst): ptr JSModuleDef {.cdecl.}
-proc js_module_check_attributes*(ctx: ptr JSContext, opaque: pointer,
-    attributes: JSValueConst): cint {.cdecl.}
+  proc js_init_module_std*(ctx: ptr JSContext, module_name: cstring): ptr JSModuleDef
+  proc js_init_module_os*(ctx: ptr JSContext, module_name: cstring): ptr JSModuleDef
+  proc js_std_add_helpers*(ctx: ptr JSContext, argc: cint, argv: ptr cstring)
+  proc js_std_init_handlers*(rt: ptr JSRuntime)
+  proc js_std_free_handlers*(rt: ptr JSRuntime)
+  proc js_std_await*(ctx: ptr JSContext, val: JSValue): JSValue
+  proc js_std_loop*(ctx: ptr JSContext)
+  proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer,
+      attributes: JSValueConst): ptr JSModuleDef {.cdecl.}
+  proc js_module_check_attributes*(ctx: ptr JSContext, opaque: pointer,
+      attributes: JSValueConst): cint {.cdecl.}
 
-{.pop.}
+  {.pop.}
 
 # Core QuickJS API bindings
 {.push importc, header: "quickjs/quickjs.h".}
@@ -251,10 +259,11 @@ proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: 
 
 {.pop.}
 
-# Bytecode evaluation from quickjs-libc.h
-{.push importc, header: "quickjs/quickjs-libc.h".}
-proc js_std_eval_binary*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint)
-{.pop.}
+# Bytecode evaluation from quickjs-libc.h (not built on embedded)
+when not defined(frameosEmbedded):
+  {.push importc, header: "quickjs/quickjs-libc.h".}
+  proc js_std_eval_binary*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint)
+  {.pop.}
 
 # JavaScript evaluation flags
 const
@@ -954,7 +963,14 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   ##
   ## Parameters:
   ## - config: Configuration specifying which modules to include
-  let rt = JS_NewRuntime()
+  when defined(frameosEmbedded):
+    # Created by the frameos_quickjs IDF component: allocators backed by
+    # PSRAM (heap_caps_malloc) and a stack limit sized for the render task.
+    proc fos_js_new_runtime(): ptr JSRuntime {.importc: "fos_js_new_runtime",
+        header: "fos_qjs_glue.h".}
+    let rt = fos_js_new_runtime()
+  else:
+    let rt = JS_NewRuntime()
   if rt == nil:
     raise newException(JSException, "Failed to create QuickJS runtime")
 
@@ -963,27 +979,28 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
     JS_FreeRuntime(rt)
     raise newException(JSException, "Failed to create QuickJS context")
 
-  # Initialize standard handlers if requested
-  if config.enableStdHandlers:
-    js_std_init_handlers(rt)
+  when not defined(frameosEmbedded):
+    # Initialize standard handlers if requested
+    if config.enableStdHandlers:
+      js_std_init_handlers(rt)
 
-  # The libc js_module_loader signature has drifted across QuickJS releases while
-  # JS_SetModuleLoaderFunc stayed on the three-argument loader callback. Avoid
-  # passing that version-sensitive symbol directly; FrameOS only uses isolated
-  # contexts in production, and std/os modules are initialized explicitly below
-  # for legacy Burrito callers.
+    # The libc js_module_loader signature has drifted across QuickJS releases while
+    # JS_SetModuleLoaderFunc stayed on the three-argument loader callback. Avoid
+    # passing that version-sensitive symbol directly; FrameOS only uses isolated
+    # contexts in production, and std/os modules are initialized explicitly below
+    # for legacy Burrito callers.
 
-  # Initialize std module if requested
-  if config.includeStdLib:
-    discard js_init_module_std(ctx, "std")
+    # Initialize std module if requested
+    if config.includeStdLib:
+      discard js_init_module_std(ctx, "std")
 
-  # Initialize os module if requested
-  if config.includeOsLib:
-    discard js_init_module_os(ctx, "os")
+    # Initialize os module if requested
+    if config.includeOsLib:
+      discard js_init_module_os(ctx, "os")
 
-  # Add std helpers if any standard library is enabled
-  if config.includeStdLib or config.includeOsLib:
-    js_std_add_helpers(ctx, 0, nil)
+    # Add std helpers if any standard library is enabled
+    if config.includeStdLib or config.includeOsLib:
+      js_std_add_helpers(ctx, 0, nil)
 
   # Create context data for function registry
   let contextData = cast[ptr BurritoContextData](alloc0(sizeof(BurritoContextData)))
@@ -1001,14 +1018,15 @@ proc close*(js: var QuickJS) =
     # Clear context opaque data first to avoid circular references
     JS_SetContextOpaque(js.context, nil)
 
-    # Process the std event loop to complete any pending operations
-    # This is critical when modules have been evaluated
-    if js.config.enableStdHandlers:
-      js_std_loop(js.context)
+    when not defined(frameosEmbedded):
+      # Process the std event loop to complete any pending operations
+      # This is critical when modules have been evaluated
+      if js.config.enableStdHandlers:
+        js_std_loop(js.context)
 
-    # Free std handlers BEFORE freeing context (same as qjs.c)
-    if js.config.enableStdHandlers:
-      js_std_free_handlers(js.runtime)
+      # Free std handlers BEFORE freeing context (same as qjs.c)
+      if js.config.enableStdHandlers:
+        js_std_free_handlers(js.runtime)
 
     # Free context and runtime in proper order
     JS_FreeContext(js.context)
@@ -1077,8 +1095,9 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
   JS_FreeValue(js.context, val)
 
   # Run the event loop to execute the module
-  if js.config.enableStdHandlers:
-    js_std_loop(js.context)
+  when not defined(frameosEmbedded):
+    if js.config.enableStdHandlers:
+      js_std_loop(js.context)
 
 proc compileToBytecode*(js: QuickJS, code: string, filename: string = "<input>", isModule: bool = false): seq[byte] =
   ## Compile JavaScript code to bytecode format
@@ -1164,15 +1183,16 @@ proc evalBytecode*(js: QuickJS, bytecode: openArray[byte], loadOnly: bool = fals
   if bytecode.len == 0:
     raise newException(ValueError, "Empty bytecode")
 
-  # First, check if this is qjsc-compiled bytecode (larger, complex bytecode)
-  # vs. simple compiled values from compileToBytecode
-  let shouldUseStdEval = js.config.enableStdHandlers and bytecode.len > 100
+  when not defined(frameosEmbedded):
+    # First, check if this is qjsc-compiled bytecode (larger, complex bytecode)
+    # vs. simple compiled values from compileToBytecode
+    let shouldUseStdEval = js.config.enableStdHandlers and bytecode.len > 100
 
-  if shouldUseStdEval:
-    # Use js_std_eval_binary for qjsc-compiled bytecode (REPL, complex modules)
-    let flags = if loadOnly: 1'i32 else: 0'i32
-    js_std_eval_binary(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, flags)
-    return "" # js_std_eval_binary doesn't return values
+    if shouldUseStdEval:
+      # Use js_std_eval_binary for qjsc-compiled bytecode (REPL, complex modules)
+      let flags = if loadOnly: 1'i32 else: 0'i32
+      js_std_eval_binary(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, flags)
+      return "" # js_std_eval_binary doesn't return values
 
   # Fallback to lower-level execution for isolated/minimal contexts
   let obj = JS_ReadObject(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, JS_READ_OBJ_BYTECODE)
@@ -1325,5 +1345,6 @@ proc processStdLoop*(js: QuickJS) =
   ## Process the QuickJS standard event loop once
   ## This handles timers, I/O, and other async operations
   ## Note: Only available when enableStdHandlers is true
-  if js.config.enableStdHandlers:
-    js_std_loop(js.context)
+  when not defined(frameosEmbedded):
+    if js.config.enableStdHandlers:
+      js_std_loop(js.context)

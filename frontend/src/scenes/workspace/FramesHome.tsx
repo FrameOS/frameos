@@ -50,6 +50,7 @@ import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
+import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -758,7 +759,7 @@ function SceneControlPanelContent({
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
                 {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
-                {scene.settings?.execution !== 'interpreted' ? (
+                {sceneIsCompiledForFrame(scene, frame.mode) ? (
                   <div className="absolute left-2 top-10 z-10">
                     <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
                   </div>

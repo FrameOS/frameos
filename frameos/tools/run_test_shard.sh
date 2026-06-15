@@ -211,7 +211,31 @@ if (( print_only )); then
   exit 0
 fi
 
+test_timeout_seconds="${FRAMEOS_TEST_TIMEOUT_SECONDS:-}"
+if [[ -z "$test_timeout_seconds" && "${CI:-}" == "true" ]]; then
+  test_timeout_seconds=300
+fi
+
+run_testament() {
+  local test_file="$1"
+
+  if [[ -n "$test_timeout_seconds" ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "${test_timeout_seconds}s" testament pattern "./${test_file}" --lineTrace:on
+  else
+    testament pattern "./${test_file}" --lineTrace:on
+  fi
+}
+
 for test_file in "${tests[@]}"; do
   echo "==> ${test_file}"
-  testament pattern "./${test_file}" --lineTrace:on
+  set +e
+  run_testament "$test_file"
+  status=$?
+  set -e
+  if (( status != 0 )); then
+    if (( status == 124 )); then
+      echo "Timed out after ${test_timeout_seconds}s: ${test_file}" >&2
+    fi
+    exit "$status"
+  fi
 done

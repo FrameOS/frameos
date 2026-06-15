@@ -1,7 +1,10 @@
 import strformat
 import strutils
 import frameos/types
-import frameos/setup_proxy
+when not defined(frameosEmbedded):
+  # setup_proxy pulls std/net + OpenSSL; the embedded firmware has no
+  # hotspot setup proxy.
+  import frameos/setup_proxy
 import frameos/utils/http_client
 
 proc publicScheme*(config: FrameConfig): string =
@@ -17,10 +20,11 @@ proc publicHost*(config: FrameConfig): string =
   if config.frameHost.len > 0: config.frameHost else: "localhost"
 
 proc hotspotSetupPort*(config: FrameConfig): int =
-  if config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
-    let port = setupProxyPort()
-    if port > 0:
-      return port
+  when not defined(frameosEmbedded):
+    if config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
+      let port = setupProxyPort()
+      if port > 0:
+        return port
   config.framePort
 
 proc publicBaseUrl*(config: FrameConfig): string =

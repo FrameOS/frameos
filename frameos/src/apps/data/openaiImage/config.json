@@ -27,6 +27,8 @@
       "type": "select",
       "options": [
         "best for orientation",
+        "1024x640",
+        "640x1024",
         "1024x1024",
         "1536x1024",
         "1024x1536"
@@ -38,7 +40,21 @@
           "field": "model",
           "operator": "eq",
           "value": "gpt-image-2"
-        },
+        }
+      ]
+    },
+    {
+      "name": "size",
+      "type": "select",
+      "options": [
+        "best for orientation",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536"
+      ],
+      "value": "best for orientation",
+      "label": "Size",
+      "showIf": [
         {
           "field": "model",
           "operator": "eq",
@@ -114,6 +130,107 @@
           "field": "model",
           "operator": "eq",
           "value": "dall-e-3"
+        }
+      ]
+    },
+    {
+      "name": "quality",
+      "type": "select",
+      "options": ["auto", "low", "medium", "high", ""],
+      "value": "auto",
+      "label": "Quality",
+      "showIf": [
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-2"
+        },
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-1"
+        },
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-1.5"
+        }
+      ]
+    },
+    {
+      "name": "outputFormat",
+      "type": "select",
+      "options": ["auto", "png", "jpeg", "webp"],
+      "value": "auto",
+      "label": "Output format",
+      "showIf": [
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-2"
+        },
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-1"
+        },
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-1.5"
+        }
+      ]
+    },
+    {
+      "name": "outputCompression",
+      "type": "integer",
+      "value": 0,
+      "min": 0,
+      "max": 100,
+      "label": "Output compression",
+      "hint": "Compression for JPEG/WebP outputs. Use 0 for the runtime default.",
+      "showIf": [
+        {
+          "and": [
+            {
+              "field": "outputFormat",
+              "operator": "ne",
+              "value": "png"
+            },
+            {
+              "field": "model",
+              "operator": "eq",
+              "value": "gpt-image-2"
+            }
+          ]
+        },
+        {
+          "and": [
+            {
+              "field": "outputFormat",
+              "operator": "ne",
+              "value": "png"
+            },
+            {
+              "field": "model",
+              "operator": "eq",
+              "value": "gpt-image-1"
+            }
+          ]
+        },
+        {
+          "and": [
+            {
+              "field": "outputFormat",
+              "operator": "ne",
+              "value": "png"
+            },
+            {
+              "field": "model",
+              "operator": "eq",
+              "value": "gpt-image-1.5"
+            }
+          ]
         }
       ]
     },

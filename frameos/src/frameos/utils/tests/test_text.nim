@@ -1,5 +1,6 @@
-import std/[options, unittest]
+import std/[options, sequtils, unittest]
 import pixie
+import ../font
 import ../text
 
 proc makeOptions(overflow = "fit-bounds", borderWidth = 0): TextRenderOptions =
@@ -42,3 +43,13 @@ suite "text layout helpers":
 
     drawText(layout, image, offsetX = 3.0, offsetY = 2.0)
     check layout.textTypeset.runes.len > 0
+
+  test "approximate stroke fallback draws border text":
+    let image = newImage(120, 60)
+    image.fill(parseHtmlColor("#ffffff"))
+    let font = newFont(getDefaultTypeface(), 32, parseHtmlColor("#000000"))
+    let arranged = typeset(@[newSpan("Hi", font)], vec2(120, 60), CenterAlign, MiddleAlign)
+
+    fillTextApproxStroke(image, arranged, vec2(0, 0), 2)
+
+    check image.data.anyIt(it != rgbx(255, 255, 255, 255))

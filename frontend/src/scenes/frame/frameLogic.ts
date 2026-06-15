@@ -42,6 +42,8 @@ import {
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
 import { normalizeFrameCompilationMode, normalizeFrameCrossCompilation } from '../../utils/frameBuildOptions'
+import { frameHasActivityLog } from '../../decorators/frame'
+import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -52,7 +54,7 @@ interface DeployPlanApiResponse {
   plan: DeployPlanResponse
 }
 
-export type DeployDrawerView = 'main' | 'sdCard' | 'script'
+export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
 
 export interface FrameLogicProps {
   frameId: number
@@ -62,6 +64,29 @@ export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy
 
 function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+}
+
+function frameCanUseFastDeploy(frame: FrameType | null | undefined, requiresRecompilation: boolean): boolean {
+  if (!frame || requiresRecompilation) {
+    return false
+  }
+  if (frame.last_successful_deploy_at) {
+    return true
+  }
+  return (frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)
+}
+
+function deployedFrameBaseline(frame: FrameType | null | undefined): Partial<FrameType> | null {
+  if (!frame) {
+    return null
+  }
+  if (frame.last_successful_deploy) {
+    return frame.last_successful_deploy
+  }
+  if ((frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)) {
+    return { ...frame, frameos_version: CURRENT_FRAMEOS_VERSION } as Partial<FrameType>
+  }
+  return null
 }
 
 const FRAME_KEYS: (keyof FrameType)[] = [
@@ -141,6 +166,20 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'network',
   'agent',
   'buildroot',
+]
+const FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED: (keyof FrameType)[] = [
+  'device',
+  'device_config',
+  'embedded',
+  'frame_host',
+  'gpio_buttons',
+  'interval',
+  'max_http_response_bytes',
+  'network',
+  'scenes',
+  'server_api_key',
+  'server_host',
+  'server_port',
 ]
 
 const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
@@ -321,7 +360,13 @@ function keyLabel(key: keyof FrameType): string {
 }
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
-  return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+  if (mode === 'buildroot') {
+    return FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
+  }
+  if (mode === 'embedded') {
+    return FRAME_KEYS_REQUIRE_RECOMPILE_EMBEDDED
+  }
+  return FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
 function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVersion: string | null): boolean {
@@ -352,13 +397,17 @@ export function sceneEqualForComparison(
   return equal(normalizeSceneForComparison(first), normalizeSceneForComparison(second))
 }
 
-function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
+function sceneChangeDetails(
+  currentScenes: FrameScene[],
+  deployedScenes: FrameScene[],
+  frameMode: FrameType['mode']
+): ChangeDetail[] {
   const details: ChangeDetail[] = []
 
   for (const scene of currentScenes) {
     const deployed = deployedScenes.find((s) => s.id === scene.id)
-    const mode = scene.settings?.execution ?? 'compiled'
-    const deployedMode = deployed?.settings?.execution ?? 'compiled'
+    const mode = sceneExecutionForFrame(scene, frameMode)
+    const deployedMode = sceneExecutionForFrame(deployed, frameMode)
 
     if (!deployed) {
       details.push({
@@ -386,7 +435,7 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
 
   for (const scene of deployedScenes) {
     if (!currentScenes.find((s) => s.id === scene.id)) {
-      const mode = scene.settings?.execution ?? 'compiled'
+      const mode = sceneExecutionForFrame(scene, frameMode)
       details.push({
         label: `Scene removed: ${scene.name || scene.id}`,
         requiresFullDeploy: mode !== 'interpreted',
@@ -418,7 +467,7 @@ function computeChangeDetails(
     }
   }
 
-  const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
+  const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [], mode)
 
   if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
@@ -1030,6 +1079,7 @@ function openSceneControlDrawer(frameId: number, sceneId: string): void {
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
+  const frameRunsInterpreted = frameRunsScenesInterpreted(frame.mode)
   const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
   const sanitizedNodes = sanitizeNodes(normalizedRawNodes)
   const normalizedNodes = sanitizedNodes.map((node) =>
@@ -1059,6 +1109,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     fields: scene.fields ?? [],
     settings: {
       ...settings,
+      ...(frameRunsInterpreted ? { execution: 'interpreted' as const } : {}),
       refreshInterval: settings.refreshInterval || frame.interval || 300,
       backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },
@@ -1328,7 +1379,8 @@ export const frameLogic = kea<frameLogicType>([
         ...(values.frame ?? {}),
         ...(values.frameForm ?? {}),
       }
-      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
+      const deployPlanMode = (currentFrameForm.mode ?? 'rpios') === 'embedded' ? 'fast' : 'combined'
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=${deployPlanMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -1407,7 +1459,7 @@ export const frameLogic = kea<frameLogicType>([
         return changed
       },
     ],
-    lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
+    lastDeploy: [(s) => [s.frame], (frame) => deployedFrameBaseline(frame)],
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
       (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
@@ -1561,7 +1613,7 @@ export const frameLogic = kea<frameLogicType>([
       }
       framesModel.actions.deployFrame(
         props.frameId,
-        Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
+        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
       )
     },
     saveAndFastDeployFrame: async () => {
@@ -1593,7 +1645,7 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: () => {
       framesModel.actions.deployFrame(
         props.frameId,
-        Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
+        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
       )
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),

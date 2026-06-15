@@ -2,7 +2,6 @@ import pixie
 import options
 import json
 import strformat
-import httpclient
 import frameos/apps
 import frameos/types
 import frameos/utils/http_client
@@ -25,17 +24,12 @@ proc get*(self: App, context: ExecutionContext): string =
   if self.appConfig.user == "" and self.appConfig.system == "":
     self.error("No system or user prompt provided in app config.")
     return
+  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"openAI"}{"apiKey"}.getStr
   if apiKey == "":
     self.error("Please provide an OpenAI API key in the settings.")
     return
 
-  var client = newHttpClient(timeout = 60000)
-  client.limitHttpResponse(self.maxHttpResponseBytes(), 60)
-  client.headers = newHttpHeaders([
-      ("Authorization", "Bearer " & apiKey),
-      ("Content-Type", "application/json"),
-  ])
   let body = %*{
       "model": self.appConfig.model,
       "messages": [
@@ -51,10 +45,19 @@ proc get*(self: App, context: ExecutionContext): string =
     }
   try:
     self.log(%*{"user": self.appConfig.user, "system": self.appConfig.system})
-    let response = client.request("https://api.openai.com/v1/chat/completions",
-        httpMethod = HttpPost, body = $body)
-    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
-    if response.code != Http200:
+    let response = boundedRequestWithHeaders(
+      "https://api.openai.com/v1/chat/completions",
+      httpMethod = "POST",
+      body = $body,
+      headers = @[
+        (name: "Authorization", value: "Bearer " & apiKey),
+        (name: "Content-Type", value: "application/json"),
+      ],
+      timeoutMs = 60000,
+      maxBytes = self.maxHttpResponseBytes(),
+      maxSeconds = 60
+    )
+    if response.code != 200:
       try:
         let json = parseJson(response.body)
         let error = json{"error"}{"message"}.getStr(json{"error"}.getStr($json))
@@ -69,5 +72,3 @@ proc get*(self: App, context: ExecutionContext): string =
   except CatchableError as e:
     self.error "OpenAI API error: " & $e.msg
     result = "OpenAI API error: " & $e.msg
-  finally:
-    client.close()

@@ -9,10 +9,15 @@ type
     pin*: int
     label*: string
 
+  PinOverrides* = ref object
+    ## GPIO remap for SPI panel drivers; -1 = keep the driver's default pin.
+    rst*, dc*, cs*, busy*, sclk*, mosi*, pwr*: int
+
   DeviceConfig* = ref object
     vcom*: float
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
+    pins*: PinOverrides
 
   PaletteConfig* = ref object
     colors*: seq[(int, int, int)]

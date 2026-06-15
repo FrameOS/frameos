@@ -56,6 +56,7 @@ import {
   sceneAppWithOrigin,
   updateSceneAppsInScenes,
 } from '../../../../utils/sceneApps'
+import { sceneExecutionForFrame, sceneIsCompiledForFrame } from '../../../../utils/sceneExecution'
 
 const events = _events as FrameEvent[]
 
@@ -744,7 +745,10 @@ export const diagramLogic = kea<diagramLogicType>([
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
-    isCompiledScene: [(s) => [s.scene], (scene): boolean => !!scene && scene.settings?.execution !== 'interpreted'],
+    isCompiledScene: [
+      (s) => [s.scene, s.editingFrame],
+      (scene, editingFrame): boolean => sceneIsCompiledForFrame(scene, editingFrame?.mode),
+    ],
     sceneApps: [(s) => [s.scene], (scene): Record<string, SceneApp> => normalizeSceneApps(scene?.apps)],
     effectiveApps: [
       (s) => [s.apps, s.scene],
@@ -827,8 +831,9 @@ export const diagramLogic = kea<diagramLogicType>([
       { resultEqualityCheck: equal },
     ],
     codeNodeLanguage: [
-      (s) => [s.scene],
-      (scene: FrameScene | null): CodeNodeLanguage => (scene?.settings?.execution === 'interpreted' ? 'js' : 'nim'),
+      (s) => [s.scene, s.editingFrame],
+      (scene: FrameScene | null, editingFrame): CodeNodeLanguage =>
+        sceneExecutionForFrame(scene, editingFrame?.mode) === 'interpreted' ? 'js' : 'nim',
     ],
     canUndo: [(s) => [s.history], (history) => history.past.length > 1],
     canRedo: [(s) => [s.history], (history) => history.future.length > 0],

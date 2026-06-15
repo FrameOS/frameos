@@ -42,7 +42,7 @@ proc run*(self: App, context: ExecutionContext) =
       self.cachedUrl == url:
     downloadedImage = self.cachedImage
   else:
-    downloadedImage = some(downloadImage(url, maxBytes = self.frameConfig.maxHttpResponseBytes()))
+    downloadedImage = some(downloadImage(url, maxBytes = self.frameConfig.maxImageResponseBytes()))
     if self.appConfig.cacheSeconds > 0:
       self.cachedImage = downloadedImage
       self.cachedUrl = url

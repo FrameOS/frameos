@@ -5,6 +5,7 @@ import {
   normalizeFrameCompilationMode,
   normalizeFrameCrossCompilation,
 } from '../../utils/frameBuildOptions'
+import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 export interface ChangeDetail {
   label: string
@@ -191,7 +192,7 @@ function frameCompilationMode(frame?: Partial<FrameType> | null): FrameCompilati
 }
 
 function frameCompiledSceneCount(frame?: Partial<FrameType> | null): number {
-  return (frame?.scenes ?? []).filter((scene) => (scene.settings?.execution ?? 'compiled') !== 'interpreted').length
+  return (frame?.scenes ?? []).filter((scene) => sceneIsCompiledForFrame(scene, frame?.mode)).length
 }
 
 function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {

@@ -61,3 +61,25 @@ proc run*(self: App, context: ExecutionContext) =
     assert "proc get*(self: AppRoot, context: ExecutionContext)" not in app_loader_nim
     assert 'of "nodeapp_custom": nodeapp_custom_loader.run(app, context)' in apps_nim
     assert "nodeapp_custom_loader.get(app, context)" not in apps_nim
+
+
+def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
+    app_dir = tmp_path / "src" / "apps" / "data" / "rstpSnapshot"
+    app_dir.mkdir(parents=True)
+    (app_dir / "config.json").write_text(
+        """
+{
+  "name": "RTSP Snapshot",
+  "category": "data",
+  "fields": []
+}
+""",
+        encoding="utf-8",
+    )
+
+    apps_nim = write_apps_nim(str(tmp_path))
+
+    assert "when not defined(frameosEmbedded):" in apps_nim
+    assert "  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader" in apps_nim
+    assert 'of "data/rstpSnapshot":\n    when defined(frameosEmbedded):' in apps_nim
+    assert "App 'data/rstpSnapshot' is not available on embedded builds" in apps_nim

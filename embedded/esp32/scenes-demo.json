@@ -1,0 +1,75 @@
+[
+  {
+    "id": "quickjs-demo",
+    "name": "QuickJS Demo",
+    "settings": {
+      "refreshInterval": 120,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "id": "e1",
+        "type": "event",
+        "data": { "keyword": "render" }
+      },
+      {
+        "id": "a1",
+        "type": "app",
+        "data": {
+          "keyword": "render/gradient",
+          "config": { "startColor": "#ffffff", "endColor": "#888888", "angle": "90" }
+        }
+      },
+      {
+        "id": "a2",
+        "type": "app",
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "fallback (code node did not run)",
+            "fontSize": "40",
+            "fontColor": "#000000",
+            "position": "center-center"
+          }
+        }
+      },
+      {
+        "id": "c1",
+        "type": "code",
+        "data": {
+          "codeJS": "\"QuickJS on ESP32-S3\\n\" + [1, 2, 3, 4, 5].map((x) => x * x).join(\" / \") + \"\\nrender @ \" + new Date().toISOString()",
+          "codeArgs": [],
+          "codeOutputs": [{ "name": "text", "type": "string" }]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "ed1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "ed2",
+        "source": "a1",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "ed3",
+        "source": "c1",
+        "sourceHandle": "fieldOutput",
+        "target": "a2",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

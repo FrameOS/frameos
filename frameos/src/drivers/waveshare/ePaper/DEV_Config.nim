@@ -85,5 +85,7 @@ proc DEV_SPI_WriteByte*(Value: UBYTE) {.importc: "DEV_SPI_WriteByte".}
 proc DEV_SPI_Write_nByte*(pData: ptr uint8; Len: uint32) {.
     importc: "DEV_SPI_Write_nByte".}
 proc DEV_Delay_ms*(xms: UDOUBLE) {.importc: "DEV_Delay_ms".}
+proc DEV_SetPinConfig*(rst: cint; dc: cint; cs: cint; busy: cint; sclk: cint;
+    mosi: cint; pwr: cint) {.importc: "DEV_SetPinConfig".}
 proc DEV_Module_Init*(): UBYTE {.importc: "DEV_Module_Init".}
 proc DEV_Module_Exit*() {.importc: "DEV_Module_Exit".}

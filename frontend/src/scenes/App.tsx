@@ -15,6 +15,7 @@ import { fontsModel } from '../models/fontsModel'
 import { templatesModel } from '../models/templatesModel'
 import { entityImagesModel } from '../models/entityImagesModel'
 import { longRunningTasksModel } from '../models/longRunningTasksModel'
+import { embeddedUsbLogsModel } from '../models/embeddedUsbLogsModel'
 import { LongRunningTaskToasts } from '../components/LongRunningTaskToasts'
 import { inHassioIngress } from '../utils/inHassioIngress'
 import { WorkspaceRouteLoading } from './workspace/WorkspaceRouteLoading'
@@ -117,6 +118,7 @@ export function LoggedInApp() {
   useMountedLogic(fontsModel)
   useMountedLogic(entityImagesModel)
   useMountedLogic(longRunningTasksModel)
+  useMountedLogic(embeddedUsbLogsModel)
   useMountedLogic(framesModel)
   useMountedLogic(templatesModel)
   const { scene, params } = useValues(sceneLogic)

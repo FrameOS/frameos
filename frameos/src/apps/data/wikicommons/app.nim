@@ -1,7 +1,9 @@
 import pixie
-import std/[httpclient, json, options, random, sequtils, strformat, strutils, times, uri]
+import std/[json, options, random, sequtils, strformat, strutils, times, uri]
 import frameos/apps
+import frameos/hal/entropy
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/utils/image
 
@@ -35,21 +37,23 @@ type
     mime: string
 
 proc init*(self: App) =
-  randomize()
+  randomizeSafe()
   self.appConfig.mode = self.appConfig.mode.strip()
   self.appConfig.submode = self.appConfig.submode.strip()
   self.appConfig.metadataStateKey = self.appConfig.metadataStateKey.strip()
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
-proc commonsHeaders(): HttpHeaders =
-  newHttpHeaders([
-    ("Accept", "application/json"),
-    ("User-Agent", CommonsUserAgent),
-  ])
+proc commonsHeaders(): seq[SimpleHttpHeader] =
+  @[
+    (name: "Accept", value: "application/json"),
+    (name: "User-Agent", value: CommonsUserAgent),
+  ]
+
+proc imageHeaders(): seq[SimpleHttpHeader] =
+  @[(name: "User-Agent", value: CommonsUserAgent)]
 
 proc queryString(params: openArray[(string, string)]): string =
   params.mapIt(encodeUrl(it[0]) & "=" & encodeUrl(it[1])).join("&")
@@ -60,13 +64,16 @@ proc fetchCommonsJson(self: App, params: openArray[(string, string)]): JsonNode 
     ("formatversion", "2")
   ]
   allParams.add(params)
-  let body = boundedGetContent(
+  let response = boundedRequestWithHeaders(
     CommonsApiUrl & "?" & queryString(allParams),
     headers = commonsHeaders(),
     timeoutMs = 60000,
     maxBytes = self.maxHttpResponseBytes(),
     maxSeconds = 60
   )
+  if response.code >= 400:
+    raise newException(CatchableError, "Wikimedia Commons API HTTP " & response.status)
+  let body = response.body
   result = parseJson(body)
   if result.hasKey("error"):
     let message = result["error"]{"info"}.getStr($result["error"])
@@ -238,8 +245,8 @@ proc fetchImageForMode(self: App, thumbnailWidth: int): CommonsImage =
     raise newException(ValueError, "Invalid Wikimedia Commons mode: " & self.appConfig.mode)
 
 proc get*(self: App, context: ExecutionContext): Image =
-  let width = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
-  let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+  let width = self.contextImageWidth(context)
+  let height = self.contextImageHeight(context)
 
   try:
     let commonsImage = self.fetchImageForMode(max(max(width, height), 1))
@@ -247,12 +254,13 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.frameConfig.debug:
       self.log(&"Downloading Wikimedia Commons image: {commonsImage.imageUrl}")
 
-    let imageData = boundedGetContent(
+    let (downloadedImage, imageData) = self.downloadImageWithDataForContext(
+      context,
       commonsImage.imageUrl,
-      headers = newHttpHeaders([("User-Agent", CommonsUserAgent)]),
-      timeoutMs = 60000,
-      maxBytes = self.maxHttpResponseBytes(),
-      maxSeconds = 60
+      maxBytes = self.maxImageResponseBytes(),
+      headers = imageHeaders(),
+      fallbackWidth = width,
+      fallbackHeight = height
     )
 
     if self.appConfig.metadataStateKey != "":
@@ -268,10 +276,10 @@ proc get*(self: App, context: ExecutionContext): Image =
         "mime": commonsImage.mime
       }
 
-    if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
+    if imageData.len > 0 and (self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always"):
       discard self.saveAsset(commonsImage.title.replace("File:", ""), commonsImage.imageExtension(),
         imageData, self.appConfig.saveAssets == "auto")
 
-    result = decodeImageWithFallback(imageData)
+    result = downloadedImage
   except CatchableError as e:
     return self.error(context, "Error fetching image from Wikimedia Commons: " & e.msg)

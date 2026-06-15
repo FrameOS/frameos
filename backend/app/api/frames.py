@@ -120,6 +120,15 @@ from app.utils.timezone import frame_timezone, normalize_timezone, stored_timezo
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
+from app.tasks.embedded_firmware import (
+    ensure_embedded_frame_defaults,
+    embedded_toolchain_available,
+    latest_embedded_firmware,
+    normalize_embedded_platform,
+    refresh_embedded_firmware_status,
+    request_or_queue_embedded_firmware_ota,
+    start_embedded_firmware,
+)
 from app.tasks.buildroot_image import (
     buildroot_sd_image_config_fingerprint,
     can_use_precompiled_buildroot_sd_image,
@@ -238,6 +247,19 @@ def _frame_uploaded_scenes_cache_key(frame_id: int) -> str:
 
 def _frame_image_cache_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image"
+
+
+def _coerce_frame_image_to_png(body: bytes, headers: dict[str, str]) -> bytes:
+    content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type not in ("image/bmp", "image/x-ms-bmp"):
+        return body
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(body)) as image:
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
 
 
 def _frame_states_cache_lock_key(frame_id: int) -> str:
@@ -396,6 +418,8 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
     old_mode = frame.mode
     if data.mode == "buildroot" or ((preview.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         ensure_buildroot_frame_defaults(preview, (preview.buildroot or {}).get("platform"))
+    elif data.mode == "embedded" or (preview.mode or "rpios") == "embedded":
+        ensure_embedded_frame_defaults(preview, (preview.embedded or {}).get("platform"))
     elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
         preview.ssh_user = "pi"
 
@@ -1785,6 +1809,9 @@ async def api_frame_get_image(
             )
 
             if status == 200:
+                body = await asyncio.get_running_loop().run_in_executor(
+                    None, _coerce_frame_image_to_png, body, headers
+                )
                 await redis.set(cache_key, body, ex=86400 * 30)
                 scene_id = headers.get("x-scene-id")
                 if not scene_id:
@@ -2574,6 +2601,125 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
+@api_project.get("/frames/{id:int}/embedded/firmware")
+async def api_frame_embedded_firmware_status(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("Firmware generation is only available for embedded frames")
+
+    try:
+        platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
+    except ValueError as exc:
+        _bad_request(str(exc))
+    return {
+        "firmware": await refresh_embedded_firmware_status(db, redis, frame)
+        or {
+            "status": "idle",
+            "platform": platform,
+        }
+    }
+
+
+@api_project.post("/frames/{id:int}/embedded/firmware")
+async def api_frame_embedded_firmware(
+    id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("Firmware generation is only available for embedded frames")
+    if not embedded_toolchain_available():
+        _bad_request(
+            "ESP-IDF toolchain not found on the backend. "
+            "Install it and set IDF_PATH (see embedded/esp32/README.md)."
+        )
+
+    try:
+        ensure_embedded_frame_defaults(frame)
+    except ValueError as exc:
+        _bad_request(str(exc))
+
+    db.add(frame)
+    db.commit()
+
+    try:
+        started, firmware = await start_embedded_firmware(db, redis, frame, force=force)
+        if started:
+            message = "Firmware build started"
+        elif firmware.get("status") == "ready":
+            message = "Firmware already ready"
+        else:
+            message = "Firmware build already running"
+        return {
+            "message": message,
+            "firmware": firmware,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_project.get("/frames/{id:int}/embedded/firmware/download")
+async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(get_db)):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("Firmware downloads are only available for embedded frames")
+
+    firmware = latest_embedded_firmware(frame)
+    if not firmware or firmware.get("status") != "ready":
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready firmware image for this frame")
+
+    path = firmware.get("path")
+    if not isinstance(path, str) or not os.path.isfile(path):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated firmware file not found")
+
+    filename = str(firmware.get("filename") or f"frameos-esp32-{id}.bin")
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
+
+
+@api_project.post("/frames/{id:int}/embedded/firmware/ota")
+async def api_frame_embedded_firmware_ota(
+    id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("OTA updates are only available for embedded frames")
+
+    try:
+        message, firmware, device_payload = await request_or_queue_embedded_firmware_ota(
+            db,
+            redis,
+            frame,
+            force=force,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+
+    return {
+        "message": message,
+        "firmware": firmware,
+        "device": device_payload,
+    }
+
+
 @api_project.get("/frames/{id:int}/deploy_plan")
 async def api_frame_deploy_plan(
     id: int,
@@ -2791,6 +2937,11 @@ async def api_frame_update_endpoint(
             ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
         except ValueError as exc:
             _bad_request(str(exc))
+    elif data.mode == "embedded" or (frame.mode or "rpios") == "embedded":
+        try:
+            ensure_embedded_frame_defaults(frame, (frame.embedded or {}).get("platform"))
+        except ValueError as exc:
+            _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
 
@@ -2862,6 +3013,8 @@ async def api_frame_new(
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
             validate_buildroot_network(data.network)
+        elif data.mode == "embedded":
+            normalize_embedded_platform(data.platform)
 
         frame = await new_frame(
             db,
@@ -2889,6 +3042,17 @@ async def api_frame_new(
             }
             ensure_buildroot_frame_defaults(frame, data.platform)
             validate_buildroot_wifi_credentials(frame)
+            db.add(frame)
+            db.commit()
+            db.refresh(frame)
+        elif frame.mode == "embedded":
+            frame.timezone = frame_timezone(data.timezone, (settings.get("defaults") or {}).get("timezone"))
+            if data.network:
+                frame.network = {
+                    **(frame.network or {}),
+                    **data.network,
+                }
+            ensure_embedded_frame_defaults(frame, data.platform)
             db.add(frame)
             db.commit()
             db.refresh(frame)

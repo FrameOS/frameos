@@ -1,0 +1,222 @@
+/*
+ * FrameOS ESP32-S3 firmware.
+ *
+ * Boot: NVS config → display select → Wi-Fi (STA, or captive-portal
+ * provisioning when unconfigured) → SNTP → HTTP server + render loop
+ * (Nim runtime on-device, or thin client fetching backend bitmaps) → OTA.
+ *
+ * The serial console (USB) is always available: `help` for commands,
+ * `wifi <ssid> [pass]` provisions a frame without the portal.
+ */
+#include <stdio.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "driver/gpio.h"
+#include "esp_app_desc.h"
+#include "esp_err.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+
+#include "fos_battery.h"
+#include "fos_buttons.h"
+#include "fos_client.h"
+#include "fos_config.h"
+#include "fos_console.h"
+#include "fos_http.h"
+#include "fos_ota.h"
+#include "fos_scenes.h"
+#include "fos_status_screen.h"
+#include "fos_wifi.h"
+#include "frameos_display.h"
+#include "frameos_nim.h"
+
+static const char *TAG = "frameos";
+
+#define WIFI_CONNECT_TIMEOUT_MS 45000
+#define SNTP_TIMEOUT_MS 10000
+
+/* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Driving an
+ * unconnected GPIO on other boards is harmless. Slow blink = running,
+ * fast blink = provisioning portal. */
+#define HEARTBEAT_GPIO 21
+
+static volatile uint32_t s_blink_period_ms = 2000;
+
+static void heartbeat_task(void *arg)
+{
+    gpio_reset_pin(HEARTBEAT_GPIO);
+    gpio_set_direction(HEARTBEAT_GPIO, GPIO_MODE_OUTPUT);
+    bool on = false;
+    while (true) {
+        on = !on;
+        gpio_set_level(HEARTBEAT_GPIO, on ? 0 : 1);
+        vTaskDelay(pdMS_TO_TICKS(s_blink_period_ms / 2));
+    }
+}
+
+static void action_ota_now(void)
+{
+    ESP_LOGW(TAG, "manual OTA requested");
+    esp_err_t err = fos_ota_request_check();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "manual OTA request failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void action_render_now(void)
+{
+    fos_client_render_now();
+}
+
+static void log_bootup_event(bool online)
+{
+    fos_config_t *config = fos_config();
+    const esp_app_desc_t *app = esp_app_get_description();
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    int pixel_format = fos_display_present() ? (int)fos_display_format() : 1;
+    char log_line[360];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"bootup\",\"source\":\"esp32\",\"width\":%d,\"height\":%d,"
+             "\"pixelFormat\":%d,\"mode\":\"embedded\",\"renderMode\":\"%s\","
+             "\"version\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\",\"wifi\":\"%s\"}",
+             width, height, pixel_format,
+             config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
+             app->version, config->panel, fos_wifi_ip(), online ? "connected" : "offline");
+    frameos_nim_log_hook(log_line);
+    frameos_nim_flush_logs();
+}
+
+void app_main(void)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    ESP_LOGI(TAG, "FrameOS %s (idf %s) booting from %s",
+             app->version, app->idf_ver, running ? running->label : "?");
+
+    ESP_ERROR_CHECK(fos_config_init());
+    fos_config_t *config = fos_config();
+
+    fos_battery_init(config->battery_pin, config->battery_divider);
+    if (fos_battery_present()) {
+        ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
+    }
+
+    xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+
+    fos_display_config_t display_config = {
+        .panel = config->panel,
+        .rst = config->pins.rst, .dc = config->pins.dc,
+        .cs = config->pins.cs, .cs2 = config->pins.cs2,
+        .busy = config->pins.busy, .sck = config->pins.sck,
+        .mosi = config->pins.mosi, .pwr = config->pins.pwr,
+    };
+    if (fos_display_init(&display_config) != ESP_OK) {
+        ESP_LOGW(TAG, "display init failed, continuing headless");
+    }
+
+    /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
+     * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
+     * (the backend renders the bitmap) so the frame still works. */
+    bool local_render_ok = true;
+    if (fos_display_present()) {
+        size_t need = fos_display_render_psram_bytes();
+        size_t have = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+        if (need > have) {
+            ESP_LOGE(TAG, "panel %s needs ~%u KB PSRAM to render on-device but the module has "
+                     "~%u KB; switching to thin-client mode", config->panel,
+                     (unsigned)(need / 1024), (unsigned)(have / 1024));
+            config->render_mode = FOS_RENDER_REMOTE;
+            local_render_ok = false;
+        }
+    }
+
+    ESP_ERROR_CHECK(fos_wifi_init());
+    fos_http_set_actions(action_render_now, action_ota_now);
+
+    bool online = false;
+    if (fos_config_wifi_ready()) {
+        online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
+        if (!online) {
+            ESP_LOGW(TAG, "Wi-Fi unreachable; starting provisioning portal");
+        }
+    } else {
+        ESP_LOGI(TAG, "no Wi-Fi configured; starting provisioning portal");
+    }
+
+    if (online) {
+        fos_wifi_sync_time(SNTP_TIMEOUT_MS);
+        /* Network up = this image is good; cancel any pending rollback. */
+        fos_ota_mark_boot_valid();
+        if (fos_ota_boot_request_pending()) {
+            esp_err_t ota_err = fos_ota_run_boot_request();
+            if (ota_err != ESP_OK) {
+                ESP_LOGW(TAG, "boot OTA request failed: %s", esp_err_to_name(ota_err));
+            }
+        }
+    }
+
+    /* Reserve the large render stack before Nim/QuickJS, SPIFFS and httpd
+     * consume internal RAM, but after early-boot OTA had a chance to run with
+     * the leanest possible task set. The task waits until fos_client_resume()
+     * below, so starting it here only claims the stack. */
+    fos_client_start();
+
+    if (frameos_nim_available() && local_render_ok) {
+        int width = fos_display_present() ? fos_display_width() : 800;
+        int height = fos_display_present() ? fos_display_height() : 480;
+        char frame_name[64];
+        snprintf(frame_name, sizeof(frame_name), "frame %lu", (unsigned long)config->frame_id);
+        if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes,
+                             config->backend_url, config->frame_id, config->api_key,
+                             config->server_send_logs)) {
+            ESP_LOGI(TAG, "nim runtime up: %s", frameos_nim_info());
+        } else {
+            ESP_LOGE(TAG, "nim runtime failed to initialize");
+        }
+    } else if (frameos_nim_available()) {
+        ESP_LOGW(TAG, "nim runtime compiled in but not started (panel too large for PSRAM)");
+    } else {
+        ESP_LOGI(TAG, "nim runtime not compiled in (thin-client only)");
+    }
+
+    /* Interpreted scenes: mount /state and queue any cached scenes.json;
+     * the render task applies it and keeps it synced with the backend. */
+    if (fos_scenes_init() != ESP_OK) {
+        ESP_LOGW(TAG, "scene storage unavailable, continuing without");
+    }
+
+    fos_console_start();
+
+    if (online) {
+        frameos_nim_set_log_upload_enabled(true);
+        log_bootup_event(true);
+        fos_http_start(false);
+        fos_ota_start_periodic_task(24);
+    } else {
+        frameos_nim_set_log_upload_enabled(false);
+        if (!fos_config_wifi_ready()) {
+            /* Fresh device: nothing to roll back to that would do better. */
+            fos_ota_mark_boot_valid();
+        }
+        /* If Wi-Fi creds exist but fail after an OTA, we deliberately do NOT
+         * mark valid: a reset rolls back to the previous image. */
+        s_blink_period_ms = 400;
+        fos_wifi_start_portal();
+        fos_http_start(true);
+        fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
+    }
+
+    /* Render loop runs in both cases: local mode works fully offline. */
+    fos_client_resume();
+    if (fos_buttons_start() != ESP_OK) {
+        ESP_LOGW(TAG, "GPIO buttons unavailable");
+    }
+
+    ESP_LOGI(TAG, "boot complete: wifi=%s ip=%s portal=%s",
+             online ? "connected" : "offline", fos_wifi_ip(),
+             fos_wifi_state() == FOS_WIFI_PORTAL ? fos_wifi_ap_ssid() : "no");
+}

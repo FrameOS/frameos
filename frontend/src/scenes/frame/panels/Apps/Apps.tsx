@@ -13,11 +13,34 @@ import { appTag } from '../../../../utils/sceneApps'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { Tooltip } from '../../../../components/Tooltip'
+import { appCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
+import clsx from 'clsx'
+
+interface CompatibleAppRow {
+  keyword: string
+  app: AppConfig
+  compatibility: CompatibilityResult
+  sources?: Record<string, string> | null
+  usageCount?: number
+}
+
+function sortCompatibleApps(a: CompatibleAppRow, b: CompatibleAppRow): number {
+  if (a.compatibility.supported !== b.compatibility.supported) {
+    return a.compatibility.supported ? -1 : 1
+  }
+  if (a.keyword === INLINE_CODE_NODE_KEYWORD) {
+    return -1
+  }
+  if (b.keyword === INLINE_CODE_NODE_KEYWORD) {
+    return 1
+  }
+  return a.app.name.localeCompare(b.app.name)
+}
 
 export function Apps() {
-  const { frameId } = useValues(frameLogic)
+  const { frameId, mode } = useValues(frameLogic)
   const logic = appsLogic({ frameId })
-  const { appsByCategory, search, visibleSceneApps, sceneAppUsageCounts } = useValues(logic)
+  const { appsByCategory, search, visibleSceneApps, rawSceneApps, sceneAppUsageCounts } = useValues(logic)
   const { setSearch, deleteUnusedSceneApp } = useActions(logic)
   const { scenesOpen } = useValues(frameEditorsLogic({ frameId }))
   const onDragStart = (event: any, keyword: string) => {
@@ -25,15 +48,32 @@ export function Apps() {
     event.dataTransfer.setData('application/reactflow', JSON.stringify(dragData))
     event.dataTransfer.effectAllowed = 'move'
   }
-  const renderApp = (keyword: string, app: AppConfig, usageCount?: number) => {
+  const renderApp = (
+    keyword: string,
+    app: AppConfig,
+    usageCount?: number,
+    sources?: Record<string, string> | null,
+    compatibility: CompatibilityResult = appCompatibilityForFrame(mode, keyword, app, sources)
+  ) => {
     const tag = appTag(app)
     const isUnusedSceneApp = usageCount === 0
+    const unsupported = !compatibility.supported
     return (
       <Box
         key={keyword}
-        className="frame-tool-row dndnode flex w-full cursor-move items-stretch gap-3 py-2 pl-0.5 pr-3"
-        draggable
-        onDragStart={(event) => onDragStart(event, keyword)}
+        className={clsx(
+          'frame-tool-row dndnode flex w-full items-stretch gap-3 py-2 pl-0.5 pr-3',
+          unsupported ? 'cursor-not-allowed opacity-50 grayscale' : 'cursor-move'
+        )}
+        draggable={!unsupported}
+        title={unsupported ? compatibility.reason : undefined}
+        onDragStart={(event) => {
+          if (unsupported) {
+            event.preventDefault()
+            return
+          }
+          onDragStart(event, keyword)
+        }}
       >
         <div className="frame-tool-drag-handle" aria-hidden="true" />
         <div className="min-w-0 flex-1">
@@ -46,6 +86,11 @@ export function Apps() {
               {typeof usageCount === 'number' ? (
                 <span className="frameos-tag mt-1 whitespace-nowrap rounded px-1.5 py-0.5 text-xs">
                   {usageCount} use{usageCount === 1 ? '' : 's'}
+                </span>
+              ) : null}
+              {unsupported ? (
+                <span className="mt-1 whitespace-nowrap rounded bg-slate-200 px-1.5 py-0.5 text-xs font-semibold text-slate-500">
+                  ESP32 unsupported
                 </span>
               ) : null}
               {app.output?.map((output, i) => (
@@ -69,6 +114,7 @@ export function Apps() {
             </div>
           </div>
           <div className="text-sm">{app.description}</div>
+          {unsupported ? <div className="mt-1 text-xs font-medium text-slate-500">{compatibility.reason}</div> : null}
         </div>
       </Box>
     )
@@ -87,22 +133,33 @@ export function Apps() {
             />
           </div>
           {Object.entries(visibleSceneApps)
-            .toSorted(([, a], [, b]) => a.name.localeCompare(b.name))
-            .map(([keyword, app]) => renderApp(keyword, app, sceneAppUsageCounts[keyword] ?? 0))}
+            .map(([keyword, app]) => {
+              const sources = rawSceneApps[keyword]?.sources
+              return {
+                keyword,
+                app,
+                sources,
+                usageCount: sceneAppUsageCounts[keyword] ?? 0,
+                compatibility: appCompatibilityForFrame(mode, keyword, app, sources),
+              }
+            })
+            .toSorted(sortCompatibleApps)
+            .map(({ keyword, app, usageCount, sources, compatibility }) =>
+              renderApp(keyword, app, usageCount, sources, compatibility)
+            )}
         </div>
       ) : null}
       {Object.entries(appsByCategory).map(([category, apps]) => (
         <div className="space-y-2" key={category}>
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>
           {Object.entries(apps)
-            .toSorted(([keywordA, a], [keywordB, b]) =>
-              keywordA === INLINE_CODE_NODE_KEYWORD
-                ? -1
-                : keywordB === INLINE_CODE_NODE_KEYWORD
-                ? 1
-                : a.name.localeCompare(b.name)
-            )
-            .map(([keyword, app]) => renderApp(keyword, app))}
+            .map(([keyword, app]) => ({
+              keyword,
+              app,
+              compatibility: appCompatibilityForFrame(mode, keyword, app),
+            }))
+            .toSorted(sortCompatibleApps)
+            .map(({ keyword, app, compatibility }) => renderApp(keyword, app, undefined, undefined, compatibility))}
         </div>
       ))}
     </div>
