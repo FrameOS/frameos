@@ -601,12 +601,15 @@ class AgentDeployer(FrameDeployer):
         )
 
         # Activate system-wide
+        service_source = shlex.quote(f"{self._release_dir()}/frameos_agent.service")
+        service_destination = shlex.quote("/etc/systemd/system/frameos_agent.service")
         await self.exec_command(
-            f"sudo cp {self._release_dir()}/frameos_agent.service "
-            "/etc/systemd/system/frameos_agent.service"
+            self._sudo_system_command(
+                f"cp {service_source} {service_destination} && "
+                f"chown root:root {service_destination} && "
+                f"chmod 644 {service_destination}"
+            )
         )
-        await self.exec_command("sudo chown root:root /etc/systemd/system/frameos_agent.service")
-        await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
 
     async def _verify_agent_transport(self, label: str) -> None:
         output: list[str] = []

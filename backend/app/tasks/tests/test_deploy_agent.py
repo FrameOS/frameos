@@ -389,6 +389,39 @@ async def test_remount_root_ro_does_not_raise_on_failure(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_setup_agent_service_uses_system_command_for_agent_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    uploads: list[str] = []
+
+    async def fake_upload_file(_db, _redis, _frame, remote_path, _data, **_kwargs):
+        uploads.append(remote_path)
+
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    monkeypatch.setattr(deploy_agent_module, "upload_file", fake_upload_file)
+
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.remote_transport = "agent"
+    deployer.frame.ssh_user = "root"
+
+    await deployer._setup_agent_service()
+
+    assert uploads == [f"{deployer._release_dir()}/frameos_agent.service"]
+    install_commands = [
+        command
+        for command in deployer.commands
+        if "/etc/systemd/system/frameos_agent.service" in command
+    ]
+    assert len(install_commands) == 1
+    assert "systemd-run" in install_commands[0]
+    assert "cp " in install_commands[0]
+    assert "chown root:root" in install_commands[0]
+    assert "chmod 644" in install_commands[0]
+    assert not install_commands[0].startswith("sudo cp ")
+
+
+@pytest.mark.asyncio
 async def test_wait_for_agent_release_requires_new_running_process(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
