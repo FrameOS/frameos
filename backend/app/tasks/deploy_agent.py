@@ -156,16 +156,19 @@ class AgentDeployer(FrameDeployer):
                     if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
                         raise Exception(f"Unsupported target distro '{distro}'")
 
-                    await self._deploy_agent(
-                        arch=arch,
-                        distro=distro,
-                        distro_version=distro_version,
-                    )
-
-                    # Installing the unit file and "systemctl enable" write to
-                    # /etc, which sits on a read-only root on Buildroot frames.
+                    # Buildroot frames usually mount /srv/frameos from a
+                    # writable data partition, but older or partially
+                    # bootstrapped hosts can expose /srv from the read-only
+                    # rootfs. Remount before any staging writes, not just the
+                    # service install in /etc.
                     root_remounted_rw = await self._remount_root_rw_if_needed()
                     try:
+                        await self._deploy_agent(
+                            arch=arch,
+                            distro=distro,
+                            distro_version=distro_version,
+                        )
+
                         await self._setup_agent_service()
 
                         # 3. Upload *frame.json* for this release
@@ -186,11 +189,12 @@ class AgentDeployer(FrameDeployer):
                         else:
                             await self.restart_service("frameos_agent")
                             await self._wait_for_agent_release(previous_agent_process)
+
+                        await self._cleanup_old_builds()
                     finally:
                         if root_remounted_rw:
                             await self._remount_root_ro()
 
-                    await self._cleanup_old_builds()
                     await self.log(
                         "stdout",
                         f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",

@@ -347,8 +347,10 @@ async def test_deploy_agent_remounts_readonly_root_around_service_install(tmp_pa
 
     await deployer.run()
 
+    assert deployer.events.index("remount_rw_check") < deployer.events.index("deploy:aarch64:debian:bookworm")
     assert deployer.events.index("remount_rw_check") < deployer.events.index("setup_service")
     assert deployer.events.index("wait_for_agent_release") < deployer.events.index("remount_ro")
+    assert deployer.events.index("cleanup_old_builds") < deployer.events.index("remount_ro")
 
 
 @pytest.mark.asyncio
