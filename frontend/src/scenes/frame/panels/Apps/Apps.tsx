@@ -90,7 +90,7 @@ export function Apps() {
               ) : null}
               {unsupported ? (
                 <span className="mt-1 whitespace-nowrap rounded bg-slate-200 px-1.5 py-0.5 text-xs font-semibold text-slate-500">
-                  ESP32 unsupported
+                  Embedded unsupported
                 </span>
               ) : null}
               {app.output?.map((output, i) => (

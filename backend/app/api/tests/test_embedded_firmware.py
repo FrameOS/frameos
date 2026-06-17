@@ -5,6 +5,8 @@ from app.models.frame import Frame
 from app.tasks.embedded_firmware import (
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_FIRMWARE_VERSION,
+    EMBEDDED_PICO2_PLATFORM,
+    EMBEDDED_PICO2W_PLATFORM,
     EMBEDDED_RENDER_REMOTE,
     EMBEDDED_SUPPORTED_PANELS,
     FOS_PIXEL_2BPP_GRAY,
@@ -22,6 +24,7 @@ from app.tasks.embedded_firmware import (
     embedded_module_psram_bytes,
     embedded_panel_for_frame,
     embedded_pins_for_frame,
+    embedded_platform_for_frame,
     embedded_pixel_format_for_panel,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
@@ -43,6 +46,31 @@ async def create_embedded_frame(async_client) -> dict:
     return response.json()['frame']
 
 
+async def create_pico2_frame(async_client) -> dict:
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Pico 2 Frame',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'pico2',
+    })
+    assert response.status_code == 200, response.text
+    return response.json()['frame']
+
+
+async def create_pico2w_frame(async_client) -> dict:
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Pico 2 W Frame',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'pico2w',
+        'network': {'wifiSSID': 'Test WiFi', 'wifiPassword': 'secret1234'},
+    })
+    assert response.status_code == 200, response.text
+    return response.json()['frame']
+
+
 @pytest.mark.asyncio
 async def test_new_embedded_frame(async_client):
     frame = await create_embedded_frame(async_client)
@@ -57,6 +85,40 @@ async def test_new_embedded_frame(async_client):
     assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame['device_config']['pins']['cs'] == 3
     assert frame['device_config']['pins']['cs2'] == -1
+
+
+@pytest.mark.asyncio
+async def test_new_pico2_frame(async_client):
+    frame = await create_pico2_frame(async_client)
+    assert frame['mode'] == 'embedded'
+    assert frame['embedded']['platform'] == 'pico2'
+    assert frame['agent']['agentEnabled'] is False
+    assert frame['https_proxy']['enable'] is False
+    assert frame['device'] == 'waveshare.EPD_2in13_V4'
+    assert frame['device_config']['pins'] == {
+        'rst': 21,
+        'dc': 20,
+        'cs': 17,
+        'cs2': -1,
+        'busy': 16,
+        'sck': 18,
+        'mosi': 19,
+        'pwr': -1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_new_pico2w_frame(async_client):
+    frame = await create_pico2w_frame(async_client)
+    assert frame['mode'] == 'embedded'
+    assert frame['embedded']['platform'] == 'pico2w'
+    assert frame['agent']['agentEnabled'] is False
+    assert frame['https_proxy']['enable'] is False
+    assert frame['device'] == 'waveshare.EPD_2in13_V4'
+    assert frame['network']['wifiSSID'] == 'Test WiFi'
+    assert frame['network']['wifiPassword'] == 'secret1234'
+    assert frame['device_config']['pins']['sck'] == 18
+    assert frame['device_config']['pins']['mosi'] == 19
 
 
 @pytest.mark.asyncio
@@ -114,6 +176,22 @@ async def test_firmware_status_idle(async_client):
 
 
 @pytest.mark.asyncio
+async def test_pico2_firmware_status_idle(async_client):
+    frame = await create_pico2_frame(async_client)
+    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 200
+    assert response.json() == {'firmware': {'status': 'idle', 'platform': 'pico2'}}
+
+
+@pytest.mark.asyncio
+async def test_pico2w_firmware_status_idle(async_client):
+    frame = await create_pico2w_frame(async_client)
+    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 200
+    assert response.json() == {'firmware': {'status': 'idle', 'platform': 'pico2w'}}
+
+
+@pytest.mark.asyncio
 async def test_firmware_endpoints_reject_non_embedded_frames(async_client):
     response = await async_client.post('/api/frames/new', json={
         'name': 'Pi Frame',
@@ -143,6 +221,15 @@ async def test_firmware_build_requires_toolchain(async_client):
 
 
 @pytest.mark.asyncio
+async def test_pico2_firmware_build_requires_pico_sdk(async_client):
+    frame = await create_pico2_frame(async_client)
+    with patch('app.api.frames.embedded_toolchain_available', return_value=False):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 400
+    assert 'Pico SDK toolchain not found' in response.json()['detail']
+
+
+@pytest.mark.asyncio
 async def test_firmware_build_queues_job(async_client, db, redis):
     frame = await create_embedded_frame(async_client)
     with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
@@ -157,6 +244,34 @@ async def test_firmware_build_queues_job(async_client, db, redis):
 
     stored = db.get(Frame, frame['id'])
     assert stored.embedded['firmware']['status'] == 'queued'
+
+
+@pytest.mark.asyncio
+async def test_pico2_firmware_build_queues_job(async_client, db, redis):
+    frame = await create_pico2_frame(async_client)
+    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
+         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data['message'] == 'Firmware build started'
+    assert data['firmware']['status'] == 'queued'
+    assert data['firmware']['platform'] == 'pico2'
+    assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
+
+
+@pytest.mark.asyncio
+async def test_pico2w_firmware_build_queues_job(async_client, db, redis):
+    frame = await create_pico2w_frame(async_client)
+    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
+         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data['message'] == 'Firmware build started'
+    assert data['firmware']['status'] == 'queued'
+    assert data['firmware']['platform'] == 'pico2w'
+    assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
 
 
 @pytest.mark.asyncio
@@ -189,6 +304,62 @@ async def test_firmware_download(async_client, db, tmp_path):
     assert response.status_code == 200
     assert response.content == b'firmware-bytes'
     assert 'frameos-esp32-s3.bin' in response.headers.get('content-disposition', '')
+
+
+@pytest.mark.asyncio
+async def test_pico2_firmware_download(async_client, db, tmp_path):
+    frame = await create_pico2_frame(async_client)
+
+    artifact = tmp_path / 'frameos-pico2.uf2'
+    artifact.write_bytes(b'uf2-firmware-bytes')
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {
+        'platform': 'pico2',
+        'firmware': {
+            'status': 'ready',
+            'platform': 'pico2',
+            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+            'filename': 'frameos-pico2.uf2',
+            'path': str(artifact),
+            'panel': 'EPD_2in13_V4',
+            'configHash': embedded_firmware_config_hash(stored),
+        },
+    }
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
+    assert response.status_code == 200
+    assert response.content == b'uf2-firmware-bytes'
+    assert 'frameos-pico2.uf2' in response.headers.get('content-disposition', '')
+
+
+@pytest.mark.asyncio
+async def test_pico2w_firmware_download(async_client, db, tmp_path):
+    frame = await create_pico2w_frame(async_client)
+
+    artifact = tmp_path / 'frameos-pico2w.uf2'
+    artifact.write_bytes(b'pico2w-uf2-firmware-bytes')
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {
+        'platform': 'pico2w',
+        'firmware': {
+            'status': 'ready',
+            'platform': 'pico2w',
+            'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+            'filename': 'frameos-pico2w.uf2',
+            'path': str(artifact),
+            'panel': 'EPD_2in13_V4',
+            'configHash': embedded_firmware_config_hash(stored),
+        },
+    }
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
+    assert response.status_code == 200
+    assert response.content == b'pico2w-uf2-firmware-bytes'
+    assert 'frameos-pico2w.uf2' in response.headers.get('content-disposition', '')
 
 
 @pytest.mark.asyncio
@@ -244,6 +415,24 @@ async def test_firmware_ota_queues_build_when_artifact_not_ready(async_client):
     assert response.json()['message'] == 'OTA update queued'
     assert firmware['status'] == 'queued'
     assert firmware['otaUpdate']['status'] == 'queued'
+
+
+@pytest.mark.asyncio
+async def test_pico2_firmware_ota_is_not_supported(async_client):
+    frame = await create_pico2_frame(async_client)
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+
+    assert response.status_code == 400
+    assert 'OTA updates are not supported' in response.json()['detail']
+
+
+@pytest.mark.asyncio
+async def test_pico2w_firmware_ota_is_not_supported(async_client):
+    frame = await create_pico2w_frame(async_client)
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+
+    assert response.status_code == 400
+    assert 'OTA updates are not supported' in response.json()['detail']
 
 
 @pytest.mark.asyncio
@@ -420,6 +609,37 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
     assert embedded_pins_for_frame(custom)["sck"] == 11
 
 
+def test_pico2_defaults_choose_remote_render_and_pin_layout():
+    frame = Frame(id=7, embedded={"platform": "pico2"}, device="web_only")
+    ensure_embedded_frame_defaults(frame)
+    assert embedded_platform_for_frame(frame) == EMBEDDED_PICO2_PLATFORM
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    assert frame.device == "waveshare.EPD_2in13_V4"
+    assert frame.https_proxy["enable"] is False
+    assert frame.device_config["pins"]["sck"] == 18
+    assert frame.device_config["pins"]["mosi"] == 19
+
+    custom = Frame(
+        embedded={"platform": "pico2"},
+        device="waveshare.EPD_2in13_V4",
+        device_config={"pins": {"rst": 30, "dc": 22, "sclk": 18}},
+    )
+    assert embedded_pins_for_frame(custom)["rst"] == 21
+    assert embedded_pins_for_frame(custom)["dc"] == 22
+    assert embedded_pins_for_frame(custom)["sck"] == 18
+
+
+def test_pico2w_defaults_choose_remote_render_and_pin_layout():
+    frame = Frame(id=7, embedded={"platform": "pico2w"}, device="web_only")
+    ensure_embedded_frame_defaults(frame)
+    assert embedded_platform_for_frame(frame) == EMBEDDED_PICO2W_PLATFORM
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    assert frame.device == "waveshare.EPD_2in13_V4"
+    assert frame.https_proxy["enable"] is False
+    assert frame.device_config["pins"]["busy"] == 16
+    assert frame.device_config["pins"]["cs"] == 17
+
+
 def test_large_spectra_panel_can_use_thin_client_on_8mb():
     frame = Frame(device="waveshare.EPD_13in3e", device_config={"renderMode": "remote"})
     assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
@@ -523,6 +743,40 @@ def test_generated_config_bakes_remote_render_mode():
                   device_config={"renderMode": "remote"})
     header = _generated_config_header(frame)
     assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
+
+
+def test_generated_config_bakes_pico2_platform_settings():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        embedded={"platform": "pico2"},
+        device="waveshare.EPD_2in13_V4",
+    )
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_PLATFORM "pico2"' in header
+    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
+    assert "#define FRAMEOS_PICO2_FLASH_BYTES 4194304" in header
+    assert "#define FRAMEOS_PICO2_SRAM_BYTES 532480" in header
+
+
+def test_generated_config_bakes_pico2w_platform_settings():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        embedded={"platform": "pico2w"},
+        device="waveshare.EPD_2in13_V4",
+        network={"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
+    )
+    header = _generated_config_header(frame, wifi_ssid="Test WiFi", wifi_password="secret1234")
+    assert '#define FRAMEOS_DEFAULT_PLATFORM "pico2w"' in header
+    assert '#define FRAMEOS_DEFAULT_WIFI_SSID "Test WiFi"' in header
+    assert '#define FRAMEOS_DEFAULT_WIFI_PASS "secret1234"' in header
+    assert "#define FRAMEOS_DEFAULT_RENDER_MODE 1" in header
+    assert "#define FRAMEOS_PICO2_FLASH_BYTES 4194304" in header
 
 
 def test_generated_config_bakes_disabled_backend_logs():

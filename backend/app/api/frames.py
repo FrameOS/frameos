@@ -122,6 +122,7 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
+    embedded_toolchain_error,
     embedded_toolchain_available,
     latest_embedded_firmware,
     normalize_embedded_platform,
@@ -2638,11 +2639,12 @@ async def api_frame_embedded_firmware(
         _not_found()
     if (frame.mode or "rpios") != "embedded":
         _bad_request("Firmware generation is only available for embedded frames")
-    if not embedded_toolchain_available():
-        _bad_request(
-            "ESP-IDF toolchain not found on the backend. "
-            "Install it and set IDF_PATH (see embedded/esp32/README.md)."
-        )
+    try:
+        platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
+    except ValueError as exc:
+        _bad_request(str(exc))
+    if not embedded_toolchain_available(platform):
+        _bad_request(embedded_toolchain_error(platform))
 
     try:
         ensure_embedded_frame_defaults(frame)
