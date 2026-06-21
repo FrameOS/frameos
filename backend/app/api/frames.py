@@ -122,8 +122,7 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
-    embedded_toolchain_error,
-    embedded_toolchain_available,
+    embedded_firmware_build_error,
     latest_embedded_firmware,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
@@ -2643,8 +2642,9 @@ async def api_frame_embedded_firmware(
         platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
     except ValueError as exc:
         _bad_request(str(exc))
-    if not embedded_toolchain_available(platform):
-        _bad_request(embedded_toolchain_error(platform))
+    build_error = embedded_firmware_build_error(db, frame, platform)
+    if build_error:
+        _bad_request(build_error)
 
     try:
         ensure_embedded_frame_defaults(frame)

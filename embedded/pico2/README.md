@@ -38,6 +38,12 @@ bash embedded/pico2/ci_build_image.sh
 FRAMEOS_PICO_PLATFORM=pico2w bash embedded/pico2/ci_build_image.sh
 ```
 
+When running the backend directly on a development machine, FrameOS first uses a
+local `PICO_SDK_PATH` if available. If the Pico SDK/toolchain is not installed
+locally, Pico firmware builds fall back to the selected build environment
+(Docker by default, or a configured build host/Modal sandbox). Setting the build
+environment to `none` disables that fallback and requires the local SDK.
+
 ## Flashing
 
 Hold `BOOTSEL` while plugging in the Pico board, then copy the generated `.uf2`

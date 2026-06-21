@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from app.models.frame import Frame
+from app.models.settings import Settings
 from app.tasks.embedded_firmware import (
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_FIRMWARE_VERSION,
@@ -214,26 +215,42 @@ async def test_firmware_endpoints_reject_non_embedded_frames(async_client):
 @pytest.mark.asyncio
 async def test_firmware_build_requires_toolchain(async_client):
     frame = await create_embedded_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=False):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=False):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 400
     assert 'ESP-IDF toolchain not found' in response.json()['detail']
 
 
 @pytest.mark.asyncio
-async def test_pico2_firmware_build_requires_pico_sdk(async_client):
+async def test_pico2_firmware_build_queues_job_with_docker_fallback(async_client, db, redis):
     frame = await create_pico2_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=False):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=False):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data['message'] == 'Firmware build started'
+    assert data['firmware']['status'] == 'queued'
+    assert data['firmware']['platform'] == 'pico2'
+    assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
+
+
+@pytest.mark.asyncio
+async def test_pico2_firmware_build_requires_pico_sdk_when_build_environment_disabled(async_client, db):
+    frame = await create_pico2_frame(async_client)
+    stored = db.get(Frame, frame['id'])
+    db.add(Settings(project_id=stored.project_id, key='buildEnvironment', value={'provider': 'none'}))
+    db.commit()
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=False):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 400
     assert 'Pico SDK toolchain not found' in response.json()['detail']
+    assert "selected build environment is 'none'" in response.json()['detail']
 
 
 @pytest.mark.asyncio
 async def test_firmware_build_queues_job(async_client, db, redis):
     frame = await create_embedded_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -249,8 +266,7 @@ async def test_firmware_build_queues_job(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_pico2_firmware_build_queues_job(async_client, db, redis):
     frame = await create_pico2_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -263,8 +279,7 @@ async def test_pico2_firmware_build_queues_job(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_pico2w_firmware_build_queues_job(async_client, db, redis):
     frame = await create_pico2w_frame(async_client)
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200, response.text
     data = response.json()
@@ -390,8 +405,7 @@ async def test_firmware_from_older_project_version_is_stale(async_client, db, tm
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
     assert response.status_code == 404
 
-    with patch('app.api.frames.embedded_toolchain_available', return_value=True), \
-         patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
         response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200
     assert response.json()['firmware']['status'] == 'queued'

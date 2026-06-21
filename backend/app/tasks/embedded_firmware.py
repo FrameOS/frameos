@@ -11,8 +11,10 @@ The pipeline mirrors the Buildroot SD image flow: an arq task builds the
 image, status lives on the frame's ``embedded.firmware`` JSON, and download
 endpoints serve the binaries.
 
-Requires ESP-IDF on the machine running the worker: the ``IDF_PATH`` env var,
-or a checkout at ``~/esp/esp-idf`` (see embedded/esp32/README.md).
+ESP32-S3 builds require ESP-IDF on the machine running the worker: the
+``IDF_PATH`` env var, or a checkout at ``~/esp/esp-idf`` (see
+embedded/esp32/README.md). Pico builds use a local Pico SDK when available and
+fall back to the selected Docker/build-host/Modal environment otherwise.
 """
 
 from __future__ import annotations
@@ -22,8 +24,10 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -35,11 +39,22 @@ from sqlalchemy.orm import Session
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
 from app.models.frame import DEFAULT_MAX_HTTP_RESPONSE_BYTES, Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
+from app.models.settings import get_settings_dict
 from app.tasks.utils import get_fresh_frame
+from app.utils.build_environment import selected_build_environment_provider
+from app.utils.build_executor import (
+    DockerMount,
+    BuildExecutor,
+    build_environment_requires_executor_config,
+    create_build_executor,
+    ensure_build_executor_configured,
+)
+from app.utils.build_host import get_build_executor_config
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+DOCKERFILE = REPO_ROOT / "Dockerfile"
 EMBEDDED_ESP32_S3_PLATFORM = "esp32-s3"
 EMBEDDED_PICO2_PLATFORM = "pico2"
 EMBEDDED_PICO2W_PLATFORM = "pico2w"
@@ -64,6 +79,13 @@ EMBEDDED_PLATFORM_ALIASES = {
 }
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_PICO2_PROJECT_DIR = REPO_ROOT / "embedded" / "pico2"
+EMBEDDED_PICO_TOOLCHAIN_IMAGE_OVERRIDE = os.environ.get("FRAMEOS_PICO_TOOLCHAIN_IMAGE")
+EMBEDDED_PICO_TOOLCHAIN_IMAGE = EMBEDDED_PICO_TOOLCHAIN_IMAGE_OVERRIDE or "frameos-pico-sdk-toolchain:latest"
+EMBEDDED_PICO_REMOTE_TOOLCHAIN_IMAGE = (
+    EMBEDDED_PICO_TOOLCHAIN_IMAGE_OVERRIDE
+    or os.environ.get("FRAMEOS_MODAL_SANDBOX_IMAGE")
+    or "frameos/frameos:latest"
+)
 EMBEDDED_IDF_TARGET = "esp32s3"
 EMBEDDED_PICO_BOARDS = {
     EMBEDDED_PICO2_PLATFORM: "pico2",
@@ -246,13 +268,63 @@ def embedded_toolchain_error(platform: str | None = None) -> str:
         return (
             f"Pico SDK toolchain not found at {embedded_pico_sdk_path()}. "
             "Set PICO_SDK_PATH and install cmake plus arm-none-eabi-gcc/g++ "
-            "with the ARM newlib C++ headers "
-            "(see embedded/pico2/README.md)."
+            "with the ARM newlib C++ headers, or use Docker/build host/Modal "
+            "for Pico firmware builds (see embedded/pico2/README.md)."
         )
     return (
         f"ESP-IDF toolchain not found at {embedded_idf_path()}. "
         "Set IDF_PATH or install it (see embedded/esp32/README.md)."
     )
+
+
+def embedded_firmware_build_error(db: Session, frame: Frame, platform: str | None = None) -> str | None:
+    normalized = normalize_embedded_platform(platform)
+    if embedded_toolchain_available(normalized):
+        return None
+    if normalized not in PICO_EMBEDDED_PLATFORMS:
+        return embedded_toolchain_error(normalized)
+
+    settings = get_settings_dict(db, project_id=frame.project_id)
+    provider = selected_build_environment_provider(settings)
+    if provider == "none":
+        return (
+            f"{embedded_toolchain_error(normalized)} "
+            "Pico firmware Docker fallback is disabled because the selected build environment is 'none'."
+        )
+    if build_environment_requires_executor_config(provider) and get_build_executor_config(db, frame.project_id) is None:
+        return f"Selected build environment '{provider}' is not configured"
+    return None
+
+
+async def _update_firmware_heartbeat(db: Session, redis: Redis, frame_id: int) -> None:
+    frame = get_fresh_frame(db, frame_id)
+    if frame is None:
+        return
+    current = latest_embedded_firmware(frame) or {}
+    if current.get("status") == "building":
+        await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+
+
+async def _with_firmware_heartbeat(db: Session, redis: Redis, frame_id: int, awaitable):
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(15)
+            await _update_firmware_heartbeat(db, redis, frame_id)
+
+    task = asyncio.create_task(heartbeat())
+    try:
+        return await awaitable
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+def _tail_output(*chunks: str | None, lines: int = 20) -> str:
+    output = "\n".join(chunk for chunk in chunks if chunk)
+    return "\n".join(output.splitlines()[-lines:])
 
 
 def _read_sdkconfig_values(path: Path) -> dict[str, str]:
@@ -712,8 +784,9 @@ async def start_embedded_firmware(
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
     platform = embedded_platform_for_frame(frame)
-    if not embedded_toolchain_available(platform):
-        raise ValueError(embedded_toolchain_error(platform))
+    build_error = embedded_firmware_build_error(db, frame, platform)
+    if build_error:
+        raise ValueError(build_error)
 
     firmware = latest_embedded_firmware(frame)
     if firmware and firmware.get("status") == "ready" and not force:
@@ -1104,43 +1177,18 @@ async def _build_esp32_firmware(db: Session, redis: Redis, frame: Frame, request
     await request_pending_embedded_firmware_ota(db, redis, frame)
 
 
-async def _build_pico_firmware(
+async def _run_pico_host_build(
     db: Session,
     redis: Redis,
     frame: Frame,
-    request_id: str | None,
     platform: str,
-) -> None:
-    if not EMBEDDED_PICO2_PROJECT_DIR.is_dir():
-        raise ValueError(f"Pico firmware project not found at {EMBEDDED_PICO2_PROJECT_DIR}")
-    sdk_path = embedded_pico_sdk_path()
-    if not embedded_toolchain_available(platform):
-        raise ValueError(embedded_toolchain_error(platform))
-    pico_board = EMBEDDED_PICO_BOARDS[platform]
-
-    current = latest_embedded_firmware(frame) or {}
-    started_at = _utc_now()
-    await _set_firmware_status(db, redis, frame, {
-        **_preserved_queue_metadata(current),
-        "status": "building",
-        "requestId": request_id or current.get("requestId"),
-        "platform": platform,
-        "startedAt": started_at,
-        "lastHeartbeatAt": started_at,
-    })
-    selected_panel = embedded_panel_for_frame(frame)
-    await log(db, redis, int(frame.id), "stdout",
-              f"Building Raspberry Pi {platform} firmware with Pico SDK at {sdk_path} (panel={selected_panel})")
-
+    pico_board: str,
+    sdk_path: Path,
+) -> tuple[Path, Path]:
     build_dir = EMBEDDED_PICO2_PROJECT_DIR / f"build-{platform}"
     env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV"}}
     env["PICO_SDK_PATH"] = str(sdk_path)
     env["PICO_BOARD"] = pico_board
-
-    generated_header = EMBEDDED_PICO2_PROJECT_DIR / "generated_config.h"
-    generated_config = _generated_config_header(frame)
-    generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
-    generated_header.write_text(generated_config, encoding="utf-8")
 
     command = (
         f'cmake -S . -B "{build_dir}" -DPICO_SDK_PATH="{sdk_path}" -DPICO_BOARD={pico_board} '
@@ -1169,52 +1217,226 @@ async def _build_pico_firmware(
             now = datetime.now(timezone.utc)
             if (now - last_heartbeat).total_seconds() >= 15:
                 last_heartbeat = now
-                frame = get_fresh_frame(db, int(frame.id)) or frame
-                current = latest_embedded_firmware(frame) or {}
-                if current.get("status") == "building":
-                    await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+                await _update_firmware_heartbeat(db, redis, int(frame.id))
         returncode = await process.wait()
 
     if returncode != 0:
         tail = "\n".join(output_tail[-20:])
         raise ValueError(f"Pico SDK build failed with exit code {returncode}:\n{tail}")
 
-    uf2 = build_dir / "frameos_pico2.uf2"
-    if not uf2.is_file():
-        raise ValueError(f"Build succeeded but {uf2} was not produced")
-    elf = build_dir / "frameos_pico2.elf"
-    if not elf.is_file():
-        raise ValueError(f"Build succeeded but {elf} was not produced")
+    return build_dir / "frameos_pico2.uf2", build_dir / "frameos_pico2.elf"
 
-    artifact_dir = embedded_artifact_dir()
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"frameos-{platform}-frame{frame.id}.uf2"
-    artifact_path = artifact_dir / filename
-    shutil.copyfile(uf2, artifact_path)
 
-    frame = get_fresh_frame(db, int(frame.id)) or frame
+async def _run_pico_executor_build(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    platform: str,
+    generated_config: str,
+    output_dir: Path,
+) -> None:
+    settings = get_settings_dict(db, project_id=frame.project_id)
+    provider = selected_build_environment_provider(settings)
+    if provider == "none":
+        raise ValueError(
+            f"{embedded_toolchain_error(platform)} "
+            "Pico firmware Docker fallback is disabled because the selected build environment is 'none'."
+        )
+
+    build_executor_config = get_build_executor_config(db, frame.project_id)
+    ensure_build_executor_configured(provider, build_executor_config)
+    executor = create_build_executor(
+        build_executor_config,
+        db=db,
+        redis=redis,
+        frame=frame,
+        workspace_prefix="frameos-pico-",
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-pico-src-{frame.id}-") as tmp:
+        source_dir = Path(tmp) / "pico2"
+        shutil.copytree(
+            EMBEDDED_PICO2_PROJECT_DIR,
+            source_dir,
+            ignore=shutil.ignore_patterns("build", "build-*", "generated_config.h"),
+        )
+        (source_dir / "generated_config.h").write_text(generated_config, encoding="utf-8")
+
+        async with executor:
+            image = await _with_firmware_heartbeat(
+                db,
+                redis,
+                int(frame.id),
+                _ensure_pico_toolchain_image(executor),
+            )
+            await log(
+                db,
+                redis,
+                int(frame.id),
+                "stdout",
+                f"Building Raspberry Pi {platform} firmware with {image}",
+            )
+            status, out, err = await _with_firmware_heartbeat(
+                db,
+                redis,
+                int(frame.id),
+                executor.docker_run(
+                    image=image,
+                    mounts=[DockerMount(source_dir, "/work")],
+                    env={
+                        "FRAMEOS_PICO_PLATFORM": platform,
+                        "FRAMEOS_PICO_BUILD_DIR": f"build-{platform}",
+                    },
+                    workdir="/work",
+                    args=["bash", "ci_build_image.sh"],
+                    workspace="pico-firmware",
+                    log_command="docker run (Pico firmware)",
+                    stderr_log_tag="stdout",
+                ),
+            )
+        if status != 0:
+            raise ValueError(f"Pico SDK build failed with exit code {status}:\n{_tail_output(out, err)}")
+
+        build_dir = source_dir / f"build-{platform}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for filename in ("frameos_pico2.uf2", "frameos_pico2.elf"):
+            output_path = build_dir / filename
+            if not output_path.is_file():
+                raise ValueError(f"Build succeeded but {output_path} was not produced")
+            shutil.copyfile(output_path, output_dir / filename)
+
+
+async def _ensure_pico_toolchain_image(executor: BuildExecutor) -> str:
+    if EMBEDDED_PICO_TOOLCHAIN_IMAGE_OVERRIDE:
+        return EMBEDDED_PICO_TOOLCHAIN_IMAGE_OVERRIDE
+    if executor.uses_container_images_directly:
+        return EMBEDDED_PICO_REMOTE_TOOLCHAIN_IMAGE
+
+    image = EMBEDDED_PICO_TOOLCHAIN_IMAGE
+    status, _out, _err = await executor.run(
+        f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1",
+        log_command=False,
+        log_output=False,
+    )
+    if status == 0:
+        return image
+
+    if not DOCKERFILE.exists():
+        raise RuntimeError(f"FrameOS Dockerfile is missing; expected at {DOCKERFILE}")
+    context_dir, dockerfile_arg = await executor.prepare_docker_build_context(
+        DOCKERFILE,
+        "pico-toolchain-dockerfile",
+    )
+    build_cmd = " ".join(
+        [
+            "docker build --load",
+            "--target pico-sdk-toolchain",
+            f"-t {shlex.quote(image)}",
+            f"-f {shlex.quote(dockerfile_arg)}",
+            shlex.quote(context_dir),
+        ]
+    )
+    status, _out, err = await executor.run(
+        build_cmd,
+        log_command="docker build (Pico SDK toolchain)",
+    )
+    if status != 0:
+        raise RuntimeError(f"Failed to build Pico SDK toolchain image: {err or 'see logs'}")
+    return image
+
+
+async def _build_pico_firmware(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    request_id: str | None,
+    platform: str,
+) -> None:
+    if not EMBEDDED_PICO2_PROJECT_DIR.is_dir():
+        raise ValueError(f"Pico firmware project not found at {EMBEDDED_PICO2_PROJECT_DIR}")
+    sdk_path = embedded_pico_sdk_path()
+    host_toolchain_available = embedded_toolchain_available(platform)
+    if not host_toolchain_available:
+        build_error = embedded_firmware_build_error(db, frame, platform)
+        if build_error:
+            raise ValueError(build_error)
+    pico_board = EMBEDDED_PICO_BOARDS[platform]
+
     current = latest_embedded_firmware(frame) or {}
+    started_at = _utc_now()
     await _set_firmware_status(db, redis, frame, {
         **_preserved_queue_metadata(current),
-        "status": "ready",
+        "status": "building",
         "requestId": request_id or current.get("requestId"),
         "platform": platform,
-        "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
-        "filename": filename,
-        "path": str(artifact_path),
-        "size": artifact_path.stat().st_size,
-        "sha256": _sha256(artifact_path),
-        "flashOffset": "UF2/BOOTSEL",
-        "flashMethod": "uf2",
-        "panel": selected_panel,
-        "configHash": generated_config_hash,
-        "elfSha256": _sha256(elf),
-        "startedAt": current.get("startedAt") or started_at,
-        "completedAt": _utc_now(),
-        "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
+        "startedAt": started_at,
+        "lastHeartbeatAt": started_at,
     })
-    await log(db, redis, int(frame.id), "stdout",
-              f"Raspberry Pi {platform} firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
+    selected_panel = embedded_panel_for_frame(frame)
+
+    generated_header = EMBEDDED_PICO2_PROJECT_DIR / "generated_config.h"
+    generated_config = _generated_config_header(frame)
+    generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
+    uf2: Path
+    elf: Path
+    output_tmp: tempfile.TemporaryDirectory[str] | None = None
+    if host_toolchain_available:
+        await log(db, redis, int(frame.id), "stdout",
+                  f"Building Raspberry Pi {platform} firmware with Pico SDK at {sdk_path} (panel={selected_panel})")
+        generated_header.write_text(generated_config, encoding="utf-8")
+        uf2, elf = await _run_pico_host_build(db, redis, frame, platform, pico_board, sdk_path)
+    else:
+        output_tmp = tempfile.TemporaryDirectory(prefix=f"frameos-pico-{frame.id}-")
+        output_dir = Path(output_tmp.name)
+        await _run_pico_executor_build(
+            db,
+            redis,
+            frame,
+            platform,
+            generated_config,
+            output_dir,
+        )
+        uf2 = output_dir / "frameos_pico2.uf2"
+        elf = output_dir / "frameos_pico2.elf"
+
+    try:
+        if not uf2.is_file():
+            raise ValueError(f"Build succeeded but {uf2} was not produced")
+        if not elf.is_file():
+            raise ValueError(f"Build succeeded but {elf} was not produced")
+
+        artifact_dir = embedded_artifact_dir()
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"frameos-{platform}-frame{frame.id}.uf2"
+        artifact_path = artifact_dir / filename
+        shutil.copyfile(uf2, artifact_path)
+
+        frame = get_fresh_frame(db, int(frame.id)) or frame
+        current = latest_embedded_firmware(frame) or {}
+        await _set_firmware_status(db, redis, frame, {
+            **_preserved_queue_metadata(current),
+            "status": "ready",
+            "requestId": request_id or current.get("requestId"),
+            "platform": platform,
+            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+            "filename": filename,
+            "path": str(artifact_path),
+            "size": artifact_path.stat().st_size,
+            "sha256": _sha256(artifact_path),
+            "flashOffset": "UF2/BOOTSEL",
+            "flashMethod": "uf2",
+            "panel": selected_panel,
+            "configHash": generated_config_hash,
+            "elfSha256": _sha256(elf),
+            "startedAt": current.get("startedAt") or started_at,
+            "completedAt": _utc_now(),
+            "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
+        })
+        await log(db, redis, int(frame.id), "stdout",
+                  f"Raspberry Pi {platform} firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
+    finally:
+        if output_tmp is not None:
+            output_tmp.cleanup()
 
 
 async def _firmware_queue_job_active(redis: Redis, firmware: dict[str, Any]) -> bool:
