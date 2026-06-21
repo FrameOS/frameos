@@ -10,7 +10,7 @@ const supported: CompatibilityResult = { supported: true }
 
 const embeddedUnavailableApps: Record<string, string> = {
   'data/chromiumScreenshot': 'Requires Playwright/Chromium and child processes.',
-  'data/localImage': 'Requires local assets or mounted files, which ESP32 frames do not support yet.',
+  'data/localImage': 'Requires local assets or mounted files, which embedded frames do not support yet.',
   'data/rstpSnapshot': 'Requires FFmpeg and child processes.',
 }
 
@@ -52,22 +52,22 @@ export function appCompatibilityForFrame(
   }
 
   if (app?.category === 'legacy') {
-    return unsupported('Legacy apps are not available in the ESP32 runtime.')
+    return unsupported('Legacy apps are not available in the embedded runtime.')
   }
 
   if (sources && hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)) {
     return unsupported(
-      'Custom Nim scene apps must be compiled into firmware; ESP32 supports built-in apps and JavaScript scene apps here.'
+      'Custom Nim scene apps must be compiled into firmware; embedded firmware supports built-in apps and JavaScript scene apps here.'
     )
   }
 
   if (app?.apt?.length) {
-    return unsupported('Requires Linux packages, which are not available in ESP32 firmware.')
+    return unsupported('Requires Linux packages, which are not available in embedded firmware.')
   }
 
   const unsupportedSettings = app?.settings?.filter((setting) => !embeddedIgnoredSettings.has(setting)) ?? []
   if (unsupportedSettings.length > 0) {
-    return unsupported('Requires global service settings that are not available in ESP32 firmware.')
+    return unsupported('Requires global service settings that are not available in embedded firmware.')
   }
 
   return supported
@@ -114,13 +114,13 @@ export function templateCompatibilityForFrame(
   for (const scene of scenes) {
     for (const node of scene.nodes ?? []) {
       if (node.type === 'source') {
-        return unsupported(`"${scene.name || 'Untitled scene'}" uses a source node, which ESP32 cannot interpret yet.`)
+        return unsupported(`"${scene.name || 'Untitled scene'}" uses a source node, which embedded firmware cannot interpret yet.`)
       }
 
       if (node.type === 'code') {
         const codeData = node.data as CodeNodeData | undefined
         if (codeData?.code?.trim() && !codeData?.codeJS?.trim()) {
-          return unsupported(`"${scene.name || 'Untitled scene'}" uses Nim inline code, which ESP32 cannot interpret.`)
+          return unsupported(`"${scene.name || 'Untitled scene'}" uses Nim inline code, which embedded firmware cannot interpret.`)
         }
       }
 

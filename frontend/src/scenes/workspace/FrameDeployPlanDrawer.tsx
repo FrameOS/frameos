@@ -21,7 +21,7 @@ import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
-import { buildrootPlatforms, devices } from '../../devices'
+import { embeddedPlatformIsPico, buildrootPlatforms, devices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameOSSettings, FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
@@ -1070,10 +1070,15 @@ function EmbeddedFirmwareSection({
   const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
-  const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash ${
-    firmware?.flashOffset || '0x0'
-  } ${filename}`
+  const isPico = embeddedPlatformIsPico(frame.embedded?.platform)
+  const filename =
+    firmware?.filename ||
+    (isPico ? `frameos-${frame.embedded?.platform || 'pico2'}-frame${frame.id}.uf2` : `frameos-esp32-s3-frame${frame.id}.bin`)
+  const flashCommand = isPico
+    ? `Copy ${filename} to the RPI-RP2 drive while the Pico board is in BOOTSEL mode.`
+    : `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash ${
+        firmware?.flashOffset || '0x0'
+      } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'
   const otaBuilding = building && !browserFlashBusy
 
@@ -1092,8 +1097,9 @@ function EmbeddedFirmwareSection({
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The firmware
-          runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+          {isPico
+            ? `Download a UF2 image for the ${platformLabel.toUpperCase()} and flash it over USB mass storage.`
+            : `Download a firmware image for the ${platformLabel.toUpperCase()} and flash it over USB serial. The firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.`}
         </div>
         {firmware?.status ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
@@ -1102,35 +1108,41 @@ function EmbeddedFirmwareSection({
         ) : null}
         {firmware?.error ? <div className="mt-2 text-sm font-semibold text-red-500">{firmware.error}</div> : null}
       </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
-          demand, so the first flash can take a minute.
-        </div>
-        <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
-      </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
-            <div className="frame-tool-muted mt-1 text-sm leading-5">
-              Build the latest app image, then ask the frame to pull it from this backend and reboot.
-            </div>
+      {!isPico ? (
+        <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
+            demand, so the first flash can take a minute.
           </div>
-          <button
-            type="button"
-            onClick={onOtaUpdate}
-            disabled={browserFlashBusy}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {otaBuilding ? 'Finish build & update' : 'Update over the air'}
-          </button>
+          <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
         </div>
-      </div>
+      ) : null}
+      {!isPico ? (
+        <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+              <div className="frame-tool-muted mt-1 text-sm leading-5">
+                Build the latest app image, then ask the frame to pull it from this backend and reboot.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOtaUpdate}
+              disabled={browserFlashBusy}
+              className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+              {otaBuilding ? 'Finish build & update' : 'Update over the air'}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
+          {isPico
+            ? 'Download the UF2 image, hold BOOTSEL while plugging in the board, then copy the file to the mounted RPI-RP2 drive:'
+            : "Or download the image and flash it by hand (pip install esptool if you don't have it):"}
         </div>
         <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
           <code>{flashCommand}</code>

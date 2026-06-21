@@ -11,8 +11,12 @@ import {
 import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_ESP32_S3,
+  EMBEDDED_PICO2,
+  EMBEDDED_PICO2_W,
   devices,
   buildrootPlatforms,
+  embeddedPlatformHasWifi,
+  embeddedPlatformIsPico,
   embeddedPlatforms,
   rpiOSPlatforms,
 } from '../../devices'
@@ -185,6 +189,10 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
   ))
 }
 
+function embeddedDeviceForPlatform(platform?: string | null): string {
+  return embeddedPlatformIsPico(platform) ? 'waveshare.EPD_2in13_V4' : 'waveshare.EPD_7in5_V2'
+}
+
 type AddFrameMode = FrameInstallMethod | 'import'
 
 function installMethodTitle(installMethod: AddFrameMode): string {
@@ -280,8 +288,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
-              title="Flash ESP32 (EXPERIMENTAL)"
-              description="Build firmware for an ESP32 and flash it over USB."
+              title="Flash embedded device"
+              description="Build firmware for ESP32-S3, Pico 2, or Pico 2 W."
             >
               <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
@@ -589,8 +597,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Build a firmware image for an ESP32 microcontroller and flash it over USB serial or from the browser. The
-            firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the air.
+            {embeddedPlatformIsPico(newFrame.platform)
+              ? newFrame.platform === EMBEDDED_PICO2_W
+                ? 'Build a UF2 image for a Raspberry Pi Pico 2 W and flash it over USB mass storage. Wireless credentials are baked into the frame settings; OTA and live polling need a future Pico network runtime.'
+                : 'Build a UF2 image for a Raspberry Pi Pico 2 and flash it over USB mass storage. Plain Pico 2 boards have no network hardware, so OTA and live polling are unavailable.'
+              : 'Build a firmware image for an ESP32 microcontroller and flash it over USB serial or from the browser. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the air.'}
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -605,7 +616,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <select
               className={selectClassName()}
               value={newFrame.platform ?? ''}
-              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+              onChange={(event) => {
+                const platform = event.target.value
+                setNewFrameValues({
+                  platform,
+                  device: embeddedDeviceForPlatform(platform),
+                })
+              }}
             >
               {renderPlatformOptions('embedded')}
             </select>
@@ -613,38 +630,42 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           <FormField label="Display panel">
             <select
               className={selectClassName()}
-              value={newFrame.device ?? 'waveshare.EPD_7in5_V2'}
+              value={newFrame.device ?? embeddedDeviceForPlatform(newFrame.platform)}
               onChange={(event) => setNewFrameValue('device', event.target.value)}
             >
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>
-          <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
-            <input
-              className={textInputClassName()}
-              value={newFrame.network?.wifiSSID ?? ''}
-              onChange={(event) =>
-                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
-              }
-              placeholder="Home WiFi"
-              autoComplete="off"
-            />
-          </FormField>
-          <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
-            <input
-              className={textInputClassName()}
-              value={newFrame.network?.wifiPassword ?? ''}
-              onChange={(event) =>
-                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiPassword: event.target.value })
-              }
-              placeholder="Network password"
-              type="password"
-              autoComplete="new-password"
-            />
-          </FormField>
-          <Field name="rememberWifi">
-            <Checkbox label="Remember wifi details for next time" />
-          </Field>
+          {embeddedPlatformHasWifi(newFrame.platform) ? (
+            <>
+              <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
+                <input
+                  className={textInputClassName()}
+                  value={newFrame.network?.wifiSSID ?? ''}
+                  onChange={(event) =>
+                    setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
+                  }
+                  placeholder="Home WiFi"
+                  autoComplete="off"
+                />
+              </FormField>
+              <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
+                <input
+                  className={textInputClassName()}
+                  value={newFrame.network?.wifiPassword ?? ''}
+                  onChange={(event) =>
+                    setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiPassword: event.target.value })
+                  }
+                  placeholder="Network password"
+                  type="password"
+                  autoComplete="new-password"
+                />
+              </FormField>
+              <Field name="rememberWifi">
+                <Checkbox label="Remember wifi details for next time" />
+              </Field>
+            </>
+          ) : null}
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button

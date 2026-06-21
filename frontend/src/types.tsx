@@ -760,6 +760,8 @@ export interface FrameEmbeddedConfig {
     size?: number
     sha256?: string
     flashOffset?: string
+    flashMethod?: string
+    elfSha256?: string
     downloadUrl?: string
     panel?: string
     otaPath?: string

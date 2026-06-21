@@ -24,6 +24,8 @@ import {
   buildrootPlatforms,
   embeddedPlatforms,
   EMBEDDED_ESP32_S3,
+  embeddedPlatformHasWifi,
+  embeddedPlatformIsPico,
   modes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
@@ -187,31 +189,46 @@ const ESP32_XIAO_13IN3E_PIN_LAYOUT: Esp32PinLayout = {
   cs2: 8,
 }
 
-function esp32RecommendedPinLayout(device?: string): Esp32PinLayout {
+const PICO2_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 21,
+  dc: 20,
+  cs: 17,
+  cs2: -1,
+  busy: 16,
+  sck: 18,
+  mosi: 19,
+  pwr: -1,
+}
+
+function esp32RecommendedPinLayout(device?: string, platform?: string): Esp32PinLayout {
+  if (embeddedPlatformIsPico(platform)) {
+    return { ...PICO2_PIN_LAYOUT }
+  }
   return device === 'waveshare.EPD_13in3e' ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
 }
 
-function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
+function normalizeEsp32PinNumber(value: unknown, fallback: number, platform?: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback
   }
-  return Math.max(-1, Math.min(48, Math.round(value)))
+  const maxPin = embeddedPlatformIsPico(platform) ? 29 : 48
+  return Math.max(-1, Math.min(maxPin, Math.round(value)))
 }
 
-function normalizeEsp32PinLayout(value: Esp32Pins | undefined, device?: string): Esp32PinLayout {
-  const recommended = esp32RecommendedPinLayout(device)
+function normalizeEsp32PinLayout(value: Esp32Pins | undefined, device?: string, platform?: string): Esp32PinLayout {
+  const recommended = esp32RecommendedPinLayout(device, platform)
   if (!value || typeof value !== 'object') {
     return recommended
   }
   return {
-    rst: normalizeEsp32PinNumber(value.rst, recommended.rst),
-    dc: normalizeEsp32PinNumber(value.dc, recommended.dc),
-    cs: normalizeEsp32PinNumber(value.cs, recommended.cs),
-    cs2: normalizeEsp32PinNumber(value.cs2, recommended.cs2),
-    busy: normalizeEsp32PinNumber(value.busy, recommended.busy),
-    sck: normalizeEsp32PinNumber(value.sck ?? value.sclk, recommended.sck),
-    mosi: normalizeEsp32PinNumber(value.mosi, recommended.mosi),
-    pwr: normalizeEsp32PinNumber(value.pwr, recommended.pwr),
+    rst: normalizeEsp32PinNumber(value.rst, recommended.rst, platform),
+    dc: normalizeEsp32PinNumber(value.dc, recommended.dc, platform),
+    cs: normalizeEsp32PinNumber(value.cs, recommended.cs, platform),
+    cs2: normalizeEsp32PinNumber(value.cs2, recommended.cs2, platform),
+    busy: normalizeEsp32PinNumber(value.busy, recommended.busy, platform),
+    sck: normalizeEsp32PinNumber(value.sck ?? value.sclk, recommended.sck, platform),
+    mosi: normalizeEsp32PinNumber(value.mosi, recommended.mosi, platform),
+    pwr: normalizeEsp32PinNumber(value.pwr, recommended.pwr, platform),
   }
 }
 
@@ -220,6 +237,9 @@ function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): bo
 }
 
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
+  if (esp32PinLayoutsEqual(pins, PICO2_PIN_LAYOUT)) {
+    return 'pico2'
+  }
   if (esp32PinLayoutsEqual(pins, ESP32_XIAO_PIN_LAYOUT)) {
     return 'xiao'
   }
@@ -229,7 +249,10 @@ function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
   return 'custom'
 }
 
-function esp32PinLayoutPresetOptions(device?: string): Option[] {
+function esp32PinLayoutPresetOptions(device?: string, platform?: string): Option[] {
+  if (embeddedPlatformIsPico(platform)) {
+    return [{ value: 'pico2', label: 'Raspberry Pi Pico 2 / 2 W SPI0' }, { value: 'custom', label: 'Custom' }]
+  }
   const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
   const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
   return device === 'waveshare.EPD_13in3e'
@@ -237,7 +260,10 @@ function esp32PinLayoutPresetOptions(device?: string): Option[] {
     : [xiao, xiao13in3e, { value: 'custom', label: 'Custom' }]
 }
 
-function esp32PinLayoutForPreset(preset: string, device?: string): Esp32PinLayout | null {
+function esp32PinLayoutForPreset(preset: string, device?: string, platform?: string): Esp32PinLayout | null {
+  if (preset === 'pico2') {
+    return { ...PICO2_PIN_LAYOUT }
+  }
   if (preset === 'xiao') {
     return { ...ESP32_XIAO_PIN_LAYOUT }
   }
@@ -245,7 +271,7 @@ function esp32PinLayoutForPreset(preset: string, device?: string): Esp32PinLayou
     return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
   }
   if (preset === 'recommended') {
-    return esp32RecommendedPinLayout(device)
+    return esp32RecommendedPinLayout(device, platform)
   }
   return null
 }
@@ -310,9 +336,12 @@ export function FrameSettings({
   const mountpoints = frameForm.mountpoints ?? { enabled: false, items: [] }
   const mountpointItems = mountpoints.items ?? []
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
-  const isBuildrootMode = mode === 'buildroot'
-  const isEmbeddedMode = mode === 'embedded'
-  const showWifiCredentials = isBuildrootMode || isEmbeddedMode
+  const deploymentMode = mode as FrameType['mode']
+  const isBuildrootMode = deploymentMode === 'buildroot'
+  const isEmbeddedMode = deploymentMode === 'embedded'
+  const embeddedPlatform = frameForm.embedded?.platform ?? frame.embedded?.platform ?? EMBEDDED_ESP32_S3
+  const isEmbeddedPico = isEmbeddedMode && embeddedPlatformIsPico(embeddedPlatform)
+  const showWifiCredentials = isBuildrootMode || (isEmbeddedMode && embeddedPlatformHasWifi(embeddedPlatform))
   const maxHttpResponsePlaceholder = String(
     isEmbeddedMode ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
   )
@@ -664,7 +693,7 @@ export function FrameSettings({
                       }
                       nextValues.device_config = {
                         ...(frameForm.device_config ?? {}),
-                        pins: normalizeEsp32PinLayout(frameForm.device_config?.pins, frameForm.device),
+                        pins: normalizeEsp32PinLayout(frameForm.device_config?.pins, frameForm.device, EMBEDDED_ESP32_S3),
                       }
                       setFrameFormValues({
                         ...nextValues,
@@ -686,12 +715,15 @@ export function FrameSettings({
                   onChange(nextDevice)
                   if (isEmbeddedMode) {
                     const currentPins = frameForm.device_config?.pins
-                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice)
-                    if (!currentPins || esp32PinLayoutsEqual(previousPins, esp32RecommendedPinLayout(previousDevice))) {
+                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice, embeddedPlatform)
+                    if (
+                      !currentPins ||
+                      esp32PinLayoutsEqual(previousPins, esp32RecommendedPinLayout(previousDevice, embeddedPlatform))
+                    ) {
                       setFrameFormValues({
                         device_config: {
                           ...(frameForm.device_config ?? {}),
-                          pins: esp32RecommendedPinLayout(nextDevice),
+                          pins: esp32RecommendedPinLayout(nextDevice, embeddedPlatform),
                         },
                       })
                     }
@@ -800,26 +832,42 @@ export function FrameSettings({
             <>
               <Group name="embedded">
                 <Field name="platform" label="Platform">
-                  <Select name="embedded.platform" options={embeddedPlatforms} />
+                  <Select
+                    name="embedded.platform"
+                    options={embeddedPlatforms}
+                    onChange={(nextPlatform) => {
+                      setFrameFormValues({
+                        embedded: { ...(frameForm.embedded ?? {}), platform: nextPlatform },
+                        device_config: {
+                          ...(frameForm.device_config ?? {}),
+                          pins: esp32RecommendedPinLayout(frameForm.device, nextPlatform),
+                        },
+                      })
+                    }}
+                  />
                 </Field>
               </Group>
               <Group name="device_config">
                 <Field
                   name="pins"
-                  label="ESP32 GPIO pin layout"
+                  label={isEmbeddedPico ? 'Pico GPIO pin layout' : 'ESP32 GPIO pin layout'}
                   tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
                 >
                   {({ value, onChange }) => {
-                    const pins = normalizeEsp32PinLayout(value as Esp32Pins | undefined, frameForm.device)
+                    const pins = normalizeEsp32PinLayout(
+                      value as Esp32Pins | undefined,
+                      frameForm.device,
+                      embeddedPlatform
+                    )
                     const preset = esp32PinLayoutPresetValue(pins)
-                    const recommended = esp32RecommendedPinLayout(frameForm.device)
+                    const recommended = esp32RecommendedPinLayout(frameForm.device, embeddedPlatform)
                     return (
                       <div className="space-y-3">
                         <Select
                           value={preset}
-                          options={esp32PinLayoutPresetOptions(frameForm.device)}
+                          options={esp32PinLayoutPresetOptions(frameForm.device, embeddedPlatform)}
                           onChange={(nextPreset) => {
-                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device)
+                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device, embeddedPlatform)
                             if (layout) {
                               onChange(layout)
                             }
@@ -836,7 +884,7 @@ export function FrameSettings({
                                   const fallback = key === 'cs2' || key === 'pwr' ? -1 : pins[key]
                                   onChange({
                                     ...pins,
-                                    [key]: normalizeEsp32PinNumber(nextValue, fallback),
+                                    [key]: normalizeEsp32PinNumber(nextValue, fallback, embeddedPlatform),
                                   })
                                 }}
                               />
@@ -970,7 +1018,7 @@ export function FrameSettings({
                     {isEmbeddedMode ? (
                       <>
                         <p>
-                          The hostname to bake into the ESP32 firmware. A value like frame.local sets the device
+                          The hostname to bake into the embedded firmware. A value like frame.local sets the device
                           hostname to frame.
                         </p>
                         <p>Leave it blank to use the generated frame hostname.</p>
@@ -1219,83 +1267,87 @@ export function FrameSettings({
           </Field>
         </div>
 
-        <H6 id="frame-http-api-section">
-          HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="frame_port"
-            label="HTTP port on frame"
-            tooltip={
-              <div className="space-y-2">
-                <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
-                <p>
-                  {isEmbeddedMode
-                    ? 'ESP32 keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
-                    : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
-                </p>
-              </div>
-            }
-          >
-            <TextInput name="frame_port" placeholder={isEmbeddedMode ? '80' : '8787'} required />
-          </Field>
-          {!isEmbeddedMode ? (
-            <>
+        {!isEmbeddedPico ? (
+          <>
+            <H6 id="frame-http-api-section">
+              HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
               <Field
-                name="frame_access"
-                label="HTTP access level"
+                name="frame_port"
+                label="HTTP port on frame"
                 tooltip={
                   <div className="space-y-2">
+                    <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
                     <p>
-                      <strong>Private (default):</strong> You need a key to both view and administer the frame.
-                    </p>
-                    <p>
-                      <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
-                      administer content.
-                    </p>
-                    <p>
-                      <strong>Public:</strong> Everyone can view or administer the frame without a key.
+                      {isEmbeddedMode
+                        ? 'Embedded HTTP stays available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
+                        : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
                     </p>
                   </div>
                 }
               >
-                <Select
-                  name="frame_access"
-                  options={[
-                    { value: 'private', label: 'Private (key needed to view and administer)' },
-                    { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
-                    { value: 'public', label: 'Public (no key needed to view or administer)' },
-                  ]}
-                />
+                <TextInput name="frame_port" placeholder={isEmbeddedMode ? '80' : '8787'} required />
               </Field>
-              <Field
-                name="frame_access_key"
-                label={<div>HTTP access key</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      setFrameFormValues({ frame_access_key: secureToken(20) })
-                      touchFrameFormField('frame_access_key')
-                    }}
+              {!isEmbeddedMode ? (
+                <>
+                  <Field
+                    name="frame_access"
+                    label="HTTP access level"
+                    tooltip={
+                      <div className="space-y-2">
+                        <p>
+                          <strong>Private (default):</strong> You need a key to both view and administer the frame.
+                        </p>
+                        <p>
+                          <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
+                          administer content.
+                        </p>
+                        <p>
+                          <strong>Public:</strong> Everyone can view or administer the frame without a key.
+                        </p>
+                      </div>
+                    }
                   >
-                    Regenerate
-                  </Button>
-                }
-                tooltip="This key is used when communicating with the frame over HTTP."
-              >
-                <TextInput
-                  name="frame_access_key"
-                  onClick={() => touchFrameFormField('frame_access_key')}
-                  type={frameFormTouches.frame_access_key ? 'text' : 'password'}
-                  placeholder=""
-                  required
-                />
-              </Field>
-            </>
-          ) : null}
-        </div>
+                    <Select
+                      name="frame_access"
+                      options={[
+                        { value: 'private', label: 'Private (key needed to view and administer)' },
+                        { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
+                        { value: 'public', label: 'Public (no key needed to view or administer)' },
+                      ]}
+                    />
+                  </Field>
+                  <Field
+                    name="frame_access_key"
+                    label={<div>HTTP access key</div>}
+                    labelRight={
+                      <Button
+                        color="secondary"
+                        size="small"
+                        onClick={() => {
+                          setFrameFormValues({ frame_access_key: secureToken(20) })
+                          touchFrameFormField('frame_access_key')
+                        }}
+                      >
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="This key is used when communicating with the frame over HTTP."
+                  >
+                    <TextInput
+                      name="frame_access_key"
+                      onClick={() => touchFrameFormField('frame_access_key')}
+                      type={frameFormTouches.frame_access_key ? 'text' : 'password'}
+                      placeholder=""
+                      required
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+          </>
+        ) : null}
 
         {!isEmbeddedMode ? (
           <>
@@ -1352,111 +1404,124 @@ export function FrameSettings({
           </>
         ) : null}
 
-        <H6 id="frame-http-proxy-section">
-          {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
-          <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="https_proxy.enable"
-            label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
-            tooltip={
-              isEmbeddedMode
-                ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
-                : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
-            }
-          >
-            {({ value, onChange }) => (
-              <Switch
+        {!isEmbeddedPico ? (
+          <>
+            <H6 id="frame-http-proxy-section">
+              {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
+              <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
                 name="https_proxy.enable"
-                value={value}
-                onChange={(enableTls) => {
-                  if (enableTls) {
-                    verifyTlsCertificates()
-                  }
-                  onChange(enableTls)
-                }}
-                fullWidth
-              />
-            )}
-          </Field>
-          {tlsEnabled ? (
-            <>
-              <Field
-                name="https_proxy.port"
-                label="HTTPS port"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      {isEmbeddedMode
-                        ? 'The port the ESP32 HTTPS server listens on.'
-                        : 'The port Caddy listens on for HTTPS connections.'}
-                    </p>
-                    <p>It's best if this ends with *443.</p>
-                  </div>
-                }
-              >
-                <NumberTextInput name="https_proxy.port" placeholder="8443" />
-              </Field>
-              {!isEmbeddedMode ? (
-                <Field
-                  name="https_proxy.expose_only_port"
-                  label="Expose only HTTPS port"
-                  tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
-                >
-                  <Switch name="https_proxy.expose_only_port" fullWidth />
-                </Field>
-              ) : null}
-              <Field
-                name="https_proxy.certs.client_ca"
-                label="HTTPS backend CA certificate"
-                labelRight={
-                  <Button color="secondary" size="small" onClick={() => generateTlsCertificates()}>
-                    Regenerate
-                  </Button>
-                }
-                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
-                hint={getCertificateHint(
-                  'Root CA certificate',
-                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
-                    frame.https_proxy?.client_ca_cert_not_valid_after
-                )}
-              >
-                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
-              <Field
-                name="https_proxy.certs.server"
-                label="HTTPS frame certificate"
+                label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
                 tooltip={
                   isEmbeddedMode
-                    ? 'PEM certificate baked into the ESP32 firmware for native HTTPS on this frame.'
-                    : 'PEM certificate used by Caddy for HTTPS on this frame.'
+                    ? 'Serve the embedded frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
+                    : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
                 }
-                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
-                hint={getCertificateHint(
-                  'Server certificate',
-                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
-                )}
               >
-                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                {({ value, onChange }) => (
+                  <Switch
+                    name="https_proxy.enable"
+                    value={value}
+                    onChange={(enableTls) => {
+                      if (enableTls) {
+                        verifyTlsCertificates()
+                      }
+                      onChange(enableTls)
+                    }}
+                    fullWidth
+                  />
+                )}
               </Field>
+              {tlsEnabled ? (
+                <>
+                  <Field
+                    name="https_proxy.port"
+                    label="HTTPS port"
+                    tooltip={
+                      <div className="space-y-2">
+                        <p>
+                          {isEmbeddedMode
+                            ? 'The port the embedded HTTPS server listens on.'
+                            : 'The port Caddy listens on for HTTPS connections.'}
+                        </p>
+                        <p>It's best if this ends with *443.</p>
+                      </div>
+                    }
+                  >
+                    <NumberTextInput name="https_proxy.port" placeholder="8443" />
+                  </Field>
+                  {!isEmbeddedMode ? (
+                    <Field
+                      name="https_proxy.expose_only_port"
+                      label="Expose only HTTPS port"
+                      tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+                    >
+                      <Switch name="https_proxy.expose_only_port" fullWidth />
+                    </Field>
+                  ) : null}
+                  <Field
+                    name="https_proxy.certs.client_ca"
+                    label="HTTPS backend CA certificate"
+                    labelRight={
+                      <Button color="secondary" size="small" onClick={() => generateTlsCertificates()}>
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                    secret={
+                      !frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca
+                    }
+                    hint={getCertificateHint(
+                      'Root CA certificate',
+                      frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                        frame.https_proxy?.client_ca_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
+                  <Field
+                    name="https_proxy.certs.server"
+                    label="HTTPS frame certificate"
+                    tooltip={
+                      isEmbeddedMode
+                        ? 'PEM certificate baked into the embedded firmware for native HTTPS on this frame.'
+                        : 'PEM certificate used by Caddy for HTTPS on this frame.'
+                    }
+                    secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
+                    hint={getCertificateHint(
+                      'Server certificate',
+                      frameForm.https_proxy?.server_cert_not_valid_after ??
+                        frame.https_proxy?.server_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
 
-              <Field
-                name="https_proxy.certs.server_key"
-                label={<div>HTTPS frame private key</div>}
-                tooltip={
-                  isEmbeddedMode
-                    ? 'PEM private key baked into the ESP32 firmware for native HTTPS on this frame. Keep this secret.'
-                    : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
-                }
-                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
-              >
-                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
-              </Field>
-            </>
-          ) : null}
-        </div>
+                  <Field
+                    name="https_proxy.certs.server_key"
+                    label={<div>HTTPS frame private key</div>}
+                    tooltip={
+                      isEmbeddedMode
+                        ? 'PEM private key baked into the embedded firmware for native HTTPS on this frame. Keep this secret.'
+                        : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
+                    }
+                    secret={
+                      !frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key
+                    }
+                  >
+                    <TextArea
+                      name="https_proxy.certs.server_key"
+                      rows={4}
+                      placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+          </>
+        ) : null}
 
         <H6 id="frame-settings-network">Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
@@ -1733,7 +1798,8 @@ export function FrameSettings({
             tooltip={
               <>
                 Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-                larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
+                larger calendar feeds, images, or APIs. Embedded frames default to 4 MiB to avoid large memory
+                allocations.
               </>
             }
           >

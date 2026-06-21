@@ -1,12 +1,11 @@
-"""Build flashable firmware images for embedded (ESP32) frames.
+"""Build flashable firmware images for embedded frames.
 
-The firmware runs the FrameOS embedded runtime: Wi-Fi provisioning, the Nim
-renderer (pixie on PSRAM), a Waveshare
-e-ink driver, thin-client fetch, and OTA A/B updates. The build bakes
-per-frame defaults into ``main/generated_config.h`` (backend URL, API key,
-panel, pins), cross-compiles the Nim runtime via ``build_nim.sh`` when nim is
-installed, and produces two artifacts: the merged image flashable at 0x0 and
-the bare app image the device pulls over the air.
+ESP32-S3 firmware runs the full FrameOS embedded runtime: Wi-Fi provisioning,
+the Nim renderer (pixie on PSRAM), a Waveshare e-ink driver, thin-client fetch,
+and OTA A/B updates. Pico 2 / Pico 2 W firmware is a UF2 USB/serial runtime
+shell with frame identity and display wiring baked in; OTA and HTTP polling
+remain unavailable for those platforms until the Pico firmware grows a network
+transport.
 
 The pipeline mirrors the Buildroot SD image flow: an arq task builds the
 image, status lives on the frame's ``embedded.firmware`` JSON, and download
@@ -24,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -40,13 +40,41 @@ from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SUPPORTED_EMBEDDED_PLATFORM = "esp32-s3"
-EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
+EMBEDDED_ESP32_S3_PLATFORM = "esp32-s3"
+EMBEDDED_PICO2_PLATFORM = "pico2"
+EMBEDDED_PICO2W_PLATFORM = "pico2w"
+SUPPORTED_EMBEDDED_PLATFORM = EMBEDDED_ESP32_S3_PLATFORM
+PICO_EMBEDDED_PLATFORMS = {EMBEDDED_PICO2_PLATFORM, EMBEDDED_PICO2W_PLATFORM}
+SUPPORTED_EMBEDDED_PLATFORMS = {EMBEDDED_ESP32_S3_PLATFORM, *PICO_EMBEDDED_PLATFORMS}
+EMBEDDED_PLATFORM_ALIASES = {
+    "": EMBEDDED_ESP32_S3_PLATFORM,
+    "esp32s3": EMBEDDED_ESP32_S3_PLATFORM,
+    "esp32-s3-devkitc-1": EMBEDDED_ESP32_S3_PLATFORM,
+    "pico-2": EMBEDDED_PICO2_PLATFORM,
+    "pico2": EMBEDDED_PICO2_PLATFORM,
+    "raspberry-pi-pico-2": EMBEDDED_PICO2_PLATFORM,
+    "raspberry-pi-pico2": EMBEDDED_PICO2_PLATFORM,
+    "rp2350": EMBEDDED_PICO2_PLATFORM,
+    "pico-2-w": EMBEDDED_PICO2W_PLATFORM,
+    "pico2-w": EMBEDDED_PICO2W_PLATFORM,
+    "pico2w": EMBEDDED_PICO2W_PLATFORM,
+    "raspberry-pi-pico-2-w": EMBEDDED_PICO2W_PLATFORM,
+    "raspberry-pi-pico2w": EMBEDDED_PICO2W_PLATFORM,
+    "rp2350w": EMBEDDED_PICO2W_PLATFORM,
+}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
+EMBEDDED_PICO2_PROJECT_DIR = REPO_ROOT / "embedded" / "pico2"
 EMBEDDED_IDF_TARGET = "esp32s3"
+EMBEDDED_PICO_BOARDS = {
+    EMBEDDED_PICO2_PLATFORM: "pico2",
+    EMBEDDED_PICO2W_PLATFORM: "pico2_w",
+}
+EMBEDDED_PICO2_FLASH_BYTES = 4 * 1024 * 1024
+EMBEDDED_PICO2_SRAM_BYTES = 520 * 1024
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 25  # Pull-side OTA checks from the ESP32 render loop
+EMBEDDED_FIRMWARE_VERSION = 26  # Pull-side OTA checks from the ESP32 render loop
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
+EMBEDDED_PICO2_DEFAULT_PANEL = "EPD_2in13_V4"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
 EMBEDDED_DEFAULT_PINS = {
@@ -60,6 +88,16 @@ EMBEDDED_DEFAULT_PINS = {
     "pwr": -1,
 }
 EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
+EMBEDDED_PICO2_DEFAULT_PINS = {
+    "rst": 21,
+    "dc": 20,
+    "cs": 17,
+    "cs2": -1,
+    "busy": 16,
+    "sck": 18,
+    "mosi": 19,
+    "pwr": -1,
+}
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1
@@ -127,9 +165,28 @@ _build_lock = asyncio.Lock()
 
 def normalize_embedded_platform(platform: str | None) -> str:
     value = (platform or "").strip()
-    if value == SUPPORTED_EMBEDDED_PLATFORM or value in EMBEDDED_PLATFORM_ALIASES:
-        return SUPPORTED_EMBEDDED_PLATFORM
+    if value in SUPPORTED_EMBEDDED_PLATFORMS:
+        return value
+    alias = EMBEDDED_PLATFORM_ALIASES.get(value.lower())
+    if alias:
+        return alias
     raise ValueError(f"Unsupported embedded platform: {value or '(empty)'}")
+
+
+def embedded_platform_for_frame(frame: Frame) -> str:
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    return normalize_embedded_platform(embedded.get("platform"))
+
+
+def _safe_embedded_platform_for_frame(frame: Frame) -> str:
+    try:
+        return embedded_platform_for_frame(frame)
+    except ValueError:
+        return SUPPORTED_EMBEDDED_PLATFORM
+
+
+def embedded_is_pico_platform(platform: str | None) -> bool:
+    return normalize_embedded_platform(platform) in PICO_EMBEDDED_PLATFORMS
 
 
 def embedded_artifact_dir() -> Path:
@@ -143,8 +200,59 @@ def embedded_idf_path() -> Path:
     return Path(os.environ.get("IDF_PATH") or (Path.home() / "esp" / "esp-idf"))
 
 
-def embedded_toolchain_available() -> bool:
-    return (embedded_idf_path() / "export.sh").is_file()
+def embedded_pico_sdk_path() -> Path:
+    return Path(os.environ.get("PICO_SDK_PATH") or (Path.home() / "pico" / "pico-sdk"))
+
+
+def _embedded_pico_cxx_headers_available() -> bool:
+    if shutil.which("arm-none-eabi-g++") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["arm-none-eabi-g++", "-x", "c++", "-std=gnu++17", "-E", "-"],
+            input="#include <cstdlib>\n",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def embedded_platform_supports_ota(platform: str | None) -> bool:
+    return normalize_embedded_platform(platform) == EMBEDDED_ESP32_S3_PLATFORM
+
+
+def embedded_toolchain_available(platform: str | None = None) -> bool:
+    normalized = normalize_embedded_platform(platform)
+    if normalized == EMBEDDED_ESP32_S3_PLATFORM:
+        return (embedded_idf_path() / "export.sh").is_file()
+    if normalized in PICO_EMBEDDED_PLATFORMS:
+        sdk = embedded_pico_sdk_path()
+        return (
+            (sdk / "external" / "pico_sdk_import.cmake").is_file()
+            and shutil.which("cmake") is not None
+            and shutil.which("arm-none-eabi-gcc") is not None
+            and _embedded_pico_cxx_headers_available()
+        )
+    return False
+
+
+def embedded_toolchain_error(platform: str | None = None) -> str:
+    normalized = normalize_embedded_platform(platform)
+    if normalized in PICO_EMBEDDED_PLATFORMS:
+        return (
+            f"Pico SDK toolchain not found at {embedded_pico_sdk_path()}. "
+            "Set PICO_SDK_PATH and install cmake plus arm-none-eabi-gcc/g++ "
+            "with the ARM newlib C++ headers "
+            "(see embedded/pico2/README.md)."
+        )
+    return (
+        f"ESP-IDF toolchain not found at {embedded_idf_path()}. "
+        "Set IDF_PATH or install it (see embedded/esp32/README.md)."
+    )
 
 
 def _read_sdkconfig_values(path: Path) -> dict[str, str]:
@@ -216,6 +324,8 @@ def embedded_module_psram_bytes(frame: Frame) -> int:
 def embedded_render_mode_for_frame(frame: Frame) -> int:
     """Default render mode baked into the firmware image: local unless opted
     into remote/thin-client mode in device_config or embedded metadata."""
+    if embedded_is_pico_platform(embedded_platform_for_frame(frame)):
+        return EMBEDDED_RENDER_REMOTE
     for source in (frame.device_config, frame.embedded):
         if isinstance(source, dict):
             value = source.get("renderMode", source.get("render_mode"))
@@ -243,14 +353,16 @@ def embedded_max_http_response_bytes_for_frame(frame: Frame) -> int:
     return value
 
 
-def embedded_default_pins_for_panel(panel: str) -> dict[str, int]:
+def embedded_default_pins_for_panel(panel: str, platform: str | None = None) -> dict[str, int]:
+    if embedded_is_pico_platform(platform):
+        return dict(EMBEDDED_PICO2_DEFAULT_PINS)
     if panel == "EPD_13in3e":
         return dict(EMBEDDED_13IN3E_DEFAULT_PINS)
     return dict(EMBEDDED_DEFAULT_PINS)
 
 
 def embedded_default_pins_for_frame(frame: Frame) -> dict[str, int]:
-    return embedded_default_pins_for_panel(embedded_panel_for_frame(frame))
+    return embedded_default_pins_for_panel(embedded_panel_for_frame(frame), embedded_platform_for_frame(frame))
 
 
 def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
@@ -262,7 +374,8 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
         raw_value = raw_pins.get(key)
         if raw_value is None and key == "sck":
             raw_value = raw_pins.get("sclk")
-        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+        max_pin = 29 if embedded_is_pico_platform(embedded_platform_for_frame(frame)) else 48
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= max_pin:
             pins[key] = raw_value
     return pins
 
@@ -415,9 +528,11 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     tls_certs = https_proxy.get("certs", {})
     tls_port = https_proxy.get("port") or 8443
 
+    platform = embedded_platform_for_frame(frame)
     lines = [
-        "/* Generated by the FrameOS backend for this frame — do not edit. */",
+        "/* Generated by the FrameOS backend for this frame - do not edit. */",
         "#pragma once",
+        f"#define FRAMEOS_DEFAULT_PLATFORM {c_str(platform)}",
         f"#define FRAMEOS_DEFAULT_WIFI_SSID {c_str(wifi_ssid)}",
         f"#define FRAMEOS_DEFAULT_WIFI_PASS {c_str(wifi_password)}",
         f"#define FRAMEOS_DEFAULT_BACKEND_URL {c_str(backend_url)}",
@@ -440,6 +555,10 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
                "sck": "SCK", "mosi": "MOSI", "pwr": "PWR"}
     for key, macro in mapping.items():
         lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {pins[key]}")
+
+    if embedded_is_pico_platform(platform):
+        lines.append(f"#define FRAMEOS_PICO2_FLASH_BYTES {EMBEDDED_PICO2_FLASH_BYTES}")
+        lines.append(f"#define FRAMEOS_PICO2_SRAM_BYTES {EMBEDDED_PICO2_SRAM_BYTES}")
 
     # Optional power-management settings (M4). Absent → firmware defaults
     # (no deep sleep, no battery pin); all still overridable from the device.
@@ -477,10 +596,11 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if not frame.frame_port or frame.frame_port == 8787:
         frame.frame_port = 80
 
-    # No SSH or agent on a microcontroller. HTTPS uses the same frame
-    # certificate model as Pi frames, but is served natively by ESP-IDF instead
-    # of through Caddy.
+    # No SSH or agent on a microcontroller. ESP32 serves HTTPS natively with the
+    # frame certificate model; Pico firmware does not expose an HTTP server yet.
     frame.https_proxy = normalize_https_proxy(frame.https_proxy)
+    if embedded_is_pico_platform(normalized_platform):
+        frame.https_proxy = {**frame.https_proxy, "enable": False}
     agent = dict(frame.agent or {})
     agent["agentEnabled"] = False
     agent["agentRunCommands"] = False
@@ -496,7 +616,12 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if not frame.server_api_key:
         frame.server_api_key = secure_token(32)
     if not frame.device or frame.device == "web_only":
-        frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
+        default_panel = (
+            EMBEDDED_PICO2_DEFAULT_PANEL
+            if embedded_is_pico_platform(normalized_platform)
+            else EMBEDDED_DEFAULT_PANEL
+        )
+        frame.device = f"waveshare.{default_panel}"
 
     frame.max_http_response_bytes = embedded_max_http_response_bytes_for_frame(frame)
 
@@ -523,6 +648,19 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             "error": "The generated firmware was built from an older firmware project version",
         }
     if firmware.get("status") == "ready":
+        platform = firmware.get("platform")
+        expected_platform = embedded_platform_for_frame(frame)
+        if isinstance(platform, str):
+            try:
+                firmware_platform = normalize_embedded_platform(platform)
+            except ValueError:
+                firmware_platform = platform
+            if firmware_platform != expected_platform:
+                return {
+                    **firmware,
+                    "status": "stale",
+                    "error": "The generated firmware was built for a different embedded platform",
+                }
         panel = firmware.get("panel")
         if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
             return {
@@ -542,9 +680,10 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     if firmware.get("status") == "ready":
         if not isinstance(path, str) or not Path(path).is_file():
             return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
-        ota_path = firmware.get("otaPath")
-        if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-            return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
+        if embedded_platform_supports_ota(embedded_platform_for_frame(frame)):
+            ota_path = firmware.get("otaPath")
+            if not isinstance(ota_path, str) or not Path(ota_path).is_file():
+                return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
     return firmware
 
 
@@ -572,11 +711,9 @@ async def start_embedded_firmware(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
-    if not embedded_toolchain_available():
-        raise ValueError(
-            f"ESP-IDF toolchain not found at {embedded_idf_path()}. "
-            "Set IDF_PATH or install it (see embedded/esp32/README.md)."
-        )
+    platform = embedded_platform_for_frame(frame)
+    if not embedded_toolchain_available(platform):
+        raise ValueError(embedded_toolchain_error(platform))
 
     firmware = latest_embedded_firmware(frame)
     if firmware and firmware.get("status") == "ready" and not force:
@@ -594,7 +731,7 @@ async def start_embedded_firmware(
         "status": "queued",
         "requestId": request_id,
         "queueJobId": queue_job_id,
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": platform,
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -665,6 +802,9 @@ async def request_embedded_firmware_ota(
     ota_update: dict[str, Any] | None = None,
 ) -> Any:
     frame = get_fresh_frame(db, int(frame.id)) or frame
+    platform = embedded_platform_for_frame(frame)
+    if not embedded_platform_supports_ota(platform):
+        raise ValueError("OTA updates are not supported for Raspberry Pi Pico firmware")
     firmware = latest_embedded_firmware(frame) or {}
     ota_path = firmware.get("otaPath")
     if firmware.get("status") != "ready":
@@ -714,6 +854,10 @@ async def request_or_queue_embedded_firmware_ota(
     *,
     force: bool = False,
 ) -> tuple[str, dict[str, Any], Any | None]:
+    platform = embedded_platform_for_frame(frame)
+    if not embedded_platform_supports_ota(platform):
+        raise ValueError("OTA updates are not supported for Raspberry Pi Pico firmware")
+
     firmware = await refresh_embedded_firmware_status(db, redis, frame) or {}
     if firmware.get("status") == "ready" and not force:
         payload = await request_embedded_firmware_ota(db, redis, frame)
@@ -762,6 +906,7 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
 
     try:
         ensure_embedded_frame_defaults(frame)
+        platform = embedded_platform_for_frame(frame)
         if request_id and not _firmware_request_matches(frame, request_id):
             await log(db, redis, id, "stderr", "Ignoring stale embedded firmware worker job")
             return
@@ -773,7 +918,7 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
             await _set_firmware_status(db, redis, frame, {
                 **_preserved_queue_metadata(current),
                 "status": "error",
-                "platform": SUPPORTED_EMBEDDED_PLATFORM,
+                "platform": _safe_embedded_platform_for_frame(frame),
                 "error": str(exc),
                 "completedAt": _utc_now(),
             })
@@ -782,6 +927,14 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
 
 
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
+    platform = embedded_platform_for_frame(frame)
+    if embedded_is_pico_platform(platform):
+        await _build_pico_firmware(db, redis, frame, request_id, platform)
+        return
+    await _build_esp32_firmware(db, redis, frame, request_id)
+
+
+async def _build_esp32_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
     if not EMBEDDED_PROJECT_DIR.is_dir():
         raise ValueError(f"Embedded firmware project not found at {EMBEDDED_PROJECT_DIR}")
     idf_path = embedded_idf_path()
@@ -796,7 +949,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         **_preserved_queue_metadata(current),
         "status": "building",
         "requestId": request_id or current.get("requestId"),
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": EMBEDDED_ESP32_S3_PLATFORM,
         "startedAt": started_at,
         "lastHeartbeatAt": started_at,
     })
@@ -915,10 +1068,10 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     artifact_dir = embedded_artifact_dir()
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}.bin"
+    filename = f"frameos-{EMBEDDED_ESP32_S3_PLATFORM}-frame{frame.id}.bin"
     artifact_path = artifact_dir / filename
     shutil.copyfile(merged_bin, artifact_path)
-    ota_filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}-ota.bin"
+    ota_filename = f"frameos-{EMBEDDED_ESP32_S3_PLATFORM}-frame{frame.id}-ota.bin"
     ota_artifact_path = artifact_dir / ota_filename
     shutil.copyfile(ota_bin, ota_artifact_path)
 
@@ -928,7 +1081,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         **_preserved_queue_metadata(current),
         "status": "ready",
         "requestId": request_id or current.get("requestId"),
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": EMBEDDED_ESP32_S3_PLATFORM,
         "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
         "filename": filename,
         "path": str(artifact_path),
@@ -949,6 +1102,119 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
               f"ESP32-S3 firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
     await request_pending_embedded_firmware_ota(db, redis, frame)
+
+
+async def _build_pico_firmware(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    request_id: str | None,
+    platform: str,
+) -> None:
+    if not EMBEDDED_PICO2_PROJECT_DIR.is_dir():
+        raise ValueError(f"Pico firmware project not found at {EMBEDDED_PICO2_PROJECT_DIR}")
+    sdk_path = embedded_pico_sdk_path()
+    if not embedded_toolchain_available(platform):
+        raise ValueError(embedded_toolchain_error(platform))
+    pico_board = EMBEDDED_PICO_BOARDS[platform]
+
+    current = latest_embedded_firmware(frame) or {}
+    started_at = _utc_now()
+    await _set_firmware_status(db, redis, frame, {
+        **_preserved_queue_metadata(current),
+        "status": "building",
+        "requestId": request_id or current.get("requestId"),
+        "platform": platform,
+        "startedAt": started_at,
+        "lastHeartbeatAt": started_at,
+    })
+    selected_panel = embedded_panel_for_frame(frame)
+    await log(db, redis, int(frame.id), "stdout",
+              f"Building Raspberry Pi {platform} firmware with Pico SDK at {sdk_path} (panel={selected_panel})")
+
+    build_dir = EMBEDDED_PICO2_PROJECT_DIR / f"build-{platform}"
+    env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV"}}
+    env["PICO_SDK_PATH"] = str(sdk_path)
+    env["PICO_BOARD"] = pico_board
+
+    generated_header = EMBEDDED_PICO2_PROJECT_DIR / "generated_config.h"
+    generated_config = _generated_config_header(frame)
+    generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
+    generated_header.write_text(generated_config, encoding="utf-8")
+
+    command = (
+        f'cmake -S . -B "{build_dir}" -DPICO_SDK_PATH="{sdk_path}" -DPICO_BOARD={pico_board} '
+        f'&& cmake --build "{build_dir}" --parallel'
+    )
+
+    async with _build_lock:
+        process = await asyncio.create_subprocess_exec(
+            "bash", "-c", command,
+            cwd=str(EMBEDDED_PICO2_PROJECT_DIR),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output_tail: list[str] = []
+        assert process.stdout is not None
+        last_heartbeat = datetime.now(timezone.utc)
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                output_tail.append(text)
+                del output_tail[:-50]
+            now = datetime.now(timezone.utc)
+            if (now - last_heartbeat).total_seconds() >= 15:
+                last_heartbeat = now
+                frame = get_fresh_frame(db, int(frame.id)) or frame
+                current = latest_embedded_firmware(frame) or {}
+                if current.get("status") == "building":
+                    await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+        returncode = await process.wait()
+
+    if returncode != 0:
+        tail = "\n".join(output_tail[-20:])
+        raise ValueError(f"Pico SDK build failed with exit code {returncode}:\n{tail}")
+
+    uf2 = build_dir / "frameos_pico2.uf2"
+    if not uf2.is_file():
+        raise ValueError(f"Build succeeded but {uf2} was not produced")
+    elf = build_dir / "frameos_pico2.elf"
+    if not elf.is_file():
+        raise ValueError(f"Build succeeded but {elf} was not produced")
+
+    artifact_dir = embedded_artifact_dir()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"frameos-{platform}-frame{frame.id}.uf2"
+    artifact_path = artifact_dir / filename
+    shutil.copyfile(uf2, artifact_path)
+
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    current = latest_embedded_firmware(frame) or {}
+    await _set_firmware_status(db, redis, frame, {
+        **_preserved_queue_metadata(current),
+        "status": "ready",
+        "requestId": request_id or current.get("requestId"),
+        "platform": platform,
+        "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+        "filename": filename,
+        "path": str(artifact_path),
+        "size": artifact_path.stat().st_size,
+        "sha256": _sha256(artifact_path),
+        "flashOffset": "UF2/BOOTSEL",
+        "flashMethod": "uf2",
+        "panel": selected_panel,
+        "configHash": generated_config_hash,
+        "elfSha256": _sha256(elf),
+        "startedAt": current.get("startedAt") or started_at,
+        "completedAt": _utc_now(),
+        "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
+    })
+    await log(db, redis, int(frame.id), "stdout",
+              f"Raspberry Pi {platform} firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
 
 async def _firmware_queue_job_active(redis: Redis, firmware: dict[str, Any]) -> bool:

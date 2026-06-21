@@ -83,7 +83,7 @@ export function TemplateRow({
     [savedSettings, secretSettings]
   )
   const unsupported = compatibility?.supported === false
-  const unsupportedReason = compatibility?.reason ?? 'This scene is not supported on ESP32 frames.'
+  const unsupportedReason = compatibility?.reason ?? 'This scene is not supported on embedded frames.'
   const canInstall = !unsupported
 
   return (
@@ -232,7 +232,7 @@ export function TemplateRow({
           </div>
           {unsupported ? (
             <div className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-              Not supported on ESP32: {unsupportedReason}
+              Not supported on embedded frames: {unsupportedReason}
             </div>
           ) : null}
           {missingSecretSettings.size ? (

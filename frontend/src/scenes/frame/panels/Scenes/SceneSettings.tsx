@@ -137,7 +137,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               <div className="app-compiled-warning rounded-xl p-3 text-sm">
                 <div className="font-semibold">
                   {frameRunsInterpreted
-                    ? 'This scene uses compiled-only content that ESP32 frames cannot run.'
+                    ? 'This scene uses compiled-only content that embedded frames cannot run.'
                     : 'This compiled scene will not work in interpreted mode.'}
                 </div>
                 <div>

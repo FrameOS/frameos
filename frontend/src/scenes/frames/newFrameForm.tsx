@@ -8,7 +8,7 @@ import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
 import { inHassioIngress } from '../../utils/inHassioIngress'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, EMBEDDED_ESP32_S3 } from '../../devices'
+import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, EMBEDDED_ESP32_S3, embeddedPlatformHasWifi } from '../../devices'
 import { settingsLogic } from '../settings/settingsLogic'
 
 function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
@@ -77,7 +77,11 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
 
 async function saveRememberedWifiDefaults(frame: NewFrameFormType): Promise<void> {
   const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
-  if ((installMethod !== 'sd_card' && installMethod !== 'embedded') || !frame.rememberWifi) {
+  if (
+    (installMethod !== 'sd_card' && installMethod !== 'embedded') ||
+    (installMethod === 'embedded' && !embeddedPlatformHasWifi(frame.platform)) ||
+    !frame.rememberWifi
+  ) {
     return
   }
 

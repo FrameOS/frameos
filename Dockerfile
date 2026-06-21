@@ -3,6 +3,7 @@
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG ESP_IDF_VERSION=v5.5.4
 ARG ESP_IDF_TARGET=esp32s3
+ARG PICO_SDK_VERSION=2.2.0
 
 FROM ${PYTHON_IMAGE} AS nim-toolchain
 
@@ -106,6 +107,37 @@ RUN set -eux; \
     idf.py --version; \
     qemu-system-xtensa --version; \
     rm -rf "${IDF_TOOLS_PATH}/dist"
+
+FROM ${PYTHON_IMAGE} AS pico-sdk-toolchain
+
+ARG PICO_SDK_VERSION
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PICO_SDK_PATH=/opt/pico/pico-sdk
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      gcc-arm-none-eabi \
+      git \
+      libnewlib-arm-none-eabi \
+      libstdc++-arm-none-eabi-dev \
+      libstdc++-arm-none-eabi-newlib \
+      ninja-build \
+      python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    mkdir -p "$(dirname "${PICO_SDK_PATH}")"; \
+    git clone --depth 1 --branch "${PICO_SDK_VERSION}" \
+      https://github.com/raspberrypi/pico-sdk.git "${PICO_SDK_PATH}"; \
+    git -C "${PICO_SDK_PATH}" submodule update --init --depth 1; \
+    test -f "${PICO_SDK_PATH}/external/pico_sdk_import.cmake"; \
+    cmake --version; \
+    arm-none-eabi-gcc --version; \
+    printf '#include <cstdlib>\n' | arm-none-eabi-g++ -x c++ -std=gnu++17 -E - >/dev/null
 
 FROM nim-toolchain AS app-builder
 
@@ -252,6 +284,7 @@ ENV VIRTUAL_ENV=/app/backend/.venv
 ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
 ENV IDF_PATH=/opt/esp/esp-idf
 ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
+ENV PICO_SDK_PATH=/opt/pico/pico-sdk
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
 
 WORKDIR /app
@@ -270,6 +303,7 @@ RUN set -eux; \
       dosfstools \
       e2fsprogs \
       flex \
+      gcc-arm-none-eabi \
       genimage \
       git \
       gnupg \
@@ -278,6 +312,9 @@ RUN set -eux; \
       libgcrypt20 \
       libffi-dev \
       libglib2.0-0 \
+      libnewlib-arm-none-eabi \
+      libstdc++-arm-none-eabi-dev \
+      libstdc++-arm-none-eabi-newlib \
       libpixman-1-0 \
       libsdl2-2.0-0 \
       libssl-dev \
@@ -302,10 +339,12 @@ RUN set -eux; \
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
 COPY --from=esp-idf-toolchain /opt/esp /opt/esp
+COPY --from=pico-sdk-toolchain /opt/pico /opt/pico
 COPY --from=app-builder /root/.nimble /root/.nimble
 COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 
 RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
+RUN bash -lc 'set -euo pipefail; test -f "${PICO_SDK_PATH}/external/pico_sdk_import.cmake"; arm-none-eabi-gcc --version; printf "#include <cstdlib>\n" | arm-none-eabi-g++ -x c++ -std=gnu++17 -E - >/dev/null'
 
 COPY docker-entrypoint.sh versions.json ./
 COPY backend backend

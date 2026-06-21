@@ -21,6 +21,17 @@ jobs:
         run: |
           docker build --target runtime -t frameos .
 
+      - name: Build Pico firmware images
+        timeout-minutes: 30
+        run: |
+          docker run --rm \
+            frameos \
+            bash -lc '
+              set -euo pipefail
+              bash embedded/pico2/ci_build_image.sh
+              FRAMEOS_PICO_PLATFORM=pico2w bash embedded/pico2/ci_build_image.sh
+            '
+
       - name: Run Docker container
         run: |
           docker run -d \

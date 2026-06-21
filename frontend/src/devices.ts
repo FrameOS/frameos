@@ -217,8 +217,22 @@ export const buildrootPlatforms: Option[] = [
 ]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
+export const EMBEDDED_PICO2 = 'pico2'
+export const EMBEDDED_PICO2_W = 'pico2w'
 
-export const embeddedPlatforms: Option[] = [{ value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' }]
+export const embeddedPlatforms: Option[] = [
+  { value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' },
+  { value: EMBEDDED_PICO2, label: 'Raspberry Pi Pico 2 (4MB)' },
+  { value: EMBEDDED_PICO2_W, label: 'Raspberry Pi Pico 2 W (4MB)' },
+]
+
+export function embeddedPlatformIsPico(platform?: string | null): boolean {
+  return platform === EMBEDDED_PICO2 || platform === EMBEDDED_PICO2_W
+}
+
+export function embeddedPlatformHasWifi(platform?: string | null): boolean {
+  return (platform || EMBEDDED_ESP32_S3) !== EMBEDDED_PICO2
+}
 
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },
@@ -234,5 +248,5 @@ export const rpiOSPlatforms: Option[] = [
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
   { value: 'buildroot', label: 'Buildroot (beta)' },
-  { value: 'embedded', label: 'ESP32' },
+  { value: 'embedded', label: 'Embedded' },
 ]
