@@ -155,6 +155,17 @@ block test_frameos_service_contents_embed_memory_limits:
   doAssert service.contains("WatchdogSec=900")
   doAssert service.contains("Type=notify")
 
+block test_frameos_service_user_prefers_explicit_setup_user:
+  let previousServiceUser = getEnv("FRAMEOS_SERVICE_USER")
+  putEnv("FRAMEOS_SERVICE_USER", "frame-user")
+  try:
+    doAssert frameosServiceUser() == "frame-user"
+  finally:
+    if previousServiceUser.len > 0:
+      putEnv("FRAMEOS_SERVICE_USER", previousServiceUser)
+    else:
+      delEnv("FRAMEOS_SERVICE_USER")
+
 block test_cgroup_indicates_agent_service:
   doAssert cgroupIndicatesAgentService("0::/system.slice/frameos_agent.service\n")
   doAssert cgroupIndicatesAgentService(
@@ -162,6 +173,17 @@ block test_cgroup_indicates_agent_service:
   doAssert not cgroupIndicatesAgentService("0::/system.slice/frameos.service\n")
   doAssert not cgroupIndicatesAgentService("0::/user.slice/user-1000.slice/session-4.scope\n")
   doAssert not cgroupIndicatesAgentService("")
+
+block test_running_under_frameos_agent_honors_setup_env:
+  let previousSetupUnderAgent = getEnv("FRAMEOS_SETUP_UNDER_AGENT")
+  putEnv("FRAMEOS_SETUP_UNDER_AGENT", "1")
+  try:
+    doAssert runningUnderFrameosAgent()
+  finally:
+    if previousSetupUnderAgent.len > 0:
+      putEnv("FRAMEOS_SETUP_UNDER_AGENT", previousSetupUnderAgent)
+    else:
+      delEnv("FRAMEOS_SETUP_UNDER_AGENT")
 
 block test_system_hardening_defers_live_changes_when_not_live_applying:
   var commands: seq[string] = @[]

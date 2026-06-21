@@ -929,7 +929,7 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_remote_build_if_needed(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         if full_plan.low_memory and not cross_compiled:
             await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-            await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
+            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False)
 
     async def _install_planned_remote_dependencies(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
@@ -1105,7 +1105,7 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_release_setup(self) -> bool:
         await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
         statuses = [
-            await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False),
+            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False),
             await self.deployer.exec_command(
                 "sudo sh -c 'killall frameos 2>/dev/null || true'",
                 raise_on_error=False,
@@ -1140,7 +1140,7 @@ class FrameDeployWorkflow:
         try:
             setup_output: list[str] = []
             setup_status = await self.deployer.exec_command(
-                f"cd {shlex.quote(path)} && sudo ./frameos setup",
+                self._frameos_setup_command(path),
                 output=setup_output,
                 raise_on_error=False,
                 log_command="sudo ./frameos setup",
@@ -1154,7 +1154,10 @@ class FrameDeployWorkflow:
                 "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.",
             )
             return False
-        if self._setup_failed_after_buildroot_systemd_service_install(setup_status, setup_output):
+        if path == "/srv/frameos/current" and self._setup_failed_after_buildroot_systemd_service_install(
+            setup_status,
+            setup_output,
+        ):
             await self.deployer.log(
                 "stderr",
                 "FrameOS setup completed device changes but failed refreshing the Buildroot systemd service file; continuing deploy.",
@@ -1166,6 +1169,26 @@ class FrameDeployWorkflow:
             await self._log_setup_failure_diagnostics(setup_status)
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
+
+    def _frameos_setup_command(self, path: str) -> str:
+        quoted_path = shlex.quote(path)
+        if not _deploy_uses_agent(self.frame):
+            return f"cd {quoted_path} && sudo ./frameos setup"
+
+        systemd_inner = shlex.quote(
+            'set -eu; export FRAMEOS_SETUP_UNDER_AGENT=1; export FRAMEOS_SERVICE_USER="$1"; cd "$2"; ./frameos setup'
+        )
+        fallback_inner = shlex.quote('set -eu; cd "$1"; ./frameos setup')
+        return (
+            'agent_user="$(id -un)"; '
+            "if command -v systemd-run >/dev/null 2>&1; then "
+            "sudo -n systemd-run --quiet --wait --pipe --collect /bin/sh -lc "
+            f"{systemd_inner} frameos-setup \"$agent_user\" {quoted_path}; "
+            "else "
+            "sudo -n env FRAMEOS_SETUP_UNDER_AGENT=1 FRAMEOS_SERVICE_USER=\"$agent_user\" "
+            f"/bin/sh -lc {fallback_inner} frameos-setup {quoted_path}; "
+            "fi"
+        )
 
     async def _remount_root_rw_if_needed(self, context: str) -> bool:
         status = await self.deployer.exec_command(

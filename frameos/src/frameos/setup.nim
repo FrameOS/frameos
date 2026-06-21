@@ -151,7 +151,12 @@ proc installServiceFile(sourcePath, destinationPath: string) =
   writePrivilegedFile(destinationPath, readFile(sourcePath))
 
 proc frameosServiceUser*(): string =
-  for candidate in [getEnv("SUDO_USER"), getEnv("USER"), getEnv("LOGNAME")]:
+  for candidate in [
+    getEnv("FRAMEOS_SERVICE_USER"),
+    getEnv("SUDO_USER"),
+    getEnv("USER"),
+    getEnv("LOGNAME"),
+  ]:
     let user = candidate.strip()
     if user.len > 0:
       return user
@@ -298,6 +303,8 @@ proc cgroupIndicatesAgentService*(cgroupContent: string): bool =
 proc runningUnderFrameosAgent*(): bool =
   ## Deploys can run "frameos setup" through the agent's websocket connection;
   ## the spawned process (and its sudo children) stays in the agent's cgroup.
+  if getEnv("FRAMEOS_SETUP_UNDER_AGENT").normalize in ["1", "true", "yes"]:
+    return true
   try:
     result = fileExists("/proc/self/cgroup") and
       cgroupIndicatesAgentService(readFile("/proc/self/cgroup"))
