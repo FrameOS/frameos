@@ -972,7 +972,6 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
-  self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
   markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
     clearNode = true)
 
