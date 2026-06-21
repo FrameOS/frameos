@@ -1,0 +1,210 @@
+name: Publish Buildroot base image
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Buildroot platform to publish"
+        required: true
+        default: raspberry-pi-zero-2-w
+        type: string
+      runner_label:
+        description: "Runner label to use; override with a larger/self-hosted ARM runner label if available"
+        required: true
+        default: ubuntu-24.04-arm
+        type: string
+      bucket:
+        description: "R2 bucket"
+        required: true
+        default: frameos-archive
+        type: string
+      prefix:
+        description: "R2 object prefix"
+        required: true
+        default: buildroot-images
+        type: string
+      force_upload:
+        description: "Replace an existing object with the same key"
+        required: true
+        default: false
+        type: boolean
+      buildroot_jlevel:
+        description: "Buildroot BR2_JLEVEL; 0 lets Buildroot choose"
+        required: true
+        default: "0"
+        type: string
+      buildroot_docker_image:
+        description: "Optional FRAMEOS_BUILDROOT_DOCKER_IMAGE override"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish ${{ inputs.platform }}
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 360
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      R2_BUCKET: ${{ inputs.bucket }}
+      R2_PREFIX: ${{ inputs.prefix }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      FRAMEOS_BUILDROOT_JLEVEL: ${{ inputs.buildroot_jlevel }}
+      FRAMEOS_BUILDROOT_CACHE_DIR: ${{ github.workspace }}/build/buildroot-images/cache
+    steps:
+      - name: Require branch dispatch
+        if: github.ref_type != 'branch'
+        run: |
+          echo "Run this workflow against a branch so the manifest commit has a target."
+          exit 1
+
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Prepare branch checkout
+        run: |
+          set -euo pipefail
+          git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore Buildroot download cache
+        uses: actions/cache@v4
+        with:
+          path: build/buildroot-images/cache
+          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('backend/app/tasks/buildroot_image.py', 'tools/buildroot-images/buildroot_images.py') }}
+          restore-keys: |
+            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-
+            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r backend/requirements.txt boto3
+
+      - name: Validate configuration
+        env:
+          BUILDROOT_DOCKER_IMAGE_OVERRIDE: ${{ inputs.buildroot_docker_image }}
+        run: |
+          set -euo pipefail
+          if [ -z "${R2_ACCESS_KEY_ID}" ] || [ -z "${R2_SECRET_ACCESS_KEY}" ]; then
+            echo "R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY repository secrets must be set."
+            exit 1
+          fi
+          if [ -z "${R2_ENDPOINT}" ] && [ -z "${R2_ACCOUNT_ID}" ]; then
+            echo "Set either R2_ENDPOINT or R2_ACCOUNT_ID as a repository secret."
+            exit 1
+          fi
+          if ! [[ "${FRAMEOS_BUILDROOT_JLEVEL}" =~ ^[0-9]+$ ]]; then
+            echo "buildroot_jlevel must be an integer."
+            exit 1
+          fi
+          if [ -n "${BUILDROOT_DOCKER_IMAGE_OVERRIDE}" ]; then
+            echo "FRAMEOS_BUILDROOT_DOCKER_IMAGE=${BUILDROOT_DOCKER_IMAGE_OVERRIDE}" >> "$GITHUB_ENV"
+          fi
+          mkdir -p "${FRAMEOS_BUILDROOT_CACHE_DIR}"
+          docker version
+          df -h
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          versions = json.loads(Path("versions.json").read_text(encoding="utf-8"))
+          print("FrameOS version:", str(versions["frameos"]).split("+", 1)[0])
+          PY
+
+      - name: Build Buildroot base image
+        run: |
+          set -euo pipefail
+          python3 tools/buildroot-images/buildroot_images.py \
+            --platform "${PLATFORM}" \
+            --bucket "${R2_BUCKET}" \
+            --prefix "${R2_PREFIX}" \
+            --cache-dir "${FRAMEOS_BUILDROOT_CACHE_DIR}" \
+            build
+
+      - name: Upload Buildroot base image to R2
+        env:
+          FORCE_UPLOAD: ${{ inputs.force_upload }}
+        run: |
+          set -euo pipefail
+          args=(
+            --platform "${PLATFORM}"
+            --bucket "${R2_BUCKET}"
+            --prefix "${R2_PREFIX}"
+            upload
+            --yes
+          )
+          if [ "${FORCE_UPLOAD}" = "true" ]; then
+            args+=(--force)
+          fi
+          python3 tools/buildroot-images/buildroot_images.py "${args[@]}"
+
+      - name: Verify manifest
+        run: |
+          set -euo pipefail
+          python3 tools/buildroot-images/buildroot_images.py \
+            --platform "${PLATFORM}" \
+            --bucket "${R2_BUCKET}" \
+            --prefix "${R2_PREFIX}" \
+            list
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          platform = os.environ["PLATFORM"]
+          version = json.loads(Path("versions.json").read_text(encoding="utf-8"))["frameos"].split("+", 1)[0]
+          manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
+          matches = [
+              entry
+              for entry in manifest.get("entries", [])
+              if entry.get("platform") == platform and entry.get("frameos_version") == version
+          ]
+          if len(matches) != 1:
+              raise SystemExit(f"Expected one manifest entry for {platform} {version}, found {len(matches)}")
+          entry = matches[0]
+          required = ["object_key", "sha256", "size", "updated_at"]
+          missing = [key for key in required if not entry.get(key)]
+          if missing:
+              raise SystemExit(f"Manifest entry is missing: {', '.join(missing)}")
+          print(json.dumps(entry, indent=2, sort_keys=True))
+          PY
+
+      - name: Commit manifest changes
+        run: |
+          set -euo pipefail
+          git add tools/buildroot-images/manifest.json
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          version="$(python3 -c "import json; print(json.load(open('versions.json'))['frameos'].split('+', 1)[0])")"
+          git commit -m "chore: refresh Buildroot base image manifest for ${version}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Upload build metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildroot-base-${{ inputs.platform }}-${{ github.run_id }}
+          path: |
+            build/buildroot-images/${{ inputs.platform }}/**/metadata.json
+            tools/buildroot-images/manifest.json
+          if-no-files-found: warn

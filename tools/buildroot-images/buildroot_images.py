@@ -75,6 +75,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--manifest-key", default=None)
+    parser.add_argument(
+        "--cache-dir",
+        default=os.environ.get("FRAMEOS_BUILDROOT_CACHE_DIR"),
+        help="Optional host directory mounted at /cache for Buildroot downloads",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("build", help="Build the reusable base image locally")
@@ -287,6 +292,14 @@ def local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / frameos_version()
 
 
+def docker_cache_mount_args(cache_dir: str | None) -> list[str]:
+    if not cache_dir:
+        return []
+    path = Path(cache_dir).expanduser().resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return ["--volume", f"{path}:/cache"]
+
+
 def legacy_local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / raw_frameos_version()
 
@@ -379,6 +392,7 @@ def build(args: argparse.Namespace) -> None:
                 f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
                 "-e",
                 "FORCE_UNSAFE_CONFIGURE=1",
+                *docker_cache_mount_args(args.cache_dir),
                 BUILDROOT_DOCKER_IMAGE,
                 "bash",
                 "/work/buildroot-build.sh",
