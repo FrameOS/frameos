@@ -65,7 +65,9 @@ proc startThread*() {.thread.} =
             "error": e.msg})
 
     if openDevices.len == 0:
-      raise newException(Exception, &"No devices found")
+      log(%*{"event": "driver:evdev",
+          "info": "No input devices found, stopping evdev driver"})
+      return
 
     log(%*{"event": "driver:evdev",
           "info": &"Listening to {openDevices.len} device" & (

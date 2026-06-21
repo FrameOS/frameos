@@ -76,9 +76,12 @@ class RecordingDeployer(FakeDeployer):
         if command.startswith("awk '$2 == \"/\" "):
             return 0 if self.root_read_only else 1
         if (
-            command.startswith("cd /srv/frameos/releases/release_")
-            or command.startswith("cd /srv/frameos/current")
-        ) and command.endswith(" && sudo ./frameos setup"):
+            "./frameos setup" in command
+            and (
+                "/srv/frameos/releases/release_" in command
+                or "/srv/frameos/current" in command
+            )
+        ):
             output = kwargs.get("output")
             if output is not None:
                 output.extend(self.setup_output)
@@ -1413,6 +1416,40 @@ async def test_run_release_setup_remounts_read_only_root_around_setup():
 
 
 @pytest.mark.asyncio
+async def test_run_release_setup_uses_systemd_run_when_deploying_through_agent():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupAgentFrame",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupAgentFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_release_setup(
+        build_id="build12345678",
+        post_deploy={"final_action": "restart_frameos"},
+    )
+
+    setup_command = next(command for command in deployer.commands if "./frameos setup" in command)
+    assert "sudo -n systemd-run --quiet --wait --pipe --collect" in setup_command
+    assert "FRAMEOS_SETUP_UNDER_AGENT=1" in setup_command
+    assert 'FRAMEOS_SERVICE_USER="$1"' in setup_command
+    assert "/srv/frameos/releases/release_build12345678" in setup_command
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" not in deployer.commands
+
+
+@pytest.mark.asyncio
 async def test_buildroot_current_setup_continues_after_legacy_systemd_service_write_failure():
     frame = SimpleNamespace(
         id=10,
@@ -1451,6 +1488,48 @@ async def test_buildroot_current_setup_continues_after_legacy_systemd_service_wr
 
 
 @pytest.mark.asyncio
+async def test_buildroot_release_setup_fails_on_systemd_service_write_failure():
+    frame = SimpleNamespace(
+        id=10,
+        name="BuildrootReleaseSetupFrame",
+        mode="buildroot",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "BuildrootReleaseSetupFrame", "mode": "buildroot"},
+    )
+    deployer = RecordingDeployer()
+    deployer.setup_exit_code = 1
+    deployer.setup_output = [
+        "FrameOS setup: starting",
+        "FrameOS setup: driver setup: complete",
+        "FrameOS setup: checking systemd services",
+        "FrameOS setup: systemd services: installing frameos.service",
+        "FrameOS setup: systemd services: failed: cannot open: /etc/systemd/system/frameos.service",
+        "FrameOS fatal: cannot open: /etc/systemd/system/frameos.service",
+    ]
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    with pytest.raises(RuntimeError, match="FrameOS setup failed with exit code 1"):
+        await workflow._run_release_setup(
+            build_id="build12345678",
+            post_deploy={"final_action": "restart_frameos"},
+        )
+
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert any("FrameOS setup exited with code 1; collecting diagnostics" in message for _kind, message in deployer.logs)
+    assert "free -m" in deployer.commands
+    assert not any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
+
+
+@pytest.mark.asyncio
 async def test_stop_frameos_for_release_setup_leaves_agent_running():
     frame = SimpleNamespace(
         id=10,
@@ -1473,7 +1552,7 @@ async def test_stop_frameos_for_release_setup_leaves_agent_running():
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is True
-    assert "sudo service frameos stop" in deployer.commands
+    assert "sudo systemctl stop frameos.service" in deployer.commands
     assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert all("frameos_agent" not in command for command in deployer.commands)
 
@@ -1492,7 +1571,7 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     class MissingServiceDeployer(RecordingDeployer):
         async def exec_command(self, command: str, **kwargs) -> int:
             self.commands.append(command)
-            if command == "sudo service frameos stop":
+            if command == "sudo systemctl stop frameos.service":
                 return 5
             if command == "sudo sh -c 'killall frameos 2>/dev/null || true'":
                 return 0
@@ -1511,7 +1590,7 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is False
-    assert "sudo service frameos stop" in deployer.commands
+    assert "sudo systemctl stop frameos.service" in deployer.commands
     assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert not any(kind == "stderr" for kind, _message in deployer.logs)
     assert any("service was not loaded" in message for _kind, message in deployer.logs)
@@ -1892,7 +1971,7 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
         await workflow._execute_full(plan)
 
     assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
-    assert deployer.commands.index("sudo service frameos stop") < deployer.commands.index(
+    assert deployer.commands.index("sudo systemctl stop frameos.service") < deployer.commands.index(
         "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup"
     )
     assert deployer.restarted_services == ["frameos"]

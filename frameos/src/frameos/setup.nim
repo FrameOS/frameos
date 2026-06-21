@@ -151,7 +151,12 @@ proc installServiceFile(sourcePath, destinationPath: string) =
   writePrivilegedFile(destinationPath, readFile(sourcePath))
 
 proc frameosServiceUser*(): string =
-  for candidate in [getEnv("SUDO_USER"), getEnv("USER"), getEnv("LOGNAME")]:
+  for candidate in [
+    getEnv("FRAMEOS_SERVICE_USER"),
+    getEnv("SUDO_USER"),
+    getEnv("USER"),
+    getEnv("LOGNAME"),
+  ]:
     let user = candidate.strip()
     if user.len > 0:
       return user
@@ -183,12 +188,17 @@ proc serviceMemoryLimits*(memTotalKb: int): tuple[high, max: string] =
   let highKb = maxKb - max(maxKb div 16, 16 * 1024)
   (high: $highKb & "K", max: $maxKb & "K")
 
-proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -1): string =
+proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -1, framebufferConsole = false): string =
   let memoryLimits = serviceMemoryLimits(if memTotalKb == -1: systemMemoryTotalKb() else: memTotalKb)
   result = "[Unit]\n" &
     "Description=FrameOS Service\n" &
-    "After=network.target\n" &
-    "\n" &
+    "After=network.target"
+  if framebufferConsole:
+    result &= " getty@tty1.service\n" &
+      "Conflicts=getty@tty1.service\n"
+  else:
+    result &= "\n"
+  result &= "\n" &
     "[Service]\n" &
     "User=" & user & "\n" &
     "WorkingDirectory=/srv/frameos/current\n" &
@@ -204,6 +214,12 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "MemoryHigh=" & memoryLimits.high & "\n" &
     "MemoryMax=" & memoryLimits.max & "\n" &
     "MemorySwapMax=64M\n"
+  if framebufferConsole:
+    result &= "TTYPath=/dev/tty1\n" &
+      "StandardInput=tty-force\n" &
+      "TTYReset=yes\n" &
+      "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service\n" &
+      "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service\n"
   if consoleOutput:
     result &= "StandardOutput=journal+console\n" &
       "StandardError=journal+console\n"
@@ -211,14 +227,20 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "[Install]\n" &
     "WantedBy=multi-user.target\n"
 
-proc installFrameOSServiceFile(consoleOutput = false) =
-  writePrivilegedFile("/etc/systemd/system/frameos.service", frameosServiceContents(frameosServiceUser(), consoleOutput))
+proc installFrameOSServiceFile(consoleOutput = false, framebufferConsole = false) =
+  writePrivilegedFile(
+    "/etc/systemd/system/frameos.service",
+    frameosServiceContents(frameosServiceUser(), consoleOutput, framebufferConsole = framebufferConsole),
+  )
 
 proc installFrameOSServiceFile(frameOS: FrameOS) =
   if frameOS.frameConfig.mode == "buildroot" and fileExists("/srv/frameos/current/frameos.service"):
     installServiceFile("/srv/frameos/current/frameos.service", "/etc/systemd/system/frameos.service")
   else:
-    installFrameOSServiceFile(frameOS.frameConfig.mode == "buildroot")
+    installFrameOSServiceFile(
+      frameOS.frameConfig.mode == "buildroot",
+      framebufferConsole = frameOS.frameConfig.device == "framebuffer",
+    )
 
 proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   result = @["frameos.service"]
@@ -281,6 +303,8 @@ proc cgroupIndicatesAgentService*(cgroupContent: string): bool =
 proc runningUnderFrameosAgent*(): bool =
   ## Deploys can run "frameos setup" through the agent's websocket connection;
   ## the spawned process (and its sudo children) stays in the agent's cgroup.
+  if getEnv("FRAMEOS_SETUP_UNDER_AGENT").normalize in ["1", "true", "yes"]:
+    return true
   try:
     result = fileExists("/proc/self/cgroup") and
       cgroupIndicatesAgentService(readFile("/proc/self/cgroup"))

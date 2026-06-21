@@ -1,15 +1,28 @@
-import pixie, json, linuxfb, posix, strformat
+import pixie, json, linuxfb, posix, posix/termios, strformat
+import std/exitprocs
 import frameos/device_setup
 import frameos/driver_context
 import frameos/utils/process
 
 const DEVICE = "/dev/fb0"
+const TTY_DEVICE = "/dev/tty0"
+const FRAMEBUFFER_TTY_DEVICE = "/dev/tty1"
+const KDSETMODE = 0x4B3A
+const KD_GRAPHICS = 0x01
+const KD_TEXT = 0x00
 # vcgencmd talks to the VideoCore mailbox and can hang in uninterruptible
 # sleep when the GPU firmware is wedged; never wait for it without a bound.
 const DISPLAY_COMMAND_TIMEOUT_MS = 10 * 1000
 
+var consoleClaimAttempted = false
+var consoleModeClaimed = false
+var consoleRestoreRegistered = false
+
 proc runDisplayCommand(command: string): int =
   runShellWithParentStreams(command, timeoutMs = DISPLAY_COMMAND_TIMEOUT_MS).exitCode
+
+proc runPrivilegedDisplayShell(command: string): int =
+  runDisplayCommand(privilegedCommand("sh -c " & shellQuote(command)))
 
 type ScreenInfo* = object
   width*: uint32
@@ -35,9 +48,100 @@ proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
     logger.log(payload)
 
 proc tryToDisableCursorBlinking() =
-  let status = runDisplayCommand("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
+  let status = runPrivilegedDisplayShell("echo 0 > /sys/class/graphics/fbcon/cursor_blink")
   if status != 0:
-    discard runDisplayCommand("sudo sh -c 'setterm -cursor off > /dev/tty0'")
+    discard runPrivilegedDisplayShell("setterm -cursor off > " & shellQuote(FRAMEBUFFER_TTY_DEVICE))
+
+proc disableTerminalEcho(fd: cint) =
+  var state: Termios
+  if tcGetAttr(fd, addr state) == 0:
+    state.c_lflag = state.c_lflag and not (ECHO or ECHOE or ECHOK or ECHONL or ICANON)
+    discard tcSetAttr(fd, TCSAFLUSH, addr state)
+
+proc restoreTerminalEcho(fd: cint) =
+  var state: Termios
+  if tcGetAttr(fd, addr state) == 0:
+    state.c_lflag = state.c_lflag or ECHO or ECHOE or ECHOK or ECHONL or ICANON
+    discard tcSetAttr(fd, TCSAFLUSH, addr state)
+
+proc setVirtualTerminalMode(fd: cint, mode: cint): bool =
+  result = ioctl(fd, KDSETMODE, mode) == 0
+
+proc setVirtualTerminalGraphicsMode(fd: cint): bool =
+  result = setVirtualTerminalMode(fd, KD_GRAPHICS)
+  if result:
+    consoleModeClaimed = true
+    disableTerminalEcho(fd)
+
+proc setVirtualTerminalGraphicsMode(device: string): bool =
+  let fd = open(device, O_RDWR)
+  if fd < 0:
+    return false
+  try:
+    result = setVirtualTerminalGraphicsMode(fd)
+  finally:
+    discard close(fd)
+
+proc restoreVirtualTerminal(device: string): bool =
+  let fd = open(device, O_RDWR)
+  if fd < 0:
+    return false
+  try:
+    restoreTerminalEcho(fd)
+    result = setVirtualTerminalMode(fd, KD_TEXT)
+  finally:
+    discard close(fd)
+
+proc restoreFramebufferConsole*() =
+  if not consoleModeClaimed:
+    return
+  consoleModeClaimed = false
+
+  if isatty(STDIN_FILENO) == 1:
+    restoreTerminalEcho(STDIN_FILENO)
+    discard setVirtualTerminalMode(STDIN_FILENO, KD_TEXT)
+  for device in ["/dev/tty", FRAMEBUFFER_TTY_DEVICE, TTY_DEVICE]:
+    discard restoreVirtualTerminal(device)
+
+proc restoreFramebufferConsoleOnQuit() {.noconv.} =
+  restoreFramebufferConsole()
+
+proc restoreFramebufferConsoleSignal(sig: cint) {.noconv.} =
+  restoreFramebufferConsole()
+  signal(sig, SIG_DFL)
+  discard kill(getpid(), sig)
+
+proc registerConsoleRestore() =
+  if consoleRestoreRegistered:
+    return
+  consoleRestoreRegistered = true
+  addExitProc(restoreFramebufferConsoleOnQuit)
+  signal(SIGTERM, restoreFramebufferConsoleSignal)
+  signal(SIGINT, restoreFramebufferConsoleSignal)
+  signal(SIGHUP, restoreFramebufferConsoleSignal)
+
+proc setVirtualTerminalGraphicsMode(): bool =
+  if isatty(STDIN_FILENO) == 1 and setVirtualTerminalGraphicsMode(STDIN_FILENO):
+    return true
+  for device in ["/dev/tty", TTY_DEVICE, FRAMEBUFFER_TTY_DEVICE]:
+    if setVirtualTerminalGraphicsMode(device):
+      return true
+
+proc claimConsoleAfterSuccessfulRender(logger: DriverLogger) =
+  if consoleClaimAttempted:
+    return
+  consoleClaimAttempted = true
+
+  let graphicsMode = setVirtualTerminalGraphicsMode()
+  if graphicsMode:
+    registerConsoleRestore()
+    logFrameBuffer(logger, %*{
+        "event": "driver:frameBuffer:consoleClaimed",
+        "graphicsMode": graphicsMode,
+    })
+    return
+
+  logFrameBuffer(logger, %*{"event": "driver:frameBuffer:consoleClaim:error"})
 
 proc getScreenInfo(logger: DriverLogger): ScreenInfo =
   let fd = open(DEVICE, O_RDWR)
@@ -207,6 +311,7 @@ proc render*(self: Driver, image: Image) =
     var fb = open(DEVICE, fmWrite, buffer.len)
     discard fb.writeBuffer(addr buffer[0], buffer.len)
     fb.close()
+    claimConsoleAfterSuccessfulRender(self.logger)
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to write image to /dev/fb0"})

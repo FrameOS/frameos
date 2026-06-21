@@ -112,6 +112,23 @@ block test_frameos_service_contents_can_mirror_logs_to_console:
   doAssert service.contains("StandardOutput=journal+console")
   doAssert service.contains("StandardError=journal+console")
 
+block test_frameos_service_contents_claims_tty_for_framebuffer:
+  let service = frameosServiceContents("frame-user", framebufferConsole = true)
+
+  doAssert service.contains("After=network.target getty@tty1.service")
+  doAssert service.contains("Conflicts=getty@tty1.service")
+  doAssert service.contains("TTYPath=/dev/tty1")
+  doAssert service.contains("StandardInput=tty-force")
+  doAssert service.contains("TTYReset=yes")
+  doAssert service.contains(
+    "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service")
+  doAssert service.contains(
+    "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service")
+  doAssert not service.contains("python3 -c")
+  doAssert not service.contains("TTYVHangup=yes")
+  doAssert not service.contains("TTYVTDisallocate=yes")
+  doAssert not service.contains("StandardOutput=journal+console")
+
 block test_service_memory_limits_leave_a_fixed_os_reserve:
   # Unknown total falls back to generous percentages
   doAssert serviceMemoryLimits(0) == (high: "80%", max: "90%")
@@ -138,6 +155,17 @@ block test_frameos_service_contents_embed_memory_limits:
   doAssert service.contains("WatchdogSec=900")
   doAssert service.contains("Type=notify")
 
+block test_frameos_service_user_prefers_explicit_setup_user:
+  let previousServiceUser = getEnv("FRAMEOS_SERVICE_USER")
+  putEnv("FRAMEOS_SERVICE_USER", "frame-user")
+  try:
+    doAssert frameosServiceUser() == "frame-user"
+  finally:
+    if previousServiceUser.len > 0:
+      putEnv("FRAMEOS_SERVICE_USER", previousServiceUser)
+    else:
+      delEnv("FRAMEOS_SERVICE_USER")
+
 block test_cgroup_indicates_agent_service:
   doAssert cgroupIndicatesAgentService("0::/system.slice/frameos_agent.service\n")
   doAssert cgroupIndicatesAgentService(
@@ -145,6 +173,17 @@ block test_cgroup_indicates_agent_service:
   doAssert not cgroupIndicatesAgentService("0::/system.slice/frameos.service\n")
   doAssert not cgroupIndicatesAgentService("0::/user.slice/user-1000.slice/session-4.scope\n")
   doAssert not cgroupIndicatesAgentService("")
+
+block test_running_under_frameos_agent_honors_setup_env:
+  let previousSetupUnderAgent = getEnv("FRAMEOS_SETUP_UNDER_AGENT")
+  putEnv("FRAMEOS_SETUP_UNDER_AGENT", "1")
+  try:
+    doAssert runningUnderFrameosAgent()
+  finally:
+    if previousSetupUnderAgent.len > 0:
+      putEnv("FRAMEOS_SETUP_UNDER_AGENT", previousSetupUnderAgent)
+    else:
+      delEnv("FRAMEOS_SETUP_UNDER_AGENT")
 
 block test_system_hardening_defers_live_changes_when_not_live_applying:
   var commands: seq[string] = @[]

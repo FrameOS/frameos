@@ -164,6 +164,21 @@ def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
     scenes_json = _frame_bootstrap_scenes_json(frame)
     all_scenes_json = _frame_bootstrap_all_scenes_json(frame)
     compiled_scene_count = frame_compiled_scene_count(frame)
+    frameos_service_after = "After=network.target"
+    frameos_service_conflicts = ""
+    frameos_service_tty = ""
+    if frame.device == "framebuffer":
+        frameos_service_after = "After=network.target getty@tty1.service"
+        frameos_service_conflicts = "Conflicts=getty@tty1.service"
+        frameos_service_tty = (
+            "TTYPath=/dev/tty1\n"
+            "StandardInput=tty-force\n"
+            "TTYReset=yes\n"
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 "
+            "/bin/systemctl reset-failed getty@tty1.service\n"
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 "
+            "/bin/systemctl start getty@tty1.service"
+        )
     return f"""#!/bin/sh
 set -eu
 
@@ -371,7 +386,8 @@ mem_high_kb=$((mem_max_kb - mem_high_margin_kb))
 cat > "$frameos_release_dir/frameos.service" <<EOF
 [Unit]
 Description=FrameOS Service
-After=network.target
+{frameos_service_after}
+{frameos_service_conflicts}
 
 [Service]
 User=$agent_user
@@ -388,6 +404,7 @@ WatchdogSec=900
 MemoryHigh=${{mem_high_kb}}K
 MemoryMax=${{mem_max_kb}}K
 MemorySwapMax=64M
+{frameos_service_tty}
 
 [Install]
 WantedBy=multi-user.target

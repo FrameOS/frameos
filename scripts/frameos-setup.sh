@@ -1019,16 +1019,31 @@ if ! id "$agent_user" >/dev/null 2>&1; then
   agent_user=root
 fi
 
+frameos_service_after="After=network.target"
+frameos_service_conflicts=""
+frameos_service_tty=""
+if [ "$FRAMEOS_DEVICE" = "framebuffer" ]; then
+  frameos_service_after="After=network.target getty@tty1.service"
+  frameos_service_conflicts="Conflicts=getty@tty1.service"
+  frameos_service_tty="TTYPath=/dev/tty1
+StandardInput=tty-force
+TTYReset=yes
+ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service
+ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service"
+fi
+
 cat > "$frameos_release_dir/frameos.service" <<EOF
 [Unit]
 Description=FrameOS Service
-After=network.target
+$frameos_service_after
+$frameos_service_conflicts
 
 [Service]
 User=$agent_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
+$frameos_service_tty
 
 [Install]
 WantedBy=multi-user.target

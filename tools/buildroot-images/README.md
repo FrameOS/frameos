@@ -5,6 +5,33 @@ per-frame BOOT payloads, FRAMEOS, and ASSETS partition images. The slow Buildroo
 base image is built manually in CI or locally, uploaded to the `frameos-archive`
 R2 bucket, and referenced by this manifest.
 
+## CI publishing
+
+Use the manual GitHub workflow `.github/workflows/buildroot-base-image.yml` for
+the preferred base-image publishing path. From the branch that should receive the
+manifest commit:
+
+```bash
+gh workflow run buildroot-base-image.yml --ref your-branch
+
+# Use a custom runner label, for example a larger ARM runner:
+gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-arm-runner-label
+```
+
+The workflow defaults to `ubuntu-24.04-arm` and can be dispatched with a custom
+runner label when a larger/self-hosted ARM runner is available. It builds the
+base image, uploads it to R2, verifies the refreshed manifest, and commits the
+resulting `tools/buildroot-images/manifest.json` change back to the selected
+branch.
+
+Repository secrets required by the upload step:
+
+```bash
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_ACCOUNT_ID    # or R2_ENDPOINT
+```
+
 ## Commands
 
 ```bash

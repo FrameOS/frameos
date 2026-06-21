@@ -89,6 +89,40 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
         self.assertFalse(checks["agent_service_installed"])
+        self.assertNotIn("TTYPath=/dev/tty1", self._installed_frameos_service())
+
+    def test_framebuffer_install_claims_tty1(self) -> None:
+        self._run_setup(
+            {
+                "FRAMEOS_NAME": "Framebuffer Frame",
+                "FRAMEOS_DEVICE": "framebuffer",
+                "FRAMEOS_WIDTH": "1920",
+                "FRAMEOS_HEIGHT": "1080",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_BACKEND_ENABLED": "false",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+            }
+        )
+
+        service = self._installed_frameos_service()
+        self.assertIn("After=network.target getty@tty1.service", service)
+        self.assertIn("Conflicts=getty@tty1.service", service)
+        self.assertIn("TTYPath=/dev/tty1", service)
+        self.assertIn("StandardInput=tty-force", service)
+        self.assertIn("TTYReset=yes", service)
+        self.assertIn(
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service",
+            service,
+        )
+        self.assertIn(
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service",
+            service,
+        )
+        self.assertNotIn("python3 -c", service)
+        self.assertNotIn("TTYVHangup=yes", service)
+        self.assertNotIn("TTYVTDisallocate=yes", service)
 
     def test_existing_frame_json_defaults_enable_backend_agent(self) -> None:
         existing_dir = self.out_dir / "srv" / "frameos" / "current"
@@ -349,6 +383,11 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
         self.assertEqual(len(releases), 1)
         return json.loads((releases[0] / "frame.json").read_text(encoding="utf-8"))
+
+    def _installed_frameos_service(self) -> str:
+        releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
+        self.assertEqual(len(releases), 1)
+        return (releases[0] / "frameos.service").read_text(encoding="utf-8")
 
     def _container_checks(self) -> dict[str, bool]:
         return json.loads((self.out_dir / "container-checks.json").read_text(encoding="utf-8"))

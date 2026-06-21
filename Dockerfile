@@ -205,6 +205,23 @@ RUN nim c \
     && test -x /app/frameos/build/native_js_transpile \
     && rm -rf /tmp/frameos-native-js-transpile-nimcache
 
+FROM esp-idf-toolchain AS esp32-ci
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/opt/nim/bin:${PATH}"
+
+WORKDIR /app
+
+COPY --from=nim-toolchain /opt/nim /opt/nim
+COPY --from=app-builder /root/.nimble /root/.nimble
+COPY --from=app-builder /app/frameos /app/frameos
+COPY backend/app backend/app
+COPY embedded embedded
+COPY repo/apps repo/apps
+COPY repo/scenes repo/scenes
+
+RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; export PATH="/opt/nim/bin:${PATH}"; nim --version; qemu-system-xtensa --version'
+
 FROM ${PYTHON_IMAGE} AS python-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
