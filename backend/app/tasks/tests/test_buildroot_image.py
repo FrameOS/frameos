@@ -1482,6 +1482,15 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
         release_dir / "frame.json"
     ).read_text(encoding="utf-8")
     assert (release_dir / "frameos.service").exists()
+    frameos_service = (release_dir / "frameos.service").read_text(encoding="utf-8")
+    assert "User=root" in frameos_service
+    assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in frameos_service
+    assert (
+        "Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib"
+        in frameos_service
+    )
+    assert "StandardOutput=journal+console" not in frameos_service
+    assert "StandardError=journal+console" not in frameos_service
     assert (agent_release_dir / "frameos_agent.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()

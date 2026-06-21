@@ -1,12 +1,17 @@
-import pixie, json, linuxfb, posix, strformat
+import pixie, json, linuxfb, os, posix, strformat, strutils
 import frameos/device_setup
 import frameos/driver_context
 import frameos/utils/process
 
 const DEVICE = "/dev/fb0"
+const TTY_DEVICE = "/dev/tty0"
+const KDSETMODE = 0x4B3A
+const KD_GRAPHICS = 0x01
 # vcgencmd talks to the VideoCore mailbox and can hang in uninterruptible
 # sleep when the GPU firmware is wedged; never wait for it without a bound.
 const DISPLAY_COMMAND_TIMEOUT_MS = 10 * 1000
+
+var consoleClaimAttempted = false
 
 proc runDisplayCommand(command: string): int =
   runShellWithParentStreams(command, timeoutMs = DISPLAY_COMMAND_TIMEOUT_MS).exitCode
@@ -38,6 +43,46 @@ proc tryToDisableCursorBlinking() =
   let status = runDisplayCommand("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
   if status != 0:
     discard runDisplayCommand("sudo sh -c 'setterm -cursor off > /dev/tty0'")
+
+proc setVirtualTerminalGraphicsMode(): bool =
+  let fd = open(TTY_DEVICE, O_RDWR)
+  if fd < 0:
+    return false
+  try:
+    result = ioctl(fd, KDSETMODE, KD_GRAPHICS) == 0
+  finally:
+    discard close(fd)
+
+proc writeSystemFile(path, content: string): bool =
+  try:
+    writeFile(path, content)
+    result = true
+  except CatchableError:
+    result = false
+
+proc unbindFramebufferConsoles(): bool =
+  discard writeSystemFile("/proc/sys/kernel/printk", "1 4 1 7\n")
+  for namePath in walkPattern("/sys/class/vtconsole/vtcon*/name"):
+    let bindPath = parentDir(namePath) / "bind"
+    try:
+      if readFile(namePath).toLowerAscii().contains("frame buffer"):
+        if readFile(bindPath).strip() == "1":
+          result = writeSystemFile(bindPath, "0\n") or result
+        else:
+          result = true
+    except CatchableError:
+      discard
+
+proc claimConsoleAfterSuccessfulRender(logger: DriverLogger) =
+  if consoleClaimAttempted:
+    return
+  consoleClaimAttempted = true
+
+  if setVirtualTerminalGraphicsMode() or unbindFramebufferConsoles():
+    logFrameBuffer(logger, %*{"event": "driver:frameBuffer:consoleClaimed"})
+    return
+
+  logFrameBuffer(logger, %*{"event": "driver:frameBuffer:consoleClaim:error"})
 
 proc getScreenInfo(logger: DriverLogger): ScreenInfo =
   let fd = open(DEVICE, O_RDWR)
@@ -207,6 +252,7 @@ proc render*(self: Driver, image: Image) =
     var fb = open(DEVICE, fmWrite, buffer.len)
     discard fb.writeBuffer(addr buffer[0], buffer.len)
     fb.close()
+    claimConsoleAfterSuccessfulRender(self.logger)
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to write image to /dev/fb0"})
