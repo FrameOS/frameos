@@ -59,6 +59,7 @@ async def test_api_frame_get_found(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+    frame.device = 'framebuffer'
     frame.scenes = [
         {
             'id': 'scene-1',
@@ -93,6 +94,22 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     script = script_response.text
     assert 'frameos_agent' in script
     assert 'frameos.service' in script
+    assert 'After=network.target getty@tty1.service' in script
+    assert 'Conflicts=getty@tty1.service' in script
+    assert 'TTYPath=/dev/tty1' in script
+    assert 'StandardInput=tty-force' in script
+    assert 'TTYReset=yes' in script
+    assert (
+        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service'
+        in script
+    )
+    assert (
+        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service'
+        in script
+    )
+    assert 'python3 -c' not in script
+    assert 'TTYVHangup=yes' not in script
+    assert 'TTYVTDisallocate=yes' not in script
     assert 'FRAMEOS_DIR=/srv/frameos' in script
     assert './frameos setup' in script
     assert 'install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service' in script
