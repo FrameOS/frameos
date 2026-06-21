@@ -173,8 +173,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TZ_REPO_TOKEN:-}" ]; then
-            echo "TZ_REPO_TOKEN is required to push timezone artefacts to FrameOS/tz"
-            exit 1
+            echo "::warning::TZ_REPO_TOKEN is not set; skipping FrameOS/tz artefact push"
+            exit 0
           fi
 
           TARGET_BRANCH="${{ steps.generate.outputs.tz_branch }}"
@@ -185,9 +185,15 @@ jobs:
           git -C "$GITHUB_WORKSPACE/tz" config user.name "frameos-bot"
           git -C "$GITHUB_WORKSPACE/tz" config user.email "git@frameos.net"
           git -C "$GITHUB_WORKSPACE/tz" add dist/tzdata.json dist/timezone_aliases.json dist/timezones.csv dist/dstchanges.csv dist/tzdata.json.gz dist/timezone_aliases.json.gz dist/timezones.csv.gz dist/dstchanges.csv.gz dist/updated.txt
+          if git -C "$GITHUB_WORKSPACE/tz" diff --cached --quiet; then
+            echo "No timezone artefact changes to push"
+            exit 0
+          fi
           git -C "$GITHUB_WORKSPACE/tz" commit -m "chore: update timezone artefacts from ${{ steps.generate.outputs.tz_commit }}"
           git -C "$GITHUB_WORKSPACE/tz" remote set-url origin "https://x-access-token:${TZ_REPO_TOKEN}@github.com/FrameOS/tz.git"
-          git -C "$GITHUB_WORKSPACE/tz" push origin "HEAD:$TARGET_BRANCH"
+          if ! git -C "$GITHUB_WORKSPACE/tz" push origin "HEAD:$TARGET_BRANCH"; then
+            echo "::warning::Unable to push timezone artefacts to FrameOS/tz. Ensure TZ_REPO_TOKEN has contents:write access to FrameOS/tz."
+          fi
 
       - name: Commit and push FrameOS timezone updates
         if: steps.frameos_changes.outputs.changed == 'true'
