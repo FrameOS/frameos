@@ -99,6 +99,14 @@ proc writeTimezoneEtag(etag: string) =
   if etag.len > 0:
     writeFile(timeZoneEtagPath(), etag & "\n")
 
+proc displayTimezoneEtag*(etag: string): string =
+  let stripped = etag.strip()
+  if stripped.len >= 2 and stripped[0] == '"' and stripped[^1] == '"':
+    if stripped.len == 2:
+      return ""
+    return stripped[1 .. stripped.len - 2]
+  result = stripped
+
 proc logTimezoneUpdate(logger: Logger, payload: JsonNode) {.gcsafe.} =
   discard logger
   log(payload)
@@ -129,7 +137,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
       logTimezoneUpdate(logger, %*{
         "event": "timezone:update",
         "state": "unchanged",
-        "etag": remote.etag,
+        "etag": displayTimezoneEtag(remote.etag),
         "compressedSize": remote.contentLength,
       })
       return tzUpdateUnchanged
@@ -158,7 +166,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
         "event": "timezone:update",
         "state": "unchanged",
         "sha256": actualHash,
-        "etag": remote.etag,
+        "etag": displayTimezoneEtag(remote.etag),
         "compressedSize": compressedSize,
       })
       return tzUpdateUnchanged
@@ -185,7 +193,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
     "event": "timezone:update",
     "state": "updated",
     "sha256": actualHash,
-    "etag": remote.etag,
+    "etag": displayTimezoneEtag(remote.etag),
     "size": getFileSize(dataPath),
     "compressedSize": compressedSize,
   })

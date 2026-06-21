@@ -36,5 +36,10 @@ suite "timezone updater":
   test "timezone etag is stored next to downloaded data":
     check timeZoneEtagPath() == "state/tz/tzdata.etag"
 
+  test "timezone etag display strips HTTP wrapper quotes":
+    check displayTimezoneEtag("\"82c58f73201ad8edbcf337ca3b4f8bb9\"") == "82c58f73201ad8edbcf337ca3b4f8bb9"
+    check displayTimezoneEtag("  \"abc123\"  ") == "abc123"
+    check displayTimezoneEtag("abc123") == "abc123"
+
   test "sha256 helper matches known digest":
     check sha256Hex("hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
