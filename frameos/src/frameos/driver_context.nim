@@ -15,6 +15,7 @@ type
 
   DeviceConfig* = ref object
     vcom*: float
+    partial*: bool
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
     pins*: PinOverrides

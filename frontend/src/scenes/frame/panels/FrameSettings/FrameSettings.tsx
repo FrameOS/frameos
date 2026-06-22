@@ -707,6 +707,17 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null}
+          {frameForm.device === 'waveshare.EPD_13in3b' ? (
+            <Group name="device_config">
+              <Field
+                name="partial"
+                label="Partial refresh"
+                tooltip="Enable partial updates for this panel. Full refresh remains the default."
+              >
+                {({ value, onChange }) => <Switch value={value === true} onChange={onChange} fullWidth />}
+              </Field>
+            </Group>
+          ) : null}
           {frameForm.device === 'http.upload' ? (
             <div className="">
               <Group name="device_config">

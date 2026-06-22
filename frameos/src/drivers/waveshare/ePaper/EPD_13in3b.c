@@ -323,6 +323,26 @@ void EPD_13IN3B_Display_Base(const UBYTE *blackimage, const UBYTE *ryimage)
     }
 }
 
+// Restore previous black image RAM after waking from sleep. This is used before
+// a partial update so the controller has the same base image it would have had
+// if it had stayed awake, without leaving the panel powered between refreshes.
+void EPD_13IN3B_Display_PartialBase(const UBYTE *blackimage)
+{
+    UWORD Width, Height;
+    Width = (EPD_13IN3B_WIDTH % 8 == 0)? (EPD_13IN3B_WIDTH / 8 ): (EPD_13IN3B_WIDTH / 8 + 1);
+    Height = EPD_13IN3B_HEIGHT;
+
+    EPD_13IN3B_SetWindows(0, 0, EPD_13IN3B_WIDTH-1, EPD_13IN3B_HEIGHT-1);
+    EPD_13IN3B_SetCursor(0, 0);
+
+    EPD_13IN3B_SendCommand(0x26);
+    for (UWORD j = 0; j < Height; j++) {
+        for (UWORD i = 0; i < Width; i++) {
+            EPD_13IN3B_SendData(blackimage[i + j * Width]);
+        }
+    }
+}
+
 //Partial refresh display
 void EPD_13IN3B_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, UWORD Xend, UWORD Yend)
 {

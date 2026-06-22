@@ -555,6 +555,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "device": frame.device or "web_only",
         "deviceConfig": (lambda cfg: {
             **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
+            "partial": cfg.get('partial') is True or str(cfg.get('partial', '')).lower() == 'true',
             **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
             **({"uploadHeaders": [
                 {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}

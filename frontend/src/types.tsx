@@ -60,6 +60,7 @@ export interface FrameType {
   } | null
   device_config?: {
     vcom?: number
+    partial?: boolean
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
     psramMB?: number

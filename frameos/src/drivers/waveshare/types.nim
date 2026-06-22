@@ -10,6 +10,11 @@ type Driver* = ref object of FrameOSDriver
   lastImageHash*: Hash
   lastImageBytes*: int
   lastRenderAt*: float
+  lastPackedBlackImage*: seq[uint8]
+  lastPackedRedImage*: seq[uint8]
+  partialRefreshEnabled*: bool
+  partialRefreshReady*: bool
+  partialRefreshCount*: int
   palette*: Option[seq[(int, int, int)]]
   vcom*: float # used for the 10.3" display
 

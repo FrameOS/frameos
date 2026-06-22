@@ -118,6 +118,7 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
   if data == nil or data.kind != JObject:
     result = DeviceConfig(
       vcom: 0,
+      partial: false,
       httpUploadUrl: "",
       httpUploadHeaders: headers,
       pins: loadPins(nil),
@@ -125,6 +126,7 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
   else:
     result = DeviceConfig(
       vcom: data{"vcom"}.getFloat(0),
+      partial: data{"partial"}.getBool(false),
       httpUploadUrl: data{"uploadUrl"}.getStr(""),
       httpUploadHeaders: headers,
       pins: loadPins(data{"pins"}),

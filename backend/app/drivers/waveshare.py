@@ -100,6 +100,11 @@ BOOT_CONFIG_LINES_BY_VARIANT = {
     ],
 }
 
+PARTIAL_REFRESH_VARIANTS = {
+    "EPD_13in3b",
+}
+
+
 def get_variant_keys_for(folder: str) -> list[str]:
     directory = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / folder
     return [
@@ -321,6 +326,41 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
     if variant.color_option == "Unknown":
         color_warning = "\n\n# NOTE! We could not detect the correct color options. Assuming 1-bit Black.\n\n"
 
+    supports_partial_refresh = variant.key in PARTIAL_REFRESH_VARIANTS
+    if variant.key == "EPD_13in3b":
+        render_partial_code = f"""
+proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
+  if image1.len == 0 or image2.len == 0:
+    return
+  waveshareDisplay.{variant.prefix}_Display_Base(addr image1[0], addr image2[0])
+
+proc renderImagePartialBase*(image: seq[uint8]) =
+  if image.len == 0:
+    return
+  waveshareDisplay.{variant.prefix}_Display_PartialBase(addr image[0])
+
+proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int, yEnd: int) =
+  if image.len == 0:
+    return
+  waveshareDisplay.{variant.prefix}_Display_Partial(addr image[0], xStart.uint16, yStart.uint16, xEnd.uint16, yEnd.uint16)
+"""
+    else:
+        render_partial_code = """
+proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
+  discard image1
+  discard image2
+
+proc renderImagePartialBase*(image: seq[uint8]) =
+  discard image
+
+proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int, yEnd: int) =
+  discard image
+  discard xStart
+  discard yStart
+  discard xEnd
+  discard yEnd
+"""
+
     if variant_folder == "ePaper":
         pin_overrides_code = (
             "proc setPinOverrides*(pins: PinOverrides) =\n"
@@ -345,6 +385,7 @@ let width* = waveshareDisplay.{variant.prefix}_WIDTH
 let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 
 let color_option* = ColorOption.{variant.color_option}
+let supportsPartialRefresh* = {str(supports_partial_refresh).lower()}
 {color_warning}
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -372,5 +413,6 @@ proc renderImage*(image: seq[uint8]) =
 proc renderImageBlackWhiteRed*(image1: seq[uint8], image2: seq[uint8]) =
   {f'waveshareDisplay.{variant.display_function}(addr image1[0], addr image2[0])' if variant.color_option in ('BlackWhiteRed', 'BlackWhiteYellow') else 'discard'}
 
+{render_partial_code}
 """
     return code

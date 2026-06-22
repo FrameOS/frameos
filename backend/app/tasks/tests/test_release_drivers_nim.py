@@ -98,6 +98,21 @@ def test_release_waveshare_variant_setup_lives_in_generated_driver():
     assert 'setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])' in epd13_source
 
 
+def test_waveshare_epd13in3b_generates_partial_refresh_hooks():
+    epd13in3b = replace(DRIVERS["waveshare"], variant="EPD_13in3b")
+
+    source = write_waveshare_driver_nim({"waveshare": epd13in3b})
+
+    assert "let supportsPartialRefresh* = true" in source
+    assert "EPD_13IN3B_Display_Base(addr image1[0], addr image2[0])" in source
+    assert "EPD_13IN3B_Display_PartialBase(addr image[0])" in source
+    assert (
+        "EPD_13IN3B_Display_Partial(addr image[0], "
+        "xStart.uint16, yStart.uint16, xEnd.uint16, yEnd.uint16)"
+        in source
+    )
+
+
 def test_release_waveshare_modules_are_variant_specific(tmp_path: Path):
     frameos_root = tmp_path / "frameos"
     waveshare_root = frameos_root / "src" / "drivers" / "waveshare"

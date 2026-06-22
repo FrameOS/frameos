@@ -80,11 +80,13 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   let sourceDeviceConfig = sourceConfig.deviceConfig
   var deviceConfig = driverContext.DeviceConfig(
     vcom: 0.0,
+    partial: false,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
   )
   if not sourceDeviceConfig.isNil:
     deviceConfig.vcom = sourceDeviceConfig.vcom
+    deviceConfig.partial = sourceDeviceConfig.partial
     deviceConfig.httpUploadUrl = sourceDeviceConfig.httpUploadUrl
     for header in sourceDeviceConfig.httpUploadHeaders:
       deviceConfig.httpUploadHeaders.add(driverContext.HttpHeaderPair(
@@ -206,6 +208,7 @@ proc driverLog(payload: JsonNode) =
 proc cloneDriverContext(source: DriverContext): DriverContext =
   var deviceConfig = DeviceConfig(
     vcom: 0.0,
+    partial: false,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
   )
@@ -235,6 +238,7 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
       config.height = sourceConfig.height
       if not sourceConfig.deviceConfig.isNil:
         deviceConfig.vcom = sourceConfig.deviceConfig.vcom
+        deviceConfig.partial = sourceConfig.deviceConfig.partial
         deviceConfig.httpUploadUrl = sourceConfig.deviceConfig.httpUploadUrl
         for header in sourceConfig.deviceConfig.httpUploadHeaders:
           deviceConfig.httpUploadHeaders.add(HttpHeaderPair(name: header.name, value: header.value))

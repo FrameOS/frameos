@@ -150,6 +150,7 @@ type
 
   DeviceConfig* = ref object
     vcom*: float # used for the 10.3" display
+    partial*: bool
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
     pins*: PinOverrides

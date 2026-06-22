@@ -206,6 +206,20 @@ async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_partial_device_config(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+
+    assert get_frame_json(db, frame)["deviceConfig"]["partial"] is False
+
+    frame.device_config = {"partial": True}
+    assert get_frame_json(db, frame)["deviceConfig"]["partial"] is True
+
+    frame.device_config = {"partial": "false"}
+    assert get_frame_json(db, frame)["deviceConfig"]["partial"] is False
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_includes_max_http_response_bytes(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     frame.max_http_response_bytes = 32 * 1024 * 1024

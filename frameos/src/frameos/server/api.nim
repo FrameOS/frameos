@@ -199,6 +199,7 @@ proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
     headers.add(%*{"name": header.name, "value": header.value})
   result = %*{
     "vcom": deviceConfig.vcom,
+    "partial": deviceConfig.partial,
     "uploadUrl": deviceConfig.httpUploadUrl,
     "uploadHeaders": headers,
   }
