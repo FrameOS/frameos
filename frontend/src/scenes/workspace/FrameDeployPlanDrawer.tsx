@@ -21,7 +21,7 @@ import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
-import { buildrootPlatforms, devices } from '../../devices'
+import { buildrootPlatforms, devices, partialRefreshDevices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameOSSettings, FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
@@ -781,8 +781,10 @@ function BuildrootSdCardSection({
   const serverHost = frameForm.server_host ?? frame.server_host ?? ''
   const serverPort = frameForm.server_port ?? frame.server_port ?? 8989
   const device = frameForm.device ?? frame.device ?? 'web_only'
+  const deviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
   const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
+  const compilationMode = String(buildroot.compilationMode ?? '')
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(effectiveSshKeyIds(frame, frameForm, savedSettings))
@@ -797,6 +799,19 @@ function BuildrootSdCardSection({
   const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string): void => {
     setFrameFormValues({ buildroot: { ...buildroot, [field]: value } })
     touchFrameFormField(`buildroot.${field}`)
+  }
+  const updateDeviceConfig = (nextDeviceConfig: NonNullable<FrameType['device_config']>): void => {
+    setFrameFormValues({ device_config: nextDeviceConfig })
+    touchFrameFormField('device_config')
+  }
+  const uploadHeaders = Array.isArray(deviceConfig.uploadHeaders)
+    ? deviceConfig.uploadHeaders.map((header) => ({ name: header?.name ?? '', value: header?.value ?? '' }))
+    : []
+  const updateUploadHeader = (index: number, key: 'name' | 'value', value: string): void => {
+    updateDeviceConfig({
+      ...deviceConfig,
+      uploadHeaders: uploadHeaders.map((header, idx) => (idx === index ? { ...header, [key]: value } : header)),
+    })
   }
 
   return (
@@ -856,6 +871,79 @@ function BuildrootSdCardSection({
               ))}
             </select>
           </label>
+          {device === 'waveshare.EPD_10in3' ? (
+            <label className="block space-y-1">
+              <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">VCOM</span>
+              <TextInput
+                value={deviceConfig.vcom ?? ''}
+                onChange={(value) => updateDeviceConfig({ ...deviceConfig, vcom: value })}
+                placeholder="-1.48"
+              />
+            </label>
+          ) : null}
+          {partialRefreshDevices.has(device) ? (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 px-3 py-2">
+              <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Partial refresh</span>
+              <Switch
+                value={deviceConfig.partial === true}
+                onChange={(partial) => updateDeviceConfig({ ...deviceConfig, partial })}
+                aria-label="Partial refresh"
+              />
+            </div>
+          ) : null}
+          {device === 'http.upload' ? (
+            <>
+              <label className="block space-y-1">
+                <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Upload URL</span>
+                <TextInput
+                  value={deviceConfig.uploadUrl ?? ''}
+                  onChange={(value) => updateDeviceConfig({ ...deviceConfig, uploadUrl: value })}
+                  placeholder="https://example.com/upload"
+                />
+              </label>
+              <div className="space-y-2">
+                <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">HTTP headers</div>
+                {uploadHeaders.map((header, index) => (
+                  <div key={index} className="grid grid-cols-1 gap-2">
+                    <TextInput
+                      value={header.name}
+                      onChange={(value) => updateUploadHeader(index, 'name', value)}
+                      placeholder="Header name"
+                    />
+                    <TextInput
+                      value={header.value}
+                      onChange={(value) => updateUploadHeader(index, 'value', value)}
+                      placeholder="Header value"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDeviceConfig({
+                          ...deviceConfig,
+                          uploadHeaders: uploadHeaders.filter((_, idx) => idx !== index),
+                        })
+                      }
+                      className="frameos-secondary-button h-10 rounded-xl bg-slate-100 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      Remove header
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateDeviceConfig({
+                      ...deviceConfig,
+                      uploadHeaders: [...uploadHeaders, { name: '', value: '' }],
+                    })
+                  }
+                  className="frameos-secondary-button h-10 rounded-xl bg-slate-100 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Add header
+                </button>
+              </div>
+            </>
+          ) : null}
           <label className="block space-y-1">
             <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Timezone</span>
             <select
@@ -880,6 +968,20 @@ function BuildrootSdCardSection({
               {buildrootPlatforms.map((platform) => (
                 <option key={platform.value} value={platform.value}>
                   {platform.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Compilation mode</span>
+            <select
+              className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+              value={compilationMode}
+              onChange={(event) => updateBuildroot('compilationMode', event.target.value)}
+            >
+              {frameCompilationModeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -1234,6 +1336,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         mode: 'buildroot',
         assets_path: '/srv/assets',
         device: frameForm.device ?? frame.device,
+        device_config: frameForm.device_config ?? frame.device_config,
         ssh_pass: frameForm.ssh_pass ?? frame.ssh_pass ?? '',
         ssh_keys: effectiveSshKeyIds(frame, frameForm, savedSettings),
         server_host: frameForm.server_host ?? frame.server_host,
