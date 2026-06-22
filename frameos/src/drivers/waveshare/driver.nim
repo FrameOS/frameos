@@ -12,6 +12,9 @@ let height* = waveshareDisplay.EPD_7IN3E_HEIGHT
 
 let color_option* = ColorOption.SpectraSixColor
 let supportsPartialRefresh* = false
+let maxPartialRefreshesBeforeFull* = 5
+let maxPartialRefreshAreaPercent* = 100.0
+let supportsFastPartialSession* = false
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   discard frameOS

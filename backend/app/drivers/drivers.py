@@ -46,6 +46,7 @@ DRIVERS = {
         import_path="waveshare/waveshare",
         can_render=True,
         can_png=True,
+        can_turn_on_off=True,
     ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",

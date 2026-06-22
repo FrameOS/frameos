@@ -1,6 +1,7 @@
 import pixie, json, times, options, math, hashes
 
 import frameos/driver_context
+import frameos/driver_render_hint
 import frameos/device_setup
 import frameos/utils/dither
 import drivers/waveshare/driver as waveshareDriver
@@ -10,7 +11,8 @@ export Driver
 export preview
 
 const
-  MAX_PARTIAL_REFRESHES_BEFORE_FULL = 5
+  FAST_PARTIAL_SESSION_MAX_NEXT_RENDER_SECONDS = 30.0
+  FAST_PARTIAL_SESSION_GRACE_SECONDS = 5.0
 
 type PackedChangeBounds = object
   changed: bool
@@ -72,6 +74,46 @@ proc findPackedChangeBounds(previous, current: seq[uint8], rowWidth, height: int
     yEnd: maxY + 1,
   )
 
+proc sourcePixelsDiffer(previous, current: ColorRGBX): bool {.inline.} =
+  previous.r != current.r or previous.g != current.g or
+    previous.b != current.b or previous.a != current.a
+
+proc findSourceImageChangeBounds(previous, current: seq[ColorRGBX], width, height: int): PackedChangeBounds =
+  let rowWidth = int(ceil(width.float / 8))
+  if previous.len != current.len or current.len != width * height:
+    return PackedChangeBounds(changed: true, byteXStart: 0, byteXEnd: rowWidth, yStart: 0, yEnd: height)
+
+  var
+    minX = width
+    maxX = -1
+    minY = height
+    maxY = -1
+
+  for y in 0..<height:
+    let rowOffset = y * width
+    for x in 0..<width:
+      let index = rowOffset + x
+      if sourcePixelsDiffer(previous[index], current[index]):
+        if x < minX:
+          minX = x
+        if x > maxX:
+          maxX = x
+        if y < minY:
+          minY = y
+        if y > maxY:
+          maxY = y
+
+  if maxX < 0:
+    return PackedChangeBounds(changed: false)
+
+  PackedChangeBounds(
+    changed: true,
+    byteXStart: minX div 8,
+    byteXEnd: min(maxX div 8 + 1, rowWidth),
+    yStart: minY,
+    yEnd: maxY + 1,
+  )
+
 proc cropPackedRows(image: seq[uint8], rowWidth: int, bounds: PackedChangeBounds): seq[uint8] =
   let
     outputRowWidth = bounds.byteXEnd - bounds.byteXStart
@@ -88,6 +130,70 @@ proc copyPackedImage(image: seq[uint8]): seq[uint8] =
   result = newSeq[uint8](image.len)
   for i in 0..<image.len:
     result[i] = image[i]
+
+proc copyColorImageData(image: seq[ColorRGBX]): seq[ColorRGBX] =
+  result = newSeq[ColorRGBX](image.len)
+  for i in 0..<image.len:
+    result[i] = image[i]
+
+proc roundedPercent(value: float): float =
+  round(value * 1000.0) / 1000.0
+
+proc partialAreaPercent(partialWidth, partialHeight, totalWidth, totalHeight: int): float =
+  if totalWidth <= 0 or totalHeight <= 0:
+    return 100.0
+  (partialWidth.float * partialHeight.float * 100.0) / (totalWidth.float * totalHeight.float)
+
+proc applyPackedRows(base: seq[uint8], rowWidth: int, bounds: PackedChangeBounds, patch: seq[uint8]): seq[uint8] =
+  result = copyPackedImage(base)
+  let
+    patchRowWidth = bounds.byteXEnd - bounds.byteXStart
+    patchHeight = bounds.yEnd - bounds.yStart
+  if patch.len != patchRowWidth * patchHeight or result.len < rowWidth * bounds.yEnd:
+    return
+
+  var source = 0
+  for y in bounds.yStart..<bounds.yEnd:
+    let dest = y * rowWidth + bounds.byteXStart
+    for x in 0..<patchRowWidth:
+      result[dest + x] = patch[source + x]
+    source += patchRowWidth
+
+proc fastPartialSessionNextRenderSeconds(): Option[float] =
+  if not waveshareDriver.supportsFastPartialSession:
+    return none(float)
+  let nextRender = nextRenderSeconds()
+  if nextRender.isNone:
+    return none(float)
+  let seconds = nextRender.get()
+  if seconds < 0 or seconds > FAST_PARTIAL_SESSION_MAX_NEXT_RENDER_SECONDS:
+    return none(float)
+  some(seconds)
+
+proc markPartialSessionSleeping(self: Driver) =
+  self.partialRefreshAwake = false
+  self.partialRefreshSessionActive = false
+  self.partialRefreshAwakeUntil = 0
+
+proc markPartialSessionAwake(self: Driver, partialActive: bool, nextRenderSeconds: float) =
+  self.partialRefreshAwake = true
+  self.partialRefreshSessionActive = partialActive
+  self.partialRefreshAwakeUntil = epochTime() + max(nextRenderSeconds, 0.0) + FAST_PARTIAL_SESSION_GRACE_SECONDS
+
+proc sleepPartialSession(self: Driver, reason: string) =
+  if not self.partialRefreshAwake:
+    return
+  self.logger.log(%*{
+    "event": "driver:waveshare:partial",
+    "mode": "sleep",
+    "reason": reason,
+  })
+  waveshareDriver.sleep()
+  self.markPartialSessionSleeping()
+
+proc expirePartialSession(self: Driver) =
+  if self.partialRefreshAwake and self.partialRefreshAwakeUntil > 0 and epochTime() > self.partialRefreshAwakeUntil:
+    self.sleepPartialSession("awake-timeout")
 
 proc packedRegionContainsMarkedPixels(image: seq[uint8], rowWidth: int, bounds: PackedChangeBounds): bool =
   for y in bounds.yStart..<bounds.yEnd:
@@ -117,7 +223,7 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
     self.renderBlackWhiteRedFull(blackImage, redImage, "initial")
     return
 
-  if self.partialRefreshCount >= MAX_PARTIAL_REFRESHES_BEFORE_FULL:
+  if self.partialRefreshCount >= waveshareDriver.maxPartialRefreshesBeforeFull:
     self.renderBlackWhiteRedFull(blackImage, redImage, "periodic")
     return
 
@@ -161,39 +267,53 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
   self.lastPackedBlackImage = blackImage
   self.lastPackedRedImage = redImage
 
-proc renderBlackFull(self: Driver, blackImage: seq[uint8], reason: string) =
+proc renderBlackFull(self: Driver, blackImage: seq[uint8], sourceImage: seq[ColorRGBX], reason: string) =
   self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "base", "reason": reason})
   var displayImage = copyPackedImage(blackImage)
+  let fastNextRender = fastPartialSessionNextRenderSeconds()
+  let keepAwake = fastNextRender.isSome
   var started = false
   try:
     waveshareDriver.start(self)
     started = true
     waveshareDriver.renderImage(displayImage)
   finally:
-    if started:
+    if started and keepAwake:
+      self.markPartialSessionAwake(false, fastNextRender.get())
+    elif started:
       waveshareDriver.sleep()
+      self.markPartialSessionSleeping()
   self.partialRefreshReady = true
   self.partialRefreshCount = 0
   self.lastPackedBlackImage = blackImage
+  self.lastBlackSourceImage = copyColorImageData(sourceImage)
 
-proc renderBlackPartial(self: Driver, blackImage: seq[uint8], width, height: int) =
+proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[ColorRGBX], width, height: int) =
+  self.expirePartialSession()
+
   if not self.partialRefreshEnabled:
+    self.sleepPartialSession("partial-disabled")
     waveshareDriver.renderImage(blackImage)
     return
 
-  if not self.partialRefreshReady or self.lastPackedBlackImage.len == 0:
-    self.renderBlackFull(blackImage, "initial")
+  if not self.partialRefreshReady or self.lastPackedBlackImage.len == 0 or self.lastBlackSourceImage.len == 0:
+    self.renderBlackFull(blackImage, sourceImage, "initial")
     return
 
-  if self.partialRefreshCount >= MAX_PARTIAL_REFRESHES_BEFORE_FULL:
-    self.renderBlackFull(blackImage, "periodic")
+  if self.partialRefreshCount >= waveshareDriver.maxPartialRefreshesBeforeFull:
+    self.renderBlackFull(blackImage, sourceImage, "periodic")
     return
 
   let rowWidth = int(ceil(width.float / 8))
-  let bounds = findPackedChangeBounds(self.lastPackedBlackImage, blackImage, rowWidth, height)
+  let bounds = findSourceImageChangeBounds(self.lastBlackSourceImage, sourceImage, width, height)
   if not bounds.changed:
-    self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "packed-image-unchanged"})
-    self.lastPackedBlackImage = blackImage
+    self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "source-image-unchanged"})
+    let fastNextRender = fastPartialSessionNextRenderSeconds()
+    if self.partialRefreshAwake and fastNextRender.isSome:
+      self.markPartialSessionAwake(self.partialRefreshSessionActive, fastNextRender.get())
+    elif fastNextRender.isNone:
+      self.sleepPartialSession("source-image-unchanged")
+    self.lastBlackSourceImage = copyColorImageData(sourceImage)
     return
 
   let partialImage = cropPackedRows(blackImage, rowWidth, bounds)
@@ -202,6 +322,23 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], width, height: int
     xEnd = min(bounds.byteXEnd * 8, width)
     partialWidth = xEnd - xStart
     partialHeight = bounds.yEnd - bounds.yStart
+    areaPercent = partialAreaPercent(partialWidth, partialHeight, width, height)
+
+  if areaPercent > waveshareDriver.maxPartialRefreshAreaPercent:
+    self.logger.log(%*{
+      "event": "driver:waveshare:partial",
+      "mode": "fallback",
+      "reason": "partial-area-too-large",
+      "x": xStart,
+      "y": bounds.yStart,
+      "width": partialWidth,
+      "height": partialHeight,
+      "areaPercent": roundedPercent(areaPercent),
+      "maxAreaPercent": waveshareDriver.maxPartialRefreshAreaPercent,
+      "bounds": "source",
+    })
+    self.renderBlackFull(blackImage, sourceImage, "partial-area-too-large")
+    return
 
   self.logger.log(%*{
     "event": "driver:waveshare:partial",
@@ -210,22 +347,34 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], width, height: int
     "y": bounds.yStart,
     "width": partialWidth,
     "height": partialHeight,
+    "areaPercent": roundedPercent(areaPercent),
+    "maxAreaPercent": waveshareDriver.maxPartialRefreshAreaPercent,
     "bytes": partialImage.len,
     "count": self.partialRefreshCount + 1,
+    "bounds": "source",
   })
 
-  var started = false
+  let
+    warmSession = self.partialRefreshAwake and self.partialRefreshSessionActive
+    fastNextRender = fastPartialSessionNextRenderSeconds()
+    keepAwake = fastNextRender.isSome
+  var active = warmSession
   try:
-    waveshareDriver.startPartial(self)
-    started = true
-    waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
+    if not warmSession:
+      waveshareDriver.startPartial(self)
+      active = true
+      waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
     waveshareDriver.renderImagePartial(partialImage, xStart, bounds.yStart, xEnd, bounds.yEnd)
   finally:
-    if started:
+    if active and keepAwake:
+      self.markPartialSessionAwake(true, fastNextRender.get())
+    elif active:
       waveshareDriver.sleep()
+      self.markPartialSessionSleeping()
   self.partialRefreshReady = true
   self.partialRefreshCount += 1
-  self.lastPackedBlackImage = blackImage
+  self.lastPackedBlackImage = applyPackedRows(self.lastPackedBlackImage, rowWidth, bounds, partialImage)
+  self.lastBlackSourceImage = copyColorImageData(sourceImage)
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   waveshareDriver.setup(frameOS)
@@ -276,6 +425,12 @@ proc init*(frameOS: DriverContext): Driver =
         "error": "Failed to initialize driver", "exception": e.msg,
         "stack": e.getStackTrace()})
 
+proc turnOn*(self: Driver) =
+  discard self
+
+proc turnOff*(self: Driver) =
+  self.sleepPartialSession("runner-idle-heartbeat")
+
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available, starting render"})
 
@@ -298,7 +453,7 @@ proc renderBlack*(self: Driver, image: Image) =
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
   self.logGrayBuffer("Black", image.width * image.height, gray.len * sizeof(float), levels.len, blackImage.len)
   if self.partialRefreshEnabled:
-    self.renderBlackPartial(blackImage, image.width, image.height)
+    self.renderBlackPartial(blackImage, image.data, image.width, image.height)
   else:
     waveshareDriver.renderImage(blackImage)
 
@@ -409,6 +564,7 @@ proc renderForColor(self: Driver, image: Image) =
     self.renderBlackWhiteYellowRed(image)
 
 proc render*(self: Driver, image: Image) =
+  self.expirePartialSession()
   # Refresh at least every 12h to preserve display
   # TODO: make this configurable
   let currentImageHash = hashImageData(image.data)
@@ -416,6 +572,11 @@ proc render*(self: Driver, image: Image) =
   let imageUnchanged = self.lastImageBytes == image.data.len and self.lastImageHash == currentImageHash
   let needsPreservationRefresh = imageUnchanged and self.lastRenderAt <= now - 12 * 60 * 60
   if imageUnchanged and not needsPreservationRefresh:
+    let fastNextRender = fastPartialSessionNextRenderSeconds()
+    if self.partialRefreshAwake and fastNextRender.isSome:
+      self.markPartialSessionAwake(self.partialRefreshSessionActive, fastNextRender.get())
+    else:
+      self.sleepPartialSession("image-unchanged")
     self.logger.log(%*{"event": "driver:waveshare",
         "info": "Skipping render, image data is the same"})
     return
@@ -429,6 +590,7 @@ proc render*(self: Driver, image: Image) =
   if self.partialRefreshEnabled and waveshareDriver.colorOption == ColorOption.Black:
     self.renderForColor(image)
   elif self.partialRefreshEnabled:
+    self.sleepPartialSession("non-black-partial-render")
     var started = false
     try:
       waveshareDriver.start(self)
@@ -437,10 +599,13 @@ proc render*(self: Driver, image: Image) =
     finally:
       if started:
         waveshareDriver.sleep()
+        self.markPartialSessionSleeping()
   else:
+    self.sleepPartialSession("full-render")
     waveshareDriver.start(self)
     self.renderForColor(image)
     waveshareDriver.sleep()
+    self.markPartialSessionSleeping()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
 proc toPng*(rotate: int = 0, flip: string = ""): string =
