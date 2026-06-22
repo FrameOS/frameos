@@ -1028,8 +1028,7 @@ if [ "$FRAMEOS_DEVICE" = "framebuffer" ]; then
   frameos_service_tty="TTYPath=/dev/tty1
 StandardInput=tty-force
 TTYReset=yes
-ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service
-ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service"
+ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
 fi
 
 cat > "$frameos_release_dir/frameos.service" <<EOF
@@ -1043,6 +1042,7 @@ User=$agent_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
+RestartSec=5
 $frameos_service_tty
 
 [Install]

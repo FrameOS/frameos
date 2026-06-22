@@ -94,19 +94,21 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     script = script_response.text
     assert 'frameos_agent' in script
     assert 'frameos.service' in script
+    assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
     assert 'Conflicts=getty@tty1.service' in script
     assert 'TTYPath=/dev/tty1' in script
     assert 'StandardInput=tty-force' in script
     assert 'TTYReset=yes' in script
     assert (
-        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service'
+        "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 "
+        "/bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | "
+        "/bin/grep -xq -e active -e activating -e reloading && exit 0; "
+        "/bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
         in script
     )
-    assert (
-        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service'
-        in script
-    )
+    assert '--on-active=3 /bin/systemctl reset-failed getty@tty1.service' not in script
+    assert '--on-active=4 /bin/systemctl start getty@tty1.service' not in script
     assert 'python3 -c' not in script
     assert 'TTYVHangup=yes' not in script
     assert 'TTYVTDisallocate=yes' not in script

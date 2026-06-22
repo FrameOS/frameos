@@ -204,6 +204,7 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "WorkingDirectory=/srv/frameos/current\n" &
     "ExecStart=/srv/frameos/current/frameos\n" &
     "Restart=always\n" &
+    "RestartSec=5\n" &
     "Type=notify\n" &
     "TimeoutStartSec=300\n" &
     # Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
@@ -218,8 +219,7 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     result &= "TTYPath=/dev/tty1\n" &
       "StandardInput=tty-force\n" &
       "TTYReset=yes\n" &
-      "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service\n" &
-      "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service\n"
+      "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'\n"
   if consoleOutput:
     result &= "StandardOutput=journal+console\n" &
       "StandardError=journal+console\n"
