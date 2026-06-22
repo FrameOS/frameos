@@ -8,6 +8,7 @@ import {
   Cog6ToothIcon,
   ListBulletIcon,
   PhotoIcon,
+  PlusIcon,
   ServerStackIcon,
   SparklesIcon,
   VariableIcon,
@@ -22,6 +23,7 @@ import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
@@ -124,7 +126,7 @@ function SceneSelector({
   selectedSceneId: string | null
   sidebarActions?: JSX.Element
 }): JSX.Element {
-  const { navigateToScene, navigateToSceneFrame } = useActions(workspaceLogic)
+  const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
   const frameGroups = groupFramesByStatus(frames)
 
@@ -190,12 +192,32 @@ function SceneSelector({
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Scenes</label>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-            {scenes.length}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+              {scenes.length}
+            </span>
+            <button
+              type="button"
+              title="Add scene"
+              onClick={() => openTemplateDrawer(frame.id)}
+              className="frameos-icon-button flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <PlusIcon className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         {scenes.length === 0 ? (
-          <div className="frameos-muted rounded-xl px-3 py-2 text-sm text-slate-400">No scenes</div>
+          <div className="frameos-muted rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-400">
+            <div>No scenes</div>
+            <button
+              type="button"
+              onClick={() => openTemplateDrawer(frame.id)}
+              className="frameos-secondary-button mt-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <PlusIcon className="h-4 w-4" />
+              <span>Add scene</span>
+            </button>
+          </div>
         ) : (
           <div className="space-y-1">
             {scenes.map((scene) => {
@@ -742,17 +764,19 @@ function UtilityDrawer({
 }
 
 function SceneCanvas({
+  hasScenes,
   frameId,
   frameMode,
   selectedScene,
   selectedSceneId,
 }: {
+  hasScenes: boolean
   frameId: number
   frameMode?: FrameType['mode'] | null
   selectedScene: FrameScene | null
   selectedSceneId: string | null
 }): JSX.Element {
-  const { navigateToScene } = useActions(workspaceLogic)
+  const { navigateToScene, openTemplateDrawer } = useActions(workspaceLogic)
 
   const handleSceneDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -781,8 +805,22 @@ function SceneCanvas({
       >
         <div className="text-center">
           <PhotoIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-          <div className="text-lg font-semibold text-slate-700">No scene selected</div>
-          <div className="text-sm text-slate-500">Choose a scene from the left panel.</div>
+          <div className="text-lg font-semibold text-slate-700">
+            {hasScenes ? 'No scene selected' : 'No scenes yet'}
+          </div>
+          <div className="text-sm text-slate-500">
+            {hasScenes ? 'Choose a scene from the left panel.' : 'Add a scene to start editing this frame.'}
+          </div>
+          {!hasScenes ? (
+            <button
+              type="button"
+              onClick={() => openTemplateDrawer(frameId)}
+              className="frameos-primary-action mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <PlusIcon className="h-5 w-5" />
+              <span>Add scene</span>
+            </button>
+          ) : null}
         </div>
       </div>
     )
@@ -796,7 +834,7 @@ function SceneCanvas({
     >
       <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
-        <SceneDiagramOverlay frameId={frameId} frameMode={frameMode} scene={selectedScene} sceneId={selectedSceneId} />
+      <SceneDiagramOverlay frameId={frameId} frameMode={frameMode} scene={selectedScene} sceneId={selectedSceneId} />
     </div>
   )
 }
@@ -830,7 +868,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
     frameLogic(frameLogicProps)
   )
   const { framesList } = useValues(framesModel)
-  const { selectedSceneId, utilityPanel } = useValues(workspaceLogic)
+  const { selectedSceneId, templateDrawerFrameId, utilityPanel } = useValues(workspaceLogic)
 
   if (!frame) {
     return (
@@ -875,12 +913,15 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           rightPanel={
             deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
+            ) : templateDrawerFrameId ? (
+              <TemplateDrawer />
             ) : activeUtilityDefinition ? (
               <UtilityDrawer frameId={frameId} scene={selectedScene} frameMode={frame.mode} />
             ) : null
           }
         >
           <SceneCanvas
+            hasScenes={scenes.length > 0}
             frameId={frame.id}
             frameMode={frame.mode}
             selectedScene={selectedScene}
