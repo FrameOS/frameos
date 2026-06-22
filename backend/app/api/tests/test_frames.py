@@ -1161,6 +1161,24 @@ async def test_api_frame_new(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_preserves_device_config(async_client):
+    payload = {
+        "name": "PartialFrame",
+        "frame_host": "myhost",
+        "server_host": "myserver",
+        "device": "waveshare.EPD_13in3b",
+        "device_config": {"partial": True},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['device'] == 'waveshare.EPD_13in3b'
+    assert frame['device_config']['partial'] is True
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_buildroot_defaults(async_client):
     payload = {
         "mode": "buildroot",

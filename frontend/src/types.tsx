@@ -59,7 +59,7 @@ export interface FrameType {
     url?: string
   } | null
   device_config?: {
-    vcom?: number
+    vcom?: number | string
     partial?: boolean
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
@@ -164,6 +164,7 @@ export interface NewFrameFormType {
   name?: string | null
   frame_host?: string | null
   device?: string | null
+  device_config?: FrameType['device_config']
   timezone?: string | null
   server_host?: string | null
   ssh_pass?: string | null

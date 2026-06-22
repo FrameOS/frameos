@@ -26,6 +26,7 @@ import { Field } from '../../components/Field'
 import { Checkbox } from '../../components/Checkbox'
 import { Switch } from '../../components/Switch'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
+import { urls } from '../../urls'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -186,6 +187,7 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
 }
 
 type AddFrameMode = FrameInstallMethod | 'import'
+type UploadHeader = { name: string; value: string }
 
 function installMethodTitle(installMethod: AddFrameMode): string {
   if (installMethod === 'sd_card') {
@@ -214,6 +216,113 @@ function AddFrameSubmitButton({ loading }: { loading: boolean }): JSX.Element {
       Add frame
     </button>
   )
+}
+
+function renderNewFrameDriverConfig(
+  newFrame: NewFrameFormType,
+  setNewFrameValue: (key: any, value: any) => void
+): JSX.Element | null {
+  const deviceConfig = newFrame.device_config ?? {}
+  const setDeviceConfig = (nextDeviceConfig: NonNullable<NewFrameFormType['device_config']>) => {
+    setNewFrameValue('device_config', nextDeviceConfig)
+  }
+
+  if (newFrame.device === 'waveshare.EPD_10in3') {
+    return (
+      <FormField label="VCOM">
+        <input
+          className={textInputClassName()}
+          value={deviceConfig.vcom ?? ''}
+          onChange={(event) => setDeviceConfig({ ...deviceConfig, vcom: event.target.value })}
+          placeholder="-1.48"
+          required
+        />
+      </FormField>
+    )
+  }
+
+  if (newFrame.device === 'waveshare.EPD_13in3b') {
+    return (
+      <FormField label="Partial refresh">
+        <Switch
+          value={deviceConfig.partial === true}
+          onChange={(partial) => setDeviceConfig({ ...deviceConfig, partial })}
+          fullWidth
+          aria-label="Partial refresh"
+        />
+      </FormField>
+    )
+  }
+
+  if (newFrame.device === 'http.upload') {
+    const headers: UploadHeader[] = Array.isArray(deviceConfig.uploadHeaders)
+      ? deviceConfig.uploadHeaders.map((header) => ({ name: header?.name ?? '', value: header?.value ?? '' }))
+      : []
+    const updateHeader = (index: number, key: 'name' | 'value', newValue: string) => {
+      setDeviceConfig({
+        ...deviceConfig,
+        uploadHeaders: headers.map((header: UploadHeader, idx: number) =>
+          idx === index ? { name: header?.name ?? '', value: header?.value ?? '', [key]: newValue } : header
+        ),
+      })
+    }
+    const addHeader = () => {
+      setDeviceConfig({ ...deviceConfig, uploadHeaders: [...headers, { name: '', value: '' }] })
+    }
+    const removeHeader = (index: number) => {
+      setDeviceConfig({ ...deviceConfig, uploadHeaders: headers.filter((_: UploadHeader, idx: number) => idx !== index) })
+    }
+
+    return (
+      <>
+        <FormField label="Upload URL">
+          <input
+            className={textInputClassName()}
+            value={deviceConfig.uploadUrl ?? ''}
+            onChange={(event) => setDeviceConfig({ ...deviceConfig, uploadUrl: event.target.value })}
+            placeholder="https://example.com/upload"
+            required
+          />
+        </FormField>
+        <FormField label="HTTP headers">
+          <div className="space-y-2">
+            {headers.map((header: UploadHeader, index: number) => (
+              <div key={index} className="grid grid-cols-1 gap-2 @md:grid-cols-[1fr_1fr_auto]">
+                <input
+                  className={textInputClassName()}
+                  value={header?.name ?? ''}
+                  onChange={(event) => updateHeader(index, 'name', event.target.value)}
+                  placeholder="Header name"
+                />
+                <input
+                  className={textInputClassName()}
+                  value={header?.value ?? ''}
+                  onChange={(event) => updateHeader(index, 'value', event.target.value)}
+                  placeholder="Header value"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeHeader(index)}
+                  className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addHeader}
+              className="frameos-secondary-button h-10 rounded-xl bg-slate-100 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Add header
+            </button>
+          </div>
+        </FormField>
+      </>
+    )
+  }
+
+  return null
 }
 
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
@@ -310,7 +419,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       {addFrameMode === 'ssh' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Use SSH when the backend can directly reach the frame on your network.
+            Use SSH when the backend can directly reach the frame on your network. Set SSH keys in{' '}
+            <a className="font-semibold text-[var(--frameos-primary)] hover:underline" href={urls.settings()}>
+              global settings
+            </a>
+            .
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -367,6 +480,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderDeviceOptions()}
             </select>
           </FormField>
+          {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -430,6 +544,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderDeviceOptions()}
             </select>
           </FormField>
+          {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -505,6 +620,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderDeviceOptions()}
             </select>
           </FormField>
+          {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
           <FormField
             label={
               <span>
@@ -619,6 +735,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>
+          {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
             <input
               className={textInputClassName()}
