@@ -113,6 +113,21 @@ def test_waveshare_epd13in3b_generates_partial_refresh_hooks():
     )
 
 
+def test_waveshare_epd7in5v2_generates_partial_refresh_hooks():
+    epd7in5v2 = replace(DRIVERS["waveshare"], variant="EPD_7in5_V2")
+
+    source = write_waveshare_driver_nim({"waveshare": epd7in5v2})
+
+    assert "let supportsPartialRefresh* = true" in source
+    assert "EPD_7IN5_V2_Init_Partial()" in source
+    assert "EPD_7IN5_V2_Display_PartialBase(addr image[0])" in source
+    assert (
+        "EPD_7IN5_V2_Display_Partial(addr image[0], "
+        "xStart.uint32, yStart.uint32, xEnd.uint32, yEnd.uint32)"
+        in source
+    )
+
+
 def test_release_waveshare_modules_are_variant_specific(tmp_path: Path):
     frameos_root = tmp_path / "frameos"
     waveshare_root = frameos_root / "src" / "drivers" / "waveshare"

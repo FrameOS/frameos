@@ -145,6 +145,8 @@ export const devices: OptionGroup<Option>[] = [
   },
 ]
 
+export const partialRefreshDevices = new Set(['waveshare.EPD_7in5_V2', 'waveshare.EPD_13in3b'])
+
 const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
 export const spectraPalettes: Palette[] = [
   {

@@ -557,6 +557,18 @@ void EPD_7IN5_V2_Display(UBYTE *blackimage)
     EPD_7IN5_V2_TurnOnDisplay();
 }
 
+void EPD_7IN5_V2_Display_PartialBase(UBYTE *blackimage)
+{
+    UDOUBLE Width, Height;
+    Width =(EPD_7IN5_V2_WIDTH % 8 == 0)?(EPD_7IN5_V2_WIDTH / 8 ):(EPD_7IN5_V2_WIDTH / 8 + 1);
+    Height = EPD_7IN5_V2_HEIGHT;
+
+    EPD_SendCommand(0x10);
+    for (UDOUBLE j = 0; j < Height; j++) {
+        EPD_SendData2((UBYTE *)(blackimage+j*Width), Width);
+    }
+}
+
 void EPD_7IN5_V2_Display_Partial(UBYTE *blackimage,UDOUBLE x_start, UDOUBLE y_start, UDOUBLE x_end, UDOUBLE y_end)
 {
     UDOUBLE Width, Height;

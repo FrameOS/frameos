@@ -46,6 +46,7 @@ UBYTE EPD_7IN5_V2_Init_Partial(void);
 void EPD_7IN5_V2_Clear(void);
 void EPD_7IN5_V2_ClearBlack(void);
 void EPD_7IN5_V2_Display(UBYTE *blackimage);
+void EPD_7IN5_V2_Display_PartialBase(UBYTE *blackimage);
 void EPD_7IN5_V2_Display_Partial(UBYTE *blackimage,UDOUBLE x_start, UDOUBLE y_start, UDOUBLE x_end, UDOUBLE y_end);
 void EPD_7IN5_V2_Sleep(void);
 

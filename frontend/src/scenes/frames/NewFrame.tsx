@@ -12,6 +12,7 @@ import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_ESP32_S3,
   devices,
+  partialRefreshDevices,
   buildrootPlatforms,
   embeddedPlatforms,
   rpiOSPlatforms,
@@ -241,7 +242,7 @@ function renderNewFrameDriverConfig(
     )
   }
 
-  if (newFrame.device === 'waveshare.EPD_13in3b') {
+  if (partialRefreshDevices.has(newFrame.device ?? '')) {
     return (
       <FormField label="Partial refresh">
         <Switch

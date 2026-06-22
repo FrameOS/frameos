@@ -28,6 +28,9 @@ proc init*() =
 proc start*(self: Driver) =
   waveshareDisplay.EPD_7IN3E_Init()
 
+proc startPartial*(self: Driver) =
+  start(self)
+
 proc clear*() =
   waveshareDisplay.EPD_7IN3E_Clear(1.uint8)
 

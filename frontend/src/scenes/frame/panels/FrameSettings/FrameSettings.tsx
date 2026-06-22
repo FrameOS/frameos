@@ -19,6 +19,7 @@ import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import {
   devices,
+  partialRefreshDevices,
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
@@ -707,7 +708,7 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null}
-          {frameForm.device === 'waveshare.EPD_13in3b' ? (
+          {partialRefreshDevices.has(frameForm.device ?? '') ? (
             <Group name="device_config">
               <Field
                 name="partial"

@@ -101,6 +101,7 @@ BOOT_CONFIG_LINES_BY_VARIANT = {
 }
 
 PARTIAL_REFRESH_VARIANTS = {
+    "EPD_7in5_V2",
     "EPD_13in3b",
 }
 
@@ -327,6 +328,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
         color_warning = "\n\n# NOTE! We could not detect the correct color options. Assuming 1-bit Black.\n\n"
 
     supports_partial_refresh = variant.key in PARTIAL_REFRESH_VARIANTS
+    start_partial_code = "start(self)"
     if variant.key == "EPD_13in3b":
         render_partial_code = f"""
 proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
@@ -343,6 +345,23 @@ proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int,
   if image.len == 0:
     return
   waveshareDisplay.{variant.prefix}_Display_Partial(addr image[0], xStart.uint16, yStart.uint16, xEnd.uint16, yEnd.uint16)
+"""
+    elif variant.key == "EPD_7in5_V2":
+        start_partial_code = f"discard waveshareDisplay.{variant.prefix}_Init_Partial()"
+        render_partial_code = f"""
+proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
+  discard image1
+  discard image2
+
+proc renderImagePartialBase*(image: seq[uint8]) =
+  if image.len == 0:
+    return
+  waveshareDisplay.{variant.prefix}_Display_PartialBase(addr image[0])
+
+proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int, yEnd: int) =
+  if image.len == 0:
+    return
+  waveshareDisplay.{variant.prefix}_Display_Partial(addr image[0], xStart.uint32, yStart.uint32, xEnd.uint32, yEnd.uint32)
 """
     else:
         render_partial_code = """
@@ -400,6 +419,9 @@ proc init*() =
 
 proc start*(self: Driver) =
   {'discard ' if variant.init_returns_zero else ''}waveshareDisplay.{variant.init_function}({variant.init_args})
+
+proc startPartial*(self: Driver) =
+  {start_partial_code}
 
 proc clear*() =
   waveshareDisplay.{variant.clear_function}({variant.clear_args})

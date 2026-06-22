@@ -84,6 +84,11 @@ proc cropPackedRows(image: seq[uint8], rowWidth: int, bounds: PackedChangeBounds
       result[dest + x] = image[source + x]
     dest += outputRowWidth
 
+proc copyPackedImage(image: seq[uint8]): seq[uint8] =
+  result = newSeq[uint8](image.len)
+  for i in 0..<image.len:
+    result[i] = image[i]
+
 proc packedRegionContainsMarkedPixels(image: seq[uint8], rowWidth: int, bounds: PackedChangeBounds): bool =
   for y in bounds.yStart..<bounds.yEnd:
     let rowOffset = y * rowWidth
@@ -156,6 +161,72 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
   self.lastPackedBlackImage = blackImage
   self.lastPackedRedImage = redImage
 
+proc renderBlackFull(self: Driver, blackImage: seq[uint8], reason: string) =
+  self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "base", "reason": reason})
+  var displayImage = copyPackedImage(blackImage)
+  var started = false
+  try:
+    waveshareDriver.start(self)
+    started = true
+    waveshareDriver.renderImage(displayImage)
+  finally:
+    if started:
+      waveshareDriver.sleep()
+  self.partialRefreshReady = true
+  self.partialRefreshCount = 0
+  self.lastPackedBlackImage = blackImage
+
+proc renderBlackPartial(self: Driver, blackImage: seq[uint8], width, height: int) =
+  if not self.partialRefreshEnabled:
+    waveshareDriver.renderImage(blackImage)
+    return
+
+  if not self.partialRefreshReady or self.lastPackedBlackImage.len == 0:
+    self.renderBlackFull(blackImage, "initial")
+    return
+
+  if self.partialRefreshCount >= MAX_PARTIAL_REFRESHES_BEFORE_FULL:
+    self.renderBlackFull(blackImage, "periodic")
+    return
+
+  let rowWidth = int(ceil(width.float / 8))
+  let bounds = findPackedChangeBounds(self.lastPackedBlackImage, blackImage, rowWidth, height)
+  if not bounds.changed:
+    self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "packed-image-unchanged"})
+    self.lastPackedBlackImage = blackImage
+    return
+
+  let partialImage = cropPackedRows(blackImage, rowWidth, bounds)
+  let
+    xStart = bounds.byteXStart * 8
+    xEnd = min(bounds.byteXEnd * 8, width)
+    partialWidth = xEnd - xStart
+    partialHeight = bounds.yEnd - bounds.yStart
+
+  self.logger.log(%*{
+    "event": "driver:waveshare:partial",
+    "mode": "partial",
+    "x": xStart,
+    "y": bounds.yStart,
+    "width": partialWidth,
+    "height": partialHeight,
+    "bytes": partialImage.len,
+    "count": self.partialRefreshCount + 1,
+  })
+
+  var started = false
+  try:
+    waveshareDriver.startPartial(self)
+    started = true
+    waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
+    waveshareDriver.renderImagePartial(partialImage, xStart, bounds.yStart, xEnd, bounds.yEnd)
+  finally:
+    if started:
+      waveshareDriver.sleep()
+  self.partialRefreshReady = true
+  self.partialRefreshCount += 1
+  self.lastPackedBlackImage = blackImage
+
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   waveshareDriver.setup(frameOS)
 
@@ -226,7 +297,10 @@ proc renderBlack*(self: Driver, image: Image) =
       let bw: uint8 = levels[inputIndex] and 0x01
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
   self.logGrayBuffer("Black", image.width * image.height, gray.len * sizeof(float), levels.len, blackImage.len)
-  waveshareDriver.renderImage(blackImage)
+  if self.partialRefreshEnabled:
+    self.renderBlackPartial(blackImage, image.width, image.height)
+  else:
+    waveshareDriver.renderImage(blackImage)
 
 proc renderFourGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
@@ -352,7 +426,9 @@ proc render*(self: Driver, image: Image) =
   self.lastImageHash = currentImageHash
   self.lastRenderAt = now
   self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
-  if self.partialRefreshEnabled:
+  if self.partialRefreshEnabled and waveshareDriver.colorOption == ColorOption.Black:
+    self.renderForColor(image)
+  elif self.partialRefreshEnabled:
     var started = false
     try:
       waveshareDriver.start(self)
