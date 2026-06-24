@@ -209,6 +209,12 @@ proc init*(frameOS: DriverContext): Driver =
   try:
     tryToDisableCursorBlinking()
     screenInfo = getScreenInfo(logger)
+  except DivByZeroDefect as e:
+    screenInfo = configuredScreenInfo(frameOS)
+    logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
+        "error": "Invalid framebuffer metadata caused division by zero",
+        "exception": e.msg,
+        "fallbackScreenInfo": screenInfo})
   except Exception as e:
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
@@ -240,6 +246,8 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
         " @ " & $screenInfo.bitsPerPixel & "bpp")
     else:
       setupLog("FrameOS setup: frameBuffer: detected invalid framebuffer dimensions")
+  except DivByZeroDefect as e:
+    setupLog("FrameOS setup: frameBuffer: invalid framebuffer metadata caused division by zero: " & e.msg)
   except Exception as e:
     setupLog("FrameOS setup: frameBuffer: could not detect framebuffer dimensions: " & e.msg)
   result = setupOk()
