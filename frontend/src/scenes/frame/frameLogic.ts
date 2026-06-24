@@ -225,7 +225,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   schedule: 'Schedule',
   gpio_buttons: 'GPIO buttons',
   network: 'Network settings',
-  agent: 'Agent settings',
+  agent: 'Remote settings',
   mountpoints: 'Mountpoints',
   error_behavior: 'Global error handling',
   palette: 'Palette',

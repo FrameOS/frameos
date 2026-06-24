@@ -978,7 +978,7 @@ export function FrameSettings({
                         <p>
                           The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.
                         </p>
-                        <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
+                        <p>You can leave it blank if you only use FrameOS Remote to communicate.</p>
                       </>
                     )}
                   </div>
@@ -1072,27 +1072,27 @@ export function FrameSettings({
             {!isEmbeddedMode ? (
               <>
                 <H6 id="frame-settings-agent">
-                  Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+                  Remote (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
                 </H6>
                 <div className="pl-2 @md:pl-8 space-y-2">
                   <Group name="agent">
                     <Field
                       name="agentEnabled"
-                      label="Agent enabled"
+                      label="Remote enabled"
                       tooltip={
                         <div className="space-y-2">
                           <p>
-                            The FrameOS Agent opens a websocket connection from the frame to the backend, which is then
+                            FrameOS Remote opens a websocket connection from the frame to the backend, which is then
                             used by the backend to control the frame. This allows you to control the frame even if it's
                             behind a firewall. The backend must be publicly accessible for this to work.
                           </p>
                           <p>
-                            This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
-                            connect to the backend to await further commands.
+                            This is still beta. Enable both toggles, then save and deploy the frame. FrameOS Remote will
+                            then connect to the backend to await further commands.
                           </p>
                           <p>
-                            Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                            Agent" menu in the top.
+                            Note: after enabling FrameOS Remote, you must manually deploy it from the "..." -&gt;
+                            "Deploy Remote" menu in the top.
                           </p>
                         </div>
                       }
@@ -1106,7 +1106,7 @@ export function FrameSettings({
                           label="Allow remote control"
                           tooltip={
                             <div className="space-y-2">
-                              <p>Can the FrameOS agent actually run commands and execute updates?</p>
+                              <p>Can FrameOS Remote actually run commands and execute updates?</p>
                               <p>
                                 This is a second "are you really sure?" toggle, as this comes with risk when enabled on
                                 an unsecure connection.
@@ -1126,7 +1126,7 @@ export function FrameSettings({
                         </Field>
                         <Field
                           name="agentSharedSecret"
-                          label={<div>Agent shared secret</div>}
+                          label={<div>Remote shared secret</div>}
                           labelRight={
                             <Button
                               color="secondary"

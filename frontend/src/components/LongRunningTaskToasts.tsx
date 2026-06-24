@@ -433,7 +433,7 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
   if (log.type === 'agent') {
     return (
       <>
-        <span className={theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[AGENT]'}</span>{' '}
+        <span className={theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[REMOTE]'}</span>{' '}
         {insertBreaks(formattedLine)}
       </>
     )

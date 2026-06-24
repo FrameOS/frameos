@@ -637,7 +637,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           } else if (log.type === 'agent') {
             logLine = (
               <>
-                <span className={renderTheme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[AGENT]'}</span>{' '}
+                <span className={renderTheme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[REMOTE]'}</span>{' '}
                 {logLine}
               </>
             )

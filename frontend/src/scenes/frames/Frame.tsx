@@ -35,12 +35,12 @@ function connectedFrameTitle(enabled: boolean, runCommands: boolean, activeConne
   }
 
   if (!enabled) {
-    return 'FrameOS Agent not enabled, yet connected'
+    return 'FrameOS Remote not enabled, yet connected'
   }
   if (runCommands) {
-    return 'FrameOS Agent connected and ready to run commands'
+    return 'FrameOS Remote connected and ready to run commands'
   }
-  return 'FrameOS Agent connected, but not configured to run commands'
+  return 'FrameOS Remote connected, but not configured to run commands'
 }
 
 export function FrameConnection({ frame, title: titleOverride }: FrameConnectionProps): JSX.Element | null {
@@ -82,9 +82,7 @@ function FrameCardIndicators({ frame }: FrameProps): JSX.Element {
   const healthy = frameIsHealthy(frame)
 
   if (agentTitle) {
-    return (
-      <FrameConnection frame={frame} title={healthy ? `Frame is healthy. ${agentTitle}.` : agentTitle} />
-    )
+    return <FrameConnection frame={frame} title={healthy ? `Frame is healthy. ${agentTitle}.` : agentTitle} />
   }
 
   return (

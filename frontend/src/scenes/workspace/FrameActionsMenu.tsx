@@ -112,8 +112,8 @@ export function FrameActionsMenu({
         ...(agentConfigured
           ? [
               {
-                label: 'Restart agent',
-                title: 'Restart FrameOS agent',
+                label: 'Restart Remote',
+                title: 'Restart FrameOS Remote',
                 onClick: () => restartAgent(frame.id),
                 icon: <CommandLineIcon className="h-5 w-5" />,
               },
@@ -122,8 +122,8 @@ export function FrameActionsMenu({
         ...(agentConfigured
           ? [
               {
-                label: 'Deploy agent',
-                title: 'Deploy FrameOS agent',
+                label: 'Deploy Remote',
+                title: 'Deploy FrameOS Remote',
                 onClick: () => deployAgent(frame.id),
                 icon: <CommandLineIcon className="h-5 w-5" />,
               },

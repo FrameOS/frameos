@@ -7,7 +7,7 @@ interface FrameConnectionDotProps {
 }
 
 export function FrameConnectionDot({
-  title = 'FrameOS agent connected',
+  title = 'FrameOS Remote connected',
   size = 'md',
   className,
 }: FrameConnectionDotProps): JSX.Element {
@@ -16,7 +16,11 @@ export function FrameConnectionDot({
   return (
     <span
       title={title}
-      className={clsx('frameos-connection-dot relative inline-flex shrink-0 items-center justify-center', sizeClassName, className)}
+      className={clsx(
+        'frameos-connection-dot relative inline-flex shrink-0 items-center justify-center',
+        sizeClassName,
+        className
+      )}
     >
       <span className="frameos-connection-dot__flow" />
       <span className="frameos-connection-dot__flow frameos-connection-dot__flow--delayed" />

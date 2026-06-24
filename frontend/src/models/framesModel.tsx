@@ -532,21 +532,21 @@ export const framesModel = kea<framesModelType>([
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'agentDeploy',
-        title: recompile ? 'Recompiling and deploying FrameOS agent' : 'Deploying FrameOS agent',
-        detail: 'Agent deploy request sent',
+        title: recompile ? 'Recompiling and deploying FrameOS Remote' : 'Deploying FrameOS Remote',
+        detail: 'Remote deploy request sent',
       })
       try {
         const response = await apiFetch(`/api/frames/${id}/deploy_agent${agentTaskQuery({ recompile, transport })}`, {
           method: 'POST',
         })
         if (!response.ok) {
-          throw new Error('Failed to start agent deploy')
+          throw new Error('Failed to start remote deploy')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'agentDeploy',
-          detail: error instanceof Error ? error.message : 'Failed to deploy agent',
+          detail: error instanceof Error ? error.message : 'Failed to deploy remote',
         })
         throw error
       }
@@ -555,21 +555,21 @@ export const framesModel = kea<framesModelType>([
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'agentRestart',
-        title: 'Restarting FrameOS agent',
-        detail: 'Agent restart request sent',
+        title: 'Restarting FrameOS Remote',
+        detail: 'Remote restart request sent',
       })
       try {
         const response = await apiFetch(`/api/frames/${id}/restart_agent${agentTaskQuery({ transport })}`, {
           method: 'POST',
         })
         if (!response.ok) {
-          throw new Error('Failed to start agent restart')
+          throw new Error('Failed to start remote restart')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'agentRestart',
-          detail: error instanceof Error ? error.message : 'Failed to restart agent',
+          detail: error instanceof Error ? error.message : 'Failed to restart remote',
         })
         throw error
       }

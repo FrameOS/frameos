@@ -215,7 +215,9 @@ function parseWebhookEvent(log: LogType): Record<string, any> | null {
   }
 }
 
-function deployTaskSignal(log: LogType): { taskId: string; action: 'started' | 'completed' | 'failed'; detail: string } | null {
+function deployTaskSignal(
+  log: LogType
+): { taskId: string; action: 'started' | 'completed' | 'failed'; detail: string } | null {
   if (log.type !== 'stdout' && log.type !== 'stderr') {
     return null
   }
@@ -271,7 +273,7 @@ function agentTaskFailureDetail(log: LogType, lowerLine: string): string | null 
     lowerLine.includes('error') ||
     lowerLine.includes('not found')
   ) {
-    return log.line || 'Agent task failed'
+    return log.line || 'Remote task failed'
   }
   return null
 }
@@ -411,7 +413,9 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
                 frameId: task.frameId,
                 kind: task.kind,
                 detail:
-                  task.kind === 'agentRestart' ? 'No agent restart signal received' : 'No agent deploy signal received',
+                  task.kind === 'agentRestart'
+                    ? 'No remote restart signal received'
+                    : 'No remote deploy signal received',
               })
             }
           },
@@ -494,14 +498,14 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
           frameId: log.frame_id,
           kind: 'agentDeploy',
           status: 'success',
-          detail: 'Agent deployed and restarted',
+          detail: 'Remote deployed and restarted',
         })
       } else if (lowerLine.includes('skipping agent deployment')) {
         actions.finishTask({
           frameId: log.frame_id,
           kind: 'agentDeploy',
           status: 'success',
-          detail: 'Agent deploy skipped',
+          detail: 'Remote deploy skipped',
         })
       }
 
@@ -513,7 +517,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
           frameId: log.frame_id,
           kind: 'agentRestart',
           status: 'success',
-          detail: 'Agent restarted',
+          detail: 'Remote restarted',
         })
       }
 

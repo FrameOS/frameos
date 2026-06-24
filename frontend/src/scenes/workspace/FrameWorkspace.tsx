@@ -264,7 +264,7 @@ const frameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-device', label: 'Device' },
   { id: 'frame-settings-ssh', label: 'SSH' },
-  { id: 'frame-settings-agent', label: 'Agent' },
+  { id: 'frame-settings-agent', label: 'Remote' },
   { id: 'frame-settings-backend', label: 'Backend' },
   { id: 'frame-http-api-section', label: 'HTTP API' },
   { id: 'frame-settings-admin', label: 'Admin' },
@@ -1146,7 +1146,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             tone={healthTone}
           />
           <OverviewStatCard
-            label="Agent"
+            label="Remote"
             value={connected ? 'Online' : 'Offline'}
             detail={`${frame.active_connections ?? 0} active`}
             tone={connected ? 'good' : 'warning'}

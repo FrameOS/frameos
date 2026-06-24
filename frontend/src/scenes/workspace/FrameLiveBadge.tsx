@@ -15,7 +15,7 @@ export function FrameLiveBadge({ frame, className }: { frame: FrameType; classNa
         className
       )}
     >
-      <FrameConnectionDot size="sm" title="FrameOS agent connected" />
+      <FrameConnectionDot size="sm" title="FrameOS Remote connected" />
       Live
     </div>
   )

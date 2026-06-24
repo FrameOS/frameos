@@ -512,19 +512,19 @@ function AgentUpgradeIndicator({ notice }: { notice: AgentUpgradeNotice }): JSX.
   return (
     <ExclamationCircleIcon
       className="h-4 w-4 text-amber-500"
-      aria-label={`FrameOS agent ${agentUpgradeLabel(notice)}`}
+      aria-label={`FrameOS Remote ${agentUpgradeLabel(notice)}`}
     />
   )
 }
 
 function DeployAgentLabel({ notice }: { notice: AgentUpgradeNotice | null }): JSX.Element {
   if (!notice) {
-    return <>Deploy agent</>
+    return <>Deploy Remote</>
   }
 
   return (
     <span className="min-w-0">
-      <span>Deploy agent</span>{' '}
+      <span>Deploy Remote</span>{' '}
       <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
         <AgentUpgradeIndicator notice={notice} />
         <span>{agentUpgradeLabel(notice)}</span>
@@ -560,12 +560,11 @@ function DeployTransportToggle({
   const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(frameBootstrapLogic(bootstrapLogicProps))
   const { copyFrameBootstrapScript } = useActions(frameBootstrapLogic(bootstrapLogicProps))
   const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
-  const selectedConnectionLabel = deployWithAgent ? 'agent' : 'SSH'
+  const selectedConnectionLabel = deployWithAgent ? 'FrameOS Remote' : 'SSH'
   const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
-  const selectedConnectionUnavailableTitle =
-    'The FrameOS agent is not connected. Select SSH or wait for the agent to connect.'
+  const selectedConnectionUnavailableTitle = 'FrameOS Remote is not connected. Select SSH or wait for it to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
-  const agentUpgradeTitle = agentUpgradeNotice ? `FrameOS agent ${agentUpgradeLabel(agentUpgradeNotice)}` : undefined
+  const agentUpgradeTitle = agentUpgradeNotice ? `FrameOS Remote ${agentUpgradeLabel(agentUpgradeNotice)}` : undefined
 
   return (
     <section className="mb-4">
@@ -578,11 +577,11 @@ function DeployTransportToggle({
             title={
               <div className="space-y-1">
                 <div>
-                  SSH needs direct network access from the backend to the frame. The agent runs on the frame, and keeps
-                  a connection open to the backend.
+                  SSH needs direct network access from the backend to the frame. FrameOS Remote runs on the frame, and
+                  keeps a connection open to the backend.
                 </div>
                 <div>
-                  To use the agent, enable it under{' '}
+                  To use FrameOS Remote, enable it under{' '}
                   <Link
                     href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
                     className="frameos-link underline underline-offset-2 hover:no-underline"
@@ -614,7 +613,7 @@ function DeployTransportToggle({
             <button
               type="button"
               aria-pressed={deployWithAgent}
-              title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
+              title={agentConnected ? 'FrameOS Remote connected' : 'FrameOS Remote not connected'}
               onClick={() => onChange(true)}
               className={clsx(
                 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -622,14 +621,14 @@ function DeployTransportToggle({
               )}
             >
               {agentConnected ? (
-                <FrameConnectionDot size="sm" title="FrameOS agent connected" />
+                <FrameConnectionDot size="sm" title="FrameOS Remote connected" />
               ) : (
                 <span
                   aria-hidden="true"
                   className="h-2 w-2 shrink-0 rounded-full bg-slate-300 ring-1 ring-inset ring-slate-400/50"
                 />
               )}
-              <span>Agent</span>
+              <span>Remote</span>
             </button>
           </div>
           <DropdownMenu
@@ -655,7 +654,7 @@ function DeployTransportToggle({
                   ]
                 : []),
               {
-                label: 'Restart agent',
+                label: 'Restart Remote',
                 title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
                 disabled: selectedAgentDisconnected,
                 onClick: () => onRestartAgent(selectedTransport),
@@ -673,7 +672,7 @@ function DeployTransportToggle({
                     ...(showRecompileAgent
                       ? [
                           {
-                            label: 'Recompile and deploy agent',
+                            label: 'Recompile and deploy Remote',
                             title: selectedAgentDisconnected
                               ? selectedConnectionUnavailableTitle
                               : selectedConnectionTitle,
@@ -697,7 +696,7 @@ function FrameBootstrapHelp(): JSX.Element {
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
-      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect the agent."
+      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect FrameOS Remote."
     >
       <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS bootstrap help" />
     </Tooltip>
@@ -1094,9 +1093,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs FrameOS, starts the remote management
-          agent, and connects back to this backend. The installer supports most major Debian and Ubuntu releases,
-          including Raspberry Pi OS releases based on Debian.
+          Run this command on the device as a user with sudo access. It installs FrameOS, starts FrameOS Remote, and
+          connects back to this backend. The installer supports most major Debian and Ubuntu releases, including
+          Raspberry Pi OS releases based on Debian.
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">

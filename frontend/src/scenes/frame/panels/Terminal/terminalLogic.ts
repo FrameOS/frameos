@@ -148,7 +148,7 @@ export const terminalLogic = kea<terminalLogicType>([
       actions.initializeHistory(frame.terminal_history || [])
       actions.appendText(
         useAgentTerminal
-          ? `***connecting to ${terminalAgentTarget(frame)} via FrameOS agent***\n`
+          ? `***connecting to ${terminalAgentTarget(frame)} via FrameOS Remote***\n`
           : `***connecting to ${terminalSshTarget(frame)} via SSH***\n`
       )
       const wsPath = await projectWebSocketPath(`/ws/terminal/${frame.id}`)
