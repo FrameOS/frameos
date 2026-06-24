@@ -33,7 +33,7 @@ const TASK_LOG_SCROLL_SETTLE_FRAMES = 3
 const TASK_TOAST_EDGE_PADDING_PX = 0
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
-  if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
+  if (kind === 'deploy' || kind === 'remoteDeploy' || kind === 'remoteRestart') {
     return <RocketLaunchIcon className="h-5 w-5" />
   }
   if (kind === 'preview') {

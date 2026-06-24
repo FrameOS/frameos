@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.tasks.restart_agent import restart_agent, restart_agent_task
+from app.tasks.restart_remote import restart_remote, restart_remote_task
 
 
 class FakeRedis:
@@ -17,26 +17,26 @@ class FakeRedis:
 
 
 @pytest.mark.asyncio
-async def test_restart_agent_enqueues_transport():
+async def test_restart_remote_enqueues_transport():
     redis = FakeRedis()
 
-    await restart_agent(7, redis, transport="agent")
+    await restart_remote(7, redis, transport="agent")
 
-    assert redis.jobs == [("restart_agent", {"id": 7, "transport": "agent"})]
+    assert redis.jobs == [("restart_remote", {"id": 7, "transport": "agent"})]
 
 
 @pytest.mark.asyncio
-async def test_restart_agent_defaults_to_auto_transport():
+async def test_restart_remote_defaults_to_auto_transport():
     redis = FakeRedis()
 
-    await restart_agent(7, redis)
+    await restart_remote(7, redis)
 
-    assert redis.jobs == [("restart_agent", {"id": 7, "transport": "auto"})]
+    assert redis.jobs == [("restart_remote", {"id": 7, "transport": "auto"})]
 
 
 @pytest.mark.asyncio
-async def test_restart_agent_via_agent_schedules_delayed_restart(monkeypatch: pytest.MonkeyPatch):
-    restart_agent_module = importlib.import_module("app.tasks.restart_agent")
+async def test_restart_remote_via_agent_schedules_delayed_restart(monkeypatch: pytest.MonkeyPatch):
+    restart_remote_module = importlib.import_module("app.tasks.restart_remote")
     captured: dict[str, object] = {}
 
     async def fake_log(*_args, **_kwargs):
@@ -46,11 +46,11 @@ async def test_restart_agent_via_agent_schedules_delayed_restart(monkeypatch: py
         captured["commands"] = commands
         captured["transport"] = kwargs.get("transport")
 
-    monkeypatch.setattr(restart_agent_module, "log", fake_log)
-    monkeypatch.setattr(restart_agent_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
-    monkeypatch.setattr(restart_agent_module, "run_commands", fake_run_commands)
+    monkeypatch.setattr(restart_remote_module, "log", fake_log)
+    monkeypatch.setattr(restart_remote_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
+    monkeypatch.setattr(restart_remote_module, "run_commands", fake_run_commands)
 
-    await restart_agent_task({"db": object(), "redis": object()}, id=1, transport="agent")
+    await restart_remote_task({"db": object(), "redis": object()}, id=1, transport="agent")
 
     assert captured["transport"] == "agent"
     command = captured["commands"][0]
@@ -59,8 +59,8 @@ async def test_restart_agent_via_agent_schedules_delayed_restart(monkeypatch: py
 
 
 @pytest.mark.asyncio
-async def test_restart_agent_auto_uses_agent_when_frame_prefers_agent(monkeypatch: pytest.MonkeyPatch):
-    restart_agent_module = importlib.import_module("app.tasks.restart_agent")
+async def test_restart_remote_auto_uses_agent_when_frame_prefers_agent(monkeypatch: pytest.MonkeyPatch):
+    restart_remote_module = importlib.import_module("app.tasks.restart_remote")
     captured: dict[str, object] = {}
 
     async def fake_log(*_args, **_kwargs):
@@ -70,18 +70,18 @@ async def test_restart_agent_auto_uses_agent_when_frame_prefers_agent(monkeypatc
         captured["commands"] = commands
         captured["transport"] = kwargs.get("transport")
 
-    monkeypatch.setattr(restart_agent_module, "log", fake_log)
+    monkeypatch.setattr(restart_remote_module, "log", fake_log)
     monkeypatch.setattr(
-        restart_agent_module,
+        restart_remote_module,
         "get_fresh_frame",
         lambda _db, _id: SimpleNamespace(
             id=1,
             agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
         ),
     )
-    monkeypatch.setattr(restart_agent_module, "run_commands", fake_run_commands)
+    monkeypatch.setattr(restart_remote_module, "run_commands", fake_run_commands)
 
-    await restart_agent_task({"db": object(), "redis": object()}, id=1)
+    await restart_remote_task({"db": object(), "redis": object()}, id=1)
 
     assert captured["transport"] == "agent"
     assert "systemd-run" in captured["commands"][0]

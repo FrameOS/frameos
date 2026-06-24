@@ -16,7 +16,7 @@ import { projectApiPathFromCache } from '../utils/projectApi'
 export type AgentTaskTransport = 'auto' | 'agent' | 'ssh'
 type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
-function agentTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTransport }): string {
+function remoteTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTransport }): string {
   const query = new URLSearchParams()
   if (params.recompile) {
     query.set('recompile', '1')
@@ -295,12 +295,12 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     renameFrame: (id: number, name: string) => ({ id, name }),
-    deployAgent: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+    deployRemote: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
       transport,
     }),
-    restartAgent: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
+    restartRemote: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: number) => ({ id }),
     downloadEmbeddedFirmware: (id: number) => ({ id }),
     applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),
@@ -528,15 +528,15 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
-    deployAgent: async ({ id, recompile, transport }) => {
+    deployRemote: async ({ id, recompile, transport }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
-        kind: 'agentDeploy',
+        kind: 'remoteDeploy',
         title: recompile ? 'Recompiling and deploying FrameOS Remote' : 'Deploying FrameOS Remote',
         detail: 'Remote deploy request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/deploy_agent${agentTaskQuery({ recompile, transport })}`, {
+        const response = await apiFetch(`/api/frames/${id}/deploy_remote${remoteTaskQuery({ recompile, transport })}`, {
           method: 'POST',
         })
         if (!response.ok) {
@@ -545,21 +545,21 @@ export const framesModel = kea<framesModelType>([
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
-          kind: 'agentDeploy',
+          kind: 'remoteDeploy',
           detail: error instanceof Error ? error.message : 'Failed to deploy remote',
         })
         throw error
       }
     },
-    restartAgent: async ({ id, transport }) => {
+    restartRemote: async ({ id, transport }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
-        kind: 'agentRestart',
+        kind: 'remoteRestart',
         title: 'Restarting FrameOS Remote',
         detail: 'Remote restart request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/restart_agent${agentTaskQuery({ transport })}`, {
+        const response = await apiFetch(`/api/frames/${id}/restart_remote${remoteTaskQuery({ transport })}`, {
           method: 'POST',
         })
         if (!response.ok) {
@@ -568,7 +568,7 @@ export const framesModel = kea<framesModelType>([
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
-          kind: 'agentRestart',
+          kind: 'remoteRestart',
           detail: error instanceof Error ? error.message : 'Failed to restart remote',
         })
         throw error

@@ -1137,11 +1137,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+    deployRemote: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
       recompile: recompile || false,
       transport,
     }),
-    restartAgent: (transport: AgentTaskTransport = 'auto') => ({ transport }),
+    restartRemote: (transport: AgentTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
@@ -1586,7 +1586,7 @@ export const frameLogic = kea<frameLogicType>([
         return isAgentDeployConfigured(agent)
       },
     ],
-    agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
+    remoteDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -1605,7 +1605,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
     },
     saveAndDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1619,7 +1619,7 @@ export const frameLogic = kea<frameLogicType>([
       )
     },
     saveAndFastDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1630,7 +1630,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.deployFrame(props.frameId, true)
     },
     saveAndFullDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1652,8 +1652,8 @@ export const frameLogic = kea<frameLogicType>([
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployAgent: ({ recompile, transport }) => framesModel.actions.deployAgent(props.frameId, recompile, transport),
-    restartAgent: ({ transport }) => framesModel.actions.restartAgent(props.frameId, transport),
+    deployRemote: ({ recompile, transport }) => framesModel.actions.deployRemote(props.frameId, recompile, transport),
+    restartRemote: ({ transport }) => framesModel.actions.restartRemote(props.frameId, transport),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
     },

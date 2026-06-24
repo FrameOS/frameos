@@ -15,8 +15,8 @@ from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
 from app.tasks.restart_frame import restart_frame_task, reboot_frame_task
 from app.tasks.stop_frame import stop_frame_task
-from app.tasks.deploy_agent import deploy_agent_task
-from app.tasks.restart_agent import restart_agent_task
+from app.tasks.deploy_remote import deploy_remote_task
+from app.tasks.restart_remote import restart_remote_task
 from app.tasks.buildroot_image import buildroot_sd_image_task
 from app.tasks.embedded_firmware import embedded_firmware_task
 from app.config import config
@@ -73,8 +73,8 @@ class WorkerSettings:
         func(with_db_session(restart_frame_task),     name="restart_frame"),
         func(with_db_session(reboot_frame_task),      name="reboot_frame"),
         func(with_db_session(stop_frame_task),        name="stop_frame"),
-        func(with_db_session(deploy_agent_task),      name="deploy_agent"),
-        func(with_db_session(restart_agent_task),     name="restart_agent"),
+        func(with_db_session(deploy_remote_task),     name="deploy_remote"),
+        func(with_db_session(restart_remote_task),    name="restart_remote"),
         func(with_db_session(buildroot_sd_image_task), name="buildroot_sd_image"),
         func(with_db_session(embedded_firmware_task), name="embedded_firmware"),
     ]

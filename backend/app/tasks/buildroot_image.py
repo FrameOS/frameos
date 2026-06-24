@@ -38,7 +38,7 @@ from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
-from app.tasks.deploy_agent import AgentDeployer
+from app.tasks.deploy_remote import AgentDeployer
 from app.tasks.precompiled_agent import download_precompiled_agent_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
@@ -1132,7 +1132,7 @@ class BuildrootImageBuilder:
         return await builder.build(plan, precompiled_install_all_drivers=True)
 
     async def _build_agent_binary(self, deployer: FrameDeployer, temp_dir: str, frame: Frame) -> str:
-        await self._log("stdout", "Building FrameOS agent for Raspberry Pi Zero 2 W")
+        await self._log("stdout", "Building FrameOS Remote for Raspberry Pi Zero 2 W")
         prebuilt_target = resolve_prebuilt_target(
             FRAMEOS_BUILD_TARGET.distro,
             FRAMEOS_BUILD_TARGET.version,
@@ -1148,12 +1148,12 @@ class BuildrootImageBuilder:
                     logger=self._log,
                 )
                 action = "Using cached" if result.cache_hit else "Downloaded"
-                await self._log("stdout", f"{action} precompiled FrameOS agent release: {result.release_url}")
+                await self._log("stdout", f"{action} precompiled FrameOS Remote release: {result.release_url}")
                 return result.binary_path
             except Exception as exc:
                 await self._log(
                     "stderr",
-                    f"Could not use precompiled FrameOS agent for {prebuilt_target}: {exc}. Falling back to source build.",
+                    f"Could not use precompiled FrameOS Remote for {prebuilt_target}: {exc}. Falling back to source build.",
                 )
 
         agent_deployer = AgentDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)

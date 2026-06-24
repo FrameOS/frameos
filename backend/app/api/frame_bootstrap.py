@@ -414,7 +414,7 @@ EOF
 
 cat > "$agent_release_dir/frameos_agent.service" <<EOF
 [Unit]
-Description=FrameOS Agent (auto-reconnect, hardened)
+Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
 Wants=network-online.target
 
@@ -460,14 +460,14 @@ systemctl daemon-reload
 systemctl enable frameos.service frameos_agent.service
 if [ "$setup_status" -eq 2 ]; then
   systemctl restart frameos_agent.service
-  echo "FrameOS and the FrameOS agent are installed. Reboot this device to finish hardware setup."
+  echo "FrameOS and FrameOS Remote are installed. Reboot this device to finish hardware setup."
   exit 0
 fi
 
 systemctl restart frameos_agent.service
 systemctl restart frameos.service
 
-echo "FrameOS and the FrameOS agent are installed and started"
+echo "FrameOS and FrameOS Remote are installed and started"
 """
 
 

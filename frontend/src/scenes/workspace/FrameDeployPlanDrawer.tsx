@@ -517,7 +517,7 @@ function AgentUpgradeIndicator({ notice }: { notice: AgentUpgradeNotice }): JSX.
   )
 }
 
-function DeployAgentLabel({ notice }: { notice: AgentUpgradeNotice | null }): JSX.Element {
+function DeployRemoteLabel({ notice }: { notice: AgentUpgradeNotice | null }): JSX.Element {
   if (!notice) {
     return <>Deploy Remote</>
   }
@@ -537,22 +537,22 @@ function DeployTransportToggle({
   frameId,
   agentConnected,
   agentUpgradeNotice,
-  canDeployAgent,
+  canDeployRemote,
   canCopyBootstrapScript,
   showRecompileAgent,
-  onDeployAgent,
-  onRestartAgent,
+  onDeployRemote,
+  onRestartRemote,
   deployWithAgent,
   onChange,
 }: {
   frameId: number
   agentConnected: boolean
   agentUpgradeNotice: AgentUpgradeNotice | null
-  canDeployAgent: boolean
+  canDeployRemote: boolean
   canCopyBootstrapScript: boolean
   showRecompileAgent: boolean
-  onDeployAgent: (recompile?: boolean, transport?: AgentTaskTransport) => void
-  onRestartAgent: (transport?: AgentTaskTransport) => void
+  onDeployRemote: (recompile?: boolean, transport?: AgentTaskTransport) => void
+  onRestartRemote: (transport?: AgentTaskTransport) => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
@@ -657,17 +657,17 @@ function DeployTransportToggle({
                 label: 'Restart Remote',
                 title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
                 disabled: selectedAgentDisconnected,
-                onClick: () => onRestartAgent(selectedTransport),
+                onClick: () => onRestartRemote(selectedTransport),
               },
-              ...(canDeployAgent
+              ...(canDeployRemote
                 ? [
                     {
-                      label: <DeployAgentLabel notice={agentUpgradeNotice} />,
+                      label: <DeployRemoteLabel notice={agentUpgradeNotice} />,
                       title: selectedAgentDisconnected
                         ? selectedConnectionUnavailableTitle
                         : agentUpgradeTitle ?? selectedConnectionTitle,
                       disabled: selectedAgentDisconnected,
-                      onClick: () => onDeployAgent(false, selectedTransport),
+                      onClick: () => onDeployRemote(false, selectedTransport),
                     },
                     ...(showRecompileAgent
                       ? [
@@ -677,7 +677,7 @@ function DeployTransportToggle({
                               ? selectedConnectionUnavailableTitle
                               : selectedConnectionTitle,
                             disabled: selectedAgentDisconnected,
-                            onClick: () => onDeployAgent(true, selectedTransport),
+                            onClick: () => onDeployRemote(true, selectedTransport),
                           },
                         ]
                       : []),
@@ -1240,7 +1240,7 @@ function EmbeddedFirmwareSection({
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
-    agentDeployConnected,
+    remoteDeployConnected,
     deployChangeDetails,
     deployPlansError,
     deployPlansLoading,
@@ -1254,9 +1254,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
     hideDeployPlanModal,
-    deployAgent,
+    deployRemote,
     loadDeployPlans,
-    restartAgent,
+    restartRemote,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setDeployDrawerView,
@@ -1284,7 +1284,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     ? 'embedded'
     : deployDrawerView
   const closeOnlyDrawerView = directSdCardFirstInstall || (isEmbeddedFrame && !embeddedFastDeployReady)
-  const canDeployAgent = true
+  const canDeployRemote = true
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
   const showRecompileAgent = import.meta.env?.DEV === true
@@ -1382,13 +1382,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {deployTransportToggleVisible && !firstInstall ? (
                 <DeployTransportToggle
                   frameId={frame.id}
-                  agentConnected={agentDeployConnected}
+                  agentConnected={remoteDeployConnected}
                   agentUpgradeNotice={agentUpgradeNotice}
-                  canDeployAgent={canDeployAgent}
+                  canDeployRemote={canDeployRemote}
                   canCopyBootstrapScript={canCopyBootstrapScript}
                   showRecompileAgent={showRecompileAgent}
-                  onDeployAgent={deployAgent}
-                  onRestartAgent={restartAgent}
+                  onDeployRemote={deployRemote}
+                  onRestartRemote={restartRemote}
                   deployWithAgent={deployWithAgent}
                   onChange={setDeployWithAgent}
                 />

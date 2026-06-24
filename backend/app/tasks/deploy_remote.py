@@ -86,13 +86,13 @@ def resolve_agent_task_transport(frame: Frame, transport: RemoteTransport) -> Re
     return "ssh"
 
 
-async def deploy_agent(
+async def deploy_remote(
     id: int, redis: Redis, *, recompile: bool = False, transport: RemoteTransport = "auto"
 ) -> None:  # noqa: N802
-    await redis.enqueue_job("deploy_agent", id=id, recompile=recompile, transport=transport)
+    await redis.enqueue_job("deploy_remote", id=id, recompile=recompile, transport=transport)
 
 
-async def deploy_agent_task(
+async def deploy_remote_task(
     ctx: dict[str, Any], id: int, recompile: bool = False, transport: RemoteTransport = "auto"
 ):  # noqa: N802
     db: Session = ctx["db"]
@@ -131,14 +131,14 @@ class AgentDeployer(FrameDeployer):
         self.staged_binary_sha256: str | None = None
 
     async def run(self) -> None:
-        """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
+        """Main orchestration coroutine (used by global ``deploy_remote_task``)."""
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 self.temp_dir = temp_dir
 
                 await self.log(
                     "stdout",
-                    f"Deploying agent {self.frame.name} with build id {self.build_id} via {self.remote_transport}",
+                    f"Deploying FrameOS Remote for {self.frame.name} with build id {self.build_id} via {self.remote_transport}",
                 )
 
                 if self.remote_transport == "agent":
@@ -151,7 +151,7 @@ class AgentDeployer(FrameDeployer):
 
                 # 2. Build & deploy the agent (if needed)
                 if self._can_deploy_agent():
-                    await self.log("stdout", "- Deploying agent")
+                    await self.log("stdout", "- Deploying FrameOS Remote")
 
                     if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
                         raise Exception(f"Unsupported target distro '{distro}'")
@@ -197,12 +197,12 @@ class AgentDeployer(FrameDeployer):
 
                     await self.log(
                         "stdout",
-                        f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
+                        f"Remote deployment completed for {self.frame.name} (build id: {self.build_id})",
                     )
                 else:
                     await self.log(
                         "stdout",
-                        f"- Skipping agent deployment for {self.frame.name} (no agent connection configured)"
+                        f"- Skipping remote deployment for {self.frame.name} (no remote connection configured)"
                     )
                     # If the frame has no agent connection configured, disable service
                     await self.disable_service("frameos_agent")
@@ -301,7 +301,7 @@ class AgentDeployer(FrameDeployer):
             prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
             if prebuilt_target:
                 try:
-                    await self.log("stdout", f"- Trying precompiled FrameOS release for agent on {prebuilt_target}")
+                    await self.log("stdout", f"- Trying precompiled FrameOS Remote release on {prebuilt_target}")
                     build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
                     result = await download_precompiled_agent_release(
                         target=prebuilt_target,
@@ -311,22 +311,22 @@ class AgentDeployer(FrameDeployer):
                         logger=self.log,
                     )
                     action = "Using cached" if result.cache_hit else "Downloaded"
-                    await self.log("stdout", f"- {action} precompiled FrameOS release for agent: {result.release_url}")
+                    await self.log("stdout", f"- {action} precompiled FrameOS Remote release: {result.release_url}")
                     await self._stage_agent_binary(result.binary_path)
                     return
                 except Exception as exc:
                     await self.log(
                         "stderr",
-                        f"- Could not use precompiled agent for {prebuilt_target}: {exc}. Falling back to source build.",
+                        f"- Could not use precompiled FrameOS Remote for {prebuilt_target}: {exc}. Falling back to source build.",
                     )
             else:
                 await self.log(
                     "stdout",
-                    f"- No precompiled agent target for {distro} {distro_version} on {arch}; falling back to source build",
+                    f"- No precompiled FrameOS Remote target for {distro} {distro_version} on {arch}; falling back to source build",
                 )
         else:
             reason = "requested from local development" if self.force_source else f"{PRECOMPILED_AGENT_ENV}=source"
-            await self.log("stdout", f"- {reason}; building agent from source")
+            await self.log("stdout", f"- {reason}; building FrameOS Remote from source")
 
         await self._deploy_agent_from_source(arch, distro=distro, distro_version=distro_version)
 
@@ -464,7 +464,7 @@ class AgentDeployer(FrameDeployer):
             if await self.exec_command(gcc_check, raise_on_error=False, log_command=False, log_output=False) != 0:
                 raise RuntimeError(
                     "gcc is still unavailable after installing build-essential; "
-                    "install a C compiler on the device before source-building the FrameOS agent"
+                    "install a C compiler on the device before source-building FrameOS Remote"
                 )
             if (
                 await self.exec_command(
@@ -477,13 +477,13 @@ class AgentDeployer(FrameDeployer):
             ):
                 raise RuntimeError(
                     "OpenSSL headers are still unavailable after installing libssl-dev; "
-                    "install libssl-dev on the device before source-building the FrameOS agent"
+                    "install libssl-dev on the device before source-building FrameOS Remote"
                 )
             return
 
         if await self.exec_command(gcc_check, raise_on_error=False, log_command=False, log_output=False) != 0:
             raise RuntimeError(
-                f"Cannot source-build the FrameOS agent on {distro}: gcc is not installed and automatic "
+                f"Cannot source-build FrameOS Remote on {distro}: gcc is not installed and automatic "
                 "package installation is only supported on Debian, Ubuntu, and Raspberry Pi OS"
             )
 
@@ -514,7 +514,7 @@ class AgentDeployer(FrameDeployer):
             package_list = ", ".join(packages)
             raise RuntimeError(
                 f"Could not install agent source-build dependencies ({package_list}). "
-                "Install them on the device or deploy a precompiled agent release instead."
+                "Install them on the device or deploy a precompiled FrameOS Remote release instead."
             )
 
     async def _remount_root_rw_if_needed(self) -> bool:
@@ -587,7 +587,7 @@ class AgentDeployer(FrameDeployer):
 
     async def _setup_agent_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
-        with open("../frameos/agent/frameos_agent.service", "r", encoding="utf-8") as fh:
+        with open(REPO_ROOT / "frameos" / "agent" / "frameos_agent.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
         # Ship service file with the release
@@ -638,7 +638,7 @@ class AgentDeployer(FrameDeployer):
 
     async def _verify_staged_release(self) -> None:
         release_dir = shlex.quote(self._release_dir())
-        await self.log("stdout", "- Verifying staged agent release before switching")
+        await self.log("stdout", "- Verifying staged FrameOS Remote release before switching")
         await self.exec_command(
             "set -eu; "
             f"release={release_dir}; "
@@ -655,7 +655,7 @@ class AgentDeployer(FrameDeployer):
 
     async def _switch_current_release(self) -> None:
         release_dir = shlex.quote(self._release_dir())
-        await self.log("stdout", "- Switching current agent release")
+        await self.log("stdout", "- Switching current FrameOS Remote release")
         await self.exec_command(
             "set -eu; "
             "cd /srv/frameos/agent; "
@@ -668,7 +668,7 @@ class AgentDeployer(FrameDeployer):
         )
 
     async def _restart_agent_service_via_agent(self) -> None:
-        await self.log("stdout", "- Scheduling FrameOS agent restart through the current agent")
+        await self.log("stdout", "- Scheduling FrameOS Remote restart through the current connection")
         await self.exec_command(
             delayed_agent_restart_command(self.build_id),
             timeout=30,
@@ -697,7 +697,7 @@ class AgentDeployer(FrameDeployer):
         quoted_previous_process = shlex.quote(previous_process_signature or "")
         deadline = asyncio.get_event_loop().time() + 90
         last_error: Exception | None = None
-        await self.log("stdout", "- Waiting for restarted agent to report the new release")
+        await self.log("stdout", "- Waiting for restarted FrameOS Remote to report the new release")
 
         while asyncio.get_event_loop().time() < deadline:
             output: list[str] = []
@@ -717,14 +717,14 @@ class AgentDeployer(FrameDeployer):
                     timeout=15,
                 )
                 if "restarted-agent-release-ok" in "\n".join(output):
-                    await self.log("stdout", "- Restarted agent is running the staged release")
+                    await self.log("stdout", "- Restarted FrameOS Remote is running the staged release")
                     return
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
 
             await asyncio.sleep(3)
 
-        raise RuntimeError(f"Restarted agent did not report the staged release: {last_error}")
+        raise RuntimeError(f"Restarted FrameOS Remote did not report the staged release: {last_error}")
 
     # --------------- MISC ------------------------------------------------ #
 

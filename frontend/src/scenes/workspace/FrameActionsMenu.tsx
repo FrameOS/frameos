@@ -38,10 +38,10 @@ export function FrameActionsMenu({
   const {
     cancelDeploy,
     deleteFrame,
-    deployAgent,
+    deployRemote,
     rebootFrame,
     renderFrame,
-    restartAgent,
+    restartRemote,
     restartFrame,
     setFrameArchived,
     stopFrame,
@@ -114,7 +114,7 @@ export function FrameActionsMenu({
               {
                 label: 'Restart Remote',
                 title: 'Restart FrameOS Remote',
-                onClick: () => restartAgent(frame.id),
+                onClick: () => restartRemote(frame.id),
                 icon: <CommandLineIcon className="h-5 w-5" />,
               },
             ]
@@ -124,7 +124,7 @@ export function FrameActionsMenu({
               {
                 label: 'Deploy Remote',
                 title: 'Deploy FrameOS Remote',
-                onClick: () => deployAgent(frame.id),
+                onClick: () => deployRemote(frame.id),
                 icon: <CommandLineIcon className="h-5 w-5" />,
               },
             ]

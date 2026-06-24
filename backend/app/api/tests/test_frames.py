@@ -119,7 +119,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
         'install -m 0644 "$agent_release_dir/frameos_agent.service" '
         '/etc/systemd/system/frameos_agent.service'
     ) in script
-    assert 'FrameOS and the FrameOS agent are installed and started' in script
+    assert 'FrameOS and FrameOS Remote are installed and started' in script
     assert 'compile_frameos_agent' not in script
     assert 'sh compile' not in script
     syntax_check = subprocess.run(["sh", "-n"], input=script, text=True, capture_output=True)
@@ -186,7 +186,7 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
+async def test_api_frame_remote_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
     import app.tasks as tasks_package
 
     frame = await new_frame(
@@ -200,17 +200,17 @@ async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db,
 
     captured: list[tuple[str, int, dict]] = []
 
-    async def fake_deploy_agent(id, _redis, **kwargs):
+    async def fake_deploy_remote(id, _redis, **kwargs):
         captured.append(("deploy", id, kwargs))
 
-    async def fake_restart_agent(id, _redis, **kwargs):
+    async def fake_restart_remote(id, _redis, **kwargs):
         captured.append(("restart", id, kwargs))
 
-    monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
-    monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
+    monkeypatch.setattr(tasks_package, "deploy_remote", fake_deploy_remote)
+    monkeypatch.setattr(tasks_package, "restart_remote", fake_restart_remote)
 
-    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_agent?recompile=1')
-    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_agent')
+    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_remote?recompile=1')
+    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_remote')
 
     assert deploy_response.status_code == 200
     assert restart_response.status_code == 200

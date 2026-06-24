@@ -159,12 +159,12 @@ async def test_real_buildroot_sd_image_generation_from_precompiled_release(
     if metadata.get("precompiledSdImage"):
         assert "Customizing full precompiled Buildroot SD image" in logs
         assert "Building FrameOS binary for Raspberry Pi Zero 2 W" not in logs
-        assert "Building FrameOS agent for Raspberry Pi Zero 2 W" not in logs
+        assert "Building FrameOS Remote for Raspberry Pi Zero 2 W" not in logs
     else:
         assert "Building FrameOS binary for Raspberry Pi Zero 2 W" in logs
-        assert "Building FrameOS agent for Raspberry Pi Zero 2 W" in logs
+        assert "Building FrameOS Remote for Raspberry Pi Zero 2 W" in logs
         assert "Using precompiled FrameOS release" in logs
-        assert "precompiled FrameOS agent release" in logs
+        assert "precompiled FrameOS Remote release" in logs
     assert "Buildroot SD image ready" in logs
     assert "Falling back to source build" not in logs
     assert "Creating build archive" not in logs

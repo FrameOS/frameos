@@ -150,12 +150,12 @@ from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
 
-AGENT_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
+REMOTE_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
 
 
-def _agent_task_transport(transport: str) -> RemoteTransport:
-    if transport not in AGENT_TASK_TRANSPORTS:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid agent task transport")
+def _remote_task_transport(transport: str) -> RemoteTransport:
+    if transport not in REMOTE_TASK_TRANSPORTS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid remote task transport")
     return cast(RemoteTransport, transport)
 
 FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS = 20
@@ -2402,8 +2402,8 @@ async def api_frame_reboot_event(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.post("/frames/{id:int}/deploy_agent")
-async def api_frame_deploy_agent_event(
+@api_project.post("/frames/{id:int}/deploy_remote")
+async def api_frame_deploy_remote_event(
     id: int,
     recompile: bool = False,
     transport: str = "auto",
@@ -2411,29 +2411,29 @@ async def api_frame_deploy_agent_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
-    agent_transport = _agent_task_transport(transport)
+    remote_transport = _remote_task_transport(transport)
     try:
-        from app.tasks import deploy_agent
+        from app.tasks import deploy_remote
 
-        await deploy_agent(frame.id, redis, recompile=recompile, transport=agent_transport)
+        await deploy_remote(frame.id, redis, recompile=recompile, transport=remote_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.post("/frames/{id:int}/restart_agent")
-async def api_frame_restart_agent_event(
+@api_project.post("/frames/{id:int}/restart_remote")
+async def api_frame_restart_remote_event(
     id: int,
     transport: str = "auto",
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
-    agent_transport = _agent_task_transport(transport)
+    remote_transport = _remote_task_transport(transport)
     try:
-        from app.tasks import restart_agent
+        from app.tasks import restart_remote
 
-        await restart_agent(frame.id, redis, transport=agent_transport)
+        await restart_remote(frame.id, redis, transport=remote_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

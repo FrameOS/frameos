@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
-from app.tasks.deploy_agent import (
+from app.tasks.deploy_remote import (
     AgentDeployer,
     delayed_agent_restart_command,
-    deploy_agent,
-    deploy_agent_task,
+    deploy_remote,
+    deploy_remote_task,
     resolve_agent_task_transport,
 )
 from app.tasks.precompiled_agent import PrecompiledAgentResult
@@ -157,21 +157,21 @@ class RunFlowAgentDeployer(AgentDeployer):
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_enqueues_transport():
+async def test_deploy_remote_enqueues_transport():
     redis = FakeRedis()
 
-    await deploy_agent(7, redis, recompile=True, transport="agent")
+    await deploy_remote(7, redis, recompile=True, transport="agent")
 
-    assert redis.jobs == [("deploy_agent", {"id": 7, "recompile": True, "transport": "agent"})]
+    assert redis.jobs == [("deploy_remote", {"id": 7, "recompile": True, "transport": "agent"})]
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_defaults_to_auto_transport():
+async def test_deploy_remote_defaults_to_auto_transport():
     redis = FakeRedis()
 
-    await deploy_agent(7, redis)
+    await deploy_remote(7, redis)
 
-    assert redis.jobs == [("deploy_agent", {"id": 7, "recompile": False, "transport": "auto"})]
+    assert redis.jobs == [("deploy_remote", {"id": 7, "recompile": False, "transport": "auto"})]
 
 
 def test_resolve_agent_task_transport_uses_frame_agent_preference():
@@ -197,7 +197,7 @@ def test_delayed_agent_restart_command_uses_immediate_transient_service():
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_prefers_precompiled_binary(
+async def test_deploy_remote_prefers_precompiled_binary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -210,14 +210,14 @@ async def test_deploy_agent_prefers_precompiled_binary(
             archive_path=str(tmp_path / "archive.tar.gz"),
         )
 
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "find_nim_v2",
         lambda: (_ for _ in ()).throw(RuntimeError("Nim should not be needed")),
     )
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "download_precompiled_agent_release",
         fake_download_precompiled_agent_release,
     )
@@ -227,20 +227,20 @@ async def test_deploy_agent_prefers_precompiled_binary(
 
     assert deployer.staged_binary == str(tmp_path / "frameos_agent")
     assert deployer.source_arch is None
-    assert any("precompiled FrameOS release for agent" in message for _level, message in deployer.logs)
+    assert any("precompiled FrameOS Remote release" in message for _level, message in deployer.logs)
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_can_force_source_build(
+async def test_deploy_remote_can_force_source_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     async def fake_download_precompiled_agent_release(**kwargs):
         raise AssertionError("Precompiled agent should not be used when recompile is requested")
 
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "download_precompiled_agent_release",
         fake_download_precompiled_agent_release,
     )
@@ -257,10 +257,10 @@ async def test_deploy_agent_can_force_source_build(
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
+async def test_deploy_remote_task_does_not_require_nim_before_running_deployer(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
     captured: dict[str, Any] = {}
 
     async def fake_run(self):
@@ -269,12 +269,12 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
         captured["transport"] = self.remote_transport
 
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "find_nim_v2",
         lambda: (_ for _ in ()).throw(RuntimeError("Nim should not be needed")),
     )
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "get_fresh_frame",
         lambda _db, _id: SimpleNamespace(
             id=1,
@@ -283,23 +283,23 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
     )
     monkeypatch.setattr(AgentDeployer, "run", fake_run)
 
-    await deploy_agent_task({"db": object(), "redis": object()}, id=1, recompile=True)
+    await deploy_remote_task({"db": object(), "redis": object()}, id=1, recompile=True)
 
     assert captured == {"ran": True, "force_source": True, "transport": "agent"}
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_task_keeps_explicit_ssh_transport(
+async def test_deploy_remote_task_keeps_explicit_ssh_transport(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
     captured: dict[str, object] = {}
 
     async def fake_run(self):
         captured["transport"] = self.remote_transport
 
     monkeypatch.setattr(
-        deploy_agent_module,
+        deploy_remote_module,
         "get_fresh_frame",
         lambda _db, _id: SimpleNamespace(
             id=1,
@@ -308,13 +308,13 @@ async def test_deploy_agent_task_keeps_explicit_ssh_transport(
     )
     monkeypatch.setattr(AgentDeployer, "run", fake_run)
 
-    await deploy_agent_task({"db": object(), "redis": object()}, id=1, transport="ssh")
+    await deploy_remote_task({"db": object(), "redis": object()}, id=1, transport="ssh")
 
     assert captured == {"transport": "ssh"}
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_ssh_restart_waits_for_staged_release(tmp_path: Path):
+async def test_deploy_remote_ssh_restart_waits_for_staged_release(tmp_path: Path):
     deployer = RunFlowAgentDeployer(tmp_path, transport="ssh")
 
     await deployer.run()
@@ -328,7 +328,7 @@ async def test_deploy_agent_ssh_restart_waits_for_staged_release(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_agent_transport_restarts_and_waits_for_staged_release(tmp_path: Path):
+async def test_deploy_remote_agent_transport_restarts_and_waits_for_staged_release(tmp_path: Path):
     deployer = RunFlowAgentDeployer(tmp_path, transport="agent")
 
     await deployer.run()
@@ -342,7 +342,7 @@ async def test_deploy_agent_agent_transport_restarts_and_waits_for_staged_releas
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_remounts_readonly_root_around_service_install(tmp_path: Path):
+async def test_deploy_remote_remounts_readonly_root_around_service_install(tmp_path: Path):
     deployer = RunFlowAgentDeployer(tmp_path, transport="ssh", root_readonly=True)
 
     await deployer.run()
@@ -354,7 +354,7 @@ async def test_deploy_agent_remounts_readonly_root_around_service_install(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_leaves_writable_root_alone(tmp_path: Path):
+async def test_deploy_remote_leaves_writable_root_alone(tmp_path: Path):
     deployer = RunFlowAgentDeployer(tmp_path, transport="ssh")
 
     await deployer.run()
@@ -398,8 +398,8 @@ async def test_setup_agent_service_uses_system_command_for_agent_transport(
     async def fake_upload_file(_db, _redis, _frame, remote_path, _data, **_kwargs):
         uploads.append(remote_path)
 
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
-    monkeypatch.setattr(deploy_agent_module, "upload_file", fake_upload_file)
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
+    monkeypatch.setattr(deploy_remote_module, "upload_file", fake_upload_file)
 
     deployer = FakeAgentDeployer(tmp_path)
     deployer.remote_transport = "agent"
@@ -429,8 +429,8 @@ async def test_wait_for_agent_release_requires_new_running_process(
     async def no_sleep(_seconds: float) -> None:
         return None
 
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
-    monkeypatch.setattr(deploy_agent_module.asyncio, "sleep", no_sleep)
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
+    monkeypatch.setattr(deploy_remote_module.asyncio, "sleep", no_sleep)
 
     deployer = FakeAgentDeployer(tmp_path)
     deployer.build_id = "newrelease"
@@ -461,11 +461,11 @@ async def test_wait_for_agent_release_requires_new_running_process(
 
     assert attempts == 2
     assert "123:456" in deployer.commands[0]
-    assert any("Restarted agent is running the staged release" in message for _level, message in deployer.logs)
+    assert any("Restarted FrameOS Remote is running the staged release" in message for _level, message in deployer.logs)
 
 
 @pytest.mark.asyncio
-async def test_deploy_agent_falls_back_to_source_for_unsupported_target(tmp_path: Path):
+async def test_deploy_remote_falls_back_to_source_for_unsupported_target(tmp_path: Path):
     deployer = FakeAgentDeployer(tmp_path)
 
     await deployer._deploy_agent(arch="mips64", distro="debian", distro_version="trixie")
@@ -493,9 +493,9 @@ async def test_agent_source_build_cross_compiles_before_remote_build(
             binary_path.write_bytes(b"agent")
             return str(binary_path)
 
-    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
-    monkeypatch.setattr(deploy_agent_module, "CrossCompiler", FakeCrossCompiler)
-    monkeypatch.setattr(deploy_agent_module, "get_build_host_config", lambda _db, _project_id=None: None)
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
+    monkeypatch.setattr(deploy_remote_module, "CrossCompiler", FakeCrossCompiler)
+    monkeypatch.setattr(deploy_remote_module, "get_build_host_config", lambda _db, _project_id=None: None)
 
     deployer = FakeAgentDeployer(tmp_path)
     success = await deployer._try_cross_compile_agent(
@@ -591,5 +591,5 @@ async def test_agent_source_build_requires_gcc_on_buildroot(tmp_path: Path):
     deployer = FakeAgentDeployer(tmp_path)
     deployer.command_statuses = [("command -v gcc", 1)]
 
-    with pytest.raises(RuntimeError, match="Cannot source-build the FrameOS agent on buildroot"):
+    with pytest.raises(RuntimeError, match="Cannot source-build FrameOS Remote on buildroot"):
         await deployer._ensure_agent_source_build_dependencies("buildroot")

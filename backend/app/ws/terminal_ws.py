@@ -141,7 +141,7 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
     stream_key = STREAM_KEY.format(id=terminal_id)
     resp_key = RESP_KEY.format(id=terminal_id)
 
-    await websocket.send_text("*** connected via FrameOS agent PTY ***\n")
+    await websocket.send_text("*** connected via FrameOS Remote PTY ***\n")
     await _queue_agent_terminal_command(
         redis,
         frame,
