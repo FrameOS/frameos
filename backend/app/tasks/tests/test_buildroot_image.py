@@ -662,6 +662,18 @@ async def test_buildroot_run_rejects_source_sd_image_without_build_environment(m
         await builder.run()
 
 
+def test_buildroot_no_build_environment_message_mentions_hassio_container(monkeypatch):
+    monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
+
+    message = buildroot_image_module.buildroot_sd_image_no_build_environment_message(
+        "precompiled Buildroot SD image mode with no compiled scenes"
+    )
+
+    assert "Home Assistant add-on" in message
+    assert "existing add-on container" in message
+    assert "Docker" not in message
+
+
 @pytest.mark.asyncio
 async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeypatch):
     frame_data = {

@@ -130,6 +130,7 @@ from app.tasks.embedded_firmware import (
     start_embedded_firmware,
 )
 from app.tasks.buildroot_image import (
+    buildroot_sd_image_no_build_environment_message,
     buildroot_sd_image_config_fingerprint,
     can_use_precompiled_buildroot_sd_image,
     clear_buildroot_sd_image,
@@ -2539,8 +2540,9 @@ async def api_frame_buildroot_sd_image(
     build_environment_provider = selected_build_environment_provider(settings)
     if build_environment_provider == "none" and not can_use_precompiled_buildroot_sd_image(frame):
         _bad_request(
-            "Buildroot SD card image generation without Docker, build host, or Modal sandboxes requires "
-            "precompiled Buildroot SD image mode with no compiled scenes."
+            buildroot_sd_image_no_build_environment_message(
+                "precompiled Buildroot SD image mode with no compiled scenes"
+            )
         )
     if build_environment_requires_executor_config(build_environment_provider) and get_build_executor_config(db, frame.project_id) is None:
         _bad_request(f"Selected build environment '{build_environment_provider}' is not configured")

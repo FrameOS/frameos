@@ -1415,6 +1415,26 @@ async def test_api_frame_buildroot_sd_image_rejects_source_build_when_build_envi
 
 
 @pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_hassio_rejects_source_build_with_container_message(
+    async_client, db, redis, monkeypatch
+):
+    monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'static'}
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 400
+    detail = response.json()['detail']
+    assert 'Home Assistant add-on' in detail
+    assert 'existing add-on container' in detail
+    assert 'Docker' not in detail
+
+
+@pytest.mark.asyncio
 async def test_api_frame_buildroot_sd_image_status_allows_precompiled_when_base_manifest_is_unavailable(
     async_client, db, redis, monkeypatch
 ):

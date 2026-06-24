@@ -684,6 +684,19 @@ def can_use_precompiled_buildroot_sd_image(frame: Frame) -> bool:
     return frame_compilation_mode(frame) == COMPILATION_MODE_PRECOMPILED and frame_compiled_scene_count(frame) == 0
 
 
+def buildroot_sd_image_no_build_environment_message(requirement: str) -> str:
+    if os.environ.get("HASSIO_RUN_MODE"):
+        return (
+            "Home Assistant add-on Buildroot SD image generation runs inside the existing add-on container "
+            f"and requires {requirement}. Configure a build host or Modal sandbox for builds that need "
+            "compilation or composed-image fallback."
+        )
+    return (
+        "Buildroot SD image generation without Docker, build host, or Modal sandboxes requires "
+        f"{requirement}."
+    )
+
+
 async def start_buildroot_sd_image(
     db: Session,
     redis: Redis,
@@ -814,8 +827,9 @@ class BuildrootImageBuilder:
         self.build_executor_config = self._selected_build_executor()
         if provider == "none" and not self._can_use_precompiled_sd_image():
             raise RuntimeError(
-                "Buildroot SD image generation without Docker, build host, or Modal sandboxes requires "
-                "precompiled Buildroot SD image mode with no compiled scenes."
+                buildroot_sd_image_no_build_environment_message(
+                    "precompiled Buildroot SD image mode with no compiled scenes"
+                )
             )
         ensure_build_executor_configured(provider, self.build_executor_config)
 
@@ -911,8 +925,9 @@ class BuildrootImageBuilder:
                 )
             if precompiled_sd_image is None and self.build_environment_provider == "none":
                 raise RuntimeError(
-                    "Buildroot SD image generation without Docker, build host, or Modal sandboxes requires "
-                    "an available full precompiled Buildroot SD image release."
+                    buildroot_sd_image_no_build_environment_message(
+                        "an available full precompiled Buildroot SD image release"
+                    )
                 )
             if precompiled_sd_image is None:
                 base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -32,6 +33,8 @@ def selected_build_environment_provider(settings: dict | None) -> BuildEnvironme
     build_host = settings.get("buildHost")
     if isinstance(build_host, dict) and build_host.get("enabled"):
         return "buildHost"
+    if os.environ.get("HASSIO_RUN_MODE"):
+        return "none"
     return "docker"
 
 
@@ -40,7 +43,7 @@ def get_selected_build_environment_provider(
     project_id: int | None = None,
 ) -> BuildEnvironmentProvider:
     if db is None or project_id is None:
-        return "docker"
+        return selected_build_environment_provider(None)
     return selected_build_environment_provider(get_settings_dict(db, project_id=project_id))
 
 
