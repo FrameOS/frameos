@@ -794,7 +794,7 @@ export function FrameSettings({
               </Field>
               <Field
                 name="compilationMode"
-                label="Compilation mode"
+                label="Installation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
@@ -906,17 +906,16 @@ export function FrameSettings({
             <Group name="rpios">
               <Field
                 name="compilationMode"
-                label="Compilation mode"
+                label="Installation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers are shared libraries, or if compiled scenes are bundled in a
-                      single shared library, or linked directly into the FrameOS executable.
+                      Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS release
+                      for the current version when the frame only uses interpreted scenes.
                     </p>
                     <p>
-                      Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it
-                      will fall back to a shared scenes library when compiled scenes exist, or a single executable
-                      otherwise.
+                      If source builds are needed, choose whether to install one self-contained executable, separate
+                      driver and scene libraries, or a combined scenes library next to the FrameOS binary.
                     </p>
                   </div>
                 }

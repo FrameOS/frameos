@@ -331,7 +331,7 @@ function DeployBuildOptionsSection({
 
   return (
     <section className="space-y-2">
-      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>FrameOS compilation</DrawerHeading>
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Installation mode</DrawerHeading>
       <label className="block space-y-1">
         <select
           className={selectClassName}
@@ -950,7 +950,7 @@ function BuildrootSdCardSection({
             </select>
           </label>
           <label className="block space-y-1">
-            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Compilation mode</span>
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
             <select
               className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
               value={compilationMode}

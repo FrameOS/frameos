@@ -1,3 +1,5 @@
+import versions from '../../../versions.json'
+
 export type FrameCompilationMode = 'static' | 'shared' | 'shared-scenes' | 'precompiled'
 export type FrameCompilationModeOptionValue = '' | FrameCompilationMode
 
@@ -7,11 +9,11 @@ export interface FrameBuildOption<T extends string = string> {
 }
 
 export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeOptionValue>[] = [
-  { value: '', label: 'Use binaries if possible, compile from source if not' },
-  { value: 'precompiled', label: 'Use precompiled binaries if exist for target OS' },
-  { value: 'static', label: 'Compile a single binary' },
-  { value: 'shared', label: 'Compile drivers and scenes separately' },
-  { value: 'shared-scenes', label: 'Compile drivers separately, scenes as one library' },
+  { value: '', label: 'Prefer binaries, build from source if needed' },
+  { value: 'precompiled', label: `Install binaries (version ${versions.frameos.split('+')[0]})` },
+  { value: 'static', label: 'Build from source - single binary' },
+  { value: 'shared', label: 'Build from source - drivers and scenes separately' },
+  { value: 'shared-scenes', label: 'Build from source - drivers separately, scenes combined' },
 ]
 
 export function normalizeFrameCompilationMode(value: unknown): FrameCompilationMode {
