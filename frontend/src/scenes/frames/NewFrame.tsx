@@ -500,7 +500,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ) : addFrameMode === 'script' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Use this when SSH is not available. FrameOS will generate a command that installs FrameOS, starts the agent,
+            Use this when SSH is not available. You'll get a command that installs FrameOS, starts the agent,
             and connects back to this backend.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
