@@ -154,7 +154,7 @@ export interface PartialRefreshDefaults {
 
 export const partialRefreshDefaultsByDevice: Record<string, PartialRefreshDefaults> = {
   'waveshare.EPD_7in5_V2': {
-    maxAreaPercent: 20,
+    maxAreaPercent: 15,
     maxRefreshesBeforeFull: 30,
   },
   'waveshare.EPD_13in3b': {

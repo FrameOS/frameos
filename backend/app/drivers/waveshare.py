@@ -110,7 +110,7 @@ PARTIAL_REFRESH_MAX_BEFORE_FULL = {
 }
 
 PARTIAL_REFRESH_MAX_AREA_PERCENT = {
-    "EPD_7in5_V2": 20.0,
+    "EPD_7in5_V2": 15.0,
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:

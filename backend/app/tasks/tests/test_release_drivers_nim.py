@@ -123,7 +123,7 @@ def test_waveshare_epd7in5v2_generates_partial_refresh_hooks():
 
     assert "let supportsPartialRefresh* = true" in source
     assert "let maxPartialRefreshesBeforeFull* = 30" in source
-    assert "let maxPartialRefreshAreaPercent* = 20.0" in source
+    assert "let maxPartialRefreshAreaPercent* = 15.0" in source
     assert "EPD_7IN5_V2_Init_Partial()" in source
     assert "EPD_7IN5_V2_Display_PartialBase(addr image[0])" in source
     assert (

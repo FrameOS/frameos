@@ -142,6 +142,18 @@ proc partialAreaPercent(partialWidth, partialHeight, totalWidth, totalHeight: in
     return 100.0
   (partialWidth.float * partialHeight.float * 100.0) / (totalWidth.float * totalHeight.float)
 
+proc padPartialBounds(bounds: PackedChangeBounds, rowWidth, height: int): PackedChangeBounds =
+  if not bounds.changed:
+    return bounds
+
+  PackedChangeBounds(
+    changed: true,
+    byteXStart: max(bounds.byteXStart - 1, 0),
+    byteXEnd: min(bounds.byteXEnd + 1, rowWidth),
+    yStart: max(bounds.yStart - 1, 0),
+    yEnd: min(bounds.yEnd + 1, height),
+  )
+
 proc applyPackedRows(base: seq[uint8], rowWidth: int, bounds: PackedChangeBounds, patch: seq[uint8]): seq[uint8] =
   result = copyPackedImage(base)
   let
@@ -209,12 +221,13 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
     return
 
   let rowWidth = int(ceil(width.float / 8))
-  let bounds = findPackedChangeBounds(self.lastPackedBlackImage, blackImage, rowWidth, height)
-  if not bounds.changed:
+  let rawBounds = findPackedChangeBounds(self.lastPackedBlackImage, blackImage, rowWidth, height)
+  if not rawBounds.changed:
     self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "packed-image-unchanged"})
     self.lastPackedBlackImage = blackImage
     self.lastPackedRedImage = redImage
     return
+  let bounds = padPartialBounds(rawBounds, rowWidth, height)
 
   if packedRegionContainsMarkedPixels(redImage, rowWidth, bounds):
     self.renderBlackWhiteRedFull(blackImage, redImage, "red-in-partial-region")
@@ -293,11 +306,12 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[C
     return
 
   let rowWidth = int(ceil(width.float / 8))
-  let bounds = findSourceImageChangeBounds(self.lastBlackSourceImage, sourceImage, width, height)
-  if not bounds.changed:
+  let rawBounds = findSourceImageChangeBounds(self.lastBlackSourceImage, sourceImage, width, height)
+  if not rawBounds.changed:
     self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "source-image-unchanged"})
     self.lastBlackSourceImage = copyColorImageData(sourceImage)
     return
+  let bounds = padPartialBounds(rawBounds, rowWidth, height)
 
   let partialImage = cropPackedRows(blackImage, rowWidth, bounds)
   let
