@@ -58,6 +58,9 @@ suite "config helper loaders":
   test "loadDeviceConfig trims and filters upload headers":
     let cfg = loadDeviceConfig(%*{
       "vcom": -1.5,
+      "partial": true,
+      "partialMaxAreaPercent": 12.5,
+      "partialMaxRefreshesBeforeFull": 9,
       "uploadUrl": "http://upload.local",
       "uploadHeaders": [
         {"name": " Authorization ", "value": "Bearer abc"},
@@ -67,10 +70,14 @@ suite "config helper loaders":
     })
 
     check cfg.vcom == -1.5
+    check cfg.partial == true
+    check cfg.partialMaxAreaPercent == 12.5
+    check cfg.partialMaxRefreshesBeforeFull == 9
     check cfg.httpUploadUrl == "http://upload.local"
     check cfg.httpUploadHeaders.len == 1
     check cfg.httpUploadHeaders[0].name == "Authorization"
     check cfg.httpUploadHeaders[0].value == "Bearer abc"
+    check loadDeviceConfig(%*{}).partial == false
 
   test "loadNetwork keeps hotspot disabled when network checks are disabled":
     let disabled = loadNetwork(%*{"networkCheck": false, "wifiHotspot": "enabled"})

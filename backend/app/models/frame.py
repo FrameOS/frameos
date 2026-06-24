@@ -23,6 +23,46 @@ DEFAULT_TIMEZONE_UPDATE_URL = "https://tz.frameos.net/tzdata.json.gz"
 DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 
+def _config_bool(value: Any) -> bool:
+    return value is True or str(value).lower() == 'true'
+
+
+def _optional_config_float(cfg: dict, key: str) -> dict:
+    value = cfg.get(key)
+    if value in (None, ""):
+        return {}
+    try:
+        return {key: float(value)}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _optional_config_int(cfg: dict, key: str) -> dict:
+    value = cfg.get(key)
+    if value in (None, ""):
+        return {}
+    try:
+        return {key: int(value)}
+    except (TypeError, ValueError):
+        return {}
+
+
+def serialize_device_config(cfg: Optional[dict]) -> dict:
+    cfg = dict(cfg or {}) if isinstance(cfg, dict) else {}
+    return {
+        **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
+        "partial": _config_bool(cfg.get('partial', False)),
+        **_optional_config_float(cfg, "partialMaxAreaPercent"),
+        **_optional_config_int(cfg, "partialMaxRefreshesBeforeFull"),
+        **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
+        **({"uploadHeaders": [
+            {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}
+            for h in cfg.get('uploadHeaders', [])
+            if isinstance(h, dict) and str(h.get('name', '')).strip()
+        ]} if cfg.get('uploadHeaders') else {}),
+    }
+
+
 def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
     if not value:
         return None
@@ -553,15 +593,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "width": frame.width or (fallback_dimensions[0] if fallback_dimensions else 0),
         "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
-        "deviceConfig": (lambda cfg: {
-            **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
-            **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
-            **({"uploadHeaders": [
-                {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}
-                for h in cfg.get('uploadHeaders', [])
-                if isinstance(h, dict) and str(h.get('name', '')).strip()
-            ]} if cfg.get('uploadHeaders') else {}),
-        })(frame.device_config or {}),
+        "deviceConfig": serialize_device_config(frame.device_config),
         "metricsInterval": frame.metrics_interval or 60.0,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,

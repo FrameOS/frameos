@@ -11,6 +11,9 @@ let width* = waveshareDisplay.EPD_7IN3E_WIDTH
 let height* = waveshareDisplay.EPD_7IN3E_HEIGHT
 
 let color_option* = ColorOption.SpectraSixColor
+let supportsPartialRefresh* = false
+let maxPartialRefreshesBeforeFull* = 5
+let maxPartialRefreshAreaPercent* = 100.0
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   discard frameOS
@@ -27,6 +30,9 @@ proc init*() =
 proc start*(self: Driver) =
   waveshareDisplay.EPD_7IN3E_Init()
 
+proc startPartial*(self: Driver) =
+  start(self)
+
 proc clear*() =
   waveshareDisplay.EPD_7IN3E_Clear(1.uint8)
 
@@ -38,3 +44,17 @@ proc renderImage*(image: seq[uint8]) =
 
 proc renderImageBlackWhiteRed*(image1: seq[uint8], image2: seq[uint8]) =
   discard
+
+proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
+  discard image1
+  discard image2
+
+proc renderImagePartialBase*(image: seq[uint8]) =
+  discard image
+
+proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int, yEnd: int) =
+  discard image
+  discard xStart
+  discard yStart
+  discard xEnd
+  discard yEnd

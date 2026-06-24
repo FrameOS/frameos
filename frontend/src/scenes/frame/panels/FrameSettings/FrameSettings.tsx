@@ -17,8 +17,11 @@ import {
 import { frameCompilationModeOptions, frameCrossCompilationOptions } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
+import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
 import {
   devices,
+  partialRefreshDefaultsByDevice,
+  partialRefreshDevices,
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
@@ -707,6 +710,18 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null}
+          {partialRefreshDevices.has(frameForm.device ?? '') ? (
+            <Field name="device_config">
+              {({ value, onChange }) => (
+                <PartialRefreshSettingsFields
+                  value={value as FrameType['device_config']}
+                  onChange={onChange}
+                  variant="settings"
+                  panelDefaults={partialRefreshDefaultsByDevice[frameForm.device ?? '']}
+                />
+              )}
+            </Field>
+          ) : null}
           {frameForm.device === 'http.upload' ? (
             <div className="">
               <Group name="device_config">
@@ -977,7 +992,9 @@ export function FrameSettings({
                       </>
                     ) : (
                       <>
-                        <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
+                        <p>
+                          The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.
+                        </p>
                         <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
                       </>
                     )}
@@ -1638,7 +1655,11 @@ export function FrameSettings({
                           <Field name="domain" label="Domain">
                             <TextInput name="domain" placeholder="optional" />
                           </Field>
-                          <Field name="options" label="Options" tooltip="Additional comma-separated mount.cifs options.">
+                          <Field
+                            name="options"
+                            label="Options"
+                            tooltip="Additional comma-separated mount.cifs options."
+                          >
                             <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
                           </Field>
                         </div>

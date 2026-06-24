@@ -94,19 +94,21 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     script = script_response.text
     assert 'frameos_agent' in script
     assert 'frameos.service' in script
+    assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
     assert 'Conflicts=getty@tty1.service' in script
     assert 'TTYPath=/dev/tty1' in script
     assert 'StandardInput=tty-force' in script
     assert 'TTYReset=yes' in script
     assert (
-        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service'
+        "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 "
+        "/bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | "
+        "/bin/grep -xq -e active -e activating -e reloading && exit 0; "
+        "/bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
         in script
     )
-    assert (
-        'ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service'
-        in script
-    )
+    assert '--on-active=3 /bin/systemctl reset-failed getty@tty1.service' not in script
+    assert '--on-active=4 /bin/systemctl start getty@tty1.service' not in script
     assert 'python3 -c' not in script
     assert 'TTYVHangup=yes' not in script
     assert 'TTYVTDisallocate=yes' not in script
@@ -1156,6 +1158,24 @@ async def test_api_frame_new(async_client):
     assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['client_ca']
     assert data['frame']['https_proxy']['server_cert_not_valid_after'] is not None
     assert data['frame']['https_proxy']['client_ca_cert_not_valid_after'] is not None
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_preserves_device_config(async_client):
+    payload = {
+        "name": "PartialFrame",
+        "frame_host": "myhost",
+        "server_host": "myserver",
+        "device": "waveshare.EPD_13in3b",
+        "device_config": {"partial": True},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['device'] == 'waveshare.EPD_13in3b'
+    assert frame['device_config']['partial'] is True
 
 
 @pytest.mark.asyncio

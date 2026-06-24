@@ -109,17 +109,16 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         service = self._installed_frameos_service()
         self.assertIn("After=network.target getty@tty1.service", service)
         self.assertIn("Conflicts=getty@tty1.service", service)
+        self.assertIn("RestartSec=5", service)
         self.assertIn("TTYPath=/dev/tty1", service)
         self.assertIn("StandardInput=tty-force", service)
         self.assertIn("TTYReset=yes", service)
         self.assertIn(
-            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service",
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'",
             service,
         )
-        self.assertIn(
-            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service",
-            service,
-        )
+        self.assertNotIn("--on-active=3 /bin/systemctl reset-failed getty@tty1.service", service)
+        self.assertNotIn("--on-active=4 /bin/systemctl start getty@tty1.service", service)
         self.assertNotIn("python3 -c", service)
         self.assertNotIn("TTYVHangup=yes", service)
         self.assertNotIn("TTYVTDisallocate=yes", service)

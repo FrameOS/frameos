@@ -7,6 +7,7 @@ User=%I
 WorkingDirectory=/srv/frameos/current
 ExecStart=/srv/frameos/current/frameos
 Restart=always
+RestartSec=5
 Type=notify
 TimeoutStartSec=300
 # Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes

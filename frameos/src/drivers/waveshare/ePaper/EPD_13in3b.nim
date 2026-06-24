@@ -46,6 +46,8 @@ proc EPD_13IN3B_Display*(blackimage: ptr UBYTE; ryimage: ptr UBYTE) {.
 proc EPD_13IN3B_Display_Base*(blackimage: ptr UBYTE; ryimage: ptr UBYTE) {.
     importc: "EPD_13IN3B_Display_Base".}
 proc EPD_13IN3B_Display_Base_White*() {.importc: "EPD_13IN3B_Display_Base_White".}
+proc EPD_13IN3B_Display_PartialBase*(blackimage: ptr UBYTE) {.
+    importc: "EPD_13IN3B_Display_PartialBase".}
 proc EPD_13IN3B_Display_Partial*(Image: ptr UBYTE; Xstart: UWORD; Ystart: UWORD;
                                 Xend: UWORD; Yend: UWORD) {.
     importc: "EPD_13IN3B_Display_Partial".}

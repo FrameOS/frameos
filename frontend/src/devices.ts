@@ -145,6 +145,24 @@ export const devices: OptionGroup<Option>[] = [
   },
 ]
 
+export const partialRefreshDevices = new Set(['waveshare.EPD_7in5_V2', 'waveshare.EPD_13in3b'])
+
+export interface PartialRefreshDefaults {
+  maxAreaPercent: number
+  maxRefreshesBeforeFull: number
+}
+
+export const partialRefreshDefaultsByDevice: Record<string, PartialRefreshDefaults> = {
+  'waveshare.EPD_7in5_V2': {
+    maxAreaPercent: 15,
+    maxRefreshesBeforeFull: 30,
+  },
+  'waveshare.EPD_13in3b': {
+    maxAreaPercent: 100,
+    maxRefreshesBeforeFull: 5,
+  },
+}
+
 const colorNames = ['Black', 'White', 'Yellow', 'Red', 'Blue', 'Green']
 export const spectraPalettes: Palette[] = [
   {
@@ -212,9 +230,7 @@ export const withCustomPalette: Record<string, Palette> = {
 
 export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
 
-export const buildrootPlatforms: Option[] = [
-  { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
-]
+export const buildrootPlatforms: Option[] = [{ value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' }]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
 

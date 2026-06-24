@@ -120,31 +120,61 @@ void DEV_Delay_ms(UDOUBLE xms)
     lguSleep(xms/1000.0);
 }
 
+static int DEV_File_Contains(const char *path, const char *needle)
+{
+	FILE *fp;
+	char buffer[256];
+	size_t bytes_read;
+
+	fp = fopen(path, "r");
+	if (fp == NULL) {
+		return 0;
+	}
+	bytes_read = fread(buffer, 1, sizeof(buffer) - 1, fp);
+	fclose(fp);
+	if (bytes_read <= 0) {
+		return 0;
+	}
+	buffer[bytes_read] = '\0';
+	return strstr(buffer, needle) != NULL;
+}
+
 static int DEV_Equipment_Testing(void)
 {
 	FILE *fp;
 	char issue_str[64];
-
-	fp = fopen("/etc/issue", "r");
-	if (fp == NULL) {
-		Debug("Unable to open /etc/issue");
-		return -1;
-	}
-	if (fread(issue_str, 1, sizeof(issue_str), fp) <= 0) {
-		Debug("Unable to read from /etc/issue");
-		return -1;
-	}
-	issue_str[sizeof(issue_str)-1] = '\0';
-	fclose(fp);
+	size_t issue_bytes;
 
 	printf("Current environment: ");
-	char systems[][9] = {"Raspbian", "Debian"};
+	if (DEV_File_Contains("/proc/device-tree/model", "Raspberry Pi")) {
+		printf("Raspberry Pi\n");
+		return 0;
+	}
+
+	issue_str[0] = '\0';
+	fp = fopen("/etc/issue", "r");
+	if (fp != NULL) {
+		issue_bytes = fread(issue_str, 1, sizeof(issue_str) - 1, fp);
+		fclose(fp);
+		if (issue_bytes > 0) {
+			issue_str[issue_bytes] = '\0';
+		}
+	} else {
+		Debug("Unable to open /etc/issue");
+	}
+
+	const char *systems[] = {"Raspbian", "Debian", "FrameOS", "Buildroot"};
 	int detected = 0;
-	for(int i=0; i<2; i++) {
+	for(int i=0; i<4; i++) {
 		if (strstr(issue_str, systems[i]) != NULL) {
 			printf("%s\n", systems[i]);
 			detected = 1;
 		}
+	}
+	if (!detected && (DEV_File_Contains("/etc/os-release", "ID=buildroot") ||
+			DEV_File_Contains("/etc/os-release", "NAME=Buildroot"))) {
+		printf("Buildroot\n");
+		detected = 1;
 	}
 	if (!detected) {
 		printf("not recognized\n");
@@ -256,7 +286,10 @@ UBYTE DEV_Module_Init(void)
         return -1;
     }
 
-    if(fgets(buffer, sizeof(buffer), fp) != NULL)
+    int is_pi5 = fgets(buffer, sizeof(buffer), fp) != NULL;
+    pclose(fp);
+
+    if(is_pi5)
     {
         GPIO_Handle = lgGpiochipOpen(4);
         if (GPIO_Handle < 0)

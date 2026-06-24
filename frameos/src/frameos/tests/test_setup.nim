@@ -103,6 +103,7 @@ block test_frameos_service_contents_uses_detected_user:
   doAssert service.contains("User=frame-user")
   doAssert service.contains("WorkingDirectory=/srv/frameos/current")
   doAssert service.contains("ExecStart=/srv/frameos/current/frameos")
+  doAssert service.contains("RestartSec=5")
   doAssert not service.contains("StandardOutput=journal+console")
   doAssert not service.contains("StandardError=journal+console")
 
@@ -121,9 +122,9 @@ block test_frameos_service_contents_claims_tty_for_framebuffer:
   doAssert service.contains("StandardInput=tty-force")
   doAssert service.contains("TTYReset=yes")
   doAssert service.contains(
-    "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 /bin/systemctl reset-failed getty@tty1.service")
-  doAssert service.contains(
-    "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 /bin/systemctl start getty@tty1.service")
+    "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'")
+  doAssert not service.contains("--on-active=3 /bin/systemctl reset-failed getty@tty1.service")
+  doAssert not service.contains("--on-active=4 /bin/systemctl start getty@tty1.service")
   doAssert not service.contains("python3 -c")
   doAssert not service.contains("TTYVHangup=yes")
   doAssert not service.contains("TTYVTDisallocate=yes")

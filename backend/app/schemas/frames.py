@@ -126,6 +126,7 @@ class FrameCreateRequest(BaseModel):
     server_host: str
     interval: Optional[float] = None
     device: Optional[str] = None
+    device_config: Optional[Dict[str, Any]] = None
     ssh_pass: Optional[str] = None
     ssh_keys: Optional[List[str]] = None
     platform: Optional[str] = None

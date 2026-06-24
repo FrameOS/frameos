@@ -7,6 +7,7 @@ import apps/data/qr/app as data_qrApp
 import frameos/apps
 import frameos/channels
 import frameos/config
+import frameos/driver_render_hint
 import frameos/logger
 import frameos/metrics
 import frameos/types
@@ -24,6 +25,7 @@ const FAST_SCENE_CUTOFF_SECONDS = 0.5
 const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
 const SCENE_INIT_ERROR_REFRESH_SECONDS = 60.0
 const SCENE_INIT_ERROR_STATE_KEY = "__frameosSceneInitError"
+const DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS = 60
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -241,6 +243,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
         clearNode = true)
       try:
+        let nextRenderSeconds = if nextSleep >= 0:
+            nextSleep
+          else:
+            max(interval - durationToSeconds(getMonoTime() - timer), 0.0)
+        setNextRenderSeconds(nextRenderSeconds)
         # TODO: render the driver part in another thread
         drivers.render(lastRotatedImage)
         let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
@@ -253,6 +260,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             "message": "Driver render finished suspiciously fast; check Inky driver logs for errors."})
       except Exception as e:
         self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+      finally:
+        clearNextRenderSeconds()
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
@@ -300,10 +309,19 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
                       else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
       self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
+      var nextDriverIdleTurnOffAt =
+        if self.frameConfig.device.startsWith("waveshare."):
+          some(getMonoTime() + initDuration(seconds = DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS))
+        else:
+          none(MonoTime)
       var remainingSleepMs = sleepDuration
       while remainingSleepMs > 0:
         if self.triggerRenderNext:
           break
+        let now = getMonoTime()
+        if nextDriverIdleTurnOffAt.isSome and now >= nextDriverIdleTurnOffAt.get():
+          drivers.turnOff()
+          nextDriverIdleTurnOffAt = some(now + initDuration(seconds = DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS))
         let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
         await sleepAsync(nextSleepMs)
         remainingSleepMs -= nextSleepMs

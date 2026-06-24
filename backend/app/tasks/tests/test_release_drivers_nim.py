@@ -29,6 +29,7 @@ def test_release_driver_specs_include_base_drivers_and_waveshare_variants():
     assert drivers["waveshare_EPD_7in3e"].variant == "EPD_7in3e"
     assert drivers["waveshare_EPD_7in3e"].import_path == "waveshare/waveshare_EPD_7in3e"
     assert drivers["waveshare_EPD_7in3e"].setup_import_path == "waveshare/waveshare_EPD_7in3e"
+    assert drivers["waveshare_EPD_7in3e"].can_turn_on_off is True
     assert (
         driver_library_filename(drivers["waveshare_EPD_7in3e"])
         == "waveshare_EPD_7in3e.so"
@@ -96,6 +97,40 @@ def test_release_waveshare_variant_setup_lives_in_generated_driver():
     assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in epd10_source
     assert 'runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup())' in epd13_source
     assert 'setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])' in epd13_source
+
+
+def test_waveshare_epd13in3b_generates_partial_refresh_hooks():
+    epd13in3b = replace(DRIVERS["waveshare"], variant="EPD_13in3b")
+
+    source = write_waveshare_driver_nim({"waveshare": epd13in3b})
+
+    assert "let supportsPartialRefresh* = true" in source
+    assert "let maxPartialRefreshesBeforeFull* = 5" in source
+    assert "let maxPartialRefreshAreaPercent* = 100.0" in source
+    assert "EPD_13IN3B_Display_Base(addr image1[0], addr image2[0])" in source
+    assert "EPD_13IN3B_Display_PartialBase(addr image[0])" in source
+    assert (
+        "EPD_13IN3B_Display_Partial(addr image[0], "
+        "xStart.uint16, yStart.uint16, xEnd.uint16, yEnd.uint16)"
+        in source
+    )
+
+
+def test_waveshare_epd7in5v2_generates_partial_refresh_hooks():
+    epd7in5v2 = replace(DRIVERS["waveshare"], variant="EPD_7in5_V2")
+
+    source = write_waveshare_driver_nim({"waveshare": epd7in5v2})
+
+    assert "let supportsPartialRefresh* = true" in source
+    assert "let maxPartialRefreshesBeforeFull* = 30" in source
+    assert "let maxPartialRefreshAreaPercent* = 15.0" in source
+    assert "EPD_7IN5_V2_Init_Partial()" in source
+    assert "EPD_7IN5_V2_Display_PartialBase(addr image[0])" in source
+    assert (
+        "EPD_7IN5_V2_Display_Partial(addr image[0], "
+        "xStart.uint32, yStart.uint32, xEnd.uint32, yEnd.uint32)"
+        in source
+    )
 
 
 def test_release_waveshare_modules_are_variant_specific(tmp_path: Path):

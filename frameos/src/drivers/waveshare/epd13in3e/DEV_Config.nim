@@ -102,19 +102,32 @@ proc DEV_GPIO_Mode*(pin: UWORD; mode: UWORD) =
 proc DEV_Delay_ms*(xms: UDOUBLE) =
   lguSleep(xms.float / 1000.0)
 
+proc fileContains(path: string, needle: string): bool =
+  try:
+    readFile(path).contains(needle)
+  except CatchableError:
+    false
+
 proc devEquipmentTesting(): cint =
+  stdout.write("Current environment: ")
+  if fileContains("/proc/device-tree/model", "Raspberry Pi"):
+    echo "Raspberry Pi"
+    return 0
+
   let issue =
     try:
       readFile("/etc/issue")
     except CatchableError:
-      echo "Unable to open /etc/issue"
-      return -1
+      ""
 
-  stdout.write("Current environment: ")
-  for systemName in ["Raspbian", "Debian"]:
+  for systemName in ["Raspbian", "Debian", "FrameOS", "Buildroot"]:
     if issue.contains(systemName):
       echo systemName
       return 0
+
+  if fileContains("/etc/os-release", "ID=buildroot") or fileContains("/etc/os-release", "NAME=Buildroot"):
+    echo "Buildroot"
+    return 0
 
   echo "not recognized"
   echo "Built for Raspberry Pi, but unable to detect environment."

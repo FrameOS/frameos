@@ -44,6 +44,7 @@ void EPD_13IN3B_Clear_Red(void);
 void EPD_13IN3B_Display(const UBYTE *blackimage, const UBYTE *ryimage);
 void EPD_13IN3B_Display_Base(const UBYTE *blackimage, const UBYTE *ryimage);
 void EPD_13IN3B_Display_Base_White(void);
+void EPD_13IN3B_Display_PartialBase(const UBYTE *blackimage);
 void EPD_13IN3B_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, UWORD Xend, UWORD Yend);
 void EPD_13IN3B_Sleep(void);
 

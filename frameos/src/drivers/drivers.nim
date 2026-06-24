@@ -11,12 +11,18 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   let sourceDeviceConfig = sourceConfig.deviceConfig
   var deviceConfig = driverContext.DeviceConfig(
     vcom: 0.0,
+    partial: false,
+    partialMaxAreaPercent: 0.0,
+    partialMaxRefreshesBeforeFull: 0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
     pins: driverContext.PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
   if not sourceDeviceConfig.isNil:
     deviceConfig.vcom = sourceDeviceConfig.vcom
+    deviceConfig.partial = sourceDeviceConfig.partial
+    deviceConfig.partialMaxAreaPercent = sourceDeviceConfig.partialMaxAreaPercent
+    deviceConfig.partialMaxRefreshesBeforeFull = sourceDeviceConfig.partialMaxRefreshesBeforeFull
     deviceConfig.httpUploadUrl = sourceDeviceConfig.httpUploadUrl
     if not sourceDeviceConfig.pins.isNil:
       deviceConfig.pins = driverContext.PinOverrides(

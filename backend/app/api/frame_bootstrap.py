@@ -174,10 +174,11 @@ def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
             "TTYPath=/dev/tty1\n"
             "StandardInput=tty-force\n"
             "TTYReset=yes\n"
-            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=3 "
-            "/bin/systemctl reset-failed getty@tty1.service\n"
-            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=4 "
-            "/bin/systemctl start getty@tty1.service"
+            "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 "
+            "/bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | "
+            "/bin/grep -xq -e active -e activating -e reloading && exit 0; "
+            "/bin/systemctl reset-failed getty@tty1.service; "
+            "/bin/systemctl start getty@tty1.service'"
         )
     return f"""#!/bin/sh
 set -eu
@@ -394,6 +395,7 @@ User=$agent_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
+RestartSec=5
 Type=notify
 TimeoutStartSec=300
 # Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes

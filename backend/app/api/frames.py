@@ -3026,6 +3026,8 @@ async def api_frame_new(
             data.interval,
             project_id=project_id,
         )
+        if data.device_config is not None:
+            frame.device_config = dict(data.device_config)
 
         if data.ssh_keys is not None:
             frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))
