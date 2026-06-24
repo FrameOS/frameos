@@ -37,11 +37,7 @@ import {
   type SummaryItem,
 } from '../frame/frameLogic'
 import { buildAgentUpgradeNotice, frameosGitHubReleaseUrl, type AgentUpgradeNotice } from '../frame/frameDeployUtils'
-import {
-  frameCompilationModeOptions,
-  frameCrossCompilationOptions,
-  normalizeFrameCrossCompilation,
-} from '../../utils/frameBuildOptions'
+import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
@@ -317,13 +313,14 @@ function DeployBuildOptionsSection({
     ...(frame.buildroot ?? {}),
     ...(frameForm.buildroot ?? {}),
   }
-  const crossCompilation = normalizeFrameCrossCompilation(rpios.crossCompilation)
   const compilationMode = String((isBuildroot ? buildroot.compilationMode : rpios.compilationMode) ?? '')
   const selectClassName =
     'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 
   const updateRpios = (field: keyof NonNullable<FrameType['rpios']>, value: string): void => {
-    setFrameFormValues({ rpios: { ...rpios, [field]: value } })
+    const nextRpios = { ...rpios, [field]: value }
+    delete nextRpios.crossCompilation
+    setFrameFormValues({ rpios: nextRpios })
     touchFrameFormField(`rpios.${field}`)
   }
 
@@ -350,25 +347,6 @@ function DeployBuildOptionsSection({
               {option.label}
             </option>
           ))}
-        </select>
-      </label>
-      <label className="block space-y-1">
-        <span className="frame-tool-heading text-sm font-semibold">Build strategy</span>
-        <select
-          className={selectClassName}
-          value={isBuildroot ? 'buildroot' : crossCompilation}
-          disabled={isBuildroot}
-          onChange={(event) => updateRpios('crossCompilation', event.target.value)}
-        >
-          {isBuildroot ? (
-            <option value="buildroot">Build the configured Buildroot target</option>
-          ) : (
-            frameCrossCompilationOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))
-          )}
         </select>
       </label>
     </section>

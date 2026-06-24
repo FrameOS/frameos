@@ -618,7 +618,7 @@ export function Settings() {
                 </H6>
                 <Box className="p-3 space-y-3">
                   <p className="text-sm leading-loose">
-                    To compile FrameOS from source and to build SD card images, we need access to a Linux shell where we can run commands through Docker.
+                    To compile FrameOS from source, we need access to a Linux shell where we can run commands through Docker.
                     There are a few options for that.
                   </p>
                   <Group name="buildEnvironment">
@@ -708,7 +708,7 @@ export function Settings() {
                       <div className="space-y-2">
                         <p className="text-sm leading-loose">
                           FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
-                          compilation containers directly, avoiding Docker-in-Docker for supported targets.
+                          compilation containers directly.
                         </p>
                         <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
                           <TextInput placeholder="ak-..." />

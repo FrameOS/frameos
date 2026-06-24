@@ -41,7 +41,7 @@ import {
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
-import { normalizeFrameCompilationMode, normalizeFrameCrossCompilation } from '../../utils/frameBuildOptions'
+import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
 
@@ -555,12 +555,11 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
 
 function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
+  const { platform: _platform, compilationMode, crossCompilation: _crossCompilation, ...rest } = source
 
   return {
     ...rest,
     compilationMode: normalizeFrameCompilationMode(compilationMode),
-    crossCompilation: normalizeFrameCrossCompilation(crossCompilation),
   }
 }
 
@@ -983,10 +982,13 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
         }
       : frame.buildroot
   const rpios = frame.rpios
-    ? {
-        ...frame.rpios,
-        compilationMode: frame.rpios.compilationMode ?? '',
-      }
+    ? (() => {
+        const { crossCompilation: _crossCompilation, ...rpiosConfig } = frame.rpios
+        return {
+          ...rpiosConfig,
+          compilationMode: frame.rpios.compilationMode ?? '',
+        }
+      })()
     : frame.rpios
 
   return {

@@ -482,34 +482,19 @@ class FrameDeployWorkflow:
         compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
         compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
         buildroot_precompiled_requested = is_buildroot and compilation_mode == COMPILATION_MODE_PRECOMPILED
-        cross_compilation_setting = (
-            "auto"
-            if buildroot_precompiled_requested
-            else "always"
-            if is_buildroot
-            else (compile_settings.get("crossCompilation") or "auto").lower()
-        )
-        if cross_compilation_setting not in {"auto", "always", "never"}:
-            cross_compilation_setting = "auto"
+        cross_compilation_setting = "always" if is_buildroot and not buildroot_precompiled_requested else "global"
 
         if build_environment_provider == "none" and cross_compilation_setting == "always":
-            if is_buildroot:
-                raise RuntimeError(
-                    "Server-side compilation is disabled in global settings. Buildroot source deploys require Docker, "
-                    "a build host, or Modal sandboxes because Buildroot targets cannot compile on device."
-                )
             raise RuntimeError(
-                "Server-side compilation is disabled in global settings. Choose Docker, build host, or Modal "
-                "sandboxes as the build environment, or set this frame to always compile on device."
+                "Server-side compilation is disabled in global settings. Buildroot source deploys require Docker, "
+                "a build host, or Modal sandboxes because Buildroot targets cannot compile on device."
             )
 
-        allow_cross_compile = cross_compilation_setting != "never" and build_environment_provider != "none"
+        allow_cross_compile = build_environment_provider != "none"
         force_cross_compile = (
             is_buildroot and not buildroot_precompiled_requested
-        ) or cross_compilation_setting == "always"
-        allow_on_device_fallback = (
-            False if is_buildroot else build_environment_provider == "none" or cross_compilation_setting == "never"
         )
+        allow_on_device_fallback = False if is_buildroot else build_environment_provider == "none"
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,

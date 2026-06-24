@@ -14,7 +14,7 @@ import {
   frameLogic,
   normalizeFrameErrorBehavior,
 } from '../../frameLogic'
-import { frameCompilationModeOptions, frameCrossCompilationOptions } from '../../../../utils/frameBuildOptions'
+import { frameCompilationModeOptions } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
@@ -904,22 +904,6 @@ export function FrameSettings({
           </Field>
           {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
             <Group name="rpios">
-              <Field
-                name="crossCompilation"
-                label="Cross compilation"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      Choose how to build the FrameOS binary: auto follows the build environment selected in global
-                      settings, always fails if server-side compilation is disabled or unavailable, and never always
-                      builds on the device.
-                    </p>
-                    <p>Configure Docker, a build host, or Modal sandboxes from global settings.</p>
-                  </div>
-                }
-              >
-                <Select name="rpios.crossCompilation" options={frameCrossCompilationOptions} />
-              </Field>
               <Field
                 name="compilationMode"
                 label="Compilation mode"

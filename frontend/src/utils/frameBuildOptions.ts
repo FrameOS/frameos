@@ -1,7 +1,5 @@
 export type FrameCompilationMode = 'static' | 'shared' | 'shared-scenes' | 'precompiled'
 export type FrameCompilationModeOptionValue = '' | FrameCompilationMode
-export type FrameCrossCompilation = 'auto' | 'always' | 'never'
-export type FrameCrossCompilationOptionValue = '' | FrameCrossCompilation
 
 export interface FrameBuildOption<T extends string = string> {
   value: T
@@ -16,18 +14,8 @@ export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeO
   { value: 'shared-scenes', label: 'Compile drivers separately, scenes as one library' },
 ]
 
-export const frameCrossCompilationOptions: FrameBuildOption<FrameCrossCompilation>[] = [
-  { value: 'auto', label: 'Use global build environment' },
-  { value: 'always', label: 'Always compile on backend (this server)' },
-  { value: 'never', label: 'Always compile on device' },
-]
-
 export function normalizeFrameCompilationMode(value: unknown): FrameCompilationMode {
   return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
     ? value
     : 'precompiled'
-}
-
-export function normalizeFrameCrossCompilation(value: unknown): FrameCrossCompilation {
-  return value === 'always' || value === 'never' ? value : 'auto'
 }
