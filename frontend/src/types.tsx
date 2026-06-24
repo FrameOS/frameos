@@ -61,6 +61,8 @@ export interface FrameType {
   device_config?: {
     vcom?: number | string
     partial?: boolean
+    partialMaxAreaPercent?: number
+    partialMaxRefreshesBeforeFull?: number
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
     psramMB?: number

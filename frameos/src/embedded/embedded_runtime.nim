@@ -113,6 +113,8 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     device: "embedded",
     deviceConfig: DeviceConfig(
       partial: false,
+      partialMaxAreaPercent: 0.0,
+      partialMaxRefreshesBeforeFull: 0,
       pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
     ),
     maxHttpResponseBytes: httpResponseLimit,

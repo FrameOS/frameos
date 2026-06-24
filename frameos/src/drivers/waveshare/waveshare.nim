@@ -1,7 +1,6 @@
 import pixie, json, times, options, math, hashes
 
 import frameos/driver_context
-import frameos/driver_render_hint
 import frameos/device_setup
 import frameos/utils/dither
 import drivers/waveshare/driver as waveshareDriver
@@ -11,8 +10,7 @@ export Driver
 export preview
 
 const
-  FAST_PARTIAL_SESSION_MAX_NEXT_RENDER_SECONDS = 30.0
-  FAST_PARTIAL_SESSION_GRACE_SECONDS = 5.0
+  DEFAULT_FULL_REFRESH_INTERVAL_SECONDS = 12.0 * 60.0 * 60.0
 
 type PackedChangeBounds = object
   changed: bool
@@ -159,41 +157,21 @@ proc applyPackedRows(base: seq[uint8], rowWidth: int, bounds: PackedChangeBounds
       result[dest + x] = patch[source + x]
     source += patchRowWidth
 
-proc fastPartialSessionNextRenderSeconds(): Option[float] =
-  if not waveshareDriver.supportsFastPartialSession:
-    return none(float)
-  let nextRender = nextRenderSeconds()
-  if nextRender.isNone:
-    return none(float)
-  let seconds = nextRender.get()
-  if seconds < 0 or seconds > FAST_PARTIAL_SESSION_MAX_NEXT_RENDER_SECONDS:
-    return none(float)
-  some(seconds)
+proc configuredPartialMaxAreaPercent(self: Driver): float =
+  if self.partialMaxAreaPercent > 0:
+    return self.partialMaxAreaPercent
+  return waveshareDriver.maxPartialRefreshAreaPercent
 
-proc markPartialSessionSleeping(self: Driver) =
-  self.partialRefreshAwake = false
-  self.partialRefreshSessionActive = false
-  self.partialRefreshAwakeUntil = 0
+proc configuredPartialMaxRefreshesBeforeFull(self: Driver): int =
+  if self.partialMaxRefreshesBeforeFull > 0:
+    return self.partialMaxRefreshesBeforeFull
+  return waveshareDriver.maxPartialRefreshesBeforeFull
 
-proc markPartialSessionAwake(self: Driver, partialActive: bool, nextRenderSeconds: float) =
-  self.partialRefreshAwake = true
-  self.partialRefreshSessionActive = partialActive
-  self.partialRefreshAwakeUntil = epochTime() + max(nextRenderSeconds, 0.0) + FAST_PARTIAL_SESSION_GRACE_SECONDS
-
-proc sleepPartialSession(self: Driver, reason: string) =
-  if not self.partialRefreshAwake:
-    return
-  self.logger.log(%*{
-    "event": "driver:waveshare:partial",
-    "mode": "sleep",
-    "reason": reason,
-  })
-  waveshareDriver.sleep()
-  self.markPartialSessionSleeping()
-
-proc expirePartialSession(self: Driver) =
-  if self.partialRefreshAwake and self.partialRefreshAwakeUntil > 0 and epochTime() > self.partialRefreshAwakeUntil:
-    self.sleepPartialSession("awake-timeout")
+proc invalidatePartialBase(self: Driver) =
+  self.lastBlackSourceImage = @[]
+  self.lastPackedBlackImage = @[]
+  self.lastPackedRedImage = @[]
+  self.partialsSinceFull = 0
 
 proc packedRegionContainsMarkedPixels(image: seq[uint8], rowWidth: int, bounds: PackedChangeBounds): bool =
   for y in bounds.yStart..<bounds.yEnd:
@@ -204,26 +182,25 @@ proc packedRegionContainsMarkedPixels(image: seq[uint8], rowWidth: int, bounds: 
   false
 
 proc renderBlackWhiteRedFull(self: Driver, blackImage, redImage: seq[uint8], reason: string) =
-  if self.partialRefreshEnabled:
+  if self.partialEnabled:
     self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "base", "reason": reason})
     waveshareDriver.renderImageBlackWhiteRedBase(blackImage, redImage)
-    self.partialRefreshReady = true
-    self.partialRefreshCount = 0
   else:
     waveshareDriver.renderImageBlackWhiteRed(blackImage, redImage)
+  self.partialsSinceFull = 0
   self.lastPackedBlackImage = blackImage
   self.lastPackedRedImage = redImage
 
 proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], width, height: int) =
-  if not self.partialRefreshEnabled:
+  if not self.partialEnabled:
     self.renderBlackWhiteRedFull(blackImage, redImage, "unsupported")
     return
 
-  if not self.partialRefreshReady or self.lastPackedBlackImage.len == 0 or self.lastPackedRedImage.len == 0:
+  if self.lastPackedBlackImage.len == 0 or self.lastPackedRedImage.len == 0:
     self.renderBlackWhiteRedFull(blackImage, redImage, "initial")
     return
 
-  if self.partialRefreshCount >= waveshareDriver.maxPartialRefreshesBeforeFull:
+  if self.partialsSinceFull >= self.configuredPartialMaxRefreshesBeforeFull():
     self.renderBlackWhiteRedFull(blackImage, redImage, "periodic")
     return
 
@@ -249,6 +226,24 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
     xEnd = min(bounds.byteXEnd * 8, width)
     partialWidth = xEnd - xStart
     partialHeight = bounds.yEnd - bounds.yStart
+    areaPercent = partialAreaPercent(partialWidth, partialHeight, width, height)
+    maxAreaPercent = self.configuredPartialMaxAreaPercent()
+
+  if areaPercent > maxAreaPercent:
+    self.logger.log(%*{
+      "event": "driver:waveshare:partial",
+      "mode": "fallback",
+      "reason": "partial-area-too-large",
+      "x": xStart,
+      "y": bounds.yStart,
+      "width": partialWidth,
+      "height": partialHeight,
+      "areaPercent": roundedPercent(areaPercent),
+      "maxAreaPercent": maxAreaPercent,
+      "bounds": "packed",
+    })
+    self.renderBlackWhiteRedFull(blackImage, redImage, "partial-area-too-large")
+    return
 
   self.logger.log(%*{
     "event": "driver:waveshare:partial",
@@ -257,50 +252,43 @@ proc renderBlackWhiteRedPartial(self: Driver, blackImage, redImage: seq[uint8], 
     "y": bounds.yStart,
     "width": partialWidth,
     "height": partialHeight,
+    "areaPercent": roundedPercent(areaPercent),
+    "maxAreaPercent": maxAreaPercent,
     "bytes": partialImage.len,
-    "count": self.partialRefreshCount + 1,
+    "count": self.partialsSinceFull + 1,
+    "bounds": "packed",
   })
   waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
   waveshareDriver.renderImagePartial(partialImage, xStart, bounds.yStart, xEnd, bounds.yEnd)
-  self.partialRefreshReady = true
-  self.partialRefreshCount += 1
+  self.partialsSinceFull += 1
   self.lastPackedBlackImage = blackImage
   self.lastPackedRedImage = redImage
 
 proc renderBlackFull(self: Driver, blackImage: seq[uint8], sourceImage: seq[ColorRGBX], reason: string) =
   self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "base", "reason": reason})
   var displayImage = copyPackedImage(blackImage)
-  let fastNextRender = fastPartialSessionNextRenderSeconds()
-  let keepAwake = fastNextRender.isSome
   var started = false
   try:
     waveshareDriver.start(self)
     started = true
     waveshareDriver.renderImage(displayImage)
   finally:
-    if started and keepAwake:
-      self.markPartialSessionAwake(false, fastNextRender.get())
-    elif started:
+    if started:
       waveshareDriver.sleep()
-      self.markPartialSessionSleeping()
-  self.partialRefreshReady = true
-  self.partialRefreshCount = 0
+  self.partialsSinceFull = 0
   self.lastPackedBlackImage = blackImage
   self.lastBlackSourceImage = copyColorImageData(sourceImage)
 
 proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[ColorRGBX], width, height: int) =
-  self.expirePartialSession()
-
-  if not self.partialRefreshEnabled:
-    self.sleepPartialSession("partial-disabled")
+  if not self.partialEnabled:
     waveshareDriver.renderImage(blackImage)
     return
 
-  if not self.partialRefreshReady or self.lastPackedBlackImage.len == 0 or self.lastBlackSourceImage.len == 0:
+  if self.lastPackedBlackImage.len == 0 or self.lastBlackSourceImage.len == 0:
     self.renderBlackFull(blackImage, sourceImage, "initial")
     return
 
-  if self.partialRefreshCount >= waveshareDriver.maxPartialRefreshesBeforeFull:
+  if self.partialsSinceFull >= self.configuredPartialMaxRefreshesBeforeFull():
     self.renderBlackFull(blackImage, sourceImage, "periodic")
     return
 
@@ -308,11 +296,6 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[C
   let bounds = findSourceImageChangeBounds(self.lastBlackSourceImage, sourceImage, width, height)
   if not bounds.changed:
     self.logger.log(%*{"event": "driver:waveshare:partial", "mode": "skip", "reason": "source-image-unchanged"})
-    let fastNextRender = fastPartialSessionNextRenderSeconds()
-    if self.partialRefreshAwake and fastNextRender.isSome:
-      self.markPartialSessionAwake(self.partialRefreshSessionActive, fastNextRender.get())
-    elif fastNextRender.isNone:
-      self.sleepPartialSession("source-image-unchanged")
     self.lastBlackSourceImage = copyColorImageData(sourceImage)
     return
 
@@ -323,8 +306,9 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[C
     partialWidth = xEnd - xStart
     partialHeight = bounds.yEnd - bounds.yStart
     areaPercent = partialAreaPercent(partialWidth, partialHeight, width, height)
+    maxAreaPercent = self.configuredPartialMaxAreaPercent()
 
-  if areaPercent > waveshareDriver.maxPartialRefreshAreaPercent:
+  if areaPercent > maxAreaPercent:
     self.logger.log(%*{
       "event": "driver:waveshare:partial",
       "mode": "fallback",
@@ -334,7 +318,7 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[C
       "width": partialWidth,
       "height": partialHeight,
       "areaPercent": roundedPercent(areaPercent),
-      "maxAreaPercent": waveshareDriver.maxPartialRefreshAreaPercent,
+      "maxAreaPercent": maxAreaPercent,
       "bounds": "source",
     })
     self.renderBlackFull(blackImage, sourceImage, "partial-area-too-large")
@@ -348,31 +332,22 @@ proc renderBlackPartial(self: Driver, blackImage: seq[uint8], sourceImage: seq[C
     "width": partialWidth,
     "height": partialHeight,
     "areaPercent": roundedPercent(areaPercent),
-    "maxAreaPercent": waveshareDriver.maxPartialRefreshAreaPercent,
+    "maxAreaPercent": maxAreaPercent,
     "bytes": partialImage.len,
-    "count": self.partialRefreshCount + 1,
+    "count": self.partialsSinceFull + 1,
     "bounds": "source",
   })
 
-  let
-    warmSession = self.partialRefreshAwake and self.partialRefreshSessionActive
-    fastNextRender = fastPartialSessionNextRenderSeconds()
-    keepAwake = fastNextRender.isSome
-  var active = warmSession
+  var active = false
   try:
-    if not warmSession:
-      waveshareDriver.startPartial(self)
-      active = true
-      waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
+    waveshareDriver.startPartial(self)
+    active = true
+    waveshareDriver.renderImagePartialBase(self.lastPackedBlackImage)
     waveshareDriver.renderImagePartial(partialImage, xStart, bounds.yStart, xEnd, bounds.yEnd)
   finally:
-    if active and keepAwake:
-      self.markPartialSessionAwake(true, fastNextRender.get())
-    elif active:
+    if active:
       waveshareDriver.sleep()
-      self.markPartialSessionSleeping()
-  self.partialRefreshReady = true
-  self.partialRefreshCount += 1
+  self.partialsSinceFull += 1
   self.lastPackedBlackImage = applyPackedRows(self.lastPackedBlackImage, rowWidth, bounds, partialImage)
   self.lastBlackSourceImage = copyColorImageData(sourceImage)
 
@@ -402,7 +377,9 @@ proc init*(frameOS: DriverContext): Driver =
       width: width,
       height: height,
       palette: none(seq[(int, int, int)]),
-      partialRefreshEnabled: waveshareDriver.supportsPartialRefresh and frameOS.frameConfig.deviceConfig.partial,
+      partialEnabled: waveshareDriver.supportsPartialRefresh and frameOS.frameConfig.deviceConfig.partial,
+      partialMaxAreaPercent: frameOS.frameConfig.deviceConfig.partialMaxAreaPercent,
+      partialMaxRefreshesBeforeFull: frameOS.frameConfig.deviceConfig.partialMaxRefreshesBeforeFull,
       vcom: frameOS.frameConfig.deviceConfig.vcom
     )
 
@@ -420,6 +397,15 @@ proc init*(frameOS: DriverContext): Driver =
     else:
       result.palette = some(spectra6ColorPalette)
 
+    if waveshareDriver.supportsPartialRefresh:
+      logger.log(%*{
+        "event": "driver:waveshare:partial",
+        "mode": "config",
+        "enabled": result.partialEnabled,
+        "maxAreaPercent": result.configuredPartialMaxAreaPercent(),
+        "maxRefreshesBeforeFull": result.configuredPartialMaxRefreshesBeforeFull(),
+      })
+
   except Exception as e:
     logger.log(%*{"event": "driver:waveshare",
         "error": "Failed to initialize driver", "exception": e.msg,
@@ -429,7 +415,7 @@ proc turnOn*(self: Driver) =
   discard self
 
 proc turnOff*(self: Driver) =
-  self.sleepPartialSession("runner-idle-heartbeat")
+  discard self
 
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available, starting render"})
@@ -452,7 +438,7 @@ proc renderBlack*(self: Driver, image: Image) =
       let bw: uint8 = levels[inputIndex] and 0x01
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
   self.logGrayBuffer("Black", image.width * image.height, gray.len * sizeof(float), levels.len, blackImage.len)
-  if self.partialRefreshEnabled:
+  if self.partialEnabled:
     self.renderBlackPartial(blackImage, image.data, image.width, image.height)
   else:
     waveshareDriver.renderImage(blackImage)
@@ -521,7 +507,7 @@ proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
       blackImage[outputIndex] = blackImage[outputIndex] or (black shl (7 - x mod 8))
       redImage[outputIndex] = redImage[outputIndex] or (red shl (7 - x mod 8))
 
-  if self.partialRefreshEnabled:
+  if self.partialEnabled:
     self.renderBlackWhiteRedPartial(blackImage, redImage, image.width, image.height)
   else:
     waveshareDriver.renderImageBlackWhiteRed(blackImage, redImage)
@@ -564,33 +550,24 @@ proc renderForColor(self: Driver, image: Image) =
     self.renderBlackWhiteYellowRed(image)
 
 proc render*(self: Driver, image: Image) =
-  self.expirePartialSession()
-  # Refresh at least every 12h to preserve display
-  # TODO: make this configurable
   let currentImageHash = hashImageData(image.data)
   let now = epochTime()
   let imageUnchanged = self.lastImageBytes == image.data.len and self.lastImageHash == currentImageHash
-  let needsPreservationRefresh = imageUnchanged and self.lastRenderAt <= now - 12 * 60 * 60
+  let needsPreservationRefresh = imageUnchanged and self.lastRenderAt <= now - DEFAULT_FULL_REFRESH_INTERVAL_SECONDS
   if imageUnchanged and not needsPreservationRefresh:
-    let fastNextRender = fastPartialSessionNextRenderSeconds()
-    if self.partialRefreshAwake and fastNextRender.isSome:
-      self.markPartialSessionAwake(self.partialRefreshSessionActive, fastNextRender.get())
-    else:
-      self.sleepPartialSession("image-unchanged")
     self.logger.log(%*{"event": "driver:waveshare",
         "info": "Skipping render, image data is the same"})
     return
   if needsPreservationRefresh:
-    self.partialRefreshReady = false
+    self.invalidatePartialBase()
 
   self.lastImageBytes = image.data.len
   self.lastImageHash = currentImageHash
   self.lastRenderAt = now
   self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})
-  if self.partialRefreshEnabled and waveshareDriver.colorOption == ColorOption.Black:
+  if self.partialEnabled and waveshareDriver.colorOption == ColorOption.Black:
     self.renderForColor(image)
-  elif self.partialRefreshEnabled:
-    self.sleepPartialSession("non-black-partial-render")
+  elif self.partialEnabled:
     var started = false
     try:
       waveshareDriver.start(self)
@@ -599,13 +576,10 @@ proc render*(self: Driver, image: Image) =
     finally:
       if started:
         waveshareDriver.sleep()
-        self.markPartialSessionSleeping()
   else:
-    self.sleepPartialSession("full-render")
     waveshareDriver.start(self)
     self.renderForColor(image)
     waveshareDriver.sleep()
-    self.markPartialSessionSleeping()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
 proc toPng*(rotate: int = 0, flip: string = ""): string =

@@ -13,12 +13,10 @@ type Driver* = ref object of FrameOSDriver
   lastBlackSourceImage*: seq[ColorRGBX]
   lastPackedBlackImage*: seq[uint8]
   lastPackedRedImage*: seq[uint8]
-  partialRefreshEnabled*: bool
-  partialRefreshReady*: bool
-  partialRefreshCount*: int
-  partialRefreshAwake*: bool
-  partialRefreshSessionActive*: bool
-  partialRefreshAwakeUntil*: float
+  partialEnabled*: bool
+  partialsSinceFull*: int
+  partialMaxAreaPercent*: float
+  partialMaxRefreshesBeforeFull*: int
   palette*: Option[seq[(int, int, int)]]
   vcom*: float # used for the 10.3" display
 

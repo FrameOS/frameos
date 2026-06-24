@@ -81,12 +81,16 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   var deviceConfig = driverContext.DeviceConfig(
     vcom: 0.0,
     partial: false,
+    partialMaxAreaPercent: 0.0,
+    partialMaxRefreshesBeforeFull: 0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
   )
   if not sourceDeviceConfig.isNil:
     deviceConfig.vcom = sourceDeviceConfig.vcom
     deviceConfig.partial = sourceDeviceConfig.partial
+    deviceConfig.partialMaxAreaPercent = sourceDeviceConfig.partialMaxAreaPercent
+    deviceConfig.partialMaxRefreshesBeforeFull = sourceDeviceConfig.partialMaxRefreshesBeforeFull
     deviceConfig.httpUploadUrl = sourceDeviceConfig.httpUploadUrl
     for header in sourceDeviceConfig.httpUploadHeaders:
       deviceConfig.httpUploadHeaders.add(driverContext.HttpHeaderPair(
@@ -209,6 +213,8 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
   var deviceConfig = DeviceConfig(
     vcom: 0.0,
     partial: false,
+    partialMaxAreaPercent: 0.0,
+    partialMaxRefreshesBeforeFull: 0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
   )
@@ -239,6 +245,8 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
       if not sourceConfig.deviceConfig.isNil:
         deviceConfig.vcom = sourceConfig.deviceConfig.vcom
         deviceConfig.partial = sourceConfig.deviceConfig.partial
+        deviceConfig.partialMaxAreaPercent = sourceConfig.deviceConfig.partialMaxAreaPercent
+        deviceConfig.partialMaxRefreshesBeforeFull = sourceConfig.deviceConfig.partialMaxRefreshesBeforeFull
         deviceConfig.httpUploadUrl = sourceConfig.deviceConfig.httpUploadUrl
         for header in sourceConfig.deviceConfig.httpUploadHeaders:
           deviceConfig.httpUploadHeaders.add(HttpHeaderPair(name: header.name, value: header.value))

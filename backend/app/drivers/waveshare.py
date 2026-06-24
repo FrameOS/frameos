@@ -113,11 +113,6 @@ PARTIAL_REFRESH_MAX_AREA_PERCENT = {
     "EPD_7in5_V2": 20.0,
 }
 
-FAST_PARTIAL_SESSION_VARIANTS = {
-    "EPD_7in5_V2",
-}
-
-
 def get_variant_keys_for(folder: str) -> list[str]:
     directory = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / folder
     return [
@@ -342,7 +337,6 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
     supports_partial_refresh = variant.key in PARTIAL_REFRESH_VARIANTS
     max_partial_refreshes_before_full = PARTIAL_REFRESH_MAX_BEFORE_FULL.get(variant.key, 5)
     max_partial_refresh_area_percent = PARTIAL_REFRESH_MAX_AREA_PERCENT.get(variant.key, 100.0)
-    supports_fast_partial_session = variant.key in FAST_PARTIAL_SESSION_VARIANTS
     start_partial_code = "start(self)"
     if variant.key == "EPD_13in3b":
         render_partial_code = f"""
@@ -422,7 +416,6 @@ let color_option* = ColorOption.{variant.color_option}
 let supportsPartialRefresh* = {str(supports_partial_refresh).lower()}
 let maxPartialRefreshesBeforeFull* = {max_partial_refreshes_before_full}
 let maxPartialRefreshAreaPercent* = {max_partial_refresh_area_percent}
-let supportsFastPartialSession* = {str(supports_fast_partial_session).lower()}
 {color_warning}
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =

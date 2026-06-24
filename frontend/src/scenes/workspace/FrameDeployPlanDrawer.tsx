@@ -16,12 +16,13 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
+import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
-import { buildrootPlatforms, devices, partialRefreshDevices } from '../../devices'
+import { buildrootPlatforms, devices, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameOSSettings, FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
@@ -882,14 +883,12 @@ function BuildrootSdCardSection({
             </label>
           ) : null}
           {partialRefreshDevices.has(device) ? (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 px-3 py-2">
-              <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Partial refresh</span>
-              <Switch
-                value={deviceConfig.partial === true}
-                onChange={(partial) => updateDeviceConfig({ ...deviceConfig, partial })}
-                aria-label="Partial refresh"
-              />
-            </div>
+            <PartialRefreshSettingsFields
+              value={deviceConfig}
+              onChange={updateDeviceConfig}
+              variant="panel"
+              panelDefaults={partialRefreshDefaultsByDevice[device]}
+            />
           ) : null}
           {device === 'http.upload' ? (
             <>

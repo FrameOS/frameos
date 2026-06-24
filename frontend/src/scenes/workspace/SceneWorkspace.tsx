@@ -402,7 +402,12 @@ function SceneNodeTreeButton({
     >
       <SceneNodeTreeConnectors item={item} itemIndex={itemIndex} items={items} highlighted={highlighted} />
       {item.depth > 0 ? <span className="h-px w-3 shrink-0 opacity-0" /> : null}
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
+      <span
+        className={clsx(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold uppercase',
+          highlighted ? 'border border-white/25 bg-white/20 text-white' : 'frame-tool-row frame-tool-muted'
+        )}
+      >
         {item.node.type?.slice(0, 2) ?? 'no'}
       </span>
       <span className="min-w-0 flex-1">

@@ -119,6 +119,8 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
     result = DeviceConfig(
       vcom: 0,
       partial: false,
+      partialMaxAreaPercent: 0.0,
+      partialMaxRefreshesBeforeFull: 0,
       httpUploadUrl: "",
       httpUploadHeaders: headers,
       pins: loadPins(nil),
@@ -127,6 +129,8 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
     result = DeviceConfig(
       vcom: data{"vcom"}.getFloat(0),
       partial: data{"partial"}.getBool(false),
+      partialMaxAreaPercent: data{"partialMaxAreaPercent"}.getFloat(0.0),
+      partialMaxRefreshesBeforeFull: data{"partialMaxRefreshesBeforeFull"}.getInt(0),
       httpUploadUrl: data{"uploadUrl"}.getStr(""),
       httpUploadHeaders: headers,
       pins: loadPins(data{"pins"}),

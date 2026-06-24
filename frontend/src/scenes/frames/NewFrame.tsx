@@ -12,6 +12,7 @@ import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_ESP32_S3,
   devices,
+  partialRefreshDefaultsByDevice,
   partialRefreshDevices,
   buildrootPlatforms,
   embeddedPlatforms,
@@ -26,6 +27,7 @@ import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
 import { Checkbox } from '../../components/Checkbox'
 import { Switch } from '../../components/Switch'
+import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
 
@@ -244,14 +246,13 @@ function renderNewFrameDriverConfig(
 
   if (partialRefreshDevices.has(newFrame.device ?? '')) {
     return (
-      <FormField label="Partial refresh">
-        <Switch
-          value={deviceConfig.partial === true}
-          onChange={(partial) => setDeviceConfig({ ...deviceConfig, partial })}
-          fullWidth
-          aria-label="Partial refresh"
-        />
-      </FormField>
+      <PartialRefreshSettingsFields
+        value={deviceConfig}
+        onChange={setDeviceConfig}
+        variant="stacked"
+        panelDefaults={partialRefreshDefaultsByDevice[newFrame.device ?? '']}
+        numberInputClassName={textInputClassName()}
+      />
     )
   }
 
@@ -271,7 +272,10 @@ function renderNewFrameDriverConfig(
       setDeviceConfig({ ...deviceConfig, uploadHeaders: [...headers, { name: '', value: '' }] })
     }
     const removeHeader = (index: number) => {
-      setDeviceConfig({ ...deviceConfig, uploadHeaders: headers.filter((_: UploadHeader, idx: number) => idx !== index) })
+      setDeviceConfig({
+        ...deviceConfig,
+        uploadHeaders: headers.filter((_: UploadHeader, idx: number) => idx !== index),
+      })
     }
 
     return (

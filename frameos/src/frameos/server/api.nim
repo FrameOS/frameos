@@ -200,6 +200,8 @@ proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
   result = %*{
     "vcom": deviceConfig.vcom,
     "partial": deviceConfig.partial,
+    "partialMaxAreaPercent": deviceConfig.partialMaxAreaPercent,
+    "partialMaxRefreshesBeforeFull": deviceConfig.partialMaxRefreshesBeforeFull,
     "uploadUrl": deviceConfig.httpUploadUrl,
     "uploadHeaders": headers,
   }
