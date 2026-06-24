@@ -21,7 +21,7 @@ from app.tasks.buildroot_image import (
     SUPPORTED_BUILDROOT_PLATFORM,
     buildroot_sd_image_config_fingerprint,
 )
-from app.ws.agent_ws import hmac_sha256
+from app.ws.remote_ws import hmac_sha256
 
 
 class DummyRedis:
@@ -165,6 +165,15 @@ def test_terminal_ws_frame_not_found(client: TestClient) -> None:
 
 
 def test_agent_ws_requires_hello(client: TestClient) -> None:
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_json({"action": "nohello"})
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == 1008
+    assert exc.value.reason == "expected hello"
+
+
+def test_legacy_agent_ws_route_is_still_accepted(client: TestClient) -> None:
     with client.websocket_connect("/ws/agent") as ws:
         ws.send_json({"action": "nohello"})
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -174,7 +183,7 @@ def test_agent_ws_requires_hello(client: TestClient) -> None:
 
 
 def test_agent_ws_unknown_frame(client: TestClient) -> None:
-    with client.websocket_connect("/ws/agent") as ws:
+    with client.websocket_connect("/ws/remote") as ws:
         ws.send_json({"action": "hello", "serverApiKey": "missing"})
         with pytest.raises(WebSocketDisconnect) as exc:
             ws.receive_text()
@@ -201,8 +210,8 @@ def test_agent_ws_stores_reported_agent_version_and_clears_missing_version(clien
     finally:
         db.close()
 
-    with client.websocket_connect("/ws/agent") as ws:
-        ws.send_json({"action": "hello", "serverApiKey": server_api_key, "agentVersion": "2026.6.11+abc"})
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": server_api_key, "remoteVersion": "2026.6.11+abc"})
         challenge = ws.receive_json()
         ws.send_json({
             "action": "handshake",
@@ -218,7 +227,7 @@ def test_agent_ws_stores_reported_agent_version_and_clears_missing_version(clien
     finally:
         db.close()
 
-    with client.websocket_connect("/ws/agent") as ws:
+    with client.websocket_connect("/ws/remote") as ws:
         ws.send_json({"action": "hello", "serverApiKey": server_api_key})
         challenge = ws.receive_json()
         ws.send_json({
@@ -273,7 +282,7 @@ def test_agent_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(clien
     finally:
         db.close()
 
-    with client.websocket_connect("/ws/agent") as ws:
+    with client.websocket_connect("/ws/remote") as ws:
         ws.send_json({"action": "hello", "serverApiKey": server_api_key})
         challenge = ws.receive_json()
         ws.send_json({
@@ -405,7 +414,7 @@ async def test_broadcast_does_not_send_unscoped_project_events_to_scoped_connect
 
 @pytest.mark.asyncio
 async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
-    from app.ws import agent_ws
+    from app.ws import remote_ws
 
     class FakeRedis:
         pass
@@ -413,7 +422,7 @@ async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
     fake_redis = FakeRedis()
     closed = []
 
-    monkeypatch.setattr(agent_ws, "create_redis_connection", lambda: fake_redis)
+    monkeypatch.setattr(remote_ws, "create_redis_connection", lambda: fake_redis)
 
     async def fake_close_redis_connection(redis):
         closed.append(redis)
@@ -421,28 +430,28 @@ async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
     async def fake_send_cmd(*args, **kwargs):
         raise RuntimeError("command failed")
 
-    monkeypatch.setattr(agent_ws, "close_redis_connection", fake_close_redis_connection)
-    monkeypatch.setattr(agent_ws, "send_cmd", fake_send_cmd)
+    monkeypatch.setattr(remote_ws, "close_redis_connection", fake_close_redis_connection)
+    monkeypatch.setattr(remote_ws, "send_cmd", fake_send_cmd)
 
     with pytest.raises(RuntimeError, match="command failed"):
-        await agent_ws.file_md5_on_frame(1, "/srv/assets/test.png")
+        await remote_ws.file_md5_on_frame(1, "/srv/assets/test.png")
 
     assert closed == [fake_redis]
 
 
 @pytest.mark.asyncio
 async def test_agent_command_slot_times_out_when_frame_busy() -> None:
-    from app.ws.agent_bridge import frame_command_slot
+    from app.ws.remote_bridge import frame_command_slot
 
     async with frame_command_slot(987654, queue_timeout=None):
-        with pytest.raises(TimeoutError, match="agent command queue busy"):
+        with pytest.raises(TimeoutError, match="remote command queue busy"):
             async with frame_command_slot(987654, queue_timeout=0.01):
                 pass
 
 
 @pytest.mark.asyncio
 async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
-    from app.ws import agent_ws
+    from app.ws import remote_ws
 
     class FakeRedis:
         def __init__(self) -> None:
@@ -460,13 +469,13 @@ async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
     async def fake_write_log(_redis, frame_id: int, type: str, line: str, ip: str | None = None):
         logged.append((frame_id, type, line))
 
-    monkeypatch.setattr(agent_ws, "write_log", fake_write_log)
+    monkeypatch.setattr(remote_ws, "write_log", fake_write_log)
 
     redis = FakeRedis()
     frame = SimpleNamespace(id=77)
     ws = SimpleNamespace(scope={"cmd_log_output": {"quiet-cmd": False}})
 
-    await agent_ws.handle_agent_stream_chunk(
+    await remote_ws.handle_remote_stream_chunk(
         ws,
         redis,
         frame,
@@ -479,12 +488,12 @@ async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
         {"stream": "stdout", "data": "raspios"},
         {"stream": "stdout", "data": "bookworm"},
     ]
-    assert redis.expired == [("agent:cmd:stream:quiet-cmd", 300)]
+    assert redis.expired == [("remote:cmd:stream:quiet-cmd", 300)]
 
 
 @pytest.mark.asyncio
 async def test_agent_stream_chunk_logs_by_default(monkeypatch) -> None:
-    from app.ws import agent_ws
+    from app.ws import remote_ws
 
     class FakeRedis:
         async def rpush(self, _key: str, _value: bytes) -> None:
@@ -498,12 +507,12 @@ async def test_agent_stream_chunk_logs_by_default(monkeypatch) -> None:
     async def fake_write_log(_redis, frame_id: int, type: str, line: str, ip: str | None = None):
         logged.append((frame_id, type, line))
 
-    monkeypatch.setattr(agent_ws, "write_log", fake_write_log)
+    monkeypatch.setattr(remote_ws, "write_log", fake_write_log)
 
     frame = SimpleNamespace(id=88)
     ws = SimpleNamespace(scope={})
 
-    await agent_ws.handle_agent_stream_chunk(
+    await remote_ws.handle_remote_stream_chunk(
         ws,
         FakeRedis(),
         frame,

@@ -92,7 +92,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     assert script_response.status_code == 200
     assert script_response.headers['content-type'].startswith('text/x-shellscript')
     script = script_response.text
-    assert 'frameos_agent' in script
+    assert 'frameos_remote' in script
     assert 'frameos.service' in script
     assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
@@ -116,11 +116,11 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     assert './frameos setup' in script
     assert 'install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service' in script
     assert (
-        'install -m 0644 "$agent_release_dir/frameos_agent.service" '
-        '/etc/systemd/system/frameos_agent.service'
+        'install -m 0644 "$agent_release_dir/frameos-remote.service" '
+        '/etc/systemd/system/frameos-remote.service'
     ) in script
     assert 'FrameOS and FrameOS Remote are installed and started' in script
-    assert 'compile_frameos_agent' not in script
+    assert 'compile_frameos_remote' not in script
     assert 'sh compile' not in script
     syntax_check = subprocess.run(["sh", "-n"], input=script, text=True, capture_output=True)
     assert syntax_check.returncode == 0, syntax_check.stderr

@@ -17,21 +17,24 @@ from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
 from app.utils.local_exec import exec_local_command
-from app.utils.remote_exec import RemoteTransport, upload_file
+from app.utils.remote_exec import RemoteTransport, normalize_remote_transport, upload_file
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
-from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.utils.build_host import get_build_executor_config
 from app.utils.build_executor import build_executor_display_name, ensure_build_executor_configured
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, can_cross_compile_target
-from app.utils.versions import current_agent_version, get_versions
+from app.utils.versions import current_remote_version, get_versions
 from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
 
 
-PRECOMPILED_AGENT_ENV = "FRAMEOS_AGENT_PRECOMPILED"
-AGENT_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
-AGENT_BINARY = "frameos_agent"
+PRECOMPILED_REMOTE_ENV = "FRAMEOS_REMOTE_PRECOMPILED"
+LEGACY_PRECOMPILED_REMOTE_ENV = "FRAMEOS_AGENT_PRECOMPILED"
+REMOTE_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
+REMOTE_BINARY = "frameos_remote"
+REMOTE_SERVICE = "frameos-remote"
+LEGACY_AGENT_SERVICE = "frameos_agent"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -42,8 +45,9 @@ def get_build_host_config(*args, **kwargs):  # noqa: ANN002, ANN003
     return _get_build_host_config(*args, **kwargs)
 
 
-def precompiled_agent_enabled() -> bool:
-    return os.environ.get(PRECOMPILED_AGENT_ENV, "").strip().lower() not in {
+def precompiled_remote_enabled() -> bool:
+    setting = os.environ.get(PRECOMPILED_REMOTE_ENV, os.environ.get(LEGACY_PRECOMPILED_REMOTE_ENV, ""))
+    return setting.strip().lower() not in {
         "0",
         "false",
         "local",
@@ -53,16 +57,21 @@ def precompiled_agent_enabled() -> bool:
 
 
 def agent_build_version() -> str:
-    version = get_versions().get("agent")
+    version = get_versions().get("remote") or get_versions().get("agent")
     if isinstance(version, str) and version:
         return version
-    return current_agent_version() or "unknown"
+    return current_remote_version() or "unknown"
 
 
 def delayed_agent_restart_command(suffix: str = "manual") -> str:
     safe_suffix = "".join(ch for ch in suffix if ch.isalnum() or ch in {"-", "_"}) or "manual"
-    unit = f"frameos-agent-restart-{safe_suffix}"
-    restart_script = "sleep 1; systemctl restart frameos_agent.service"
+    unit = f"frameos-remote-restart-{safe_suffix}"
+    restart_script = (
+        "sleep 1; "
+        "systemctl enable frameos-remote.service; "
+        "systemctl restart frameos-remote.service; "
+        "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true"
+    )
     fallback_script = f"nohup sh -c {shlex.quote(restart_script)} >/dev/null 2>&1 &"
     fallback = f"sudo sh -c {shlex.quote(fallback_script)}"
     return (
@@ -73,6 +82,7 @@ def delayed_agent_restart_command(suffix: str = "manual") -> str:
 
 
 def resolve_agent_task_transport(frame: Frame, transport: RemoteTransport) -> RemoteTransport:
+    transport = normalize_remote_transport(transport)
     if transport != "auto":
         return transport
 
@@ -82,7 +92,7 @@ def resolve_agent_task_transport(frame: Frame, transport: RemoteTransport) -> Re
         and agent.get("agentRunCommands")
         and agent.get("deployWithAgent") is not False
     ):
-        return "agent"
+        return "remote"
     return "ssh"
 
 
@@ -141,7 +151,7 @@ class AgentDeployer(FrameDeployer):
                     f"Deploying FrameOS Remote for {self.frame.name} with build id {self.build_id} via {self.remote_transport}",
                 )
 
-                if self.remote_transport == "agent":
+                if self.remote_transport == "remote":
                     await self._verify_agent_transport("before staging")
 
                 # 1. Detect CPU architecture on target
@@ -149,7 +159,7 @@ class AgentDeployer(FrameDeployer):
                 distro = await self.get_distro()
                 distro_version = await self.get_distro_version()
 
-                # 2. Build & deploy the agent (if needed)
+                # 2. Build & deploy the remote (if needed)
                 if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying FrameOS Remote")
 
@@ -175,7 +185,7 @@ class AgentDeployer(FrameDeployer):
                         await self._upload_frame_json(f"{self._release_dir()}/frame.json")
                         await self._verify_staged_release()
 
-                        if self.remote_transport == "agent":
+                        if self.remote_transport == "remote":
                             await self._verify_agent_transport("before switching release")
 
                         # 4. Atomically switch *current* → new release + housekeeping
@@ -183,12 +193,13 @@ class AgentDeployer(FrameDeployer):
                         await self._switch_current_release()
 
                         # Enable + start service
-                        if self.remote_transport == "agent":
+                        if self.remote_transport == "remote":
                             await self._restart_agent_service_via_agent()
                             await self._wait_for_agent_release(previous_agent_process)
                         else:
-                            await self.restart_service("frameos_agent")
+                            await self.restart_service(REMOTE_SERVICE)
                             await self._wait_for_agent_release(previous_agent_process)
+                        await self._disable_legacy_agent_service()
 
                         await self._cleanup_old_builds()
                     finally:
@@ -204,9 +215,9 @@ class AgentDeployer(FrameDeployer):
                         "stdout",
                         f"- Skipping remote deployment for {self.frame.name} (no remote connection configured)"
                     )
-                    # If the frame has no agent connection configured, disable service
-                    await self.disable_service("frameos_agent")
-                    await self.stop_service("frameos_agent")
+                    # If the frame has no remote connection configured, disable service
+                    await self.disable_service(REMOTE_SERVICE)
+                    await self.stop_service(REMOTE_SERVICE)
 
 
         except Exception as exc:  # keep logging parity with legacy code
@@ -214,10 +225,10 @@ class AgentDeployer(FrameDeployer):
             raise
 
     def _release_dir(self) -> str:
-        return f"/srv/frameos/agent/releases/release_{self.build_id}"
+        return f"/srv/frameos/remote/releases/release_{self.build_id}"
 
     def _can_deploy_agent(self) -> bool:
-        """Whether ``frame.network`` declares an agent link + shared secret."""
+        """Whether the frame config declares a remote link + shared secret."""
         agent = self.frame.agent or {}
         return bool(agent.get("agentEnabled") and len(str(agent.get("agentSharedSecret", ""))) > 0)
 
@@ -228,13 +239,13 @@ class AgentDeployer(FrameDeployer):
         Return `(build_dir, source_dir)`.
 
         * ``build_dir`` holds the Nim intermediate artefacts.
-        * ``source_dir`` is a fresh copy of `../agent`.
+        * ``source_dir`` is a fresh copy of `../remote`.
         """
-        build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
-        source_dir = os.path.join(self.temp_dir, "agent")
+        build_dir = os.path.join(self.temp_dir, f"remote_{self.build_id}")
+        source_dir = os.path.join(self.temp_dir, "remote")
 
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree(REPO_ROOT / "frameos" / "agent", source_dir, dirs_exist_ok=True)  # idempotent copy
+        shutil.copytree(REPO_ROOT / "frameos" / "remote", source_dir, dirs_exist_ok=True)  # idempotent copy
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir
@@ -250,18 +261,18 @@ class AgentDeployer(FrameDeployer):
             self.nim_path = find_nim_v2()
         debug_opts = "--lineTrace:on" if self.frame.debug else ""
         cpu = await self.arch_to_nim_cpu(arch)
-        agent_version = agent_build_version()
-        version_option = shlex.quote(f"--define:frameosAgentVersion:{agent_version}")
+        remote_version = agent_build_version()
+        version_option = shlex.quote(f"--define:frameosRemoteVersion:{remote_version}")
         cmd = (
             f"cd {source_dir} && nimble install -dy && nimble setup && "
             f"{self.nim_path} compile --os:linux --cpu:{cpu} "
             f"--compileOnly --genScript --nimcache:{build_dir} -d:ssl "
-            f"{version_option} {debug_opts} src/frameos_agent.nim 2>&1"
+            f"{version_option} {debug_opts} src/frameos_remote.nim 2>&1"
         )
 
         status, *_ = await exec_local_command(self.db, self.redis, self.frame, cmd)
         if status != 0:
-            raise Exception("Failed to generate agent sources")
+            raise Exception("Failed to generate remote sources")
 
         # Copy nimbase.h because the generated C depends on it
         nimbase_path = find_nimbase_file(self.nim_path)
@@ -270,22 +281,22 @@ class AgentDeployer(FrameDeployer):
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
         self._write_agent_c_makefile(build_dir)
 
-        archive_path = os.path.join(self.temp_dir, f"agent_{self.build_id}.tar.gz")
+        archive_path = os.path.join(self.temp_dir, f"remote_{self.build_id}.tar.gz")
         shutil.make_archive(
-            base_name=os.path.join(self.temp_dir, f"agent_{self.build_id}"),
+            base_name=os.path.join(self.temp_dir, f"remote_{self.build_id}"),
             format="gztar",
             root_dir=self.temp_dir,
-            base_dir=f"agent_{self.build_id}",
+            base_dir=f"remote_{self.build_id}",
         )
         return archive_path
 
     def _write_agent_c_makefile(self, build_dir: str) -> None:
-        script_path = self._find_compile_script(build_dir, "compile_frameos_agent.sh")
-        linker_flags, compiler_flags = self._extract_compile_flags(script_path, AGENT_BINARY)
+        script_path = self._find_compile_script(build_dir, "compile_frameos_remote.sh")
+        linker_flags, compiler_flags = self._extract_compile_flags(script_path, REMOTE_BINARY)
         self._write_c_makefile(
             makefile_path=os.path.join(build_dir, "Makefile"),
             template_path=str(REPO_ROOT / "frameos" / "tools" / "nimc.Makefile"),
-            output_name=AGENT_BINARY,
+            output_name=REMOTE_BINARY,
             linker_flags=linker_flags,
             compiler_flags=compiler_flags,
         )
@@ -297,13 +308,13 @@ class AgentDeployer(FrameDeployer):
         Prefer the released binary for the target platform. Fall back to the
         source-generated native build path when no supported release exists.
         """
-        if not self.force_source and precompiled_agent_enabled():
+        if not self.force_source and precompiled_remote_enabled():
             prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
             if prebuilt_target:
                 try:
                     await self.log("stdout", f"- Trying precompiled FrameOS Remote release on {prebuilt_target}")
-                    build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
-                    result = await download_precompiled_agent_release(
+                    build_dir = os.path.join(self.temp_dir, f"remote_{self.build_id}")
+                    result = await download_precompiled_remote_release(
                         target=prebuilt_target,
                         build_dir=build_dir,
                         temp_dir=self.temp_dir,
@@ -325,14 +336,14 @@ class AgentDeployer(FrameDeployer):
                     f"- No precompiled FrameOS Remote target for {distro} {distro_version} on {arch}; falling back to source build",
                 )
         else:
-            reason = "requested from local development" if self.force_source else f"{PRECOMPILED_AGENT_ENV}=source"
+            reason = "requested from local development" if self.force_source else f"{PRECOMPILED_REMOTE_ENV}=source"
             await self.log("stdout", f"- {reason}; building FrameOS Remote from source")
 
         await self._deploy_agent_from_source(arch, distro=distro, distro_version=distro_version)
 
     async def _deploy_agent_from_source(self, arch: str, *, distro: str, distro_version: str) -> None:
         """
-        Build generated agent sources locally, cross-compile them when possible,
+        Build generated remote sources locally, cross-compile them when possible,
         and fall back to native compilation on the device when needed.
         """
         build_dir, source_dir = self._create_agent_build_folders()
@@ -357,7 +368,7 @@ class AgentDeployer(FrameDeployer):
             self.db,
             self.redis,
             self.frame,
-            f"/srv/frameos/agent/build/agent_{self.build_id}.tar.gz",
+            f"/srv/frameos/remote/build/remote_{self.build_id}.tar.gz",
             archive_data,
             timeout=1800,
             transport=self.remote_transport,
@@ -365,19 +376,19 @@ class AgentDeployer(FrameDeployer):
 
         # Unpack & compile _on the device_
         await self.exec_command(
-            f"cd /srv/frameos/agent/build && tar -xzf agent_{self.build_id}.tar.gz && "
-            f"rm agent_{self.build_id}.tar.gz"
+            f"cd /srv/frameos/remote/build && tar -xzf remote_{self.build_id}.tar.gz && "
+            f"rm remote_{self.build_id}.tar.gz"
         )
         await self.exec_command(
-            f"cd /srv/frameos/agent/build/agent_{self.build_id} && sh compile_frameos_agent.sh"
+            f"cd /srv/frameos/remote/build/remote_{self.build_id} && sh compile_frameos_remote.sh"
         )
 
         # Stage binary into new release dir
         await self.exec_command(
-            f"cp /srv/frameos/agent/build/agent_{self.build_id}/frameos_agent "
-            f"{self._release_dir()}/frameos_agent"
+            f"cp /srv/frameos/remote/build/remote_{self.build_id}/frameos_remote "
+            f"{self._release_dir()}/frameos_remote"
         )
-        await self.exec_command(f"chmod +x {self._release_dir()}/frameos_agent")
+        await self.exec_command(f"chmod +x {self._release_dir()}/frameos_remote")
 
     async def _try_cross_compile_agent(
         self,
@@ -393,22 +404,22 @@ class AgentDeployer(FrameDeployer):
         settings = get_settings_dict(self.db, project_id=project_id) if self.db and project_id is not None else {}
         build_environment_provider = selected_build_environment_provider(settings)
         if build_environment_provider == "none":
-            await self.log("stdout", "- Server-side compilation is disabled; building agent on the device")
+            await self.log("stdout", "- Server-side compilation is disabled; building remote on the device")
             return False
         if not can_cross_compile_target(arch):
             if build_environment_provider != "none":
-                raise RuntimeError(f"Selected build environment cannot cross compile agent for {arch}")
+                raise RuntimeError(f"Selected build environment cannot cross compile remote for {arch}")
             await self.log(
                 "stdout",
-                f"- Agent target architecture {arch} does not support cross compilation; building on the device",
+                f"- Remote target architecture {arch} does not support cross compilation; building on the device",
             )
             return False
 
         ensure_build_executor_configured(build_environment_provider, build_executor)
         if build_executor:
-            await self.log("stdout", f"- Cross compiling agent via {build_executor_display_name(build_executor)}")
+            await self.log("stdout", f"- Cross compiling remote via {build_executor_display_name(build_executor)}")
         else:
-            await self.log("stdout", "- Cross compiling agent locally")
+            await self.log("stdout", "- Cross compiling remote locally")
 
         try:
             binary_path = await CrossCompiler(
@@ -421,18 +432,18 @@ class AgentDeployer(FrameDeployer):
                 build_dir=build_dir,
                 logger=self.log,
                 build_host=build_executor,
-                output_name=AGENT_BINARY,
-                compile_script_name="compile_frameos_agent.sh",
+                output_name=REMOTE_BINARY,
+                compile_script_name="compile_frameos_remote.sh",
                 needs_quickjs=False,
             ).build(source_dir)
         except Exception as exc:  # noqa: BLE001
             if build_environment_provider != "none":
-                await self.log("stderr", f"- Agent cross compilation failed ({exc})")
+                await self.log("stderr", f"- Remote cross compilation failed ({exc})")
                 raise
-            await self.log("stderr", f"- Agent cross compilation failed ({exc}); falling back to on-device build")
+            await self.log("stderr", f"- Remote cross compilation failed ({exc}); falling back to on-device build")
             return False
 
-        await self.log("stdout", "- Agent cross compilation succeeded; skipping on-device compile")
+        await self.log("stdout", "- Remote cross compilation succeeded; skipping on-device compile")
         await self._stage_agent_binary(binary_path)
         return True
 
@@ -441,9 +452,9 @@ class AgentDeployer(FrameDeployer):
         openssl_header_check = "test -e /usr/include/openssl/ssl.h"
 
         if distro in {"raspios", "debian", "ubuntu"}:
-            await self.log("stdout", "- Ensuring agent source-build dependencies on device")
+            await self.log("stdout", "- Ensuring remote source-build dependencies on device")
             missing_packages = []
-            for pkg in AGENT_SOURCE_BUILD_APT_PACKAGES:
+            for pkg in REMOTE_SOURCE_BUILD_APT_PACKAGES:
                 sanitized_pkg = sanitize_apt_package_name(pkg)
                 installed = (
                     await self.exec_command(
@@ -493,7 +504,7 @@ class AgentDeployer(FrameDeployer):
 
         quoted_packages = " ".join(shlex.quote(pkg) for pkg in packages)
         install_command = f"apt-get install -y {quoted_packages}"
-        await self.log("stdout", f"- Installing agent source-build dependencies: {', '.join(packages)}")
+        await self.log("stdout", f"- Installing remote source-build dependencies: {', '.join(packages)}")
 
         output: list[str] = []
         status = await self.exec_command(
@@ -503,7 +514,7 @@ class AgentDeployer(FrameDeployer):
             timeout=1800,
         )
         if status != 0:
-            await self.log("stdout", "- Installing agent source-build dependencies failed. Updating apt and retrying.")
+            await self.log("stdout", "- Installing remote source-build dependencies failed. Updating apt and retrying.")
             status = await self.exec_command(
                 self._sudo_system_command(f"apt-get update && {install_command}"),
                 raise_on_error=False,
@@ -513,7 +524,7 @@ class AgentDeployer(FrameDeployer):
         if status != 0:
             package_list = ", ".join(packages)
             raise RuntimeError(
-                f"Could not install agent source-build dependencies ({package_list}). "
+                f"Could not install remote source-build dependencies ({package_list}). "
                 "Install them on the device or deploy a precompiled FrameOS Remote release instead."
             )
 
@@ -527,7 +538,7 @@ class AgentDeployer(FrameDeployer):
         if status != 0:
             return False
 
-        await self.log("stdout", "- Root filesystem is read-only; remounting read-write to install the agent service")
+        await self.log("stdout", "- Root filesystem is read-only; remounting read-write to install the remote service")
         await self.exec_command(self._sudo_system_command("mount -o remount,rw /"))
         return True
 
@@ -545,7 +556,7 @@ class AgentDeployer(FrameDeployer):
         inner = f"set -eu; export DEBIAN_FRONTEND=noninteractive; {command}"
         quoted_inner = shlex.quote(inner)
 
-        if self.remote_transport == "agent":
+        if self.remote_transport == "remote":
             return (
                 "if command -v systemd-run >/dev/null 2>&1; then "
                 "sudo -n systemd-run --quiet --wait --pipe --collect /bin/sh -lc "
@@ -562,7 +573,7 @@ class AgentDeployer(FrameDeployer):
         with open(binary_path, "rb") as fh:
             data = fh.read()
         self.staged_binary_sha256 = hashlib.sha256(data).hexdigest()
-        remote_binary = f"{self._release_dir()}/frameos_agent"
+        remote_binary = f"{self._release_dir()}/frameos_remote"
         await upload_file(
             self.db,
             self.redis,
@@ -578,8 +589,8 @@ class AgentDeployer(FrameDeployer):
     async def _ensure_agent_directories(self) -> None:
         await self.exec_command(
             "mkdir -p "
-            "/srv/frameos/agent/build/ "
-            "/srv/frameos/agent/logs/ "
+            "/srv/frameos/remote/build/ "
+            "/srv/frameos/remote/logs/ "
             f"{self._release_dir()}"
         )
 
@@ -587,7 +598,7 @@ class AgentDeployer(FrameDeployer):
 
     async def _setup_agent_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
-        with open(REPO_ROOT / "frameos" / "agent" / "frameos_agent.service", "r", encoding="utf-8") as fh:
+        with open(REPO_ROOT / "frameos" / "remote" / "frameos-remote.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
         # Ship service file with the release
@@ -595,34 +606,35 @@ class AgentDeployer(FrameDeployer):
             self.db,
             self.redis,
             self.frame,
-            f"{self._release_dir()}/frameos_agent.service",
+            f"{self._release_dir()}/frameos-remote.service",
             service_contents.encode(),
             transport=self.remote_transport,
         )
 
         # Activate system-wide
-        service_source = shlex.quote(f"{self._release_dir()}/frameos_agent.service")
-        service_destination = shlex.quote("/etc/systemd/system/frameos_agent.service")
+        service_source = shlex.quote(f"{self._release_dir()}/frameos-remote.service")
+        service_destination = shlex.quote("/etc/systemd/system/frameos-remote.service")
         await self.exec_command(
             self._sudo_system_command(
                 f"cp {service_source} {service_destination} && "
                 f"chown root:root {service_destination} && "
-                f"chmod 644 {service_destination}"
+                f"chmod 644 {service_destination} && "
+                "systemctl daemon-reload"
             )
         )
 
     async def _verify_agent_transport(self, label: str) -> None:
         output: list[str] = []
-        await self.log("stdout", f"- Verifying agent command transport ({label})")
+        await self.log("stdout", f"- Verifying remote command transport ({label})")
         await self.exec_command(
-            "printf frameos-agent-transport-ok",
+            "printf frameos-remote-transport-ok",
             output=output,
             log_output=False,
             log_command=False,
             timeout=30,
         )
-        if "frameos-agent-transport-ok" not in "\n".join(output):
-            raise RuntimeError(f"Agent command transport verification failed ({label})")
+        if "frameos-remote-transport-ok" not in "\n".join(output):
+            raise RuntimeError(f"Remote command transport verification failed ({label})")
 
     async def _verify_uploaded_binary(self, remote_binary: str) -> None:
         if not self.staged_binary_sha256:
@@ -643,13 +655,13 @@ class AgentDeployer(FrameDeployer):
             "set -eu; "
             f"release={release_dir}; "
             'test -d "$release"; '
-            'test -s "$release/frameos_agent"; '
-            'test -x "$release/frameos_agent"; '
-            'test -s "$release/frameos_agent.service"; '
+            'test -s "$release/frameos_remote"; '
+            'test -x "$release/frameos_remote"; '
+            'test -s "$release/frameos-remote.service"; '
             'test -s "$release/frame.json"; '
-            "grep -q '^ExecStart=/srv/frameos/agent/current/frameos_agent$' "
-            '"$release/frameos_agent.service"; '
-            "echo staged-agent-release-ok",
+            "grep -q '^ExecStart=/srv/frameos/remote/current/frameos_remote$' "
+            '"$release/frameos-remote.service"; '
+            "echo staged-remote-release-ok",
             timeout=120,
         )
 
@@ -658,7 +670,7 @@ class AgentDeployer(FrameDeployer):
         await self.log("stdout", "- Switching current FrameOS Remote release")
         await self.exec_command(
             "set -eu; "
-            "cd /srv/frameos/agent; "
+            "cd /srv/frameos/remote; "
             "rm -f current.next; "
             f"ln -sfn {release_dir} current.next; "
             "(mv -Tf current.next current 2>/dev/null || (rm -rf current && mv current.next current)); "
@@ -674,10 +686,21 @@ class AgentDeployer(FrameDeployer):
             timeout=30,
         )
 
+    async def _disable_legacy_agent_service(self) -> None:
+        await self.exec_command(
+            self._sudo_system_command(
+                "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; "
+                "rm -f /etc/systemd/system/frameos_agent.service; "
+                "systemctl daemon-reload"
+            ),
+            raise_on_error=False,
+            timeout=120,
+        )
+
     async def _agent_service_process_signature(self) -> str | None:
         output: list[str] = []
         await self.exec_command(
-            "pid=$(systemctl show -p MainPID --value frameos_agent.service 2>/dev/null || true); "
+            "pid=$(systemctl show -p MainPID --value frameos-remote.service 2>/dev/null || true); "
             'if [ -n "$pid" ] && [ "$pid" != "0" ]; then '
             'start=$(awk \'{print $22}\' "/proc/$pid/stat" 2>/dev/null || true); '
             'printf "%s:%s" "$pid" "$start"; '
@@ -692,7 +715,7 @@ class AgentDeployer(FrameDeployer):
         return signature or None
 
     async def _wait_for_agent_release(self, previous_process_signature: str | None = None) -> None:
-        expected_binary = f"{self._release_dir()}/frameos_agent"
+        expected_binary = f"{self._release_dir()}/frameos_remote"
         quoted_expected = shlex.quote(expected_binary)
         quoted_previous_process = shlex.quote(previous_process_signature or "")
         deadline = asyncio.get_event_loop().time() + 90
@@ -703,20 +726,20 @@ class AgentDeployer(FrameDeployer):
             output: list[str] = []
             try:
                 await self.exec_command(
-                    "pid=$(systemctl show -p MainPID --value frameos_agent.service 2>/dev/null || true); "
+                    "pid=$(systemctl show -p MainPID --value frameos-remote.service 2>/dev/null || true); "
                     'test -n "$pid"; test "$pid" != "0"; '
                     'start=$(awk \'{print $22}\' "/proc/$pid/stat" 2>/dev/null || true); '
                     'signature="$pid:$start"; '
                     f'[ -z {quoted_previous_process} ] || [ "$signature" != {quoted_previous_process} ]; '
                     f'test "$(readlink -f /proc/$pid/exe 2>/dev/null)" = {quoted_expected}; '
-                    "systemctl is-active --quiet frameos_agent.service; "
-                    "echo restarted-agent-release-ok",
+                    "systemctl is-active --quiet frameos-remote.service; "
+                    "echo restarted-remote-release-ok",
                     output=output,
                     log_output=False,
                     log_command=False,
                     timeout=15,
                 )
-                if "restarted-agent-release-ok" in "\n".join(output):
+                if "restarted-remote-release-ok" in "\n".join(output):
                     await self.log("stdout", "- Restarted FrameOS Remote is running the staged release")
                     return
             except Exception as exc:  # noqa: BLE001
@@ -732,11 +755,11 @@ class AgentDeployer(FrameDeployer):
         """Keep only the 10 most-recent builds + releases on the device."""
         # Prune `/build`
         await self.exec_command(
-            "cd /srv/frameos/agent/build && ls -dt1 agent_* | tail -n +11 | xargs rm -rf"
+            "cd /srv/frameos/remote/build && ls -dt1 remote_* | tail -n +11 | xargs rm -rf"
         )
         # Prune `/releases` except for the one currently linked
         await self.exec_command(
-            "cd /srv/frameos/agent/releases && "
+            "cd /srv/frameos/remote/releases && "
             'ls -dt1 release_* | grep -v "$(basename $(readlink ../current))" | '
             "tail -n +11 | xargs rm -rf"
         )

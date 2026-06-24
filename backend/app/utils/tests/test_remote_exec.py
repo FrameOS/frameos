@@ -57,7 +57,7 @@ async def test_agent_run_command_preserves_output_without_requesting_log(monkeyp
     assert stderr == ""
     assert logged == []
     key, raw_job = redis.pushed[0]
-    assert key == "agent:cmd:123"
+    assert key == "remote:cmd:123"
     assert json.loads(raw_job)["log"] is False
 
 

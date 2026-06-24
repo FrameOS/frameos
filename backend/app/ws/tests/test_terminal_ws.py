@@ -66,7 +66,7 @@ async def test_run_agent_terminal_command_streams_output_and_exit_status():
 
     assert len(redis.pushed) == 1
     key, raw_job = redis.pushed[0]
-    assert key == "agent:cmd:987654321"
+    assert key == "remote:cmd:987654321"
 
     job = json.loads(raw_job)
     assert job["frame_id"] == frame.id
@@ -78,7 +78,7 @@ async def test_run_agent_terminal_command_streams_output_and_exit_status():
         "hello\n",
         "*** command exited with status 2 ***\n",
     ]
-    assert redis.deleted == [f"agent:cmd:stream:{job['id']}"]
+    assert redis.deleted == [f"remote:cmd:stream:{job['id']}"]
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_queue_agent_terminal_command_uses_terminal_payload():
 
     assert len(redis.pushed) == 1
     key, raw_job = redis.pushed[0]
-    assert key == "agent:cmd:42"
+    assert key == "remote:cmd:42"
     assert json.loads(raw_job) == {
         "id": "terminal-id",
         "frame_id": 42,

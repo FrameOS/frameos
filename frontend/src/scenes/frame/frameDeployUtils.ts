@@ -110,7 +110,8 @@ export interface AgentUpgradeNotice {
 type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
 
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
-export const CURRENT_FRAMEOS_AGENT_VERSION = (versions.agent || 'dev').split('+')[0]
+export const CURRENT_FRAMEOS_REMOTE_VERSION = ((versions as any).remote || (versions as any).agent || 'dev').split('+')[0]
+export const CURRENT_FRAMEOS_AGENT_VERSION = CURRENT_FRAMEOS_REMOTE_VERSION
 export const FRAMEOS_GITHUB_RELEASES_URL = 'https://github.com/FrameOS/frameos/releases'
 
 const INKY_BUTTON_DEVICES = new Set([

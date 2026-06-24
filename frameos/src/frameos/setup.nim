@@ -245,10 +245,20 @@ proc installFrameOSServiceFile(frameOS: FrameOS) =
 proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   result = @["frameos.service"]
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
-    result.add("frameos_agent.service")
+    result.add("frameos-remote.service")
 
 proc ensureSystemdServiceDirectories() =
   discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system /etc/cron.d"))
+
+proc scheduleLegacyAgentDisableCommand(): string =
+  let script = "sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; " &
+    "rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload"
+  if commandExists("systemd-run"):
+    return privilegedCommand(
+      "systemd-run --quiet --unit=frameos-remote-disable-legacy-agent --collect /bin/sh -lc " &
+      shellQuote(script)
+    )
+  privilegedCommand("sh -c " & shellQuote("nohup sh -c " & shellQuote(script) & " >/dev/null 2>&1 &"))
 
 proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   if not commandExists("systemctl"):
@@ -262,13 +272,14 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   installFrameOSServiceFile(frameOS)
 
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
-    setupLog("FrameOS setup: systemd services: installing frameos_agent.service")
-    installServiceFile("/srv/frameos/agent/current/frameos_agent.service", "/etc/systemd/system/frameos_agent.service")
+    setupLog("FrameOS setup: systemd services: installing frameos-remote.service")
+    installServiceFile("/srv/frameos/remote/current/frameos-remote.service", "/etc/systemd/system/frameos-remote.service")
   else:
-    discard runSetupCommand(privilegedCommand("systemctl disable frameos_agent.service"), raiseOnError = false)
+    discard runSetupCommand(privilegedCommand("systemctl disable frameos-remote.service"), raiseOnError = false)
 
   discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
   discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
+  discard runSetupCommand(scheduleLegacyAgentDisableCommand(), raiseOnError = false)
 
   result = setupOk()
 
@@ -296,14 +307,15 @@ proc wirelessInterfaces(): seq[string] =
 
 proc cgroupIndicatesAgentService*(cgroupContent: string): bool =
   for line in cgroupContent.splitLines():
-    if "frameos_agent.service" in line:
+    if "frameos-remote.service" in line or "frameos_agent.service" in line:
       return true
   false
 
 proc runningUnderFrameosAgent*(): bool =
-  ## Deploys can run "frameos setup" through the agent's websocket connection;
-  ## the spawned process (and its sudo children) stays in the agent's cgroup.
-  if getEnv("FRAMEOS_SETUP_UNDER_AGENT").normalize in ["1", "true", "yes"]:
+  ## Deploys can run "frameos setup" through the remote websocket connection;
+  ## the spawned process (and its sudo children) stays in the remote cgroup.
+  if getEnv("FRAMEOS_SETUP_UNDER_REMOTE").normalize in ["1", "true", "yes"] or
+      getEnv("FRAMEOS_SETUP_UNDER_AGENT").normalize in ["1", "true", "yes"]:
     return true
   try:
     result = fileExists("/proc/self/cgroup") and
@@ -509,13 +521,13 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupOk()
   ))
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
-  # When setup runs as a child of the agent (deploys over the agent websocket),
+  # When setup runs as a child of FrameOS Remote (deploys over the remote websocket),
   # live-applying network/systemd changes can drop the very connection the
   # deploy is running on. Write the configs but defer their activation.
   let liveApply = not runningUnderFrameosAgent()
   if not liveApply:
-    setupLog("FrameOS setup: running inside frameos_agent.service; deferring live system changes " &
-      "to keep the agent connection alive")
+    setupLog("FrameOS setup: running inside frameos-remote.service; deferring live system changes " &
+      "to keep the remote connection alive")
   addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
@@ -525,7 +537,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
 proc writeSetupReleasePayload*(
   configPath: string,
   frameosCurrentDir = "/srv/frameos/current",
-  agentCurrentDir = "/srv/frameos/agent/current",
+  agentCurrentDir = "/srv/frameos/remote/current",
 ) =
   if configPath.len == 0:
     return

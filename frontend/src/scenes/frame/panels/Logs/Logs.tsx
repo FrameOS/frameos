@@ -305,7 +305,7 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   if (type === 'stderr') {
     return theme === 'dark' ? 'text-red-300' : 'text-red-700'
   }
-  if (type === 'agent') {
+  if (type === 'agent' || type === 'remote') {
     return theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
   }
   if (type === 'build') {
@@ -634,7 +634,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 )
               }
             } catch (e) {}
-          } else if (log.type === 'agent') {
+          } else if (log.type === 'agent' || log.type === 'remote') {
             logLine = (
               <>
                 <span className={renderTheme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[REMOTE]'}</span>{' '}

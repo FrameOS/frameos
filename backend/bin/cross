@@ -69,8 +69,8 @@ RELEASE_CACHE_VERSION = "2"
 RELEASE_BUILD_MAKEFILE_VERSION = "3"
 RELEASE_BUILD_MARKER = ".frameos-release-build.json"
 AGENT_RELEASE_BUILD_MAKEFILE_VERSION = "1"
-AGENT_RELEASE_BUILD_MARKER = ".frameos-agent-release-build.json"
-AGENT_BINARY = "frameos_agent"
+AGENT_RELEASE_BUILD_MARKER = ".frameos-remote-release-build.json"
+AGENT_BINARY = "frameos_remote"
 RELEASE_HASH_IGNORED_NAMES = {
     ".DS_Store",
     ".git",
@@ -164,7 +164,7 @@ def release_build_cache_dir(slug: str, input_hash: str) -> Path:
 
 
 def release_agent_build_cache_dir(slug: str, input_hash: str) -> Path:
-    return release_cache_root() / "agent-builds" / slug / input_hash / "build"
+    return release_cache_root() / "remote-builds" / slug / input_hash / "build"
 
 
 def release_artifact_cache_dir(slug: str, input_hash: str) -> Path:
@@ -292,7 +292,7 @@ def release_agent_generated_build_dir_complete(
         return False
     if marker.get("makefile_version") != AGENT_RELEASE_BUILD_MAKEFILE_VERSION:
         return False
-    return (build_dir / "compile_frameos_agent.sh").is_file() and (build_dir / "Makefile").is_file()
+    return (build_dir / "compile_frameos_remote.sh").is_file() and (build_dir / "Makefile").is_file()
 
 
 def release_build_outputs_complete(
@@ -359,7 +359,7 @@ def agent_version_for_repo(repo_root: Path) -> str:
         data = json.loads(versions_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return "unknown"
-    version = data.get("agent")
+    version = data.get("remote") or data.get("agent")
     if isinstance(version, str) and version:
         return version
     return "unknown"
@@ -388,23 +388,23 @@ async def generate_agent_build_dir(
     build_dir.mkdir(parents=True, exist_ok=True)
     cpu = await deployer.arch_to_nim_cpu(arch)
     agent_version = agent_version_for_repo(repo_root)
-    version_option = shlex.quote(f"--define:frameosAgentVersion:{agent_version}")
+    version_option = shlex.quote(f"--define:frameosRemoteVersion:{agent_version}")
     command = (
         f"cd {shlex.quote(str(agent_source_dir))} && nimble install -dy && nimble setup && "
         f"{shlex.quote(nim_path)} compile --os:linux --cpu:{cpu} "
         f"--compileOnly --genScript --nimcache:{shlex.quote(str(build_dir))} "
-        f"-d:ssl {version_option} src/frameos_agent.nim 2>&1"
+        f"-d:ssl {version_option} src/frameos_remote.nim 2>&1"
     )
     status, out, err = await exec_local_command(None, None, deployer.frame, command)
     if status != 0:
-        raise RuntimeError(f"Failed to generate agent sources: {err or out or 'see logs'}")
+        raise RuntimeError(f"Failed to generate remote sources: {err or out or 'see logs'}")
 
     nimbase_path = find_nimbase_file(nim_path)
     if not nimbase_path:
         raise RuntimeError("nimbase.h not found")
     shutil.copy(nimbase_path, build_dir / "nimbase.h")
 
-    script_path = FrameDeployer._find_compile_script(str(build_dir), "compile_frameos_agent.sh")
+    script_path = FrameDeployer._find_compile_script(str(build_dir), "compile_frameos_remote.sh")
     linker_flags, compiler_flags = FrameDeployer._extract_compile_flags(script_path, AGENT_BINARY)
     FrameDeployer._write_c_makefile(
         makefile_path=str(build_dir / "Makefile"),
@@ -696,14 +696,14 @@ async def build_release_target(
         if not binary_path:
             raise RuntimeError("Release cross compilation completed without producing a binary")
 
-        agent_source_dir = Path(source_dir) / "agent"
+        agent_source_dir = Path(source_dir) / "remote"
         if not agent_source_dir.is_dir():
-            raise RuntimeError(f"FrameOS agent source directory is missing: {agent_source_dir}")
+            raise RuntimeError(f"FrameOS Remote source directory is missing: {agent_source_dir}")
         agent_build_dir = release_agent_build_cache_dir(slug, input_hash)
         if rebuild:
             shutil.rmtree(agent_build_dir, ignore_errors=True)
         if release_agent_generated_build_dir_complete(agent_build_dir, input_hash=input_hash):
-            await deployer.log("stdout", f"Using cached generated agent build directory: {agent_build_dir}")
+            await deployer.log("stdout", f"Using cached generated remote build directory: {agent_build_dir}")
         else:
             shutil.rmtree(agent_build_dir, ignore_errors=True)
             await generate_agent_build_dir(
@@ -721,7 +721,7 @@ async def build_release_target(
             )
 
         if not rebuild and release_agent_build_output_complete(agent_build_dir):
-            await deployer.log("stdout", f"Using cached compiled agent output: {agent_build_dir}")
+            await deployer.log("stdout", f"Using cached compiled remote output: {agent_build_dir}")
             agent_binary_path = str(agent_build_dir / AGENT_BINARY)
         else:
             target_override = TargetMetadata(
@@ -741,12 +741,12 @@ async def build_release_target(
                 build_dir=agent_build_dir,
                 logger=console_log,
                 output_name=AGENT_BINARY,
-                compile_script_name="compile_frameos_agent.sh",
+                compile_script_name="compile_frameos_remote.sh",
                 needs_quickjs=False,
             )
             agent_binary_path = await agent_compiler.build(str(agent_source_dir))
         if not agent_binary_path:
-            raise RuntimeError("Release cross compilation completed without producing an agent binary")
+            raise RuntimeError("Release cross compilation completed without producing a remote binary")
 
         target_tmp = artifacts_dir / f".{slug}.tmp-{os.getpid()}"
         shutil.rmtree(target_tmp, ignore_errors=True)
@@ -790,6 +790,7 @@ async def build_release_target(
             "driver_registry": "runtime-filtered",
             "driver_libraries": driver_library_names,
             "vendor_folders": vendor_folders,
+            "remote_binary": AGENT_BINARY,
             "agent_binary": AGENT_BINARY,
             "release_cache_version": RELEASE_CACHE_VERSION,
             "input_hash": input_hash,

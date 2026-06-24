@@ -146,8 +146,8 @@ COPY frameos/frameos.nimble frameos/nimble.lock frameos/nim.cfg frameos/config.n
 WORKDIR /app/frameos
 RUN nimble install -d -y && nimble setup
 
-COPY frameos/agent/frameos_agent.nimble frameos/agent/nimble.lock frameos/agent/config.nims /app/frameos/agent/
-WORKDIR /app/frameos/agent
+COPY frameos/remote/frameos_remote.nimble frameos/remote/nimble.lock frameos/remote/config.nims /app/frameos/remote/
+WORKDIR /app/frameos/remote
 RUN nimble install -d -y && nimble setup
 
 WORKDIR /app
@@ -194,8 +194,8 @@ RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
       /app/frameos/nimcache \
       /app/frameos/testresults \
       /app/frameos/tmp \
-      /app/frameos/agent/build \
-      /app/frameos/agent/tmp
+      /app/frameos/remote/build \
+      /app/frameos/remote/tmp
 
 WORKDIR /app/frameos
 RUN nim c \

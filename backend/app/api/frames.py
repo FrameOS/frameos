@@ -82,6 +82,7 @@ from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
     RemoteTransport,
+    normalize_remote_transport,
     upload_file,
     delete_path,
     rename_path,
@@ -102,7 +103,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import close_redis_connection, create_redis_connection, get_redis
 from app.websockets import publish_message
-from app.ws.agent_ws import (
+from app.ws.remote_ws import (
     http_get_on_frame,
     number_of_connections_for_frame,
     file_md5_on_frame,
@@ -150,13 +151,13 @@ from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
 
-REMOTE_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
+REMOTE_TASK_TRANSPORTS = {"auto", "remote", "agent", "ssh"}
 
 
 def _remote_task_transport(transport: str) -> RemoteTransport:
     if transport not in REMOTE_TASK_TRANSPORTS:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid remote task transport")
-    return cast(RemoteTransport, transport)
+    return normalize_remote_transport(transport)
 
 FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS = 20
 FRAME_ASSETS_CACHE_RETRY_AFTER_SECONDS = 2

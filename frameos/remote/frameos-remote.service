@@ -1,14 +1,14 @@
-# /etc/systemd/system/frameos_agent.service
+# /etc/systemd/system/frameos-remote.service
 [Unit]
-Description=FrameOS Agent (auto-reconnect, hardened)
+Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=%I
-WorkingDirectory=/srv/frameos/agent/current
-ExecStart=/srv/frameos/agent/current/frameos_agent
+WorkingDirectory=/srv/frameos/remote/current
+ExecStart=/srv/frameos/remote/current/frameos_remote
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

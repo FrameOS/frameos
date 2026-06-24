@@ -24,8 +24,11 @@ async def restart_remote_task(ctx: dict[str, Any], id: int, transport: RemoteTra
         await log(db, redis, id, "stdout", f"Restarting FrameOS Remote via {resolved_transport}")
         commands = (
             [delayed_agent_restart_command("manual")]
-            if resolved_transport == "agent"
-            else ["sudo systemctl restart frameos_agent.service"]
+            if resolved_transport == "remote"
+            else [
+                "sudo systemctl restart frameos-remote.service && "
+                "sudo systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true"
+            ]
         )
         await run_commands(
             db,

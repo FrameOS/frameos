@@ -514,7 +514,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
       if (
         lowerLine.includes('frameos agent restart command completed') ||
         lowerLine.includes('frameos remote restart command completed') ||
-        (log.type === 'agent' && lowerLine.includes('connected'))
+        ((log.type === 'agent' || log.type === 'remote') && lowerLine.includes('connected'))
       ) {
         actions.finishTask({
           frameId: log.frame_id,

@@ -4,7 +4,7 @@ set -eu
 FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-2026.6.8}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
-FRAMEOS_AGENT_DIR="${FRAMEOS_AGENT_DIR:-/srv/frameos/agent}"
+FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
 FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"
 SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
 SUPPORTED_ARCHES="arm64 armhf amd64"
@@ -912,8 +912,8 @@ if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-$(ask_required "Backend host" "$default_server_host")}"
   FRAMEOS_SERVER_PORT="${FRAMEOS_SERVER_PORT:-$(ask_int "Backend port" "$default_server_port")}"
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-$(ask_required "Backend server API key" "$default_server_api_key")}"
-  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$(ask_required "FrameOS agent shared secret" "$default_agent_secret")}"
-  FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-$(ask_yes_no "Allow backend terminal/deploy commands through the agent" "$default_agent_run_commands")}"
+  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$(ask_required "FrameOS Remote shared secret" "$default_agent_secret")}"
+  FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-$(ask_yes_no "Allow backend terminal/deploy commands through FrameOS Remote" "$default_agent_run_commands")}"
   FRAMEOS_SERVER_SEND_LOGS="${FRAMEOS_SERVER_SEND_LOGS:-$(ask_yes_no "Send logs to the backend" "$default_server_send_logs")}"
 else
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-}"
@@ -972,25 +972,28 @@ archive_url="$base_url/v$FRAMEOS_RELEASE_VERSION/frameos-$FRAMEOS_RELEASE_VERSIO
 work_dir="$(mktemp -d)"
 release_name="release_setup_$(date +%Y%m%d%H%M%S)"
 frameos_release_dir="$FRAMEOS_DIR/releases/$release_name"
-agent_release_dir="$FRAMEOS_AGENT_DIR/releases/$release_name"
+agent_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
-mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_AGENT_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
+mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 
 frameos_binary="$(find "$work_dir/extract" -type f -name frameos | head -n 1)"
-agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+agent_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
+if [ -z "$agent_binary" ]; then
+  agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+fi
 if [ -z "$frameos_binary" ]; then
   die "The precompiled FrameOS release did not contain a frameos binary for $target."
 fi
 if [ -z "$agent_binary" ]; then
-  die "The precompiled FrameOS release did not contain a frameos_agent binary for $target."
+  die "The precompiled FrameOS release did not contain a frameos_remote binary for $target."
 fi
 artifact_root="${frameos_binary%/*}"
 
 install -m 0755 "$frameos_binary" "$frameos_release_dir/frameos"
-install -m 0755 "$agent_binary" "$agent_release_dir/frameos_agent"
+install -m 0755 "$agent_binary" "$agent_release_dir/frameos_remote"
 
 if [ -d "$artifact_root/drivers" ]; then
   cp -R "$artifact_root/drivers" "$frameos_release_dir/drivers"
@@ -1049,17 +1052,17 @@ $frameos_service_tty
 WantedBy=multi-user.target
 EOF
 
-cat > "$agent_release_dir/frameos_agent.service" <<EOF
+cat > "$agent_release_dir/frameos-remote.service" <<EOF
 [Unit]
-Description=FrameOS Agent (auto-reconnect, hardened)
+Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=$agent_user
-WorkingDirectory=$FRAMEOS_AGENT_DIR/current
-ExecStart=$FRAMEOS_AGENT_DIR/current/frameos_agent
+WorkingDirectory=$FRAMEOS_REMOTE_DIR/current
+ExecStart=$FRAMEOS_REMOTE_DIR/current/frameos_remote
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -1071,9 +1074,9 @@ ReadWritePaths=/etc/systemd/system /etc/cron.d /boot
 WantedBy=multi-user.target
 EOF
 
-rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_AGENT_DIR/current"
+rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_REMOTE_DIR/current"
 ln -s "$frameos_release_dir" "$FRAMEOS_DIR/current"
-ln -s "$agent_release_dir" "$FRAMEOS_AGENT_DIR/current"
+ln -s "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/current"
 chown -R "$agent_user" "$FRAMEOS_DIR" "$FRAMEOS_ASSETS_PATH"
 
 set +e
@@ -1088,14 +1091,21 @@ fi
 install -d -m 0755 /etc/systemd/system
 install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-  install -m 0644 "$agent_release_dir/frameos_agent.service" /etc/systemd/system/frameos_agent.service
+  install -m 0644 "$agent_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
 else
-  systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true
+  systemctl disable --now frameos-remote.service >/dev/null 2>&1 || true
 fi
 systemctl daemon-reload
 systemctl enable frameos.service >/dev/null
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-  systemctl enable frameos_agent.service >/dev/null
+  systemctl enable frameos-remote.service >/dev/null
+fi
+
+legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
+if command -v systemd-run >/dev/null 2>&1; then
+  systemd-run --quiet --unit=frameos-remote-disable-legacy-agent --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
+else
+  nohup sh -c "$legacy_disable_script" >/dev/null 2>&1 &
 fi
 
 if [ "$setup_status" -eq 2 ]; then
@@ -1104,7 +1114,7 @@ if [ "$setup_status" -eq 2 ]; then
   say "Reboot this device, then open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
 else
   if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-    systemctl restart frameos_agent.service
+    systemctl restart frameos-remote.service
   fi
   systemctl restart frameos.service
   say ""
@@ -1132,5 +1142,5 @@ say "You should see FrameOS render soon. If the display stays blank or distorted
 say "Logs:"
 say "  journalctl -u frameos -f"
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-  say "  journalctl -u frameos_agent -f"
+  say "  journalctl -u frameos-remote -f"
 fi

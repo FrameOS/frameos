@@ -226,7 +226,7 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "systemctl reboot" in script
     assert "Reboot command accepted" in script
     assert "with status 0 (reboot requested)" in script
-    assert "Before=dropbear.service frameos.service frameos_agent.service" in service
+    assert "Before=dropbear.service frameos.service frameos-remote.service" in service
     assert "--from-file" not in script
 
 
@@ -1424,7 +1424,7 @@ def test_buildroot_rejects_root_password_with_line_breaks(tmp_path):
 
 def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, monkeypatch):
     frameos_binary = tmp_path / "frameos"
-    agent_binary = tmp_path / "frameos_agent"
+    agent_binary = tmp_path / "frameos_remote"
     frameos_binary.write_bytes(b"frameos")
     agent_binary.write_bytes(b"agent")
     frame = SimpleNamespace(
@@ -1489,7 +1489,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert scenes_payload == [frame.scenes[0]]
     assert all_scenes_payload == frame.scenes
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
-    agent_release_dir = overlay_dir / "srv" / "frameos" / "agent" / "releases" / "release_build123"
+    agent_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / "release_build123"
     assert (agent_release_dir / "frame.json").read_text(encoding="utf-8") == (
         release_dir / "frame.json"
     ).read_text(encoding="utf-8")
@@ -1503,9 +1503,9 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
     assert "StandardOutput=journal+console" not in frameos_service
     assert "StandardError=journal+console" not in frameos_service
-    assert (agent_release_dir / "frameos_agent.service").exists()
+    assert (agent_release_dir / "frameos-remote.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
-    assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()
+    assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos-remote.service").exists()
 
 
 def test_buildroot_boot_config_merge_is_written_to_active_boot_location(tmp_path):

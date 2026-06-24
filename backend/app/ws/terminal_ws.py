@@ -14,8 +14,8 @@ from app.models.frame import Frame
 from app.api.auth import get_current_user_from_websocket
 from app.tenancy import get_user_project
 from app.utils.ssh_utils import get_ssh_connection, remove_ssh_connection
-from app.ws.agent_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, frame_command_slot
-from app.ws.agent_ws import number_of_connections_for_frame
+from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, frame_command_slot
+from app.ws.remote_ws import number_of_connections_for_frame
 
 router = APIRouter()
 
@@ -109,7 +109,7 @@ async def _run_agent_terminal_command(
                 res = await redis.blpop([stream_key, resp_key], timeout=AGENT_TERMINAL_TIMEOUT_SECONDS)
                 if res is None:
                     await websocket.send_text(
-                        f"*** agent command timed out after {AGENT_TERMINAL_TIMEOUT_SECONDS}s ***\n"
+                        f"*** remote command timed out after {AGENT_TERMINAL_TIMEOUT_SECONDS}s ***\n"
                     )
                     return
 
@@ -172,7 +172,7 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
                     exit_status = int(result.get("exit", exit_status) or exit_status)
                     error = str(result.get("error") or "")
                 if error:
-                    await websocket.send_text(f"\n*** agent terminal error: {error} ***\n")
+                    await websocket.send_text(f"\n*** remote terminal error: {error} ***\n")
                 elif exit_status:
                     await websocket.send_text(f"\n*** terminal exited with status {exit_status} ***\n")
                 else:

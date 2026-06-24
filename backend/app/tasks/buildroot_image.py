@@ -39,7 +39,7 @@ from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import AgentDeployer
-from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
@@ -1140,9 +1140,9 @@ class BuildrootImageBuilder:
         )
         if prebuilt_target:
             try:
-                result = await download_precompiled_agent_release(
+                result = await download_precompiled_remote_release(
                     target=prebuilt_target,
-                    build_dir=str(Path(temp_dir) / f"agent_{deployer.build_id}"),
+                    build_dir=str(Path(temp_dir) / f"remote_{deployer.build_id}"),
                     temp_dir=temp_dir,
                     build_id=deployer.build_id,
                     logger=self._log,
@@ -1169,8 +1169,8 @@ class BuildrootImageBuilder:
             temp_dir=temp_dir,
             build_dir=build_dir,
             logger=agent_deployer.log,
-            output_name="frameos_agent",
-            compile_script_name="compile_frameos_agent.sh",
+            output_name="frameos_remote",
+            compile_script_name="compile_frameos_remote.sh",
             needs_quickjs=False,
             build_host=self.build_executor_config,
         ).build(source_dir)
@@ -1186,7 +1186,7 @@ class BuildrootImageBuilder:
         agent_binary: str,
     ) -> None:
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
-        agent_release_dir = overlay_dir / "srv" / "frameos" / "agent" / "releases" / f"release_{build_id}"
+        agent_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / f"release_{build_id}"
         state_dir = overlay_dir / "srv" / "frameos" / "state"
         boot_overlay_dir = overlay_dir / "boot"
         assets_dir = overlay_dir / "srv" / "assets"
@@ -1238,15 +1238,15 @@ class BuildrootImageBuilder:
             },
         )
 
-        shutil.copy2(agent_binary, agent_release_dir / "frameos_agent")
-        os.chmod(agent_release_dir / "frameos_agent", 0o755)
+        shutil.copy2(agent_binary, agent_release_dir / "frameos_remote")
+        os.chmod(agent_release_dir / "frameos_remote", 0o755)
         (agent_release_dir / "frame.json").write_text(
             json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
             encoding="utf-8",
         )
         self._write_service(
-            REPO_ROOT / "frameos" / "agent" / "frameos_agent.service",
-            agent_release_dir / "frameos_agent.service",
+            REPO_ROOT / "frameos" / "remote" / "frameos-remote.service",
+            agent_release_dir / "frameos-remote.service",
             user="root",
             environment={
                 "FRAMEOS_HOME": "/srv/frameos/current",
@@ -1257,7 +1257,7 @@ class BuildrootImageBuilder:
         self._relative_symlink(f"releases/release_{build_id}", overlay_dir / "srv" / "frameos" / "current")
         self._relative_symlink(
             f"releases/release_{build_id}",
-            overlay_dir / "srv" / "frameos" / "agent" / "current",
+            overlay_dir / "srv" / "frameos" / "remote" / "current",
         )
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
         self._stage_font_assets(assets_dir)
@@ -2353,7 +2353,7 @@ set -euo pipefail
 target_dir="${TARGET_DIR:?TARGET_DIR is required}"
 
 chmod 0755 "$target_dir/srv/frameos/current/frameos" || true
-chmod 0755 "$target_dir/srv/frameos/agent/current/frameos_agent" || true
+chmod 0755 "$target_dir/srv/frameos/remote/current/frameos_remote" || true
 mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/etc/cron.d"
 
 if [ -d "$target_dir/lib/firmware/brcm" ]; then

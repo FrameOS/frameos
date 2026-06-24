@@ -64,7 +64,7 @@ export R2_BUCKET=frameos-archive
 ## Runtime Flow
 
 The web UI no longer runs Buildroot. When a Buildroot frame requests an SD card
-image, the backend builds the FrameOS binary and agent, downloads the matching
+image, the backend builds the FrameOS binary and Remote, downloads the matching
 cached base image from `https://archive.frameos.net/buildroot-images/manifest.json`,
 then patches the BOOT partition with per-frame setup files and replaces only the
 `FRAMEOS` and `ASSETS` partitions.
@@ -85,7 +85,7 @@ disposable.
 
 Release images are composed after all precompiled release binaries have been
 built. They use the cached base image plus the Debian Bookworm ARM64 precompiled
-FrameOS/agent artifacts, ship without WiFi credentials, and keep
+FrameOS/Remote artifacts, ship without WiFi credentials, and keep
 `wifiHotspot=bootOnly` so a Pi Zero 2 W starts the setup hotspot when it cannot
 reach the network. The first-boot setup service is present but dormant until a
 future SD card builder copies `frameos-setup.json` to the BOOT partition.

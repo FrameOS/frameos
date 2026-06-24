@@ -186,7 +186,7 @@ set -eu
 FRAMEOS_RELEASE_VERSION={shlex.quote(version)}
 FRAMEOS_RELEASE_BASE_URL={shlex.quote(RELEASE_BASE_URL)}
 FRAMEOS_DIR=/srv/frameos
-FRAMEOS_AGENT_DIR=/srv/frameos/agent
+FRAMEOS_REMOTE_DIR=/srv/frameos/remote
 FRAMEOS_COMPILED_SCENE_COUNT={compiled_scene_count}
 
 need_cmd() {{
@@ -320,22 +320,25 @@ archive_url="$base_url/v$FRAMEOS_RELEASE_VERSION/frameos-$FRAMEOS_RELEASE_VERSIO
 work_dir="$(mktemp -d)"
 release_name="release_bootstrap_$(date +%Y%m%d%H%M%S)"
 frameos_release_dir="$FRAMEOS_DIR/releases/$release_name"
-agent_release_dir="$FRAMEOS_AGENT_DIR/releases/$release_name"
+agent_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
 echo "Downloading precompiled FrameOS release for $target"
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
-mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_AGENT_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state"
+mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 
 frameos_binary="$(find "$work_dir/extract" -type f -name frameos | head -n 1)"
-agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+agent_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
+if [ -z "$agent_binary" ]; then
+  agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+fi
 if [ -z "$frameos_binary" ]; then
   echo "The precompiled FrameOS release did not contain frameos for $target" >&2
   exit 1
 fi
 if [ -z "$agent_binary" ]; then
-  echo "The precompiled FrameOS release did not contain frameos_agent for $target" >&2
+  echo "The precompiled FrameOS release did not contain frameos_remote for $target" >&2
   exit 1
 fi
 
@@ -346,7 +349,7 @@ install_optional_packages caddy
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
 install -m 0755 "$frameos_binary" "$frameos_release_dir/frameos"
-install -m 0755 "$agent_binary" "$agent_release_dir/frameos_agent"
+install -m 0755 "$agent_binary" "$agent_release_dir/frameos_remote"
 
 if [ -d "$artifact_root/drivers" ]; then
   cp -R "$artifact_root/drivers" "$frameos_release_dir/drivers"
@@ -412,7 +415,7 @@ MemorySwapMax=64M
 WantedBy=multi-user.target
 EOF
 
-cat > "$agent_release_dir/frameos_agent.service" <<EOF
+cat > "$agent_release_dir/frameos-remote.service" <<EOF
 [Unit]
 Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
@@ -421,8 +424,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$agent_user
-WorkingDirectory=$FRAMEOS_AGENT_DIR/current
-ExecStart=$FRAMEOS_AGENT_DIR/current/frameos_agent
+WorkingDirectory=$FRAMEOS_REMOTE_DIR/current
+ExecStart=$FRAMEOS_REMOTE_DIR/current/frameos_remote
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -434,13 +437,13 @@ ReadWritePaths=/etc/systemd/system /etc/cron.d /boot
 WantedBy=multi-user.target
 EOF
 
-rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_AGENT_DIR/current"
+rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_REMOTE_DIR/current"
 ln -s "$frameos_release_dir" "$FRAMEOS_DIR/current"
-ln -s "$agent_release_dir" "$FRAMEOS_AGENT_DIR/current"
+ln -s "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/current"
 chown -R "$agent_user" "$FRAMEOS_DIR"
 
 if [ "$FRAMEOS_COMPILED_SCENE_COUNT" -gt 0 ]; then
-  echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT compiled scene(s) still require a full deploy after the agent connects."
+  echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT compiled scene(s) still require a full deploy after FrameOS Remote connects."
 fi
 
 set +e
@@ -455,16 +458,22 @@ fi
 
 install -d -m 0755 /etc/systemd/system
 install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service
-install -m 0644 "$agent_release_dir/frameos_agent.service" /etc/systemd/system/frameos_agent.service
+install -m 0644 "$agent_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
 systemctl daemon-reload
-systemctl enable frameos.service frameos_agent.service
+systemctl enable frameos.service frameos-remote.service
+legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
+if command -v systemd-run >/dev/null 2>&1; then
+  systemd-run --quiet --unit=frameos-remote-disable-legacy-agent --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
+else
+  nohup sh -c "$legacy_disable_script" >/dev/null 2>&1 &
+fi
 if [ "$setup_status" -eq 2 ]; then
-  systemctl restart frameos_agent.service
+  systemctl restart frameos-remote.service
   echo "FrameOS and FrameOS Remote are installed. Reboot this device to finish hardware setup."
   exit 0
 fi
 
-systemctl restart frameos_agent.service
+systemctl restart frameos-remote.service
 systemctl restart frameos.service
 
 echo "FrameOS and FrameOS Remote are installed and started"

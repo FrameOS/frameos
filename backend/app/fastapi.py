@@ -14,7 +14,7 @@ from app.api import api_open, api_project, api_user, api_public
 from app.api.project_auth import get_current_project
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
-from app.ws.agent_ws import router as agent_ws_router
+from app.ws.remote_ws import router as remote_ws_router
 from app.ws.terminal_ws import router as terminal_ws_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config, normalize_ingress_path
@@ -41,7 +41,7 @@ app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
 
 register_ws_routes(app)
-app.include_router(agent_ws_router)
+app.include_router(remote_ws_router)
 app.include_router(terminal_ws_router)
 
 if config.HASSIO_RUN_MODE:

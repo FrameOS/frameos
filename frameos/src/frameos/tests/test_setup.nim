@@ -168,14 +168,15 @@ block test_frameos_service_user_prefers_explicit_setup_user:
       delEnv("FRAMEOS_SERVICE_USER")
 
 block test_cgroup_indicates_agent_service:
+  doAssert cgroupIndicatesAgentService("0::/system.slice/frameos-remote.service\n")
   doAssert cgroupIndicatesAgentService("0::/system.slice/frameos_agent.service\n")
   doAssert cgroupIndicatesAgentService(
-    "12:pids:/system.slice/frameos_agent.service\n1:name=systemd:/system.slice/frameos_agent.service\n")
+    "12:pids:/system.slice/frameos-remote.service\n1:name=systemd:/system.slice/frameos-remote.service\n")
   doAssert not cgroupIndicatesAgentService("0::/system.slice/frameos.service\n")
   doAssert not cgroupIndicatesAgentService("0::/user.slice/user-1000.slice/session-4.scope\n")
   doAssert not cgroupIndicatesAgentService("")
 
-block test_running_under_frameos_agent_honors_setup_env:
+block test_running_under_frameos_remote_honors_setup_env:
   let previousSetupUnderAgent = getEnv("FRAMEOS_SETUP_UNDER_AGENT")
   putEnv("FRAMEOS_SETUP_UNDER_AGENT", "1")
   try:
@@ -225,7 +226,7 @@ block test_write_frame_config_dimensions_persists_detected_size:
 block test_write_setup_release_payload_updates_agent_frame_config:
   let tempRoot = getTempDir() / ("frameos-setup-payload-" & $epochTime().int64)
   let frameosCurrent = tempRoot / "current"
-  let agentCurrent = tempRoot / "agent" / "current"
+  let agentCurrent = tempRoot / "remote" / "current"
   let setupPath = tempRoot / "frameos-setup.json"
   createDir(frameosCurrent)
   createDir(agentCurrent)
@@ -321,9 +322,9 @@ block test_first_boot_service_start_is_non_blocking:
     startFrameOSSystemdServices(path)
 
     doAssert commands.anyIt(it.contains("command -v 'systemctl'"))
-    doAssert commands.anyIt(it.contains("systemctl --no-block start frameos.service frameos_agent.service"))
+    doAssert commands.anyIt(it.contains("systemctl --no-block start frameos.service frameos-remote.service"))
     doAssert not commands.anyIt(
-      it.contains("systemctl start frameos.service frameos_agent.service") and
+      it.contains("systemctl start frameos.service frameos-remote.service") and
         not it.contains("--no-block")
     )
   finally:

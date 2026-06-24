@@ -42,13 +42,13 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
 ):
     cross_module = load_cross_module()
     repo_root = tmp_path / "repo"
-    agent_source_dir = repo_root / "frameos" / "agent source"
-    build_dir = tmp_path / "agent-build"
+    agent_source_dir = repo_root / "frameos" / "remote source"
+    build_dir = tmp_path / "remote-build"
     nimbase = tmp_path / "nimbase.h"
     repo_root.mkdir()
     agent_source_dir.mkdir(parents=True)
     nimbase.write_text("// nimbase\n", encoding="utf-8")
-    (repo_root / "versions.json").write_text('{"agent":"2026.5.14"}\n', encoding="utf-8")
+    (repo_root / "versions.json").write_text('{"remote":"2026.5.14"}\n', encoding="utf-8")
 
     captured: dict[str, str] = {}
 
@@ -61,7 +61,7 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
 
     async def fake_exec_local_command(_db, _redis, _frame, command):
         captured["command"] = command
-        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (build_dir / "compile_frameos_remote.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         return 0, "", ""
 
     monkeypatch.setattr(
@@ -72,7 +72,7 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
     monkeypatch.setattr(
         "backend.app.tasks._frame_deployer.FrameDeployer._find_compile_script",
         staticmethod(
-            lambda build_dir_arg, _name: str(Path(build_dir_arg) / "compile_frameos_agent.sh")
+            lambda build_dir_arg, _name: str(Path(build_dir_arg) / "compile_frameos_remote.sh")
         ),
     )
     monkeypatch.setattr(
@@ -98,7 +98,7 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
         repo_root=repo_root,
     )
 
-    assert "--define:frameosAgentVersion:2026.5.14" in captured["command"]
+    assert "--define:frameosRemoteVersion:2026.5.14" in captured["command"]
     assert shlex.quote(str(agent_source_dir)) in captured["command"]
     assert (build_dir / "nimbase.h").read_text(encoding="utf-8") == "// nimbase\n"
     assert (build_dir / "Makefile").exists()
@@ -147,7 +147,7 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
     frameos_root = tmp_path / "frameos"
     artifacts_dir = tmp_path / "artifacts"
     frameos_root.mkdir()
-    (frameos_root / "versions.json").write_text('{"agent":"2026.5.14"}\n', encoding="utf-8")
+    (frameos_root / "versions.json").write_text('{"remote":"2026.5.14"}\n', encoding="utf-8")
 
     destination = await cross_module.build_target("debian-trixie-amd64", frameos_root, artifacts_dir)
 
@@ -189,7 +189,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
 
         def create_local_source_folder(self, temp_dir, source_root=None):
             source_dir = Path(temp_dir) / "frameos"
-            (source_dir / "agent").mkdir(parents=True)
+            (source_dir / "remote").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "shared").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare" / "waveshare.nim").write_text(
@@ -235,7 +235,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
             build_dir = Path(self.kwargs["build_dir"])
             output_name = self.kwargs.get("output_name", "frameos")
             binary_path = build_dir / output_name
-            binary_path.write_bytes(b"release-agent" if output_name == "frameos_agent" else b"release-frameos")
+            binary_path.write_bytes(b"release-remote" if output_name == "frameos_remote" else b"release-frameos")
             if output_name == "frameos":
                 driver_path = build_dir / "drivers" / "httpUpload" / "httpUpload.so"
                 driver_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +249,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         assert kwargs["repo_root"] == repo_root
         build_dir = Path(kwargs["build_dir"])
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (build_dir / "compile_frameos_remote.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         (build_dir / "Makefile").write_text("all:\n", encoding="utf-8")
 
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
@@ -282,7 +282,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     frameos_root.mkdir(parents=True)
     expected_versions = {
         "frameos": "2026.5.15+frameos",
-        "agent": "2026.5.16+agent",
+        "remote": "2026.5.16+remote",
         "docker": "2026.5.16+docker",
     }
     (repo_root / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
@@ -296,12 +296,12 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         / "drivers"
         / "httpUpload.so"
     ).read_bytes() == b"driver"
-    assert (artifacts_dir / "debian-trixie-amd64" / "frameos_agent").read_bytes() == b"release-agent"
+    assert (artifacts_dir / "debian-trixie-amd64" / "frameos_remote").read_bytes() == b"release-remote"
     metadata = json.loads((artifacts_dir / "debian-trixie-amd64" / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["release_artifact"] is True
     assert metadata["driver_registry"] == "runtime-filtered"
     assert metadata["driver_libraries"] == ["httpUpload.so"]
-    assert metadata["agent_binary"] == "frameos_agent"
+    assert metadata["remote_binary"] == "frameos_remote"
     assert metadata["input_hash"]
     versions = json.loads((artifacts_dir / "debian-trixie-amd64" / "versions.json").read_text(encoding="utf-8"))
     assert versions == expected_versions

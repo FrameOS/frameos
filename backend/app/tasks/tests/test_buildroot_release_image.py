@@ -37,7 +37,7 @@ def test_find_precompiled_artifact_root_prefers_matching_metadata(tmp_path):
     artifact_root = tmp_path / "frameos-2026.6.2-debian-bookworm-arm64"
     artifact_root.mkdir()
     (artifact_root / "frameos").write_bytes(b"frameos")
-    (artifact_root / "frameos_agent").write_bytes(b"agent")
+    (artifact_root / "frameos_remote").write_bytes(b"agent")
     (artifact_root / "metadata.json").write_text(
         json.dumps({"slug": "debian-bookworm-arm64"}),
         encoding="utf-8",
@@ -63,7 +63,7 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
     release_assets_dir = tmp_path / "release-assets"
     artifact_root.mkdir(parents=True)
     (artifact_root / "frameos").write_bytes(b"frameos")
-    (artifact_root / "frameos_agent").write_bytes(b"agent")
+    (artifact_root / "frameos_remote").write_bytes(b"agent")
     (artifact_root / "metadata.json").write_text(
         json.dumps({"slug": target, "compilation_mode": "shared"}),
         encoding="utf-8",

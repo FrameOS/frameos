@@ -60,7 +60,7 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_pat
 
 async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_path: str):
     if await _use_agent(frame, redis):
-        from app.ws.agent_ws import assets_list_on_frame
+        from app.ws.remote_ws import assets_list_on_frame
         assets = await assets_list_on_frame(frame.id, assets_path + "/fonts", redis=redis)
         remote_fonts = {a["path"]: int(a.get("size", 0)) for a in assets}
     else:

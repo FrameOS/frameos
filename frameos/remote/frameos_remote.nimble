@@ -2,11 +2,11 @@
 
 version       = "0.1.0"
 author        = "Marius Andra"
-description   = "FrameOS agent"
+description   = "FrameOS Remote"
 license       = "AGPL"
 srcDir        = "src"
 binDir        = "build"
-bin           = @["frameos_agent"]
+bin           = @["frameos_remote"]
 
 
 # Dependencies

@@ -20,9 +20,9 @@ class FakeRedis:
 async def test_restart_remote_enqueues_transport():
     redis = FakeRedis()
 
-    await restart_remote(7, redis, transport="agent")
+    await restart_remote(7, redis, transport="remote")
 
-    assert redis.jobs == [("restart_remote", {"id": 7, "transport": "agent"})]
+    assert redis.jobs == [("restart_remote", {"id": 7, "transport": "remote"})]
 
 
 @pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def test_restart_remote_defaults_to_auto_transport():
 
 
 @pytest.mark.asyncio
-async def test_restart_remote_via_agent_schedules_delayed_restart(monkeypatch: pytest.MonkeyPatch):
+async def test_restart_remote_via_remote_schedules_delayed_restart(monkeypatch: pytest.MonkeyPatch):
     restart_remote_module = importlib.import_module("app.tasks.restart_remote")
     captured: dict[str, object] = {}
 
@@ -50,16 +50,16 @@ async def test_restart_remote_via_agent_schedules_delayed_restart(monkeypatch: p
     monkeypatch.setattr(restart_remote_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
     monkeypatch.setattr(restart_remote_module, "run_commands", fake_run_commands)
 
-    await restart_remote_task({"db": object(), "redis": object()}, id=1, transport="agent")
+    await restart_remote_task({"db": object(), "redis": object()}, id=1, transport="remote")
 
-    assert captured["transport"] == "agent"
+    assert captured["transport"] == "remote"
     command = captured["commands"][0]
     assert "systemd-run" in command
-    assert "systemctl restart frameos_agent.service" in command
+    assert "systemctl restart frameos-remote.service" in command
 
 
 @pytest.mark.asyncio
-async def test_restart_remote_auto_uses_agent_when_frame_prefers_agent(monkeypatch: pytest.MonkeyPatch):
+async def test_restart_remote_auto_uses_remote_when_frame_prefers_remote(monkeypatch: pytest.MonkeyPatch):
     restart_remote_module = importlib.import_module("app.tasks.restart_remote")
     captured: dict[str, object] = {}
 
@@ -83,5 +83,5 @@ async def test_restart_remote_auto_uses_agent_when_frame_prefers_agent(monkeypat
 
     await restart_remote_task({"db": object(), "redis": object()}, id=1)
 
-    assert captured["transport"] == "agent"
+    assert captured["transport"] == "remote"
     assert "systemd-run" in captured["commands"][0]

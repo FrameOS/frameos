@@ -14,7 +14,7 @@ from app.tasks.deploy_remote import (
     deploy_remote_task,
     resolve_agent_task_transport,
 )
-from app.tasks.precompiled_agent import PrecompiledAgentResult
+from app.tasks.precompiled_remote import PrecompiledRemoteResult
 
 
 class FakeAgentDeployer(AgentDeployer):
@@ -145,6 +145,9 @@ class RunFlowAgentDeployer(AgentDeployer):
         self.wait_previous_process_signature = previous_process_signature
         self.events.append("wait_for_agent_release")
 
+    async def _disable_legacy_agent_service(self) -> None:  # type: ignore[override]
+        self.events.append("disable_legacy_agent_service")
+
     async def _cleanup_old_builds(self) -> None:  # type: ignore[override]
         self.events.append("cleanup_old_builds")
 
@@ -160,9 +163,9 @@ class RunFlowAgentDeployer(AgentDeployer):
 async def test_deploy_remote_enqueues_transport():
     redis = FakeRedis()
 
-    await deploy_remote(7, redis, recompile=True, transport="agent")
+    await deploy_remote(7, redis, recompile=True, transport="remote")
 
-    assert redis.jobs == [("deploy_remote", {"id": 7, "recompile": True, "transport": "agent"})]
+    assert redis.jobs == [("deploy_remote", {"id": 7, "recompile": True, "transport": "remote"})]
 
 
 @pytest.mark.asyncio
@@ -179,7 +182,7 @@ def test_resolve_agent_task_transport_uses_frame_agent_preference():
         agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True}
     )
 
-    assert resolve_agent_task_transport(frame, "auto") == "agent"
+    assert resolve_agent_task_transport(frame, "auto") == "remote"
     assert resolve_agent_task_transport(frame, "ssh") == "ssh"
 
     frame.agent["deployWithAgent"] = False
@@ -189,11 +192,12 @@ def test_resolve_agent_task_transport_uses_frame_agent_preference():
 def test_delayed_agent_restart_command_uses_immediate_transient_service():
     command = delayed_agent_restart_command("build id!")
 
-    assert "frameos-agent-restart-buildid" in command
+    assert "frameos-remote-restart-buildid" in command
     assert "systemd-run --quiet" in command
     assert "--on-active" not in command
     assert "/bin/sh -lc" in command
-    assert "sleep 1; systemctl restart frameos_agent.service" in command
+    assert "systemctl enable frameos-remote.service; systemctl restart frameos-remote.service" in command
+    assert "systemctl disable --now frameos_agent.service" in command
 
 
 @pytest.mark.asyncio
@@ -201,10 +205,10 @@ async def test_deploy_remote_prefers_precompiled_binary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def fake_download_precompiled_agent_release(**kwargs):
-        binary_path = tmp_path / "frameos_agent"
+    async def fake_download_precompiled_remote_release(**kwargs):
+        binary_path = tmp_path / "frameos_remote"
         binary_path.write_bytes(b"agent")
-        return PrecompiledAgentResult(
+        return PrecompiledRemoteResult(
             release_url="https://example.test/frameos.tar.gz",
             binary_path=str(binary_path),
             archive_path=str(tmp_path / "archive.tar.gz"),
@@ -218,14 +222,14 @@ async def test_deploy_remote_prefers_precompiled_binary(
     )
     monkeypatch.setattr(
         deploy_remote_module,
-        "download_precompiled_agent_release",
-        fake_download_precompiled_agent_release,
+        "download_precompiled_remote_release",
+        fake_download_precompiled_remote_release,
     )
 
     deployer = FakeAgentDeployer(tmp_path)
     await deployer._deploy_agent(arch="aarch64", distro="debian", distro_version="trixie")
 
-    assert deployer.staged_binary == str(tmp_path / "frameos_agent")
+    assert deployer.staged_binary == str(tmp_path / "frameos_remote")
     assert deployer.source_arch is None
     assert any("precompiled FrameOS Remote release" in message for _level, message in deployer.logs)
 
@@ -235,14 +239,14 @@ async def test_deploy_remote_can_force_source_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def fake_download_precompiled_agent_release(**kwargs):
-        raise AssertionError("Precompiled agent should not be used when recompile is requested")
+    async def fake_download_precompiled_remote_release(**kwargs):
+        raise AssertionError("Precompiled remote should not be used when recompile is requested")
 
     deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
     monkeypatch.setattr(
         deploy_remote_module,
-        "download_precompiled_agent_release",
-        fake_download_precompiled_agent_release,
+        "download_precompiled_remote_release",
+        fake_download_precompiled_remote_release,
     )
 
     deployer = FakeAgentDeployer(tmp_path)
@@ -285,7 +289,7 @@ async def test_deploy_remote_task_does_not_require_nim_before_running_deployer(
 
     await deploy_remote_task({"db": object(), "redis": object()}, id=1, recompile=True)
 
-    assert captured == {"ran": True, "force_source": True, "transport": "agent"}
+    assert captured == {"ran": True, "force_source": True, "transport": "remote"}
 
 
 @pytest.mark.asyncio
@@ -319,17 +323,18 @@ async def test_deploy_remote_ssh_restart_waits_for_staged_release(tmp_path: Path
 
     await deployer.run()
 
-    assert "restart_service:frameos_agent" in deployer.events
+    assert "restart_service:frameos-remote" in deployer.events
     assert "wait_for_agent_release" in deployer.events
     assert deployer.wait_previous_process_signature == "old-agent-process"
     assert deployer.events.index("capture_agent_process") < deployer.events.index("switch_current_release")
-    assert deployer.events.index("restart_service:frameos_agent") < deployer.events.index("wait_for_agent_release")
-    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+    assert deployer.events.index("restart_service:frameos-remote") < deployer.events.index("wait_for_agent_release")
+    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("disable_legacy_agent_service")
+    assert deployer.events.index("disable_legacy_agent_service") < deployer.events.index("cleanup_old_builds")
 
 
 @pytest.mark.asyncio
-async def test_deploy_remote_agent_transport_restarts_and_waits_for_staged_release(tmp_path: Path):
-    deployer = RunFlowAgentDeployer(tmp_path, transport="agent")
+async def test_deploy_remote_remote_transport_restarts_and_waits_for_staged_release(tmp_path: Path):
+    deployer = RunFlowAgentDeployer(tmp_path, transport="remote")
 
     await deployer.run()
 
@@ -338,7 +343,8 @@ async def test_deploy_remote_agent_transport_restarts_and_waits_for_staged_relea
     assert deployer.wait_previous_process_signature == "old-agent-process"
     assert deployer.events.index("capture_agent_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_via_agent") < deployer.events.index("wait_for_agent_release")
-    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("disable_legacy_agent_service")
+    assert deployer.events.index("disable_legacy_agent_service") < deployer.events.index("cleanup_old_builds")
 
 
 @pytest.mark.asyncio
@@ -402,16 +408,16 @@ async def test_setup_agent_service_uses_system_command_for_agent_transport(
     monkeypatch.setattr(deploy_remote_module, "upload_file", fake_upload_file)
 
     deployer = FakeAgentDeployer(tmp_path)
-    deployer.remote_transport = "agent"
+    deployer.remote_transport = "remote"
     deployer.frame.ssh_user = "root"
 
     await deployer._setup_agent_service()
 
-    assert uploads == [f"{deployer._release_dir()}/frameos_agent.service"]
+    assert uploads == [f"{deployer._release_dir()}/frameos-remote.service"]
     install_commands = [
         command
         for command in deployer.commands
-        if "/etc/systemd/system/frameos_agent.service" in command
+        if "/etc/systemd/system/frameos-remote.service" in command
     ]
     assert len(install_commands) == 1
     assert "systemd-run" in install_commands[0]
@@ -452,7 +458,7 @@ async def test_wait_for_agent_release_requires_new_running_process(
                 raise RuntimeError("old process still running")
             return 1
         if output is not None:
-            output.append("restarted-agent-release-ok")
+            output.append("restarted-remote-release-ok")
         return 0
 
     deployer.exec_command = fake_exec_command  # type: ignore[method-assign]
@@ -489,7 +495,7 @@ async def test_agent_source_build_cross_compiles_before_remote_build(
 
         async def build(self, source_dir: str) -> str:
             captured["source_dir"] = source_dir
-            binary_path = tmp_path / "cross-frameos-agent"
+            binary_path = tmp_path / "cross-frameos-remote"
             binary_path.write_bytes(b"agent")
             return str(binary_path)
 
@@ -507,12 +513,12 @@ async def test_agent_source_build_cross_compiles_before_remote_build(
     )
 
     assert success is True
-    assert deployer.staged_binary == str(tmp_path / "cross-frameos-agent")
+    assert deployer.staged_binary == str(tmp_path / "cross-frameos-remote")
     assert captured["source_dir"] == str(tmp_path / "source")
     kwargs = captured["kwargs"]
     assert kwargs["build_dir"] == str(tmp_path / "build")
-    assert kwargs["output_name"] == "frameos_agent"
-    assert kwargs["compile_script_name"] == "compile_frameos_agent.sh"
+    assert kwargs["output_name"] == "frameos_remote"
+    assert kwargs["compile_script_name"] == "compile_frameos_remote.sh"
     assert kwargs["needs_quickjs"] is False
 
 
@@ -569,7 +575,7 @@ async def test_agent_source_build_does_not_touch_device_when_cross_compile_succe
 @pytest.mark.asyncio
 async def test_agent_source_build_installs_ubuntu_compiler_dependencies(tmp_path: Path):
     deployer = FakeAgentDeployer(tmp_path)
-    deployer.remote_transport = "agent"
+    deployer.remote_transport = "remote"
     deployer.command_statuses = [
         ("dpkg-query -W -f='${Status}' build-essential", 1),
         ("dpkg-query -W -f='${Status}' libssl-dev", 1),

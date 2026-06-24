@@ -12,7 +12,7 @@ from app.models.frame import Frame, normalize_https_proxy
 from app.utils.env import get_env_float, get_env_int
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import _use_agent
-from app.ws.agent_ws import http_get_on_frame
+from app.ws.remote_ws import http_get_on_frame
 from arq import ArqRedis as Redis
 
 

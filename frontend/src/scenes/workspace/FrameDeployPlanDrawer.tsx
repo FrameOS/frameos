@@ -187,7 +187,7 @@ function deployPlanLogTone(
       : { dot: 'bg-amber-500', timestamp: 'text-amber-600/80', text: 'text-amber-700' }
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return theme === 'dark'
       ? { dot: 'bg-blue-300', timestamp: 'text-blue-200/80', text: 'text-blue-300' }
       : { dot: 'bg-blue-500', timestamp: 'text-blue-600/80', text: 'frameos-primary-text' }
@@ -559,9 +559,9 @@ function DeployTransportToggle({
   const bootstrapLogicProps = { frameId }
   const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(frameBootstrapLogic(bootstrapLogicProps))
   const { copyFrameBootstrapScript } = useActions(frameBootstrapLogic(bootstrapLogicProps))
-  const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
+  const selectedTransport: AgentTaskTransport = deployWithAgent ? 'remote' : 'ssh'
   const selectedConnectionLabel = deployWithAgent ? 'FrameOS Remote' : 'SSH'
-  const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
+  const selectedAgentDisconnected = selectedTransport === 'remote' && !agentConnected
   const selectedConnectionUnavailableTitle = 'FrameOS Remote is not connected. Select SSH or wait for it to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
   const agentUpgradeTitle = agentUpgradeNotice ? `FrameOS Remote ${agentUpgradeLabel(agentUpgradeNotice)}` : undefined

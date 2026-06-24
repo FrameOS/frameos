@@ -13,7 +13,8 @@ import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
 
-export type AgentTaskTransport = 'auto' | 'agent' | 'ssh'
+export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
+export type AgentTaskTransport = RemoteTaskTransport
 type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
 function remoteTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTransport }): string {

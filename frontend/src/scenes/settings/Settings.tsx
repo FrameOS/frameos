@@ -71,7 +71,7 @@ const settingsNavSections: readonly SettingsNavSection[] = [
 const settingsNavItems = settingsNavSections.flatMap((section) => section.items)
 
 // The docker version is the release version: it bumps on every release, while
-// the frameos/agent components only bump when their own sources change.
+// the frameos/remote components only bump when their own sources change.
 const frameosVersion = typeof versions.docker === 'string' ? versions.docker.split('+')[0] : null
 const frameosVersionLabel = frameosVersion ? `FrameOS ${frameosVersion}` : 'FrameOS'
 

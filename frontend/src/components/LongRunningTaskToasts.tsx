@@ -346,7 +346,7 @@ function taskLogLineClassName(log: LongRunningTaskLog, formattedLine: string, th
     return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
   }
 
@@ -430,7 +430,7 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
     } catch (error) {}
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return (
       <>
         <span className={theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[REMOTE]'}</span>{' '}

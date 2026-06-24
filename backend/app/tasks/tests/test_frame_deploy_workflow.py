@@ -1615,7 +1615,7 @@ async def test_stop_frameos_for_release_setup_leaves_agent_running():
     assert stopped is True
     assert "sudo systemctl stop frameos.service" in deployer.commands
     assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
-    assert all("frameos_agent" not in command for command in deployer.commands)
+    assert all("frameos-remote" not in command and "frameos_agent" not in command for command in deployer.commands)
 
 
 @pytest.mark.asyncio
