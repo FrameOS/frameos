@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import {
   metricSeriesVisibilityKey,
+  metricTimestamp,
   metricsLogic,
   metricsTimeRangeOptions,
   type MetricsTimeRangePreset,
@@ -20,7 +21,22 @@ const metricLabels: Record<string, string> = {
   diskUsage: 'Disk',
   processMemory: 'Process memory',
   runtimeDimensions: 'Runtime size',
+  openFileDescriptors: 'Open file descriptors',
+  cpuUsage: 'CPU usage',
+  cpuTemperature: 'CPU temperature',
+  cpuCount: 'CPU count',
+  'runtime.sequence': 'Render sequence index (keeps incrementing)',
+  'runtime.lastCompletedAgoMs': 'Seconds since last render',
 }
+
+const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
 
 interface MetricsProps {
   scrollContainer?: boolean
@@ -31,6 +47,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
   const { theme } = useValues(workspaceLogic)
   const {
     metrics,
+    sortedMetrics,
     metricsByCategory,
     visibleMetricsByCategory,
     hiddenMetricSeries,
@@ -55,6 +72,13 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
       ? [...metricsTimeRangeOptions, { value: 'custom' as const, label: 'Custom' }]
       : metricsTimeRangeOptions
   const chartTheme = metricChartThemes[theme]
+  const requestMetricsTooltipId = `frame-${frameId}-request-metrics-tooltip`
+  const latestMetric = sortedMetrics[sortedMetrics.length - 1]
+  const latestMetricTimestamp = latestMetric ? metricTimestamp(latestMetric) : null
+  const latestDatapointLabel =
+    latestMetricTimestamp !== null && Number.isFinite(latestMetricTimestamp)
+      ? latestDatapointFormatter.format(new Date(latestMetricTimestamp))
+      : null
 
   return (
     <div
@@ -76,18 +100,30 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
           <div className="frame-tool-muted text-sm">
             {metricsLoading
               ? 'Loading metrics...'
-              : `${metrics.length} datapoint${metrics.length === 1 ? '' : 's'} loaded`}
+              : `${metrics.length} datapoint${metrics.length === 1 ? '' : 's'} loaded${
+                  latestDatapointLabel ? `, last datapoint ${latestDatapointLabel}` : ''
+                }`}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={requestMetrics}
-          disabled={requestMetricsLoading}
-          className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <BoltIcon className={clsx('h-4 w-4', requestMetricsLoading && 'animate-pulse')} />
-          <span>{requestMetricsLoading ? 'Requesting...' : 'Request metrics'}</span>
-        </button>
+        <div className="group/request-metrics relative inline-flex shrink-0">
+          <button
+            type="button"
+            onClick={requestMetrics}
+            disabled={requestMetricsLoading}
+            aria-describedby={requestMetricsTooltipId}
+            className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <BoltIcon className={clsx('h-4 w-4', requestMetricsLoading && 'animate-pulse')} />
+            <span>{requestMetricsLoading ? 'Requesting...' : 'Request metrics'}</span>
+          </button>
+          <span
+            id={requestMetricsTooltipId}
+            role="tooltip"
+            className="frameos-tooltip-panel pointer-events-none invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-md p-3 text-left text-xs leading-snug opacity-0 transition group-hover/request-metrics:visible group-hover/request-metrics:opacity-100 group-focus-within/request-metrics:visible group-focus-within/request-metrics:opacity-100"
+          >
+            Requests a fresh metrics sample from this frame and adds it to the chart when it reports back.
+          </span>
+        </div>
       </div>
       {metricsLoading ? (
         <div className="frame-tool-card flex min-h-[12rem] items-center justify-center rounded-[22px] text-sm frame-tool-muted">

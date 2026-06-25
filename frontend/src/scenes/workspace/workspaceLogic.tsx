@@ -1314,10 +1314,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
       navigateToFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
         const panel = isFrameToolPanel(values.utilityPanel) ? values.utilityPanel : 'overview'
-        router.actions.push(urls.frame(frameId, panel))
+        router.actions.push(
+          urls.frame(frameId),
+          { tool: panel },
+          utilityDrawerClosedHash(workspaceContentNavigationHash())
+        )
       },
       openFrameTool: ({ frameId, panel }) => {
-        router.actions.push(urls.frame(frameId, panel))
+        router.actions.push(
+          urls.frame(frameId),
+          { tool: panel },
+          utilityDrawerClosedHash(workspaceContentNavigationHash())
+        )
       },
       navigateToSceneFrame: ({ frameId }) => {
         actions.selectFrame(frameId)

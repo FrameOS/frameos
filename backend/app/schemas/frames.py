@@ -218,6 +218,7 @@ class FrameLogsResponse(BaseModel):
 
 class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
+    reboots: List[Dict[str, Any]] = Field(default_factory=list)
 
 class FrameImageLinkResponse(ImageTokenResponse):
     pass

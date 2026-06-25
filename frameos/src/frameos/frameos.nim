@@ -6,6 +6,7 @@ import frameos/config
 import frameos/logger
 import frameos/metrics
 import frameos/runner
+import frameos/reboot_reason
 import frameos/server
 import frameos/scheduler
 import frameos/scenes
@@ -172,6 +173,9 @@ proc start*(self: FrameOS) {.async.} =
       "showErrorRetrySeconds": self.frameConfig.errorBehavior.showErrorRetrySeconds
     }
   }}
+  let rebootInfo = startupRebootInfoSnapshot()
+  if rebootInfo.len > 0:
+    message["reboot"] = rebootInfo
   self.logger.log(message)
   netportal.setLogger(self.logger)
 

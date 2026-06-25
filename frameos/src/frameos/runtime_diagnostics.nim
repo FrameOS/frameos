@@ -1,5 +1,6 @@
 import json, locks, random, times
 import frameos/hal/entropy
+import frameos/reboot_reason
 
 type
   RuntimeDiagnosticsState = object
@@ -128,6 +129,9 @@ proc runtimeDiagnosticsSnapshot*(): JsonNode {.gcsafe.} =
         "phase": runtimeState.phase,
         "sequence": runtimeState.sequence,
       }
+      let rebootInfo = startupRebootInfoSnapshot()
+      if rebootInfo.len > 0:
+        result["reboot"] = rebootInfo
       if runtimeState.active:
         result["sceneId"] = %runtimeState.sceneId
         result["currentSceneId"] = %runtimeState.currentSceneId

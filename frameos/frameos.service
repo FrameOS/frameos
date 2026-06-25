@@ -20,6 +20,7 @@ WatchdogSec=900
 MemoryHigh=80%
 MemoryMax=90%
 MemorySwapMax=64M
+ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%s\nexitCode=%s\nexitStatus=%s\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
 
 [Install]
 WantedBy=multi-user.target

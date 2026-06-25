@@ -823,8 +823,12 @@ class BuildrootImageBuilder:
     async def run(self) -> dict[str, Any]:
         settings = _get_frame_settings(self.db, self.frame)
         provider = selected_build_environment_provider(settings)
+        if self._should_customize_precompiled_sd_image_locally(provider):
+            provider = "none"
+            self.build_executor_config = None
+        else:
+            self.build_executor_config = self._selected_build_executor()
         self.build_environment_provider = provider
-        self.build_executor_config = self._selected_build_executor()
         if provider == "none" and not self._can_use_precompiled_sd_image():
             raise RuntimeError(
                 buildroot_sd_image_no_build_environment_message(
@@ -1033,6 +1037,9 @@ class BuildrootImageBuilder:
 
     def _can_use_precompiled_sd_image(self) -> bool:
         return can_use_precompiled_buildroot_sd_image(self.frame)
+
+    def _should_customize_precompiled_sd_image_locally(self, provider: BuildEnvironmentProvider) -> bool:
+        return bool(os.environ.get("HASSIO_RUN_MODE")) and provider != "none" and self._can_use_precompiled_sd_image()
 
     def _selected_build_executor(self) -> BuildHostConfig | ModalSandboxConfig | None:
         project_id = getattr(self.frame, "project_id", None)
