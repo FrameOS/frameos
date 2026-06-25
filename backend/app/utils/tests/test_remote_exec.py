@@ -169,48 +169,44 @@ async def test_upload_file_scp_fails_after_max_attempts(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_file_remote_small_payload_uses_legacy_file_write(monkeypatch):
+async def test_upload_file_remote_small_payload_uses_shell_upload(monkeypatch):
     logged: list[tuple[str, str]] = []
-    legacy_uploads: list[tuple[str, bytes, int]] = []
+    shell_uploads: list[tuple[str, bytes, int]] = []
     stream_uploads: list[tuple[str, bytes]] = []
     frame = SimpleNamespace(id=1, agent={"agentEnabled": True, "agentRunCommands": True})
     _patch_remote_upload_env(monkeypatch, logged)
 
-    async def fake_legacy_upload(_redis, _frame, remote_path, data, timeout):
-        legacy_uploads.append((remote_path, data, timeout))
+    async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
+        shell_uploads.append((remote_path, data, timeout))
 
     async def fake_stream_file(_db, _redis, _frame, remote_path, data, timeout=120):
         stream_uploads.append((remote_path, data))
 
-    monkeypatch.setattr(remote_exec, "_file_write_via_remote", fake_legacy_upload)
+    monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
     monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
 
     await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data", timeout=1800)
 
-    assert legacy_uploads == [("/tmp/target", b"data", 1800)]
+    assert shell_uploads == [("/tmp/target", b"data", 1800)]
     assert stream_uploads == []
 
 
 @pytest.mark.asyncio
-async def test_upload_file_remote_legacy_missing_falls_back_to_shell_upload(monkeypatch):
+async def test_upload_file_remote_large_payload_uses_stream_upload(monkeypatch):
     logged: list[tuple[str, str]] = []
-    shell_uploads: list[tuple[str, bytes, int]] = []
+    stream_uploads: list[tuple[str, bytes]] = []
     frame = SimpleNamespace(id=1, agent={"agentEnabled": True, "agentRunCommands": True})
     _patch_remote_upload_env(monkeypatch, logged)
 
-    async def fake_legacy_upload(_redis, _frame, _remote_path, _data, _timeout):
-        raise RuntimeError("file_write missing")
+    async def fake_stream_file(_db, _redis, _frame, remote_path, data, timeout=120):
+        stream_uploads.append((remote_path, data))
 
-    async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
-        shell_uploads.append((remote_path, data, timeout))
+    monkeypatch.setattr(remote_exec, "REMOTE_SHELL_UPLOAD_MAX_SIZE", 3)
+    monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
 
-    monkeypatch.setattr(remote_exec, "_file_write_via_remote", fake_legacy_upload)
-    monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
+    await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data")
 
-    await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data", timeout=1800)
-
-    assert shell_uploads == [("/tmp/target", b"data", 1800)]
-    assert any("legacy remote upload unavailable" in line for _t, line in logged)
+    assert stream_uploads == [("/tmp/target", b"data")]
 
 
 @pytest.mark.asyncio
@@ -226,7 +222,7 @@ async def test_upload_file_remote_stream_falls_back_to_shell_upload(monkeypatch)
     async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
         shell_uploads.append((remote_path, data, timeout))
 
-    monkeypatch.setattr(remote_exec, "REMOTE_LEGACY_FILE_WRITE_MAX_SIZE", 0)
+    monkeypatch.setattr(remote_exec, "REMOTE_SHELL_UPLOAD_MAX_SIZE", 0)
     monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
     monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
 
@@ -249,7 +245,7 @@ async def test_upload_file_remote_stream_non_capability_errors_still_raise(monke
     async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
         shell_uploads.append((remote_path, data, timeout))
 
-    monkeypatch.setattr(remote_exec, "REMOTE_LEGACY_FILE_WRITE_MAX_SIZE", 0)
+    monkeypatch.setattr(remote_exec, "REMOTE_SHELL_UPLOAD_MAX_SIZE", 0)
     monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
     monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
 
