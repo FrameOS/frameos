@@ -488,7 +488,7 @@ function remoteUpgradeChangeDetail(frame: Partial<FrameType> | null | undefined)
   }
 
   return {
-    label: `FrameOS Remote upgrade ${previousVersion ?? 'unreported'} -> ${currentVersion}`,
+    label: `FrameOS Remote ${previousVersion ?? 'unreported'} -> ${currentVersion}`,
     requiresFullDeploy: true,
     remoteVersionChange: {
       previousVersion,
@@ -534,7 +534,7 @@ function computeChangeDetails(
 
   if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
-      label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
+      label: `FrameOS ${previousFrameosVersion ?? 'unreported'} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
       frameosVersionChange: {
         kind: 'upgrade',
@@ -601,21 +601,20 @@ function firstDeployChangeDetails(
 }
 
 function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
+  const priority = (change: ChangeDetail): number => {
+    if (change.remoteVersionChange) {
+      return 0
+    }
+    if (change.frameosVersionChange) {
+      return 1
+    }
+    return change.requiresFullDeploy ? 2 : 3
+  }
+
   return changes
     .map((change, index) => ({ change, index }))
     .sort((first, second) => {
-      const firstPriority = first.change.label.startsWith('FrameOS upgrade')
-        ? 0
-        : first.change.requiresFullDeploy
-        ? 1
-        : 2
-      const secondPriority = second.change.label.startsWith('FrameOS upgrade')
-        ? 0
-        : second.change.requiresFullDeploy
-        ? 1
-        : 2
-
-      return firstPriority - secondPriority || first.index - second.index
+      return priority(first.change) - priority(second.change) || first.index - second.index
     })
     .map(({ change }) => change)
 }

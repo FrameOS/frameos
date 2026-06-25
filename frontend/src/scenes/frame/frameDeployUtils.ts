@@ -628,7 +628,7 @@ export function buildDeployRecommendation(
 ): DeployRecommendation {
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
   const fullDeployChanges = deployChangeDetails
-    .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
+    .filter((change) => change.requiresFullDeploy && !change.frameosVersionChange)
     .map((change) => change.label)
 
   if (!hasPreviousDeploy) {

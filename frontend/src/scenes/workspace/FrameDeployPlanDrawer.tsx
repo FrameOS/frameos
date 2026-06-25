@@ -377,7 +377,7 @@ function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
   if (remoteVersionChange) {
     return (
       <>
-        FrameOS Remote upgrade{' '}
+        FrameOS Remote{' '}
         {remoteVersionChange.previousVersion ? (
           <FrameosReleaseLink version={remoteVersionChange.previousVersion} />
         ) : (
@@ -402,7 +402,7 @@ function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
 
   return (
     <>
-      FrameOS upgrade{' '}
+      FrameOS{' '}
       {frameosVersionChange.previousVersion ? (
         <FrameosReleaseLink version={frameosVersionChange.previousVersion} />
       ) : (
