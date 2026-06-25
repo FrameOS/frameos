@@ -1,9 +1,14 @@
 from typing import Any
+import shlex
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
-from app.tasks.deploy_remote import delayed_remote_restart_command, resolve_remote_task_transport
+from app.tasks.deploy_remote import (
+    delayed_remote_restart_command,
+    legacy_remote_cleanup_script,
+    resolve_remote_task_transport,
+)
 from app.tasks.utils import get_fresh_frame
 from app.utils.remote_exec import RemoteTransport, run_commands
 
@@ -26,8 +31,13 @@ async def restart_remote_task(ctx: dict[str, Any], id: int, transport: RemoteTra
             [delayed_remote_restart_command("manual")]
             if resolved_transport == "remote"
             else [
-                "sudo systemctl restart frameos-remote.service && "
-                "sudo systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true"
+                "sudo -n sh -lc "
+                + shlex.quote(
+                    "systemctl restart frameos-remote.service; "
+                    "restart_status=$?; "
+                    f"{legacy_remote_cleanup_script()}; "
+                    'exit "$restart_status"'
+                )
             ]
         )
         await run_commands(

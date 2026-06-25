@@ -1101,7 +1101,7 @@ if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   systemctl enable frameos-remote.service >/dev/null
 fi
 
-legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
+legacy_disable_script="sleep 1; for service in frameos_agent.service frameos-agent.service; do systemctl disable --now \"\$service\" >/dev/null 2>&1 || true; systemctl reset-failed \"\$service\" >/dev/null 2>&1 || true; done; rm -f /etc/systemd/system/frameos_agent.service /etc/systemd/system/frameos-agent.service /etc/systemd/system/multi-user.target.wants/frameos_agent.service /etc/systemd/system/multi-user.target.wants/frameos-agent.service /etc/systemd/system/default.target.wants/frameos_agent.service /etc/systemd/system/default.target.wants/frameos-agent.service /lib/systemd/system/frameos_agent.service /lib/systemd/system/frameos-agent.service /usr/lib/systemd/system/frameos_agent.service /usr/lib/systemd/system/frameos-agent.service >/dev/null 2>&1 || true; if command -v pgrep >/dev/null 2>&1; then for pid in \$(pgrep -f '[f]rameos_agent' 2>/dev/null || true); do exe=\$(readlink -f \"/proc/\$pid/exe\" 2>/dev/null || true); case \"\$exe\" in /srv/frameos/agent/*/frameos_agent) kill \"\$pid\" >/dev/null 2>&1 || true ;; esac; done; fi; systemctl daemon-reload >/dev/null 2>&1 || true"
 if command -v systemd-run >/dev/null 2>&1; then
   systemd-run --quiet --unit=frameos-remote-disable-legacy-service --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
 else

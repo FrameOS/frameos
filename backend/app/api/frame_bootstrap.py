@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, update_frame
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
+from app.tasks.deploy_remote import legacy_remote_cleanup_script
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
 from app.utils.token import secure_token
 
@@ -461,7 +462,7 @@ install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frame
 install -m 0644 "$remote_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
 systemctl daemon-reload
 systemctl enable frameos.service frameos-remote.service
-legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
+legacy_disable_script={shlex.quote(legacy_remote_cleanup_script(delay_seconds=1))}
 if command -v systemd-run >/dev/null 2>&1; then
   systemd-run --quiet --unit=frameos-remote-disable-legacy-service --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
 else

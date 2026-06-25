@@ -56,6 +56,8 @@ async def test_restart_remote_via_remote_schedules_delayed_restart(monkeypatch: 
     command = captured["commands"][0]
     assert "systemd-run" in command
     assert "systemctl restart frameos-remote.service" in command
+    assert "frameos_agent.service frameos-agent.service" in command
+    assert "[f]rameos_agent" in command
 
 
 @pytest.mark.asyncio
@@ -85,3 +87,30 @@ async def test_restart_remote_auto_uses_remote_when_frame_prefers_remote(monkeyp
 
     assert captured["transport"] == "remote"
     assert "systemd-run" in captured["commands"][0]
+
+
+@pytest.mark.asyncio
+async def test_restart_remote_via_ssh_cleans_up_legacy_remote(monkeypatch: pytest.MonkeyPatch):
+    restart_remote_module = importlib.import_module("app.tasks.restart_remote")
+    captured: dict[str, object] = {}
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    async def fake_run_commands(_db, _redis, _frame, commands, **kwargs):
+        captured["commands"] = commands
+        captured["transport"] = kwargs.get("transport")
+
+    monkeypatch.setattr(restart_remote_module, "log", fake_log)
+    monkeypatch.setattr(restart_remote_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
+    monkeypatch.setattr(restart_remote_module, "run_commands", fake_run_commands)
+
+    await restart_remote_task({"db": object(), "redis": object()}, id=1, transport="ssh")
+
+    assert captured["transport"] == "ssh"
+    command = captured["commands"][0]
+    assert "sudo -n sh -lc" in command
+    assert "systemctl restart frameos-remote.service" in command
+    assert "frameos_agent.service frameos-agent.service" in command
+    assert "[f]rameos_agent" in command
+    assert 'exit "$restart_status"' in command

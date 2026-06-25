@@ -167,20 +167,31 @@ block test_frameos_service_user_prefers_explicit_setup_user:
     else:
       delEnv("FRAMEOS_SERVICE_USER")
 
-block test_cgroup_indicates_agent_service:
-  doAssert cgroupIndicatesAgentService("0::/system.slice/frameos-remote.service\n")
-  doAssert cgroupIndicatesAgentService("0::/system.slice/frameos_agent.service\n")
-  doAssert cgroupIndicatesAgentService(
+block test_cgroup_indicates_remote_service:
+  doAssert cgroupIndicatesRemoteService("0::/system.slice/frameos-remote.service\n")
+  doAssert cgroupIndicatesRemoteService("0::/system.slice/frameos_agent.service\n")
+  doAssert cgroupIndicatesRemoteService("0::/system.slice/frameos-agent.service\n")
+  doAssert cgroupIndicatesRemoteService(
     "12:pids:/system.slice/frameos-remote.service\n1:name=systemd:/system.slice/frameos-remote.service\n")
-  doAssert not cgroupIndicatesAgentService("0::/system.slice/frameos.service\n")
-  doAssert not cgroupIndicatesAgentService("0::/user.slice/user-1000.slice/session-4.scope\n")
-  doAssert not cgroupIndicatesAgentService("")
+  doAssert not cgroupIndicatesRemoteService("0::/system.slice/frameos.service\n")
+  doAssert not cgroupIndicatesRemoteService("0::/user.slice/user-1000.slice/session-4.scope\n")
+  doAssert not cgroupIndicatesRemoteService("")
 
 block test_running_under_frameos_remote_honors_setup_env:
+  let previousSetupUnderRemote = getEnv("FRAMEOS_SETUP_UNDER_REMOTE")
   let previousSetupUnderAgent = getEnv("FRAMEOS_SETUP_UNDER_AGENT")
+  putEnv("FRAMEOS_SETUP_UNDER_REMOTE", "1")
+  try:
+    doAssert runningUnderFrameosRemote()
+  finally:
+    if previousSetupUnderRemote.len > 0:
+      putEnv("FRAMEOS_SETUP_UNDER_REMOTE", previousSetupUnderRemote)
+    else:
+      delEnv("FRAMEOS_SETUP_UNDER_REMOTE")
+
   putEnv("FRAMEOS_SETUP_UNDER_AGENT", "1")
   try:
-    doAssert runningUnderFrameosAgent()
+    doAssert runningUnderFrameosRemote()
   finally:
     if previousSetupUnderAgent.len > 0:
       putEnv("FRAMEOS_SETUP_UNDER_AGENT", previousSetupUnderAgent)
@@ -223,14 +234,14 @@ block test_write_frame_config_dimensions_persists_detected_size:
     if fileExists(path):
       removeFile(path)
 
-block test_write_setup_release_payload_updates_agent_frame_config:
+block test_write_setup_release_payload_updates_remote_frame_config:
   let tempRoot = getTempDir() / ("frameos-setup-payload-" & $epochTime().int64)
   let frameosCurrent = tempRoot / "current"
-  let agentCurrent = tempRoot / "remote" / "current"
+  let remoteCurrent = tempRoot / "remote" / "current"
   let setupPath = tempRoot / "frameos-setup.json"
   createDir(frameosCurrent)
-  createDir(agentCurrent)
-  writeFile(agentCurrent / "frame.json", pretty(%*{
+  createDir(remoteCurrent)
+  writeFile(remoteCurrent / "frame.json", pretty(%*{
     "serverHost": "localhost",
     "serverPort": 8989,
   }, indent = 4) & "\n")
@@ -250,19 +261,19 @@ block test_write_setup_release_payload_updates_agent_frame_config:
   }, indent = 4) & "\n")
 
   try:
-    writeSetupReleasePayload(setupPath, frameosCurrent, agentCurrent)
+    writeSetupReleasePayload(setupPath, frameosCurrent, remoteCurrent)
 
     let runtimeConfigJson = readFile(frameosCurrent / "frame.json")
-    let agentConfigJson = readFile(agentCurrent / "frame.json")
-    doAssert agentConfigJson == runtimeConfigJson
+    let remoteConfigJson = readFile(remoteCurrent / "frame.json")
+    doAssert remoteConfigJson == runtimeConfigJson
     let runtimeConfig = parseJson(runtimeConfigJson)
-    let agentConfig = parseJson(agentConfigJson)
+    let remoteConfig = parseJson(remoteConfigJson)
     let allScenes = parseJson(uncompress(readFile(frameosCurrent / "all_scenes.json.gz"), dataFormat = dfGzip))
     let interpretedScenes = parseJson(uncompress(readFile(frameosCurrent / "scenes.json.gz"), dataFormat = dfGzip))
 
     doAssert runtimeConfig{"serverHost"}.getStr() == "backend.frameos.local"
-    doAssert agentConfig{"serverHost"}.getStr() == "backend.frameos.local"
-    doAssert agentConfig{"serverPort"}.getInt() == 443
+    doAssert remoteConfig{"serverHost"}.getStr() == "backend.frameos.local"
+    doAssert remoteConfig{"serverPort"}.getInt() == 443
     doAssert allScenes.len == 2
     doAssert interpretedScenes.len == 1
     doAssert interpretedScenes[0]{"id"}.getStr() == "interpreted-scene"

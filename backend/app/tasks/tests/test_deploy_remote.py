@@ -197,8 +197,11 @@ def test_delayed_remote_restart_command_uses_immediate_transient_service():
     assert "--on-active" not in command
     assert "/bin/sh -lc" in command
     assert "systemctl enable frameos-remote.service; systemctl restart frameos-remote.service" in command
-    assert "systemctl disable --now frameos_agent.service" in command
-    assert "rm -f /etc/systemd/system/frameos_agent.service" in command
+    assert "frameos_agent.service frameos-agent.service" in command
+    assert "systemctl disable --now" in command
+    assert "rm -f /etc/systemd/system/frameos_agent.service /etc/systemd/system/frameos-agent.service" in command
+    assert "[f]rameos_agent" in command
+    assert "/srv/frameos/agent/*/frameos_agent" in command
     assert "systemctl daemon-reload" in command
 
 
@@ -414,8 +417,11 @@ async def test_disable_legacy_service_runs_over_ssh_transport(tmp_path: Path):
     await deployer._disable_legacy_service()
 
     assert len(deployer.commands) == 1
-    assert "systemctl disable --now frameos_agent.service" in deployer.commands[0]
-    assert "rm -f /etc/systemd/system/frameos_agent.service" in deployer.commands[0]
+    assert "frameos_agent.service frameos-agent.service" in deployer.commands[0]
+    assert "systemctl disable --now" in deployer.commands[0]
+    assert "rm -f /etc/systemd/system/frameos_agent.service /etc/systemd/system/frameos-agent.service" in deployer.commands[0]
+    assert "[f]rameos_agent" in deployer.commands[0]
+    assert "/srv/frameos/agent/*/frameos_agent" in deployer.commands[0]
 
 
 @pytest.mark.asyncio

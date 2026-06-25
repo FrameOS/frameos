@@ -37,6 +37,35 @@ REMOTE_SERVICE = "frameos-remote"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def legacy_remote_cleanup_script(delay_seconds: int = 0) -> str:
+    delay = f"sleep {delay_seconds}; " if delay_seconds > 0 else ""
+    return (
+        delay
+        + "for service in frameos_agent.service frameos-agent.service; do "
+        'systemctl disable --now "$service" >/dev/null 2>&1 || true; '
+        'systemctl reset-failed "$service" >/dev/null 2>&1 || true; '
+        "done; "
+        "rm -f "
+        "/etc/systemd/system/frameos_agent.service "
+        "/etc/systemd/system/frameos-agent.service "
+        "/etc/systemd/system/multi-user.target.wants/frameos_agent.service "
+        "/etc/systemd/system/multi-user.target.wants/frameos-agent.service "
+        "/etc/systemd/system/default.target.wants/frameos_agent.service "
+        "/etc/systemd/system/default.target.wants/frameos-agent.service "
+        "/lib/systemd/system/frameos_agent.service "
+        "/lib/systemd/system/frameos-agent.service "
+        "/usr/lib/systemd/system/frameos_agent.service "
+        "/usr/lib/systemd/system/frameos-agent.service >/dev/null 2>&1 || true; "
+        "if command -v pgrep >/dev/null 2>&1; then "
+        "for pid in $(pgrep -f '[f]rameos_agent' 2>/dev/null || true); do "
+        'exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true); '
+        'case "$exe" in /srv/frameos/agent/*/frameos_agent) kill "$pid" >/dev/null 2>&1 || true ;; esac; '
+        "done; "
+        "fi; "
+        "systemctl daemon-reload >/dev/null 2>&1 || true"
+    )
+
+
 def get_build_host_config(*args, **kwargs):  # noqa: ANN002, ANN003
     """Compatibility shim for older tests monkeypatching this module symbol."""
     from app.utils.build_host import get_build_host_config as _get_build_host_config
@@ -69,9 +98,7 @@ def delayed_remote_restart_command(suffix: str = "manual") -> str:
         "sleep 1; "
         "systemctl enable frameos-remote.service; "
         "systemctl restart frameos-remote.service; "
-        "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; "
-        "rm -f /etc/systemd/system/frameos_agent.service; "
-        "systemctl daemon-reload"
+        f"{legacy_remote_cleanup_script()}"
     )
     fallback_script = f"nohup sh -c {shlex.quote(restart_script)} >/dev/null 2>&1 &"
     fallback = f"sudo sh -c {shlex.quote(fallback_script)}"
@@ -691,11 +718,7 @@ class RemoteDeployer(FrameDeployer):
         if self.remote_transport == "remote":
             return
         await self.exec_command(
-            self._sudo_system_command(
-                "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; "
-                "rm -f /etc/systemd/system/frameos_agent.service; "
-                "systemctl daemon-reload"
-            ),
+            self._sudo_system_command(legacy_remote_cleanup_script()),
             raise_on_error=False,
             timeout=120,
         )
