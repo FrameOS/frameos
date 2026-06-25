@@ -1072,7 +1072,7 @@ export function FrameSettings({
             {!isEmbeddedMode ? (
               <>
                 <H6 id="frame-settings-agent">
-                  Remote (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+                  Remote control - beta <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
                 </H6>
                 <div className="pl-2 @md:pl-8 space-y-2">
                   <Group name="agent">
