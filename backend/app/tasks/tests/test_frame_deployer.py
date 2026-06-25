@@ -6,6 +6,7 @@ import pytest
 
 from app.drivers.drivers import DRIVERS
 from app.codegen.drivers_nim import write_driver_library_nim
+from app.tasks import _frame_deployer as frame_deployer_module
 from app.tasks._frame_deployer import FrameDeployer
 
 
@@ -19,6 +20,14 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     (frameos_root / "frontend" / "src" / "main.tsx").write_text("local frame frontend\n", encoding="utf-8")
     (frameos_root / "frontend" / "node_modules" / "autoprefixer").mkdir(parents=True)
     (frameos_root / "frontend" / "node_modules" / "autoprefixer" / "package.json").write_text("{}", encoding="utf-8")
+    (frameos_root / ".flox" / "run").mkdir(parents=True)
+    (frameos_root / ".flox" / "run" / "env").write_text("cached env\n", encoding="utf-8")
+    (frameos_root / ".git" / "objects").mkdir(parents=True)
+    (frameos_root / ".git" / "objects" / "pack").write_text("git data\n", encoding="utf-8")
+    (frameos_root / ".pnpm-store" / "v10").mkdir(parents=True)
+    (frameos_root / ".pnpm-store" / "v10" / "store.json").write_text("{}", encoding="utf-8")
+    (frameos_root / ".venv" / "bin").mkdir(parents=True)
+    (frameos_root / ".venv" / "bin" / "python").write_text("python\n", encoding="utf-8")
     (frameos_root / "nimcache" / "local-test").mkdir(parents=True)
     (frameos_root / "nimcache" / "local-test" / "frameos.o").write_bytes(b"object")
     (frameos_root / "build").mkdir()
@@ -69,6 +78,10 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (tmp_path / "build" / "repo" / "apps" / "code" / "sample" / "config.json").exists()
     assert (tmp_path / "build" / "repo" / "apps" / "code" / "sample" / "app.ts").exists()
     assert (tmp_path / "build" / "versions.json").exists()
+    assert not (copied_source_dir / ".flox").exists()
+    assert not (copied_source_dir / ".git").exists()
+    assert not (copied_source_dir / ".pnpm-store").exists()
+    assert not (copied_source_dir / ".venv").exists()
     assert not (copied_source_dir / "frontend" / "node_modules").exists()
     assert not (copied_source_dir / "nimcache").exists()
     assert not (copied_source_dir / "build").exists()
@@ -77,6 +90,35 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (copied_source_dir / "assets" / "compiled" / "web" / "control.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "frame_web" / "index.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf").exists()
+
+
+def test_create_local_source_folder_default_source_root_ignores_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo_root = tmp_path / "repo"
+    frameos_root = repo_root / "frameos"
+    wrong_root = tmp_path / "frameos"
+    frameos_root.mkdir(parents=True)
+    wrong_root.mkdir()
+    (frameos_root / "frameos.nimble").write_text("# real runtime\n", encoding="utf-8")
+    (wrong_root / "wrong.txt").write_text("wrong cwd-relative runtime\n", encoding="utf-8")
+
+    monkeypatch.setattr(frame_deployer_module, "DEFAULT_FRAMEOS_SOURCE_ROOT", frameos_root)
+    monkeypatch.chdir(repo_root)
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+
+    copied_source_dir = Path(deployer.create_local_source_folder(str(tmp_path / "build")))
+
+    assert (copied_source_dir / "frameos.nimble").exists()
+    assert not (copied_source_dir / "wrong.txt").exists()
 
 
 def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
