@@ -201,6 +201,7 @@ def test_remote_ws_stores_reported_version_and_clears_missing_version(client: Te
             "agentRunCommands": True,
             "agentSharedSecret": secret,
             "agentVersion": "2026.1.1",
+            "remoteCapabilities": {"fileWriteStream": False},
         }
         db.add(frame)
         db.commit()
@@ -211,7 +212,12 @@ def test_remote_ws_stores_reported_version_and_clears_missing_version(client: Te
         db.close()
 
     with client.websocket_connect("/ws/remote") as ws:
-        ws.send_json({"action": "hello", "serverApiKey": server_api_key, "remoteVersion": "2026.6.11+abc"})
+        ws.send_json({
+            "action": "hello",
+            "serverApiKey": server_api_key,
+            "remoteVersion": "2026.6.11+abc",
+            "remoteCapabilities": {"fileWriteStream": True, "ignored": "not-bool"},
+        })
         challenge = ws.receive_json()
         ws.send_json({
             "action": "handshake",
@@ -224,6 +230,7 @@ def test_remote_ws_stores_reported_version_and_clears_missing_version(client: Te
         updated = db.get(Frame, frame_id)
         assert updated is not None
         assert updated.agent["agentVersion"] == "2026.6.11+abc"
+        assert updated.agent["remoteCapabilities"] == {"fileWriteStream": True}
     finally:
         db.close()
 
@@ -241,6 +248,7 @@ def test_remote_ws_stores_reported_version_and_clears_missing_version(client: Te
         updated = db.get(Frame, frame_id)
         assert updated is not None
         assert "agentVersion" not in updated.agent
+        assert "remoteCapabilities" not in updated.agent
     finally:
         db.close()
 

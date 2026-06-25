@@ -665,7 +665,10 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     "action": "hello",
     "serverApiKey": cfg.serverApiKey,
     "remoteVersion": frameosRemoteVersion,
-    "agentVersion": frameosRemoteVersion
+    "agentVersion": frameosRemoteVersion,
+    "remoteCapabilities": {
+      "fileWriteStream": true
+    }
   }
   await ws.send($hello)
 

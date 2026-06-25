@@ -63,7 +63,19 @@ def remote_version_from_hello(hello_msg: dict[str, Any]) -> str | None:
     return None
 
 
-async def store_connected_remote_version(redis: Redis, frame: Frame, remote_version: str | None) -> None:
+def remote_capabilities_from_hello(hello_msg: dict[str, Any]) -> dict[str, bool] | None:
+    capabilities = hello_msg.get("remoteCapabilities")
+    if not isinstance(capabilities, dict):
+        return None
+    return {str(key): value for key, value in capabilities.items() if isinstance(value, bool)}
+
+
+async def store_connected_remote_version(
+    redis: Redis,
+    frame: Frame,
+    remote_version: str | None,
+    remote_capabilities: dict[str, bool] | None = None,
+) -> None:
     db = SessionLocal()
     try:
         stored_frame = db.get(Frame, frame.id)
@@ -75,6 +87,10 @@ async def store_connected_remote_version(redis: Redis, frame: Frame, remote_vers
             agent["agentVersion"] = remote_version
         else:
             agent.pop("agentVersion", None)
+        if remote_capabilities:
+            agent["remoteCapabilities"] = remote_capabilities
+        else:
+            agent.pop("remoteCapabilities", None)
 
         if agent == (stored_frame.agent or {}):
             frame.agent = agent
@@ -430,7 +446,12 @@ async def ws_remote_endpoint(
 
     # STEP 3 – server → handshake/ok  +  start pump
     await ws.send_json({"action": "handshake/ok"})
-    await store_connected_remote_version(redis, frame, remote_version_from_hello(hello_msg))
+    await store_connected_remote_version(
+        redis,
+        frame,
+        remote_version_from_hello(hello_msg),
+        remote_capabilities_from_hello(hello_msg),
+    )
     send_task = asyncio.create_task(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )

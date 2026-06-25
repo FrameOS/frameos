@@ -195,6 +195,12 @@ def _remote_stream_upload_can_fallback(exc: Exception) -> bool:
     return any(token in message for token in ("unknown", "missing", "timed-out", "timeout"))
 
 
+def _remote_supports_stream_upload(frame: Frame) -> bool:
+    agent = frame.agent or {}
+    capabilities = agent.get("remoteCapabilities")
+    return isinstance(capabilities, dict) and capabilities.get("fileWriteStream") is True
+
+
 async def _shell_upload_via_remote(
     db: Session,
     redis: Redis,
@@ -218,7 +224,7 @@ async def _shell_upload_via_remote(
         redis,
         frame.id,
         "stdout",
-        f"> falling back to shell/base64 upload for {remote_path} ({print_size(len(data))})",
+        f"> using shell/base64 upload for {remote_path} ({print_size(len(data))})",
     )
     try:
         await _exec_via_remote(
@@ -404,7 +410,7 @@ async def upload_file(
     if await _use_remote(frame, redis, transport):
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via remote)")
-            if size <= REMOTE_SHELL_UPLOAD_MAX_SIZE:
+            if size <= REMOTE_SHELL_UPLOAD_MAX_SIZE and not _remote_supports_stream_upload(frame):
                 await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
                 return
             await _stream_file_via_remote(db, redis, frame, remote_path, data)

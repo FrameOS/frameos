@@ -210,6 +210,36 @@ async def test_upload_file_remote_large_payload_uses_stream_upload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upload_file_remote_small_payload_streams_when_capability_is_reported(monkeypatch):
+    logged: list[tuple[str, str]] = []
+    shell_uploads: list[tuple[str, bytes, int]] = []
+    stream_uploads: list[tuple[str, bytes]] = []
+    frame = SimpleNamespace(
+        id=1,
+        agent={
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "remoteCapabilities": {"fileWriteStream": True},
+        },
+    )
+    _patch_remote_upload_env(monkeypatch, logged)
+
+    async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
+        shell_uploads.append((remote_path, data, timeout))
+
+    async def fake_stream_file(_db, _redis, _frame, remote_path, data, timeout=120):
+        stream_uploads.append((remote_path, data))
+
+    monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
+    monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
+
+    await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data")
+
+    assert stream_uploads == [("/tmp/target", b"data")]
+    assert shell_uploads == []
+
+
+@pytest.mark.asyncio
 async def test_upload_file_remote_stream_falls_back_to_shell_upload(monkeypatch):
     logged: list[tuple[str, str]] = []
     shell_uploads: list[tuple[str, bytes, int]] = []
@@ -279,4 +309,4 @@ async def test_shell_upload_via_remote_writes_base64_chunks(monkeypatch):
     assert "printf %s bG8= >>" in commands[2]
     assert "base64 -d" in commands[3]
     assert "mv " in commands[3]
-    assert any("falling back to shell/base64 upload" in line for _t, line in logged)
+    assert any("using shell/base64 upload" in line for _t, line in logged)
