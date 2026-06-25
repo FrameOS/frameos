@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
-from app.tasks.deploy_remote import delayed_agent_restart_command, resolve_agent_task_transport
+from app.tasks.deploy_remote import delayed_remote_restart_command, resolve_remote_task_transport
 from app.tasks.utils import get_fresh_frame
 from app.utils.remote_exec import RemoteTransport, run_commands
 
@@ -20,10 +20,10 @@ async def restart_remote_task(ctx: dict[str, Any], id: int, transport: RemoteTra
         return
 
     try:
-        resolved_transport = resolve_agent_task_transport(frame, transport)
+        resolved_transport = resolve_remote_task_transport(frame, transport)
         await log(db, redis, id, "stdout", f"Restarting FrameOS Remote via {resolved_transport}")
         commands = (
-            [delayed_agent_restart_command("manual")]
+            [delayed_remote_restart_command("manual")]
             if resolved_transport == "remote"
             else [
                 "sudo systemctl restart frameos-remote.service && "

@@ -36,17 +36,17 @@ def test_repo_root_for_frameos_root_uses_parent_versions_file(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_generate_agent_build_dir_constructs_versioned_command(
+async def test_generate_remote_build_dir_constructs_versioned_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     cross_module = load_cross_module()
     repo_root = tmp_path / "repo"
-    agent_source_dir = repo_root / "frameos" / "remote source"
+    remote_source_dir = repo_root / "frameos" / "remote source"
     build_dir = tmp_path / "remote-build"
     nimbase = tmp_path / "nimbase.h"
     repo_root.mkdir()
-    agent_source_dir.mkdir(parents=True)
+    remote_source_dir.mkdir(parents=True)
     nimbase.write_text("// nimbase\n", encoding="utf-8")
     (repo_root / "versions.json").write_text('{"remote":"2026.5.14"}\n', encoding="utf-8")
 
@@ -89,9 +89,9 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
         ),
     )
 
-    await cross_module.generate_agent_build_dir(
+    await cross_module.generate_remote_build_dir(
         deployer=FakeDeployer(),
-        agent_source_dir=agent_source_dir,
+        remote_source_dir=remote_source_dir,
         build_dir=build_dir,
         arch="aarch64",
         nim_path="/opt/nim/bin/nim",
@@ -99,7 +99,7 @@ async def test_generate_agent_build_dir_constructs_versioned_command(
     )
 
     assert "--define:frameosRemoteVersion:2026.5.14" in captured["command"]
-    assert shlex.quote(str(agent_source_dir)) in captured["command"]
+    assert shlex.quote(str(remote_source_dir)) in captured["command"]
     assert (build_dir / "nimbase.h").read_text(encoding="utf-8") == "// nimbase\n"
     assert (build_dir / "Makefile").exists()
 
@@ -245,7 +245,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
-    async def fake_generate_agent_build_dir(**kwargs):
+    async def fake_generate_remote_build_dir(**kwargs):
         assert kwargs["repo_root"] == repo_root
         build_dir = Path(kwargs["build_dir"])
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -256,7 +256,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     monkeypatch.setattr("backend.app.tasks.utils.find_nim_v2", lambda: "/tmp/nim")
     monkeypatch.setattr("backend.app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
     monkeypatch.setattr("backend.app.utils.cross_compile.CrossCompiler", FakeCrossCompiler)
-    monkeypatch.setattr(cross_module, "generate_agent_build_dir", fake_generate_agent_build_dir)
+    monkeypatch.setattr(cross_module, "generate_remote_build_dir", fake_generate_remote_build_dir)
     monkeypatch.setattr(
         "app.codegen.release_drivers_nim.release_driver_specs",
         lambda: {

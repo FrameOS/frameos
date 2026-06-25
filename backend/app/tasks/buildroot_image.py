@@ -38,7 +38,7 @@ from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
-from app.tasks.deploy_remote import AgentDeployer
+from app.tasks.deploy_remote import RemoteDeployer
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
@@ -1156,9 +1156,9 @@ class BuildrootImageBuilder:
                     f"Could not use precompiled FrameOS Remote for {prebuilt_target}: {exc}. Falling back to source build.",
                 )
 
-        agent_deployer = AgentDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
+        agent_deployer = RemoteDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
         agent_deployer.build_id = deployer.build_id
-        build_dir, source_dir = agent_deployer._create_agent_build_folders()
+        build_dir, source_dir = agent_deployer._create_remote_build_folders()
         await agent_deployer._create_local_build_archive(build_dir, source_dir, FRAMEOS_BUILD_TARGET.arch)
         return await CrossCompiler(
             db=self.db,
