@@ -98,6 +98,17 @@ def _patch_scp_env(monkeypatch, scp_impl, logged):
     return connections
 
 
+def _patch_remote_upload_env(monkeypatch, logged):
+    async def fake_use_remote(_frame, _redis, _transport):
+        return True
+
+    async def fake_log(_db, _redis, _frame_id, log_type, line, timestamp=None):
+        logged.append((log_type, line))
+
+    monkeypatch.setattr(remote_exec, "_use_remote", fake_use_remote)
+    monkeypatch.setattr(remote_exec, "log", fake_log)
+
+
 @pytest.mark.asyncio
 async def test_upload_file_scp_success(monkeypatch):
     logged: list[tuple[str, str]] = []
@@ -155,3 +166,74 @@ async def test_upload_file_scp_fails_after_max_attempts(monkeypatch):
 
     assert len(connections) == 2
     assert all(ssh.aborted for ssh in connections)
+
+
+@pytest.mark.asyncio
+async def test_upload_file_remote_stream_falls_back_to_shell_upload(monkeypatch):
+    logged: list[tuple[str, str]] = []
+    shell_uploads: list[tuple[str, bytes, int]] = []
+    frame = SimpleNamespace(id=1, agent={"agentEnabled": True, "agentRunCommands": True})
+    _patch_remote_upload_env(monkeypatch, logged)
+
+    async def fake_stream_file(_db, _redis, _frame, _remote_path, _data, timeout=120):
+        raise RuntimeError("file_write_chunk failed: file_write_open missing")
+
+    async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
+        shell_uploads.append((remote_path, data, timeout))
+
+    monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
+    monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
+
+    await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data", timeout=1800)
+
+    assert shell_uploads == [("/tmp/target", b"data", 1800)]
+    assert any("remote streaming upload unavailable" in line for _t, line in logged)
+
+
+@pytest.mark.asyncio
+async def test_upload_file_remote_stream_non_capability_errors_still_raise(monkeypatch):
+    logged: list[tuple[str, str]] = []
+    shell_uploads: list[tuple[str, bytes, int]] = []
+    frame = SimpleNamespace(id=1, agent={"agentEnabled": True, "agentRunCommands": True})
+    _patch_remote_upload_env(monkeypatch, logged)
+
+    async def fake_stream_file(_db, _redis, _frame, _remote_path, _data, timeout=120):
+        raise RuntimeError("file_write_open failed: Permission denied")
+
+    async def fake_shell_upload(_db, _redis, _frame, remote_path, data, timeout):
+        shell_uploads.append((remote_path, data, timeout))
+
+    monkeypatch.setattr(remote_exec, "_stream_file_via_remote", fake_stream_file)
+    monkeypatch.setattr(remote_exec, "_shell_upload_via_remote", fake_shell_upload)
+
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        await remote_exec.upload_file(None, None, frame, "/tmp/target", b"data")
+
+    assert shell_uploads == []
+    assert any("ERROR writing /tmp/target" in line for _t, line in logged)
+
+
+@pytest.mark.asyncio
+async def test_shell_upload_via_remote_writes_base64_chunks(monkeypatch):
+    logged: list[tuple[str, str]] = []
+    commands: list[str] = []
+    frame = SimpleNamespace(id=7)
+
+    async def fake_exec(_redis, _frame, cmd, _timeout):
+        commands.append(cmd)
+
+    async def fake_log(_db, _redis, _frame_id, log_type, line, timestamp=None):
+        logged.append((log_type, line))
+
+    monkeypatch.setattr(remote_exec, "_exec_via_remote", fake_exec)
+    monkeypatch.setattr(remote_exec, "log", fake_log)
+    monkeypatch.setattr(remote_exec, "SHELL_UPLOAD_BASE64_CHUNK_SIZE", 4)
+
+    await remote_exec._shell_upload_via_remote(None, None, frame, "/srv/frameos/remote/bin", b"hello", 30)
+
+    assert commands[0].startswith("set -eu; mkdir -p /srv/frameos/remote; : > ")
+    assert "printf %s aGVs >>" in commands[1]
+    assert "printf %s bG8= >>" in commands[2]
+    assert "base64 -d" in commands[3]
+    assert "mv " in commands[3]
+    assert any("falling back to shell/base64 upload" in line for _t, line in logged)

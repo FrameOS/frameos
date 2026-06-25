@@ -535,11 +535,12 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
           copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
           pos += frame.len
 
+        let compression = args{"compression"}.getStr("gzip")
         let payload =
-          if currentUpload.compression == "zlib":
-            uncompress(buf) # zippy
-          else:
+          if compression == "none":
             buf
+          else:
+            uncompress(buf) # zippy supports the gzip/zlib formats we send
 
         createDir(parentDir(path))
         writeFile(path, payload)

@@ -43,6 +43,7 @@ CHUNK_ZLEVEL = 6               # good compromise
 UPLOAD_PROGRESS_INTERVAL_SECONDS = 30  # how often to log upload progress
 SCP_STALL_TIMEOUT_SECONDS = 90         # abort the transfer when no bytes move for this long
 SCP_MAX_ATTEMPTS = 3
+SHELL_UPLOAD_BASE64_CHUNK_SIZE = 48 * 1024
 
 RemoteTransport = Literal["auto", "remote", "ssh"]
 REMOTE_TRANSPORT_VALUES = {"auto", "remote", "agent", "ssh"}
@@ -130,7 +131,7 @@ async def _file_write_via_remote(
         payload = {
             "type": "cmd",
             "name": "file_write",
-            "args": {"path": remote_path, "size": len(zipped)},
+            "args": {"path": remote_path, "size": len(zipped), "compression": "gzip"},
         }
 
         message = {
@@ -160,18 +161,115 @@ async def _file_write_via_remote(
 async def _stream_file_via_remote(db, redis, frame, remote_path, data, timeout: int = 120):
     size = len(data)
     last_report = time.monotonic()
-    await file_write_open_on_frame(frame.id, remote_path,
-                                   meta={"compression": "zlib"}, redis=redis)
+    try:
+        await file_write_open_on_frame(frame.id, remote_path,
+                                       meta={"compression": "zlib"}, redis=redis)
+    except Exception as exc:
+        raise RuntimeError(f"file_write_open failed: {exc}") from exc
+
     for off in range(0, len(data), CHUNK_SIZE):
         raw  = data[off:off+CHUNK_SIZE]
         comp = zlib.compress(raw, CHUNK_ZLEVEL)
-        await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+        try:
+            await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+        except Exception as exc:
+            raise RuntimeError(f"file_write_chunk failed: {exc}") from exc
         if time.monotonic() - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
             last_report = time.monotonic()
             sent = min(off + CHUNK_SIZE, size)
             await log(db, redis, frame.id, "stdout",
                       f"> upload progress: {print_size(sent)} / {print_size(size)}")
-    await file_write_close_on_frame(frame.id, redis=redis)
+    try:
+        await file_write_close_on_frame(frame.id, redis=redis)
+    except Exception as exc:
+        raise RuntimeError(f"file_write_close failed: {exc}") from exc
+
+
+def _remote_stream_upload_can_fallback(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "file_write_open missing" in message:
+        return True
+    if "file_write_open" not in message and "file_write_chunk" not in message:
+        return False
+    return any(token in message for token in ("unknown", "missing", "timed-out", "timeout"))
+
+
+async def _shell_upload_via_remote(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+    data: bytes,
+    timeout: int,
+) -> None:
+    encoded = base64.b64encode(data).decode("ascii")
+    parent = os.path.dirname(remote_path) or "."
+    upload_id = uuid.uuid4().hex
+    b64_path = f"{remote_path}.frameos-upload-{upload_id}.b64"
+    tmp_path = f"{remote_path}.frameos-upload-{upload_id}.tmp"
+    quoted_remote = shlex.quote(remote_path)
+    quoted_parent = shlex.quote(parent)
+    quoted_b64 = shlex.quote(b64_path)
+    quoted_tmp = shlex.quote(tmp_path)
+
+    await log(
+        db,
+        redis,
+        frame.id,
+        "stdout",
+        f"> falling back to shell/base64 upload for {remote_path} ({print_size(len(data))})",
+    )
+    try:
+        await _exec_via_remote(
+            redis,
+            frame,
+            f"set -eu; mkdir -p {quoted_parent}; : > {quoted_b64}; rm -f {quoted_tmp}",
+            timeout,
+        )
+        last_report = time.monotonic()
+        for off in range(0, len(encoded), SHELL_UPLOAD_BASE64_CHUNK_SIZE):
+            chunk = encoded[off:off + SHELL_UPLOAD_BASE64_CHUNK_SIZE]
+            await _exec_via_remote(
+                redis,
+                frame,
+                f"printf %s {shlex.quote(chunk)} >> {quoted_b64}",
+                timeout,
+            )
+            if time.monotonic() - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
+                last_report = time.monotonic()
+                sent = min((off + SHELL_UPLOAD_BASE64_CHUNK_SIZE) * 3 // 4, len(data))
+                await log(
+                    db,
+                    redis,
+                    frame.id,
+                    "stdout",
+                    f"> shell/base64 upload progress: {print_size(sent)} / {print_size(len(data))}",
+                )
+
+        await _exec_via_remote(
+            redis,
+            frame,
+            "set -eu; "
+            "if command -v base64 >/dev/null 2>&1; then "
+            f"base64 -d {quoted_b64} > {quoted_tmp}; "
+            "elif command -v python3 >/dev/null 2>&1; then "
+            "python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))' "
+            f"< {quoted_b64} > {quoted_tmp}; "
+            "else echo 'base64 command missing' >&2; exit 127; fi; "
+            f"mv {quoted_tmp} {quoted_remote}; rm -f {quoted_b64}",
+            timeout,
+        )
+    except Exception:
+        try:
+            await _exec_via_remote(
+                redis,
+                frame,
+                f"rm -f {quoted_b64} {quoted_tmp}",
+                min(timeout, 30),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        raise
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -312,6 +410,26 @@ async def upload_file(
             #     await _file_write_via_remote(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
+            if _remote_stream_upload_can_fallback(e):
+                await log(
+                    db,
+                    redis,
+                    frame.id,
+                    "stdout",
+                    f"> remote streaming upload unavailable for {remote_path}: {e}",
+                )
+                try:
+                    await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                    return
+                except Exception as fallback_exc:
+                    await log(
+                        db,
+                        redis,
+                        frame.id,
+                        "stderr",
+                        f"> ERROR writing {remote_path} ({print_size(size)} via remote fallback) - {fallback_exc}",
+                    )
+                    raise
             await log(
                 db,
                 redis,
