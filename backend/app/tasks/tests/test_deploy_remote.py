@@ -202,6 +202,7 @@ def test_delayed_remote_restart_command_uses_immediate_transient_service():
     assert "rm -f /etc/systemd/system/frameos_agent.service /etc/systemd/system/frameos-agent.service" in command
     assert "[f]rameos_agent" in command
     assert "/srv/frameos/agent/*/frameos_agent" in command
+    assert "rm -rf /srv/frameos/agent" in command
     assert "systemctl daemon-reload" in command
 
 
@@ -434,6 +435,7 @@ async def test_disable_legacy_service_runs_over_ssh_transport(tmp_path: Path):
     assert "rm -f /etc/systemd/system/frameos_agent.service /etc/systemd/system/frameos-agent.service" in deployer.commands[0]
     assert "[f]rameos_agent" in deployer.commands[0]
     assert "/srv/frameos/agent/*/frameos_agent" in deployer.commands[0]
+    assert "rm -rf /srv/frameos/agent" in deployer.commands[0]
 
 
 @pytest.mark.asyncio

@@ -272,6 +272,7 @@ proc legacyRemoteCleanupScript(delaySeconds = 0): string =
     "case \"$exe\" in /srv/frameos/agent/*/frameos_agent) kill \"$pid\" >/dev/null 2>&1 || true ;; esac; " &
     "done; " &
     "fi; " &
+    "rm -rf /srv/frameos/agent >/dev/null 2>&1 || true; " &
     "systemctl daemon-reload >/dev/null 2>&1 || true"
   if delaySeconds > 0:
     result = "sleep " & $delaySeconds & "; " & result

@@ -62,6 +62,7 @@ def legacy_remote_cleanup_script(delay_seconds: int = 0) -> str:
         'case "$exe" in /srv/frameos/agent/*/frameos_agent) kill "$pid" >/dev/null 2>&1 || true ;; esac; '
         "done; "
         "fi; "
+        "rm -rf /srv/frameos/agent >/dev/null 2>&1 || true; "
         "systemctl daemon-reload >/dev/null 2>&1 || true"
     )
 

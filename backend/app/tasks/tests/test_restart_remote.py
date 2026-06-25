@@ -58,6 +58,7 @@ async def test_restart_remote_via_remote_schedules_delayed_restart(monkeypatch: 
     assert "systemctl restart frameos-remote.service" in command
     assert "frameos_agent.service frameos-agent.service" in command
     assert "[f]rameos_agent" in command
+    assert "rm -rf /srv/frameos/agent" in command
 
 
 @pytest.mark.asyncio
@@ -113,4 +114,5 @@ async def test_restart_remote_via_ssh_cleans_up_legacy_remote(monkeypatch: pytes
     assert "systemctl restart frameos-remote.service" in command
     assert "frameos_agent.service frameos-agent.service" in command
     assert "[f]rameos_agent" in command
+    assert "rm -rf /srv/frameos/agent" in command
     assert 'exit "$restart_status"' in command
