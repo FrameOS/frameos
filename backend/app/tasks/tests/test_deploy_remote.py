@@ -81,6 +81,18 @@ class FakeRedis:
         self.jobs.append((name, kwargs))
 
 
+class ReconnectRedis:
+    def __init__(self, scans: list[set[str]]) -> None:
+        self.scans = scans
+        self.scan_count = 0
+
+    async def scan_iter(self, match: str):
+        keys = self.scans[min(self.scan_count, len(self.scans) - 1)]
+        self.scan_count += 1
+        for key in keys:
+            yield key.encode()
+
+
 class RunFlowRemoteDeployer(RemoteDeployer):
     def __init__(self, tmp_path: Path, *, transport: str, root_readonly: bool = False) -> None:
         super().__init__(
@@ -512,6 +524,32 @@ async def test_wait_for_remote_release_requires_new_running_process(
     assert attempts == 2
     assert "123:456" in deployer.commands[0]
     assert any("Restarted FrameOS Remote is running the staged release" in message for _level, message in deployer.logs)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_remote_websocket_reconnection_requires_new_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    deploy_remote_module = importlib.import_module("app.tasks.deploy_remote")
+    monkeypatch.setattr(deploy_remote_module.asyncio, "sleep", no_sleep)
+
+    deployer = FakeRemoteDeployer(tmp_path)
+    deployer.redis = ReconnectRedis(
+        [
+            {"frame:1:conn:old"},
+            {"frame:1:conn:old"},
+            {"frame:1:conn:new"},
+        ]
+    )
+
+    await deployer._wait_for_remote_websocket_reconnection({"frame:1:conn:old"})
+
+    assert ("stdout", "- Waiting for FrameOS Remote websocket reconnection") in deployer.logs
+    assert ("stdout", "- FrameOS Remote reconnected to this backend") in deployer.logs
 
 
 @pytest.mark.asyncio

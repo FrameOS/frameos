@@ -12,6 +12,7 @@ from app.tasks.frame_deploy_workflow import (
     FullDeployPlan,
     HelperActionPlan,
     PackagePlan,
+    RemoteUpgradePlan,
 )
 from app.utils.cross_compile import TargetMetadata
 
@@ -213,6 +214,111 @@ async def test_full_deploy_skips_authorized_keys_when_remote_is_transport(monkey
     await workflow._install_authorized_keys_for_full_deploy(full_plan)
 
     assert deployer.logs == [("stdout", "🔷 Remote deploy selected; skipping SSH authorized_keys install")]
+
+
+@pytest.mark.asyncio
+async def test_full_plan_includes_remote_upgrade(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=29,
+        name="RemoteUpgradeFrame",
+        ssh_keys=[],
+        rpios={},
+        reboot=None,
+        agent={
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "agentSharedSecret": "secret",
+            "agentVersion": "2026.1.1",
+            "deployWithAgent": True,
+        },
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 29, "name": "RemoteUpgradeFrame"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.current_remote_version", lambda: "2026.2.0")
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db, project_id=None: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.remote_upgrade == RemoteUpgradePlan(
+        previous_version="2026.1.1",
+        current_version="2026.2.0",
+        transport="remote",
+    )
+    assert plan.full_deploy.to_dict()["remote_upgrade"] == {
+        "previous_version": "2026.1.1",
+        "current_version": "2026.2.0",
+        "transport": "remote",
+    }
+    assert any("FrameOS Remote 2026.1.1 -> 2026.2.0" in note for note in plan.notes)
+
+
+@pytest.mark.asyncio
+async def test_full_deploy_runs_remote_upgrade_with_planned_transport(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=30,
+        name="RemoteUpgradeFrame",
+        agent={
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "agentSharedSecret": "secret",
+            "agentVersion": "2026.1.1",
+            "deployWithAgent": True,
+        },
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="/tmp/frameos-test",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    remote_runs: list[tuple[int, str, str]] = []
+
+    class FakeRemoteDeployer:
+        def __init__(self, _db, _redis, remote_frame, _nim_path, temp_dir, *, transport):
+            self.remote_frame = remote_frame
+            self.temp_dir = temp_dir
+            self.transport = transport
+
+        async def run(self):
+            remote_runs.append((self.remote_frame.id, self.temp_dir, self.transport))
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.current_remote_version", lambda: "2026.2.0")
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.RemoteDeployer", FakeRemoteDeployer)
+    full_plan = FullDeployPlan(
+        target={},
+        low_memory=False,
+        drivers=[],
+        binary_plan=await FakeBinaryBuilder().plan_build(),
+        remote_upgrade=RemoteUpgradePlan(
+            previous_version="2026.1.1",
+            current_version="2026.2.0",
+            transport="remote",
+        ),
+    )
+
+    await workflow._deploy_remote_for_full_deploy_if_needed(full_plan)
+
+    assert remote_runs == [(30, "/tmp/frameos-test", "remote")]
+    assert deployer.logs == [
+        ("stdout", "🔷 Updating FrameOS Remote 2026.1.1 -> 2026.2.0 before FrameOS full deploy")
+    ]
 
 
 @pytest.mark.asyncio

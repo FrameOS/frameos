@@ -30,6 +30,7 @@ from app.tasks.frame_deploy_helpers import (
     sync_vendor_dir,
     upload_binary,
 )
+from app.tasks.deploy_remote import RemoteDeployer
 from app.tasks.setup_json_reset import (
     SETUP_JSON_RESET_SCRIPT_NAME,
     SETUP_JSON_RESET_SCRIPT_PATH,
@@ -44,7 +45,7 @@ from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
-from app.utils.versions import current_frameos_version
+from app.utils.versions import current_frameos_version, current_remote_version
 
 REMOTE_RUNTIME_APT_PACKAGES = (
     "hostapd",
@@ -74,6 +75,40 @@ def _deploy_uses_remote(frame: Frame) -> bool:
         agent.get("agentEnabled")
         and agent.get("agentRunCommands")
         and agent.get("deployWithAgent") is not False
+    )
+
+
+def _remote_agent(frame: Frame) -> dict[str, Any]:
+    agent = getattr(frame, "agent", None)
+    return agent if isinstance(agent, dict) else {}
+
+
+def _normalize_version(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    version = value.strip()
+    if not version:
+        return None
+    return version.split("+", 1)[0]
+
+
+def _remote_upgrade_plan(frame: Frame) -> RemoteUpgradePlan | None:
+    current_version = _normalize_version(current_remote_version())
+    if not current_version or current_version == "dev":
+        return None
+
+    agent = _remote_agent(frame)
+    if not agent.get("agentEnabled") or not str(agent.get("agentSharedSecret") or "").strip():
+        return None
+
+    previous_version = _normalize_version(agent.get("agentVersion"))
+    if previous_version == current_version:
+        return None
+
+    return RemoteUpgradePlan(
+        previous_version=previous_version,
+        current_version=current_version,
+        transport="remote" if _deploy_uses_remote(frame) else "ssh",
     )
 
 
@@ -167,6 +202,20 @@ class FastDeployPlan:
 
 
 @dataclass(slots=True)
+class RemoteUpgradePlan:
+    previous_version: str | None
+    current_version: str
+    transport: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "previous_version": self.previous_version,
+            "current_version": self.current_version,
+            "transport": self.transport,
+        }
+
+
+@dataclass(slots=True)
 class FullDeployPlan:
     target: dict[str, Any]
     low_memory: bool
@@ -183,6 +232,7 @@ class FullDeployPlan:
     ssh_keys_need_install: bool = False
     selected_public_keys: list[str] = field(default_factory=list)
     known_public_keys: list[str] = field(default_factory=list)
+    remote_upgrade: RemoteUpgradePlan | None = None
     post_deploy: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -199,6 +249,7 @@ class FullDeployPlan:
                 "installed": self.quickjs_installed,
             },
             "ssh_keys_need_install": self.ssh_keys_need_install,
+            "remote_upgrade": self.remote_upgrade.to_dict() if self.remote_upgrade else None,
             "post_deploy": self.post_deploy,
         }
 
@@ -653,6 +704,14 @@ class FrameDeployWorkflow:
         elif ssh_keys_need_install:
             notes.append("SSH public keys changed since the last deploy and will be installed on the frame.")
 
+        remote_upgrade = _remote_upgrade_plan(self.frame)
+        if remote_upgrade:
+            notes.append(
+                "FrameOS Remote "
+                f"{remote_upgrade.previous_version or 'unreported'} -> {remote_upgrade.current_version} "
+                "will be deployed before the FrameOS full deploy."
+            )
+
         post_deploy = await self._plan_post_deploy_cleanup(drivers=drivers, low_memory=low_memory)
 
         return FrameDeployPlan(
@@ -683,6 +742,7 @@ class FrameDeployWorkflow:
                 ssh_keys_need_install=ssh_keys_need_install,
                 selected_public_keys=selected_public_keys,
                 known_public_keys=known_public_keys,
+                remote_upgrade=remote_upgrade,
                 post_deploy=post_deploy,
             ),
             notes=notes,
@@ -812,6 +872,7 @@ class FrameDeployWorkflow:
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
         try:
+            await self._deploy_remote_for_full_deploy_if_needed(full_plan)
             await ensure_sudo_available(self.deployer)
             await self._install_authorized_keys_for_full_deploy(full_plan)
             build_result = await self._build_full_release_binary(full_plan)
@@ -857,6 +918,31 @@ class FrameDeployWorkflow:
                         f"Failed to restart previous FrameOS service after failed deploy: {restart_error}",
                     )
             raise
+
+    async def _deploy_remote_for_full_deploy_if_needed(self, full_plan: FullDeployPlan) -> None:
+        if not full_plan.remote_upgrade:
+            return
+
+        remote_upgrade = _remote_upgrade_plan(self.frame)
+        if not remote_upgrade:
+            await self.deployer.log("stdout", f"{icon} FrameOS Remote is already up to date")
+            return
+
+        await self.deployer.log(
+            "stdout",
+            f"{icon} Updating FrameOS Remote "
+            f"{remote_upgrade.previous_version or 'unreported'} -> {remote_upgrade.current_version} "
+            "before FrameOS full deploy",
+        )
+        remote_deployer = RemoteDeployer(
+            self.db,
+            self.redis,
+            self.frame,
+            "",
+            self.temp_dir,
+            transport=remote_upgrade.transport,
+        )
+        await remote_deployer.run()
 
     async def _mark_stuck_deploy_as_undeployed(self) -> None:
         self.frame.status = "uninitialized"
