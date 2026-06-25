@@ -44,6 +44,7 @@ UPLOAD_PROGRESS_INTERVAL_SECONDS = 30  # how often to log upload progress
 SCP_STALL_TIMEOUT_SECONDS = 90         # abort the transfer when no bytes move for this long
 SCP_MAX_ATTEMPTS = 3
 SHELL_UPLOAD_BASE64_CHUNK_SIZE = 48 * 1024
+REMOTE_LEGACY_FILE_WRITE_MAX_SIZE = CHUNK_SIZE
 
 RemoteTransport = Literal["auto", "remote", "ssh"]
 REMOTE_TRANSPORT_VALUES = {"auto", "remote", "agent", "ssh"}
@@ -192,6 +193,13 @@ def _remote_stream_upload_can_fallback(exc: Exception) -> bool:
     if "file_write_open" not in message and "file_write_chunk" not in message:
         return False
     return any(token in message for token in ("unknown", "missing", "timed-out", "timeout"))
+
+
+def _remote_legacy_upload_can_fallback(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "file_write" in message and any(
+        token in message for token in ("unknown", "missing", "timed-out", "timeout")
+    )
 
 
 async def _shell_upload_via_remote(
@@ -403,11 +411,23 @@ async def upload_file(
     if await _use_remote(frame, redis, transport):
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via remote)")
+            if size <= REMOTE_LEGACY_FILE_WRITE_MAX_SIZE:
+                try:
+                    await _file_write_via_remote(redis, frame, remote_path, data, timeout)
+                    return
+                except Exception as legacy_exc:
+                    if not _remote_legacy_upload_can_fallback(legacy_exc):
+                        raise
+                    await log(
+                        db,
+                        redis,
+                        frame.id,
+                        "stdout",
+                        f"> legacy remote upload unavailable for {remote_path}: {legacy_exc}",
+                    )
+                    await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                    return
             await _stream_file_via_remote(db, redis, frame, remote_path, data)
-            # TODO: restore faster path for smaller files?
-            # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
-            # else:
-            #     await _file_write_via_remote(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
             if _remote_stream_upload_can_fallback(e):

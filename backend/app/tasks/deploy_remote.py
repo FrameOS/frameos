@@ -680,16 +680,23 @@ class RemoteDeployer(FrameDeployer):
         release_dir = shlex.quote(self._release_dir())
         await self.log("stdout", "- Verifying staged FrameOS Remote release before switching")
         await self.exec_command(
-            "set -eu; "
+            "set -u; "
             f"release={release_dir}; "
-            'test -d "$release"; '
-            'test -s "$release/frameos_remote"; '
-            'test -x "$release/frameos_remote"; '
-            'test -s "$release/frameos-remote.service"; '
-            'test -s "$release/frame.json"; '
-            "grep -q '^ExecStart=/srv/frameos/remote/current/frameos_remote$' "
-            '"$release/frameos-remote.service"; '
-            "echo staged-remote-release-ok",
+            "failed=0; "
+            'check() { if ! eval "$1"; then echo "$2"; failed=1; fi; }; '
+            'check \'test -d "$release"\' "staged release directory missing: $release"; '
+            'check \'test -s "$release/frameos_remote"\' "staged frameos_remote missing or empty"; '
+            'check \'test -x "$release/frameos_remote"\' "staged frameos_remote is not executable"; '
+            'check \'test -s "$release/frameos-remote.service"\' "staged frameos-remote.service missing or empty"; '
+            'check \'test -s "$release/frame.json"\' "staged frame.json missing or empty"; '
+            'if test -s "$release/frameos-remote.service" && ! grep -qx '
+            "'ExecStart=/srv/frameos/remote/current/frameos_remote' "
+            '"$release/frameos-remote.service"; then '
+            'echo "staged frameos-remote.service has unexpected ExecStart:"; '
+            'grep "^ExecStart=" "$release/frameos-remote.service" || true; '
+            "failed=1; "
+            "fi; "
+            'if [ "$failed" -eq 0 ]; then echo staged-remote-release-ok; else exit 1; fi',
             timeout=120,
         )
 
