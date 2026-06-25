@@ -57,7 +57,7 @@ async def test_api_frame_get_found(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
+async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
     frame.device = 'framebuffer'
     frame.scenes = [
@@ -116,7 +116,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     assert './frameos setup' in script
     assert 'install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service' in script
     assert (
-        'install -m 0644 "$agent_release_dir/frameos-remote.service" '
+        'install -m 0644 "$remote_release_dir/frameos-remote.service" '
         '/etc/systemd/system/frameos-remote.service'
     ) in script
     assert 'FrameOS and FrameOS Remote are installed and started' in script
@@ -153,13 +153,26 @@ async def test_api_frame_bootstrap_command_can_preserve_deploy_transport(async_c
     db.add(frame)
     db.commit()
 
-    response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?select_agent=0')
+    response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?select_remote=0')
 
     assert response.status_code == 200
     db.refresh(frame)
     assert frame.agent['agentEnabled'] is True
     assert frame.agent['agentRunCommands'] is True
     assert frame.agent['deployWithAgent'] is False
+
+    legacy_frame = await new_frame(db, redis, 'BootstrapLegacyFrame', 'legacy-frame.local', 'backend.local')
+    legacy_frame.agent = {'deployWithAgent': False}
+    db.add(legacy_frame)
+    db.commit()
+
+    legacy_response = await async_client.post(f'/api/frames/{legacy_frame.id}/frame_bootstrap?select_agent=0')
+
+    assert legacy_response.status_code == 200
+    db.refresh(legacy_frame)
+    assert legacy_frame.agent['agentEnabled'] is True
+    assert legacy_frame.agent['agentRunCommands'] is True
+    assert legacy_frame.agent['deployWithAgent'] is False
 
 
 @pytest.mark.asyncio
@@ -171,7 +184,7 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
     first_payload = first_response.json()
     first_script_path = urlparse(first_payload['script_url']).path
     db.refresh(frame)
-    first_agent_secret = frame.agent['agentSharedSecret']
+    first_remote_secret = frame.agent['agentSharedSecret']
 
     second_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?regenerate=1')
     assert second_response.status_code == 200
@@ -180,7 +193,7 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
     db.refresh(frame)
 
     assert second_payload['script_url'] != first_payload['script_url']
-    assert frame.agent['agentSharedSecret'] != first_agent_secret
+    assert frame.agent['agentSharedSecret'] != first_remote_secret
     assert (await no_auth_client.get(first_script_path)).status_code == 404
     assert (await no_auth_client.get(second_script_path)).status_code == 200
 

@@ -145,8 +145,8 @@ class RunFlowRemoteDeployer(RemoteDeployer):
         self.wait_previous_process_signature = previous_process_signature
         self.events.append("wait_for_remote_release")
 
-    async def _disable_legacy_agent_service(self) -> None:  # type: ignore[override]
-        self.events.append("disable_legacy_agent_service")
+    async def _disable_legacy_service(self) -> None:  # type: ignore[override]
+        self.events.append("disable_legacy_service")
 
     async def _cleanup_old_builds(self) -> None:  # type: ignore[override]
         self.events.append("cleanup_old_builds")
@@ -330,8 +330,8 @@ async def test_deploy_remote_ssh_restart_waits_for_staged_release(tmp_path: Path
     assert deployer.wait_previous_process_signature == "old-agent-process"
     assert deployer.events.index("capture_remote_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_service:frameos-remote") < deployer.events.index("wait_for_remote_release")
-    assert deployer.events.index("wait_for_remote_release") < deployer.events.index("disable_legacy_agent_service")
-    assert deployer.events.index("disable_legacy_agent_service") < deployer.events.index("cleanup_old_builds")
+    assert deployer.events.index("wait_for_remote_release") < deployer.events.index("disable_legacy_service")
+    assert deployer.events.index("disable_legacy_service") < deployer.events.index("cleanup_old_builds")
 
 
 @pytest.mark.asyncio
@@ -345,8 +345,8 @@ async def test_deploy_remote_remote_transport_restarts_and_waits_for_staged_rele
     assert deployer.wait_previous_process_signature == "old-agent-process"
     assert deployer.events.index("capture_remote_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_via_remote") < deployer.events.index("wait_for_remote_release")
-    assert deployer.events.index("wait_for_remote_release") < deployer.events.index("disable_legacy_agent_service")
-    assert deployer.events.index("disable_legacy_agent_service") < deployer.events.index("cleanup_old_builds")
+    assert deployer.events.index("wait_for_remote_release") < deployer.events.index("disable_legacy_service")
+    assert deployer.events.index("disable_legacy_service") < deployer.events.index("cleanup_old_builds")
 
 
 @pytest.mark.asyncio
@@ -397,21 +397,21 @@ async def test_remount_root_ro_does_not_raise_on_failure(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_disable_legacy_agent_service_skips_remote_transport(tmp_path: Path):
+async def test_disable_legacy_service_skips_remote_transport(tmp_path: Path):
     deployer = FakeRemoteDeployer(tmp_path)
     deployer.remote_transport = "remote"
 
-    await deployer._disable_legacy_agent_service()
+    await deployer._disable_legacy_service()
 
     assert deployer.commands == []
 
 
 @pytest.mark.asyncio
-async def test_disable_legacy_agent_service_runs_over_ssh_transport(tmp_path: Path):
+async def test_disable_legacy_service_runs_over_ssh_transport(tmp_path: Path):
     deployer = FakeRemoteDeployer(tmp_path)
     deployer.remote_transport = "ssh"
 
-    await deployer._disable_legacy_agent_service()
+    await deployer._disable_legacy_service()
 
     assert len(deployer.commands) == 1
     assert "systemctl disable --now frameos_agent.service" in deployer.commands[0]

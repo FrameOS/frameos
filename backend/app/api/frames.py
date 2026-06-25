@@ -88,7 +88,7 @@ from app.utils.remote_exec import (
     rename_path,
     make_dir,
     run_command,
-    _use_agent,
+    _use_remote,
 )
 from app.utils.frame_http import (
     _build_frame_path,
@@ -622,9 +622,9 @@ def _ascii_safe(name: str) -> str:
     return _ascii_re.sub("_", name)[:150] or "download"
 
 
-def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
+def _normalise_remote_response(resp: Any) -> tuple[int, Any]:
     """
-    Agent “http” command returns {"status": int, "body": str}.
+    Remote “http” command returns {"status": int, "body": str}.
     Convert that (or a normal HTTPX Response) into (status-code, payload).
     """
     if isinstance(resp, dict) and {"status", "body"} <= resp.keys():
@@ -636,7 +636,7 @@ def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
             payload = body_raw
         return status, payload
 
-    # already a JSON-payload (e.g. other agent commands)
+    # already a JSON-payload (e.g. other remote commands)
     return 200, resp
 
 
@@ -747,27 +747,27 @@ async def _forward_frame_request(
 
         raise HTTPException(status_code=400, detail="Unable to reach frame")
 
-    # The agent HTTP command wants a *string* while httpx needs either
+    # The remote HTTP command wants a *string* while httpx needs either
     #   • json=<obj>   for real JSON payloads
     #   • content=<bytes> for arbitrary binary bodies.
-    body_for_agent: str | None = None
+    body_for_remote: str | None = None
     if json_body is not None:
         if isinstance(json_body, (bytes, bytearray)):
             # keep the bytes unchanged – use latin-1 for a 1-to-1 mapping
-            body_for_agent = json_body.decode("latin1")
+            body_for_remote = json_body.decode("latin1")
         else:
-            body_for_agent = json.dumps(json_body)
+            body_for_remote = json.dumps(json_body)
 
-    if await _use_agent(frame, redis):
-        agent_resp = await http_get_on_frame(
+    if await _use_remote(frame, redis):
+        remote_resp = await http_get_on_frame(
             frame.id,
             _build_frame_path(frame, path, method),
             method=method.upper(),
-            body=body_for_agent,
+            body=body_for_remote,
             headers=_auth_headers(frame),
             redis=redis,
         )
-        status, payload = _normalise_agent_response(agent_resp)
+        status, payload = _normalise_remote_response(remote_resp)
         if status == 200:
             if cache_key:
                 if isinstance(payload, (bytes, bytearray)):
@@ -781,7 +781,7 @@ async def _forward_frame_request(
                         pass
             return payload
 
-        raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
+        raise HTTPException(status_code=400, detail=f"Remote error: {status} {payload}")
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
@@ -964,9 +964,9 @@ async def _remote_file_md5(
     remote_path: str,
 ) -> Tuple[str, bool]:
     """
-    Return (md5, exists). Prefer the websocket agent, fall back to SSH.
+    Return (md5, exists). Prefer the websocket remote, fall back to SSH.
     """
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         resp = await file_md5_on_frame(frame.id, remote_path, redis=redis)
         return resp.get("md5", ""), bool(resp.get("exists", False))
 
@@ -1000,9 +1000,9 @@ async def _remote_download_file(
     remote_path: str,
 ) -> bytes:
     """
-    Download *remote_path* – agent first, SSH SCP otherwise.
+    Download *remote_path* – remote first, SSH SCP otherwise.
     """
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         return await file_read_on_frame(frame.id, remote_path, redis=redis)
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -1610,7 +1610,7 @@ async def api_frame_get_asset(
 
         return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         try:
             data = await file_read_on_frame(frame.id, full_path, redis=redis)
         except Exception:  # file_read returns RuntimeError on missing file
@@ -1960,7 +1960,7 @@ async def _load_frame_assets(
     frame: Frame,
     assets_path: str,
 ) -> list[dict[str, Any]]:
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
         return assets
@@ -2323,7 +2323,7 @@ async def api_frame_clear_build_cache(
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         try:
             await log(
                 db,

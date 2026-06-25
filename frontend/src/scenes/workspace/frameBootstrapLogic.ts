@@ -50,7 +50,7 @@ export const frameBootstrapLogic = kea<frameBootstrapLogicType>([
   props({} as FrameBootstrapLogicProps),
   key((props) => props.frameId),
   actions({
-    copyFrameBootstrapScript: (selectAgent = true) => ({ selectAgent }),
+    copyFrameBootstrapScript: (selectRemote = true) => ({ selectRemote }),
     copyFrameBootstrapScriptSuccess: true,
     copyFrameBootstrapScriptFailure: (error: string) => ({ error }),
     resetFrameBootstrapScriptState: true,
@@ -84,9 +84,9 @@ export const frameBootstrapLogic = kea<frameBootstrapLogicType>([
     ],
   }),
   listeners(({ actions, props }) => ({
-    copyFrameBootstrapScript: async ({ selectAgent }) => {
+    copyFrameBootstrapScript: async ({ selectRemote }) => {
       const response = await apiFetch(
-        `/api/frames/${props.frameId}/frame_bootstrap?select_agent=${selectAgent ? 1 : 0}`,
+        `/api/frames/${props.frameId}/frame_bootstrap?select_remote=${selectRemote ? 1 : 0}`,
         {
           method: 'POST',
         }

@@ -1424,9 +1424,9 @@ def test_buildroot_rejects_root_password_with_line_breaks(tmp_path):
 
 def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, monkeypatch):
     frameos_binary = tmp_path / "frameos"
-    agent_binary = tmp_path / "frameos_remote"
+    remote_binary = tmp_path / "frameos_remote"
     frameos_binary.write_bytes(b"frameos")
-    agent_binary.write_bytes(b"agent")
+    remote_binary.write_bytes(b"agent")
     frame = SimpleNamespace(
         id=1,
         frame_host="Frame One.local",
@@ -1477,7 +1477,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
             prebuilt_target=None,
             log_path=None,
         ),
-        agent_binary=str(agent_binary),
+        remote_binary=str(remote_binary),
     )
 
     assert (overlay_dir / "boot" / "frameos-setup.json").exists()
@@ -1489,8 +1489,8 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert scenes_payload == [frame.scenes[0]]
     assert all_scenes_payload == frame.scenes
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
-    agent_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / "release_build123"
-    assert (agent_release_dir / "frame.json").read_text(encoding="utf-8") == (
+    remote_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / "release_build123"
+    assert (remote_release_dir / "frame.json").read_text(encoding="utf-8") == (
         release_dir / "frame.json"
     ).read_text(encoding="utf-8")
     assert (release_dir / "frameos.service").exists()
@@ -1503,7 +1503,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
     assert "StandardOutput=journal+console" not in frameos_service
     assert "StandardError=journal+console" not in frameos_service
-    assert (agent_release_dir / "frameos-remote.service").exists()
+    assert (remote_release_dir / "frameos-remote.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos-remote.service").exists()
 

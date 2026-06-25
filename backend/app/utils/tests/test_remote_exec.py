@@ -7,7 +7,7 @@ import pytest
 from app.utils import remote_exec
 
 
-class FakeAgentCommandRedis:
+class FakeRemoteCommandRedis:
     def __init__(self) -> None:
         self.pushed: list[tuple[str, bytes]] = []
         self.deleted: list[str] = []
@@ -32,8 +32,8 @@ class FakeAgentCommandRedis:
 
 
 @pytest.mark.asyncio
-async def test_agent_run_command_preserves_output_without_requesting_log(monkeypatch):
-    redis = FakeAgentCommandRedis()
+async def test_remote_run_command_preserves_output_without_requesting_log(monkeypatch):
+    redis = FakeRemoteCommandRedis()
     frame = SimpleNamespace(id=123)
     logged: list[str] = []
 
@@ -42,7 +42,7 @@ async def test_agent_run_command_preserves_output_without_requesting_log(monkeyp
 
     monkeypatch.setattr(remote_exec, "log", fake_log)
 
-    status, stdout, stderr = await remote_exec._run_command_agent(
+    status, stdout, stderr = await remote_exec._run_command_remote(
         None,
         redis,
         frame,
@@ -72,7 +72,7 @@ class FakeSSH:
 def _patch_scp_env(monkeypatch, scp_impl, logged):
     connections: list[FakeSSH] = []
 
-    async def fake_use_agent(_frame, _redis, _transport):
+    async def fake_use_remote(_frame, _redis, _transport):
         return False
 
     async def fake_get_ssh_connection(_db, _redis, _frame):
@@ -86,7 +86,7 @@ def _patch_scp_env(monkeypatch, scp_impl, logged):
     async def fake_log(_db, _redis, _frame_id, log_type, line, timestamp=None):
         logged.append((log_type, line))
 
-    monkeypatch.setattr(remote_exec, "_use_agent", fake_use_agent)
+    monkeypatch.setattr(remote_exec, "_use_remote", fake_use_remote)
     monkeypatch.setattr(remote_exec, "get_ssh_connection", fake_get_ssh_connection)
     monkeypatch.setattr(remote_exec, "remove_ssh_connection", fake_remove_ssh_connection)
     monkeypatch.setattr(remote_exec, "log", fake_log)

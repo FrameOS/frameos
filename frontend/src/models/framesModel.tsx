@@ -14,10 +14,9 @@ import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
-export type AgentTaskTransport = RemoteTaskTransport
 type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
-function remoteTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTransport }): string {
+function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTransport }): string {
   const query = new URLSearchParams()
   if (params.recompile) {
     query.set('recompile', '1')
@@ -296,12 +295,12 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     renameFrame: (id: number, name: string) => ({ id, name }),
-    deployRemote: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+    deployRemote: (id: number, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
       transport,
     }),
-    restartRemote: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
+    restartRemote: (id: number, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: number) => ({ id }),
     downloadEmbeddedFirmware: (id: number) => ({ id }),
     applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),

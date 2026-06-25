@@ -102,7 +102,7 @@ export interface DeployRecommendation {
   descriptionEmphasis?: string
 }
 
-export interface AgentUpgradeNotice {
+export interface RemoteUpgradeNotice {
   previousVersion: string | null
   currentVersion: string
 }
@@ -111,7 +111,6 @@ type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['pos
 
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 export const CURRENT_FRAMEOS_REMOTE_VERSION = ((versions as any).remote || (versions as any).agent || 'dev').split('+')[0]
-export const CURRENT_FRAMEOS_AGENT_VERSION = CURRENT_FRAMEOS_REMOTE_VERSION
 export const FRAMEOS_GITHUB_RELEASES_URL = 'https://github.com/FrameOS/frameos/releases'
 
 const INKY_BUTTON_DEVICES = new Set([
@@ -366,8 +365,8 @@ export function frameosGitHubReleaseUrl(version: unknown): string {
   return `${FRAMEOS_GITHUB_RELEASES_URL}/tag/v${encodeURIComponent(normalizedVersion)}`
 }
 
-export function buildAgentUpgradeNotice(frame?: Partial<FrameType> | null): AgentUpgradeNotice | null {
-  const currentVersion = normalizeFrameosVersion(CURRENT_FRAMEOS_AGENT_VERSION)
+export function buildRemoteUpgradeNotice(frame?: Partial<FrameType> | null): RemoteUpgradeNotice | null {
+  const currentVersion = normalizeFrameosVersion(CURRENT_FRAMEOS_REMOTE_VERSION)
   if (!currentVersion || currentVersion === 'dev' || (frame?.active_connections ?? 0) <= 0) {
     return null
   }

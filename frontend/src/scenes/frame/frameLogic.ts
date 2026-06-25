@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
-import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
+import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
@@ -62,7 +62,7 @@ export interface FrameLogicProps {
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
 
-function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
+function isRemoteDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
 }
 
@@ -590,7 +590,7 @@ function normalizeTimezoneForComparison(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function normalizeAgentForComparison(value: unknown): Record<string, unknown> {
+function normalizeRemoteForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   return {
     agentEnabled: Boolean(source.agentEnabled),
@@ -605,7 +605,7 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
   }
 
   if (key === 'agent') {
-    return normalizeAgentForComparison(value)
+    return normalizeRemoteForComparison(value)
   }
 
   if (key === 'timezone') {
@@ -1017,12 +1017,12 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
-function preferSshTransportWhenAgentUnavailable(
+function preferSshTransportWhenRemoteUnavailable(
   frame: Partial<FrameType>,
-  agentConnected: boolean
+  remoteConnected: boolean
 ): Partial<FrameType> {
   const agent = frame.agent
-  if (!agentConnected && isAgentDeployConfigured(agent) && agent?.deployWithAgent !== false) {
+  if (!remoteConnected && isRemoteDeployConfigured(agent) && agent?.deployWithAgent !== false) {
     return { ...frame, agent: { ...agent, deployWithAgent: false } }
   }
   return frame
@@ -1137,11 +1137,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployRemote: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+    deployRemote: (recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       recompile: recompile || false,
       transport,
     }),
-    restartRemote: (transport: AgentTaskTransport = 'auto') => ({ transport }),
+    restartRemote: (transport: RemoteTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
@@ -1570,7 +1570,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame) => {
         const agent = frameForm?.agent ?? frame?.agent
-        if (!isAgentDeployConfigured(agent)) {
+        if (!isRemoteDeployConfigured(agent)) {
           return false
         }
         if ((frame?.active_connections ?? 0) <= 0) {
@@ -1583,7 +1583,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
         const agent = frameForm?.agent ?? frame?.agent
-        return isAgentDeployConfigured(agent)
+        return isRemoteDeployConfigured(agent)
       },
     ],
     remoteDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
@@ -1605,7 +1605,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
     },
     saveAndDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1619,7 +1619,7 @@ export const frameLogic = kea<frameLogicType>([
       )
     },
     saveAndFastDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1630,7 +1630,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.deployFrame(props.frameId, true)
     },
     saveAndFullDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.remoteDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)

@@ -9,7 +9,7 @@ from http import HTTPStatus
 from urllib.parse import urlparse
 
 from arq import ArqRedis as Redis
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -35,9 +35,9 @@ def _bad_request(message: str) -> None:
 
 def _frame_bootstrap_token(frame: Frame) -> str:
     agent = frame.agent if isinstance(frame.agent, dict) else {}
-    agent_secret = str(agent.get("agentSharedSecret") or "")
+    remote_secret = str(agent.get("agentSharedSecret") or "")
     server_api_key = str(frame.server_api_key or "")
-    payload = f"{frame.id}:{server_api_key}:{agent_secret}"
+    payload = f"{frame.id}:{server_api_key}:{remote_secret}"
     return hmac.new(
         str(config.SECRET_KEY).encode("utf-8"),
         payload.encode("utf-8"),
@@ -54,7 +54,7 @@ async def _ensure_frame_bootstrap_enabled(
     redis: Redis,
     frame: Frame,
     *,
-    select_agent: bool = True,
+    select_remote: bool = True,
     regenerate: bool = False,
 ) -> None:
     changed = False
@@ -73,7 +73,7 @@ async def _ensure_frame_bootstrap_enabled(
             agent[key] = True
             changed = True
 
-    if select_agent and agent.get("deployWithAgent") is not True:
+    if select_remote and agent.get("deployWithAgent") is not True:
         agent["deployWithAgent"] = True
         changed = True
 
@@ -133,12 +133,12 @@ def _frame_bootstrap_script_url(request: Request, frame: Frame) -> str:
 def _frame_bootstrap_config_json(db: Session, frame: Frame) -> str:
     payload = get_frame_json(db, frame)
     agent = dict(payload.get("agent") or {})
-    frame_agent = frame.agent if isinstance(frame.agent, dict) else {}
+    frame_remote = frame.agent if isinstance(frame.agent, dict) else {}
     payload["agent"] = {
         **agent,
         "agentEnabled": True,
         "agentRunCommands": True,
-        "agentSharedSecret": str(frame_agent.get("agentSharedSecret") or ""),
+        "agentSharedSecret": str(frame_remote.get("agentSharedSecret") or ""),
     }
     return json.dumps(payload, indent=2) + "\n"
 
@@ -302,16 +302,16 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-agent_user="${{SUDO_USER:-}}"
-if [ -z "$agent_user" ] || [ "$agent_user" = "root" ]; then
+remote_user="${{SUDO_USER:-}}"
+if [ -z "$remote_user" ] || [ "$remote_user" = "root" ]; then
   if id pi >/dev/null 2>&1; then
-    agent_user=pi
+    remote_user=pi
   else
-    agent_user="$(id -un)"
+    remote_user="$(id -un)"
   fi
 fi
-if ! id "$agent_user" >/dev/null 2>&1; then
-  agent_user=root
+if ! id "$remote_user" >/dev/null 2>&1; then
+  remote_user=root
 fi
 
 target="$(detect_target)"
@@ -320,24 +320,24 @@ archive_url="$base_url/v$FRAMEOS_RELEASE_VERSION/frameos-$FRAMEOS_RELEASE_VERSIO
 work_dir="$(mktemp -d)"
 release_name="release_bootstrap_$(date +%Y%m%d%H%M%S)"
 frameos_release_dir="$FRAMEOS_DIR/releases/$release_name"
-agent_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
+remote_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
 echo "Downloading precompiled FrameOS release for $target"
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
-mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state"
+mkdir -p "$work_dir/extract" "$frameos_release_dir" "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 
 frameos_binary="$(find "$work_dir/extract" -type f -name frameos | head -n 1)"
-agent_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
-if [ -z "$agent_binary" ]; then
-  agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+remote_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
+if [ -z "$remote_binary" ]; then
+  remote_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
 fi
 if [ -z "$frameos_binary" ]; then
   echo "The precompiled FrameOS release did not contain frameos for $target" >&2
   exit 1
 fi
-if [ -z "$agent_binary" ]; then
+if [ -z "$remote_binary" ]; then
   echo "The precompiled FrameOS release did not contain frameos_remote for $target" >&2
   exit 1
 fi
@@ -349,7 +349,7 @@ install_optional_packages caddy
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
 install -m 0755 "$frameos_binary" "$frameos_release_dir/frameos"
-install -m 0755 "$agent_binary" "$agent_release_dir/frameos_remote"
+install -m 0755 "$remote_binary" "$remote_release_dir/frameos_remote"
 
 if [ -d "$artifact_root/drivers" ]; then
   cp -R "$artifact_root/drivers" "$frameos_release_dir/drivers"
@@ -364,7 +364,7 @@ fi
 
 cat > "$frameos_release_dir/frame.json" <<'FRAMEOS_CONFIG_JSON'
 {config_json}FRAMEOS_CONFIG_JSON
-cp "$frameos_release_dir/frame.json" "$agent_release_dir/frame.json"
+cp "$frameos_release_dir/frame.json" "$remote_release_dir/frame.json"
 
 cat > "$work_dir/scenes.json" <<'FRAMEOS_SCENES_JSON'
 {scenes_json}FRAMEOS_SCENES_JSON
@@ -394,7 +394,7 @@ Description=FrameOS Service
 {frameos_service_conflicts}
 
 [Service]
-User=$agent_user
+User=$remote_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
@@ -415,7 +415,7 @@ MemorySwapMax=64M
 WantedBy=multi-user.target
 EOF
 
-cat > "$agent_release_dir/frameos-remote.service" <<EOF
+cat > "$remote_release_dir/frameos-remote.service" <<EOF
 [Unit]
 Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
@@ -423,7 +423,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$agent_user
+User=$remote_user
 WorkingDirectory=$FRAMEOS_REMOTE_DIR/current
 ExecStart=$FRAMEOS_REMOTE_DIR/current/frameos_remote
 Restart=always
@@ -439,8 +439,8 @@ EOF
 
 rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_REMOTE_DIR/current"
 ln -s "$frameos_release_dir" "$FRAMEOS_DIR/current"
-ln -s "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/current"
-chown -R "$agent_user" "$FRAMEOS_DIR"
+ln -s "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/current"
+chown -R "$remote_user" "$FRAMEOS_DIR"
 
 if [ "$FRAMEOS_COMPILED_SCENE_COUNT" -gt 0 ]; then
   echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT compiled scene(s) still require a full deploy after FrameOS Remote connects."
@@ -458,12 +458,12 @@ fi
 
 install -d -m 0755 /etc/systemd/system
 install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service
-install -m 0644 "$agent_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
+install -m 0644 "$remote_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
 systemctl daemon-reload
 systemctl enable frameos.service frameos-remote.service
 legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
 if command -v systemd-run >/dev/null 2>&1; then
-  systemd-run --quiet --unit=frameos-remote-disable-legacy-agent --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
+  systemd-run --quiet --unit=frameos-remote-disable-legacy-service --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
 else
   nohup sh -c "$legacy_disable_script" >/dev/null 2>&1 &
 fi
@@ -484,7 +484,8 @@ echo "FrameOS and FrameOS Remote are installed and started"
 async def api_frame_bootstrap_command(
     id: int,
     request: Request,
-    select_agent: bool = True,
+    select_remote: bool | None = None,
+    select_agent: bool | None = Query(default=None, include_in_schema=False),
     regenerate: bool = False,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -493,7 +494,8 @@ async def api_frame_bootstrap_command(
     if (frame.mode or "rpios") != "rpios":
         _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
 
-    await _ensure_frame_bootstrap_enabled(db, redis, frame, select_agent=select_agent, regenerate=regenerate)
+    selected_remote = select_remote if select_remote is not None else (select_agent if select_agent is not None else True)
+    await _ensure_frame_bootstrap_enabled(db, redis, frame, select_remote=selected_remote, regenerate=regenerate)
     script_url = _frame_bootstrap_script_url(request, frame)
     return {
         "script_url": script_url,

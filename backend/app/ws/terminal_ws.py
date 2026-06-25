@@ -19,11 +19,11 @@ from app.ws.remote_ws import number_of_connections_for_frame
 
 router = APIRouter()
 
-AGENT_TERMINAL_TIMEOUT_SECONDS = 60 * 60
-AGENT_TERMINAL_IDLE_TIMEOUT_SECONDS = 5 * 60
+REMOTE_TERMINAL_TIMEOUT_SECONDS = 60 * 60
+REMOTE_TERMINAL_IDLE_TIMEOUT_SECONDS = 5 * 60
 
 
-def _agent_terminal_configured(frame: Frame) -> bool:
+def _remote_terminal_configured(frame: Frame) -> bool:
     agent = frame.agent if isinstance(frame.agent, dict) else {}
     return bool(
         agent.get("agentEnabled")
@@ -32,8 +32,8 @@ def _agent_terminal_configured(frame: Frame) -> bool:
     )
 
 
-async def _should_use_agent_terminal(redis: Redis, frame: Frame) -> bool:
-    if not _agent_terminal_configured(frame):
+async def _should_use_remote_terminal(redis: Redis, frame: Frame) -> bool:
+    if not _remote_terminal_configured(frame):
         return False
     return (await number_of_connections_for_frame(redis, frame.id)) > 0
 
@@ -42,13 +42,13 @@ def _redis_key_name(key: bytes | str) -> str:
     return key.decode() if isinstance(key, bytes) else key
 
 
-async def _queue_agent_terminal_command(
+async def _queue_remote_terminal_command(
     redis: Redis,
     frame: Frame,
     command_id: str,
     name: str,
     args: dict,
-    timeout: int = AGENT_TERMINAL_TIMEOUT_SECONDS,
+    timeout: int = REMOTE_TERMINAL_TIMEOUT_SECONDS,
 ) -> None:
     await redis.rpush(
         CMD_KEY.format(id=frame.id),
@@ -64,7 +64,7 @@ async def _queue_agent_terminal_command(
     )
 
 
-async def _send_agent_stream_chunk(websocket: WebSocket, chunk: dict) -> None:
+async def _send_remote_stream_chunk(websocket: WebSocket, chunk: dict) -> None:
     data = str(chunk.get("data", ""))
     if not data:
         return
@@ -74,7 +74,7 @@ async def _send_agent_stream_chunk(websocket: WebSocket, chunk: dict) -> None:
     await websocket.send_text(data if data.endswith("\n") else f"{data}\n")
 
 
-async def _run_agent_terminal_command(
+async def _run_remote_terminal_command(
     websocket: WebSocket,
     redis: Redis,
     frame: Frame,
@@ -96,7 +96,7 @@ async def _run_agent_terminal_command(
                     "frame_id": frame.id,
                     "payload": {"type": "cmd", "name": "shell", "args": {"cmd": command}},
                     "log": False,
-                    "timeout": AGENT_TERMINAL_TIMEOUT_SECONDS,
+                    "timeout": REMOTE_TERMINAL_TIMEOUT_SECONDS,
                 }
             ).encode(),
         )
@@ -106,10 +106,10 @@ async def _run_agent_terminal_command(
 
         try:
             while True:
-                res = await redis.blpop([stream_key, resp_key], timeout=AGENT_TERMINAL_TIMEOUT_SECONDS)
+                res = await redis.blpop([stream_key, resp_key], timeout=REMOTE_TERMINAL_TIMEOUT_SECONDS)
                 if res is None:
                     await websocket.send_text(
-                        f"*** remote command timed out after {AGENT_TERMINAL_TIMEOUT_SECONDS}s ***\n"
+                        f"*** remote command timed out after {REMOTE_TERMINAL_TIMEOUT_SECONDS}s ***\n"
                     )
                     return
 
@@ -118,7 +118,7 @@ async def _run_agent_terminal_command(
 
                 if key_name == stream_key:
                     chunk = json.loads(raw)
-                    await _send_agent_stream_chunk(websocket, chunk)
+                    await _send_remote_stream_chunk(websocket, chunk)
                     continue
 
                 if key_name == resp_key:
@@ -136,13 +136,13 @@ async def _run_agent_terminal_command(
                 await redis.delete(stream_key)
 
 
-async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> None:
+async def _remote_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> None:
     terminal_id = str(uuid.uuid4())
     stream_key = STREAM_KEY.format(id=terminal_id)
     resp_key = RESP_KEY.format(id=terminal_id)
 
     await websocket.send_text("*** connected via FrameOS Remote PTY ***\n")
-    await _queue_agent_terminal_command(
+    await _queue_remote_terminal_command(
         redis,
         frame,
         terminal_id,
@@ -152,14 +152,14 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
 
     async def output_pump() -> None:
         while True:
-            res = await redis.blpop([stream_key, resp_key], timeout=AGENT_TERMINAL_IDLE_TIMEOUT_SECONDS)
+            res = await redis.blpop([stream_key, resp_key], timeout=REMOTE_TERMINAL_IDLE_TIMEOUT_SECONDS)
             if res is None:
                 continue
 
             key, raw = res
             key_name = _redis_key_name(key)
             if key_name == stream_key:
-                await _send_agent_stream_chunk(websocket, json.loads(raw))
+                await _send_remote_stream_chunk(websocket, json.loads(raw))
                 continue
 
             if key_name == resp_key:
@@ -182,7 +182,7 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
     async def input_pump() -> None:
         while True:
             message = await websocket.receive_text()
-            await _queue_agent_terminal_command(
+            await _queue_remote_terminal_command(
                 redis,
                 frame,
                 str(uuid.uuid4()),
@@ -206,7 +206,7 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
             task.cancel()
         await asyncio.gather(output_task, input_task, return_exceptions=True)
         with contextlib.suppress(Exception):
-            await _queue_agent_terminal_command(
+            await _queue_remote_terminal_command(
                 redis,
                 frame,
                 str(uuid.uuid4()),
@@ -259,8 +259,8 @@ async def ssh_terminal(
         await websocket.close(code=1008, reason="Frame not found")
         return
 
-    if await _should_use_agent_terminal(redis, frame):
-        await _agent_terminal(websocket, redis, frame)
+    if await _should_use_remote_terminal(redis, frame):
+        await _remote_terminal(websocket, redis, frame)
         return
 
     db = SessionLocal()

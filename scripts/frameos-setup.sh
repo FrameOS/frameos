@@ -701,12 +701,12 @@ network.update({
     "wifiHotspotTimeoutSeconds": env_int("FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS", 300),
 })
 
-agent_enabled = env_bool("FRAMEOS_BACKEND_ENABLED")
-agent = dict(data.get("agent") or {})
-agent.update({
-    "agentEnabled": agent_enabled,
-    "agentRunCommands": env_bool("FRAMEOS_AGENT_RUN_COMMANDS") if agent_enabled else False,
-    "agentSharedSecret": env("FRAMEOS_AGENT_SHARED_SECRET") if agent_enabled else agent.get("agentSharedSecret", ""),
+remote_enabled = env_bool("FRAMEOS_BACKEND_ENABLED")
+remote_config = dict(data.get("agent") or {})
+remote_config.update({
+    "agentEnabled": remote_enabled,
+    "agentRunCommands": env_bool("FRAMEOS_AGENT_RUN_COMMANDS") if remote_enabled else False,
+    "agentSharedSecret": env("FRAMEOS_AGENT_SHARED_SECRET") if remote_enabled else remote_config.get("agentSharedSecret", ""),
 })
 
 frame_admin_auth = dict(data.get("frameAdminAuth") or {})
@@ -728,7 +728,7 @@ data.update({
     "serverHost": env("FRAMEOS_SERVER_HOST"),
     "serverPort": env_int("FRAMEOS_SERVER_PORT", 8989),
     "serverApiKey": env("FRAMEOS_SERVER_API_KEY"),
-    "serverSendLogs": env_bool("FRAMEOS_SERVER_SEND_LOGS") if agent_enabled else False,
+    "serverSendLogs": env_bool("FRAMEOS_SERVER_SEND_LOGS") if remote_enabled else False,
     "width": env_int("FRAMEOS_WIDTH", 800),
     "height": env_int("FRAMEOS_HEIGHT", 480),
     "device": env("FRAMEOS_DEVICE"),
@@ -749,7 +749,7 @@ data.update({
     "palette": data.get("palette") if isinstance(data.get("palette"), dict) else {},
     "controlCode": data.get("controlCode") if isinstance(data.get("controlCode"), dict) else {"enabled": False},
     "network": network,
-    "agent": agent,
+    "agent": remote_config,
     "mountpoints": data.get("mountpoints") if isinstance(data.get("mountpoints"), dict) else {"enabled": False, "items": []},
     "errorBehavior": data.get("errorBehavior") if isinstance(data.get("errorBehavior"), dict) else {
         "mode": "show_error_retry",
@@ -825,9 +825,9 @@ default_frame_access_key="$(json_get "$existing_config" frameAccessKey "$(random
 default_server_host="$(json_get "$existing_config" serverHost "")"
 default_server_port="$(json_get "$existing_config" serverPort "8989")"
 default_server_api_key="$(json_get "$existing_config" serverApiKey "")"
-default_agent_secret="$(json_get "$existing_config" agent.agentSharedSecret "")"
-default_agent_enabled="$(json_get "$existing_config" agent.agentEnabled "false")"
-default_agent_run_commands="$(json_get "$existing_config" agent.agentRunCommands "true")"
+default_remote_secret="$(json_get "$existing_config" agent.agentSharedSecret "")"
+default_remote_enabled="$(json_get "$existing_config" agent.agentEnabled "false")"
+default_remote_run_commands="$(json_get "$existing_config" agent.agentRunCommands "true")"
 default_server_send_logs="$(json_get "$existing_config" serverSendLogs "true")"
 default_network_check="$(json_get "$existing_config" network.networkCheck "true")"
 default_wifi_hotspot="$(json_get "$existing_config" network.wifiHotspot "disabled")"
@@ -903,7 +903,7 @@ case "$FRAMEOS_DEVICE" in
 esac
 
 backend_default="n"
-if [ "$default_agent_enabled" = "true" ] || { [ -n "$default_server_host" ] && [ "$default_server_host" != "localhost" ]; }; then
+if [ "$default_remote_enabled" = "true" ] || { [ -n "$default_server_host" ] && [ "$default_server_host" != "localhost" ]; }; then
   backend_default="y"
 fi
 FRAMEOS_BACKEND_ENABLED="${FRAMEOS_BACKEND_ENABLED:-$(ask_yes_no "Connect this frame to a FrameOS backend" "$backend_default")}"
@@ -912,14 +912,14 @@ if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-$(ask_required "Backend host" "$default_server_host")}"
   FRAMEOS_SERVER_PORT="${FRAMEOS_SERVER_PORT:-$(ask_int "Backend port" "$default_server_port")}"
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-$(ask_required "Backend server API key" "$default_server_api_key")}"
-  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$(ask_required "FrameOS Remote shared secret" "$default_agent_secret")}"
-  FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-$(ask_yes_no "Allow backend terminal/deploy commands through FrameOS Remote" "$default_agent_run_commands")}"
+  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$(ask_required "FrameOS Remote shared secret" "$default_remote_secret")}"
+  FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-$(ask_yes_no "Allow backend terminal/deploy commands through FrameOS Remote" "$default_remote_run_commands")}"
   FRAMEOS_SERVER_SEND_LOGS="${FRAMEOS_SERVER_SEND_LOGS:-$(ask_yes_no "Send logs to the backend" "$default_server_send_logs")}"
 else
   FRAMEOS_SERVER_HOST="${FRAMEOS_SERVER_HOST:-}"
   FRAMEOS_SERVER_PORT="${FRAMEOS_SERVER_PORT:-8989}"
   FRAMEOS_SERVER_API_KEY="${FRAMEOS_SERVER_API_KEY:-}"
-  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$default_agent_secret}"
+  FRAMEOS_AGENT_SHARED_SECRET="${FRAMEOS_AGENT_SHARED_SECRET:-$default_remote_secret}"
   FRAMEOS_AGENT_RUN_COMMANDS="${FRAMEOS_AGENT_RUN_COMMANDS:-false}"
   FRAMEOS_SERVER_SEND_LOGS="${FRAMEOS_SERVER_SEND_LOGS:-false}"
 fi
@@ -972,28 +972,28 @@ archive_url="$base_url/v$FRAMEOS_RELEASE_VERSION/frameos-$FRAMEOS_RELEASE_VERSIO
 work_dir="$(mktemp -d)"
 release_name="release_setup_$(date +%Y%m%d%H%M%S)"
 frameos_release_dir="$FRAMEOS_DIR/releases/$release_name"
-agent_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
+remote_release_dir="$FRAMEOS_REMOTE_DIR/releases/$release_name"
 trap 'rm -rf "$work_dir"' EXIT
 
 download_file "$archive_url" "$work_dir/frameos.tar.gz"
-mkdir -p "$work_dir/extract" "$frameos_release_dir" "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
+mkdir -p "$work_dir/extract" "$frameos_release_dir" "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/logs" "$FRAMEOS_DIR/logs" "$FRAMEOS_DIR/state" "$FRAMEOS_ASSETS_PATH"
 tar -xzf "$work_dir/frameos.tar.gz" -C "$work_dir/extract"
 
 frameos_binary="$(find "$work_dir/extract" -type f -name frameos | head -n 1)"
-agent_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
-if [ -z "$agent_binary" ]; then
-  agent_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
+remote_binary="$(find "$work_dir/extract" -type f -name frameos_remote | head -n 1)"
+if [ -z "$remote_binary" ]; then
+  remote_binary="$(find "$work_dir/extract" -type f -name frameos_agent | head -n 1)"
 fi
 if [ -z "$frameos_binary" ]; then
   die "The precompiled FrameOS release did not contain a frameos binary for $target."
 fi
-if [ -z "$agent_binary" ]; then
+if [ -z "$remote_binary" ]; then
   die "The precompiled FrameOS release did not contain a frameos_remote binary for $target."
 fi
 artifact_root="${frameos_binary%/*}"
 
 install -m 0755 "$frameos_binary" "$frameos_release_dir/frameos"
-install -m 0755 "$agent_binary" "$agent_release_dir/frameos_remote"
+install -m 0755 "$remote_binary" "$remote_release_dir/frameos_remote"
 
 if [ -d "$artifact_root/drivers" ]; then
   cp -R "$artifact_root/drivers" "$frameos_release_dir/drivers"
@@ -1007,19 +1007,19 @@ if [ -d "$artifact_root/vendor" ]; then
 fi
 
 write_frame_config "$existing_config" "$frameos_release_dir/frame.json"
-cp "$frameos_release_dir/frame.json" "$agent_release_dir/frame.json"
+cp "$frameos_release_dir/frame.json" "$remote_release_dir/frame.json"
 copy_scene_payloads "$frameos_release_dir" "$existing_release_dir"
 
-agent_user="${SUDO_USER:-}"
-if [ -z "$agent_user" ] || [ "$agent_user" = "root" ]; then
+remote_user="${SUDO_USER:-}"
+if [ -z "$remote_user" ] || [ "$remote_user" = "root" ]; then
   if id pi >/dev/null 2>&1; then
-    agent_user=pi
+    remote_user=pi
   else
-    agent_user="$(id -un)"
+    remote_user="$(id -un)"
   fi
 fi
-if ! id "$agent_user" >/dev/null 2>&1; then
-  agent_user=root
+if ! id "$remote_user" >/dev/null 2>&1; then
+  remote_user=root
 fi
 
 frameos_service_after="After=network.target"
@@ -1041,7 +1041,7 @@ $frameos_service_after
 $frameos_service_conflicts
 
 [Service]
-User=$agent_user
+User=$remote_user
 WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
@@ -1052,7 +1052,7 @@ $frameos_service_tty
 WantedBy=multi-user.target
 EOF
 
-cat > "$agent_release_dir/frameos-remote.service" <<EOF
+cat > "$remote_release_dir/frameos-remote.service" <<EOF
 [Unit]
 Description=FrameOS Remote (auto-reconnect, hardened)
 After=network-online.target
@@ -1060,7 +1060,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$agent_user
+User=$remote_user
 WorkingDirectory=$FRAMEOS_REMOTE_DIR/current
 ExecStart=$FRAMEOS_REMOTE_DIR/current/frameos_remote
 Restart=always
@@ -1076,8 +1076,8 @@ EOF
 
 rm -rf "$FRAMEOS_DIR/current" "$FRAMEOS_REMOTE_DIR/current"
 ln -s "$frameos_release_dir" "$FRAMEOS_DIR/current"
-ln -s "$agent_release_dir" "$FRAMEOS_REMOTE_DIR/current"
-chown -R "$agent_user" "$FRAMEOS_DIR" "$FRAMEOS_ASSETS_PATH"
+ln -s "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/current"
+chown -R "$remote_user" "$FRAMEOS_DIR" "$FRAMEOS_ASSETS_PATH"
 
 set +e
 cd "$frameos_release_dir" && ./frameos setup
@@ -1091,7 +1091,7 @@ fi
 install -d -m 0755 /etc/systemd/system
 install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-  install -m 0644 "$agent_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
+  install -m 0644 "$remote_release_dir/frameos-remote.service" /etc/systemd/system/frameos-remote.service
 else
   systemctl disable --now frameos-remote.service >/dev/null 2>&1 || true
 fi
@@ -1103,7 +1103,7 @@ fi
 
 legacy_disable_script='sleep 1; systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/frameos_agent.service; systemctl daemon-reload'
 if command -v systemd-run >/dev/null 2>&1; then
-  systemd-run --quiet --unit=frameos-remote-disable-legacy-agent --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
+  systemd-run --quiet --unit=frameos-remote-disable-legacy-service --collect /bin/sh -lc "$legacy_disable_script" >/dev/null 2>&1 || true
 else
   nohup sh -c "$legacy_disable_script" >/dev/null 2>&1 &
 fi

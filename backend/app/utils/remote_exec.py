@@ -60,7 +60,7 @@ def normalize_remote_transport(transport: str) -> RemoteTransport:
 # ---------------------------------------------------------------------------#
 
 
-async def _use_agent(frame: Frame, redis: Redis, transport: str = "auto") -> bool:
+async def _use_remote(frame: Frame, redis: Redis, transport: str = "auto") -> bool:
     """
     Returns True if we can use the WebSocket Remote for this frame.
     """
@@ -80,7 +80,7 @@ async def _use_agent(frame: Frame, redis: Redis, transport: str = "auto") -> boo
     return False
 
 
-async def _exec_via_agent(
+async def _exec_via_remote(
     redis: Redis,
     frame: Frame,
     cmd: str,
@@ -106,7 +106,7 @@ async def _exec_via_agent(
         res = await redis.blpop(resp_key, timeout=timeout)
         if res is None:  # ⬅︎ handle timeout
             raise TimeoutError(
-                f"_exec_via_agent via remote timed-out after {timeout}s "
+                f"_exec_via_remote via remote timed-out after {timeout}s "
                 f"(frame {frame.id}, command: {cmd})"
             )
 
@@ -117,7 +117,7 @@ async def _exec_via_agent(
             raise RuntimeError(reply.get("error", "remote error"))
 
 
-async def _file_write_via_agent(
+async def _file_write_via_remote(
     redis: Redis,
     frame: Frame,
     remote_path: str,
@@ -157,7 +157,7 @@ async def _file_write_via_agent(
         if not reply.get("ok"):
             raise RuntimeError(reply.get("error", "remote error"))
 
-async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
+async def _stream_file_via_remote(db, redis, frame, remote_path, data, timeout: int = 120):
     size = len(data)
     last_report = time.monotonic()
     await file_write_open_on_frame(frame.id, remote_path,
@@ -192,11 +192,11 @@ async def run_commands(
     Execute *commands* (in order) on the frame. Either via the WebSocket Remote or via SSH.
     """
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
-                await _exec_via_agent(redis, frame, cmd, timeout)
+                await _exec_via_remote(redis, frame, cmd, timeout)
             except Exception as e:
                 await log(
                     db,
@@ -302,14 +302,14 @@ async def upload_file(
     """
     size = len(data)
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via remote)")
-            await _stream_file_via_agent(db, redis, frame, remote_path, data)
+            await _stream_file_via_remote(db, redis, frame, remote_path, data)
             # TODO: restore faster path for smaller files?
             # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
             # else:
-            #     await _file_write_via_agent(redis, frame, remote_path, data, timeout)
+            #     await _file_write_via_remote(redis, frame, remote_path, data, timeout)
             return
         except Exception as e:  # noqa: BLE001
             await log(
@@ -363,7 +363,7 @@ async def delete_path(
 ) -> None:
     """Delete a file or directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         from app.ws.remote_ws import file_delete_on_frame
 
         try:
@@ -394,7 +394,7 @@ async def rename_path(
 ) -> None:
     """Rename a file or directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         from app.ws.remote_ws import file_rename_on_frame
 
         try:
@@ -424,7 +424,7 @@ async def make_dir(
 ) -> None:
     """Create a directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         from app.ws.remote_ws import file_mkdir_on_frame
 
         try:
@@ -445,7 +445,7 @@ async def make_dir(
         await remove_ssh_connection(db, redis, ssh, frame)
 
 
-async def _run_command_agent(
+async def _run_command_remote(
     db: Session,
     redis: Redis,
     frame: Frame,
@@ -611,6 +611,6 @@ async def run_command(
 
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
-    if await _use_agent(frame, redis, transport):
-        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
+    if await _use_remote(frame, redis, transport):
+        return await _run_command_remote(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
     return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)

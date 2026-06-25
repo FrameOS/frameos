@@ -622,7 +622,7 @@ async def build_release_image(args: argparse.Namespace) -> None:
             bootstrap_frame=frame,
             setup_payload=get_frame_json(None, frame),
             frameos_build=frameos_build,
-            agent_binary=str(_remote_binary_path(artifact_root)),
+            remote_binary=str(_remote_binary_path(artifact_root)),
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)

@@ -164,7 +164,7 @@ def test_terminal_ws_frame_not_found(client: TestClient) -> None:
     assert exc.value.reason == "Frame not found"
 
 
-def test_agent_ws_requires_hello(client: TestClient) -> None:
+def test_remote_ws_requires_hello(client: TestClient) -> None:
     with client.websocket_connect("/ws/remote") as ws:
         ws.send_json({"action": "nohello"})
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -182,7 +182,7 @@ def test_legacy_agent_ws_route_is_still_accepted(client: TestClient) -> None:
     assert exc.value.reason == "expected hello"
 
 
-def test_agent_ws_unknown_frame(client: TestClient) -> None:
+def test_remote_ws_unknown_frame(client: TestClient) -> None:
     with client.websocket_connect("/ws/remote") as ws:
         ws.send_json({"action": "hello", "serverApiKey": "missing"})
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -191,10 +191,10 @@ def test_agent_ws_unknown_frame(client: TestClient) -> None:
     assert exc.value.reason == "unknown frame"
 
 
-def test_agent_ws_stores_reported_agent_version_and_clears_missing_version(client: TestClient) -> None:
+def test_remote_ws_stores_reported_version_and_clears_missing_version(client: TestClient) -> None:
     db = SessionLocal()
     try:
-        frame = asyncio.run(new_frame(db, DummyRedis(), "AgentVersionFrame", "frame-agent.local", "localhost"))
+        frame = asyncio.run(new_frame(db, DummyRedis(), "RemoteVersionFrame", "frame-remote.local", "localhost"))
         secret = "agent-secret"
         frame.agent = {
             "agentEnabled": True,
@@ -245,7 +245,7 @@ def test_agent_ws_stores_reported_agent_version_and_clears_missing_version(clien
         db.close()
 
 
-def test_agent_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:
+def test_remote_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:
     db = SessionLocal()
     try:
         frame = asyncio.run(new_frame(db, DummyRedis(), "BuildrootFrame", "frame53.local", "localhost"))
@@ -413,7 +413,7 @@ async def test_broadcast_does_not_send_unscoped_project_events_to_scoped_connect
 
 
 @pytest.mark.asyncio
-async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
+async def test_remote_helper_closes_owned_redis(monkeypatch) -> None:
     from app.ws import remote_ws
 
     class FakeRedis:
@@ -440,7 +440,7 @@ async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_command_slot_times_out_when_frame_busy() -> None:
+async def test_remote_command_slot_times_out_when_frame_busy() -> None:
     from app.ws.remote_bridge import frame_command_slot
 
     async with frame_command_slot(987654, queue_timeout=None):
@@ -450,7 +450,7 @@ async def test_agent_command_slot_times_out_when_frame_busy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
+async def test_remote_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
     from app.ws import remote_ws
 
     class FakeRedis:
@@ -492,7 +492,7 @@ async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_stream_chunk_logs_by_default(monkeypatch) -> None:
+async def test_remote_stream_chunk_logs_by_default(monkeypatch) -> None:
     from app.ws import remote_ws
 
     class FakeRedis:

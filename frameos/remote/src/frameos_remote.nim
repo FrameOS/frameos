@@ -27,7 +27,7 @@ type
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
 
-  AgentConfig* = ref object
+  RemoteConfig* = ref object
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
@@ -52,7 +52,7 @@ type
     debug*: bool
     timeZone*: string
     network*: NetworkConfig
-    agent*: AgentConfig
+    agent*: RemoteConfig
 
   WhichStream* = enum stdoutStr, stderrStr
 
@@ -656,7 +656,7 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     raise newException(Exception, "⚠️  serverApiKey is empty, cannot connect")
 
   if len(cfg.agent.agentSharedSecret) == 0:
-    echo "⚠️  agentSharedSecret is empty, cannot connect"
+    echo "⚠️  remote shared secret is empty, cannot connect"
     raise newException(Exception, "⚠️  agent.agentSharedSecret is empty, FrameOS Remote cannot connect")
 
   # --- Step 0: say hello ----------------------------------------------------
@@ -718,7 +718,7 @@ proc calcBackoff(elapsed: int): int =
 # Run-forever loop with exponential back-off
 # ----------------------------------------------------------------------------
 
-proc runAgent(cfg: FrameConfig) {.async.} =
+proc runRemote(cfg: FrameConfig) {.async.} =
   var disconnectAt = getMonoTime()
   var wasConnected = false # did we ever finish handshake?
   while true:
@@ -777,6 +777,6 @@ when isMainModule:
       waitFor sleepAsync(10_000)
       quit(0) # graceful, zero-exit
 
-    waitFor runAgent(cfg)
+    waitFor runRemote(cfg)
   except Exception as e:
     fatal(e.msg)

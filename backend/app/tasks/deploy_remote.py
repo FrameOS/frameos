@@ -34,7 +34,6 @@ LEGACY_PRECOMPILED_REMOTE_ENV = "FRAMEOS_AGENT_PRECOMPILED"
 REMOTE_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
 REMOTE_BINARY = "frameos_remote"
 REMOTE_SERVICE = "frameos-remote"
-LEGACY_AGENT_SERVICE = "frameos_agent"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -201,7 +200,7 @@ class RemoteDeployer(FrameDeployer):
                         else:
                             await self.restart_service(REMOTE_SERVICE)
                             await self._wait_for_remote_release(previous_remote_process)
-                        await self._disable_legacy_agent_service()
+                        await self._disable_legacy_service()
 
                         await self._cleanup_old_builds()
                     finally:
@@ -688,7 +687,7 @@ class RemoteDeployer(FrameDeployer):
             timeout=30,
         )
 
-    async def _disable_legacy_agent_service(self) -> None:
+    async def _disable_legacy_service(self) -> None:
         if self.remote_transport == "remote":
             return
         await self.exec_command(

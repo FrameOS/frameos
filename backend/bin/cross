@@ -387,8 +387,8 @@ async def generate_remote_build_dir(
 
     build_dir.mkdir(parents=True, exist_ok=True)
     cpu = await deployer.arch_to_nim_cpu(arch)
-    agent_version = remote_version_for_repo(repo_root)
-    version_option = shlex.quote(f"--define:frameosRemoteVersion:{agent_version}")
+    remote_version = remote_version_for_repo(repo_root)
+    version_option = shlex.quote(f"--define:frameosRemoteVersion:{remote_version}")
     command = (
         f"cd {shlex.quote(str(remote_source_dir))} && nimble install -dy && nimble setup && "
         f"{shlex.quote(nim_path)} compile --os:linux --cpu:{cpu} "
@@ -791,7 +791,6 @@ async def build_release_target(
             "driver_libraries": driver_library_names,
             "vendor_folders": vendor_folders,
             "remote_binary": REMOTE_BINARY,
-            "agent_binary": REMOTE_BINARY,
             "release_cache_version": RELEASE_CACHE_VERSION,
             "input_hash": input_hash,
         }

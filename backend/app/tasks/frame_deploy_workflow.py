@@ -66,7 +66,7 @@ def active_deploy_job_key(frame_id: int) -> str:
     return f"frame:deploy:job:{frame_id}"
 
 
-def _deploy_uses_agent(frame: Frame) -> bool:
+def _deploy_uses_remote(frame: Frame) -> bool:
     agent = getattr(frame, "agent", None)
     if not isinstance(agent, dict):
         agent = {}
@@ -865,10 +865,10 @@ class FrameDeployWorkflow:
 
     async def _install_authorized_keys_for_full_deploy(self, full_plan: FullDeployPlan) -> None:
         if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:
-            if _deploy_uses_agent(self.frame):
+            if _deploy_uses_remote(self.frame):
                 await self.deployer.log(
                     "stdout",
-                    f"{icon} Agent deploy selected; skipping SSH authorized_keys install",
+                    f"{icon} Remote deploy selected; skipping SSH authorized_keys install",
                 )
                 return
             await self.deployer.log("stdout", f"{icon} Checking SSH keys on device")
@@ -1157,20 +1157,20 @@ class FrameDeployWorkflow:
 
     def _frameos_setup_command(self, path: str) -> str:
         quoted_path = shlex.quote(path)
-        if not _deploy_uses_agent(self.frame):
+        if not _deploy_uses_remote(self.frame):
             return f"cd {quoted_path} && sudo ./frameos setup"
 
         systemd_inner = shlex.quote(
-            'set -eu; export FRAMEOS_SETUP_UNDER_AGENT=1; export FRAMEOS_SERVICE_USER="$1"; cd "$2"; ./frameos setup'
+            'set -eu; export FRAMEOS_SETUP_UNDER_REMOTE=1; export FRAMEOS_SERVICE_USER="$1"; cd "$2"; ./frameos setup'
         )
         fallback_inner = shlex.quote('set -eu; cd "$1"; ./frameos setup')
         return (
-            'agent_user="$(id -un)"; '
+            'remote_user="$(id -un)"; '
             "if command -v systemd-run >/dev/null 2>&1; then "
             "sudo -n systemd-run --quiet --wait --pipe --collect /bin/sh -lc "
-            f"{systemd_inner} frameos-setup \"$agent_user\" {quoted_path}; "
+            f"{systemd_inner} frameos-setup \"$remote_user\" {quoted_path}; "
             "else "
-            "sudo -n env FRAMEOS_SETUP_UNDER_AGENT=1 FRAMEOS_SERVICE_USER=\"$agent_user\" "
+            "sudo -n env FRAMEOS_SETUP_UNDER_REMOTE=1 FRAMEOS_SERVICE_USER=\"$remote_user\" "
             f"/bin/sh -lc {fallback_inner} frameos-setup {quoted_path}; "
             "fi"
         )
@@ -1195,7 +1195,7 @@ class FrameDeployWorkflow:
         await self._exec_host_root_command("mount -o remount,ro /", fallback_command="sudo mount -o remount,ro /")
 
     def _host_root_command(self, command: str, *, fallback_command: str | None = None) -> str:
-        if not _deploy_uses_agent(self.frame):
+        if not _deploy_uses_remote(self.frame):
             return fallback_command or f"sudo sh -lc {shlex.quote(command)}"
 
         inner = shlex.quote(f"set -eu; {command}")

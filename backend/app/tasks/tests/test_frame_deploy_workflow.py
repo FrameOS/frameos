@@ -179,7 +179,7 @@ async def test_plan_fast_for_embedded_uses_http_scene_reload_plan():
 
 
 @pytest.mark.asyncio
-async def test_full_deploy_skips_authorized_keys_when_agent_is_transport(monkeypatch: pytest.MonkeyPatch):
+async def test_full_deploy_skips_authorized_keys_when_remote_is_transport(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=28,
         name="AgentFrame",
@@ -206,13 +206,13 @@ async def test_full_deploy_skips_authorized_keys_when_agent_is_transport(monkeyp
     )
 
     async def fail_install_authorized_keys(*_args, **_kwargs):
-        raise AssertionError("authorized_keys should not be installed during agent deploy")
+        raise AssertionError("authorized_keys should not be installed during remote deploy")
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow._install_authorized_keys", fail_install_authorized_keys)
 
     await workflow._install_authorized_keys_for_full_deploy(full_plan)
 
-    assert deployer.logs == [("stdout", "🔷 Agent deploy selected; skipping SSH authorized_keys install")]
+    assert deployer.logs == [("stdout", "🔷 Remote deploy selected; skipping SSH authorized_keys install")]
 
 
 @pytest.mark.asyncio
@@ -1350,15 +1350,15 @@ async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_updat
 
 
 @pytest.mark.asyncio
-async def test_run_post_deploy_cleanup_uses_host_systemd_for_agent_rootfs_writes():
+async def test_run_post_deploy_cleanup_uses_host_systemd_for_remote_rootfs_writes():
     frame = SimpleNamespace(
         id=9,
-        name="BuildrootAgentCleanupFrame",
+        name="BuildrootRemoteCleanupFrame",
         agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
         reboot={"enabled": "true", "crontab": "0 4 * * *", "type": "frameos"},
         last_successful_deploy_at=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
-        to_dict=lambda: {"id": 9, "name": "BuildrootAgentCleanupFrame"},
+        to_dict=lambda: {"id": 9, "name": "BuildrootRemoteCleanupFrame"},
     )
     deployer = RecordingDeployer()
     deployer.root_read_only = True
@@ -1477,15 +1477,15 @@ async def test_run_release_setup_remounts_read_only_root_around_setup():
 
 
 @pytest.mark.asyncio
-async def test_run_release_setup_uses_systemd_run_when_deploying_through_agent():
+async def test_run_release_setup_uses_systemd_run_when_deploying_through_remote():
     frame = SimpleNamespace(
         id=10,
-        name="SetupAgentFrame",
+        name="SetupRemoteFrame",
         agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
         reboot={"enabled": "false"},
         last_successful_deploy_at=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
-        to_dict=lambda: {"id": 10, "name": "SetupAgentFrame"},
+        to_dict=lambda: {"id": 10, "name": "SetupRemoteFrame"},
     )
     deployer = RecordingDeployer()
     workflow = FrameDeployWorkflow(
@@ -1504,7 +1504,7 @@ async def test_run_release_setup_uses_systemd_run_when_deploying_through_agent()
 
     setup_command = next(command for command in deployer.commands if "./frameos setup" in command)
     assert "sudo -n systemd-run --quiet --wait --pipe --collect" in setup_command
-    assert "FRAMEOS_SETUP_UNDER_AGENT=1" in setup_command
+    assert "FRAMEOS_SETUP_UNDER_REMOTE=1" in setup_command
     assert 'FRAMEOS_SERVICE_USER="$1"' in setup_command
     assert "/srv/frameos/releases/release_build12345678" in setup_command
     assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" not in deployer.commands
@@ -1591,7 +1591,7 @@ async def test_buildroot_release_setup_fails_on_systemd_service_write_failure():
 
 
 @pytest.mark.asyncio
-async def test_stop_frameos_for_release_setup_leaves_agent_running():
+async def test_stop_frameos_for_release_setup_leaves_remote_running():
     frame = SimpleNamespace(
         id=10,
         name="SetupStopFrame",
