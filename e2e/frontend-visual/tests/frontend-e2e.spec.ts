@@ -27,7 +27,7 @@ const frameSettingsSections = [
   ['Info', 'frame-settings-info'],
   ['Device', 'frame-settings-device'],
   ['SSH', 'frame-settings-ssh'],
-  ['Agent', 'frame-settings-agent'],
+  ['Remote', 'frame-settings-agent'],
   ['Backend', 'frame-settings-backend'],
   ['HTTP API', 'frame-http-api-section'],
   ['Admin', 'frame-settings-admin'],
