@@ -200,7 +200,7 @@ def render_setup_json_reset_service(setup_file_path: str, script_path: str = SET
 Description=FrameOS setup JSON reset
 DefaultDependencies=no
 After=local-fs.target systemd-sysusers.service
-Before=dropbear.service frameos.service frameos_agent.service
+Before=dropbear.service frameos.service frameos-remote.service
 RequiresMountsFor=/boot /srv/frameos
 ConditionPathExists={quoted_setup_file_path}
 

@@ -82,12 +82,13 @@ from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
     RemoteTransport,
+    normalize_remote_transport,
     upload_file,
     delete_path,
     rename_path,
     make_dir,
     run_command,
-    _use_agent,
+    _use_remote,
 )
 from app.utils.frame_http import (
     _build_frame_path,
@@ -102,7 +103,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import close_redis_connection, create_redis_connection, get_redis
 from app.websockets import publish_message
-from app.ws.agent_ws import (
+from app.ws.remote_ws import (
     http_get_on_frame,
     number_of_connections_for_frame,
     file_md5_on_frame,
@@ -150,13 +151,13 @@ from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
 from . import api_project, api_open
 
-AGENT_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
+REMOTE_TASK_TRANSPORTS = {"auto", "remote", "agent", "ssh"}
 
 
-def _agent_task_transport(transport: str) -> RemoteTransport:
-    if transport not in AGENT_TASK_TRANSPORTS:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid agent task transport")
-    return cast(RemoteTransport, transport)
+def _remote_task_transport(transport: str) -> RemoteTransport:
+    if transport not in REMOTE_TASK_TRANSPORTS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid remote task transport")
+    return normalize_remote_transport(transport)
 
 FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS = 20
 FRAME_ASSETS_CACHE_RETRY_AFTER_SECONDS = 2
@@ -621,9 +622,9 @@ def _ascii_safe(name: str) -> str:
     return _ascii_re.sub("_", name)[:150] or "download"
 
 
-def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
+def _normalise_remote_response(resp: Any) -> tuple[int, Any]:
     """
-    Agent “http” command returns {"status": int, "body": str}.
+    Remote “http” command returns {"status": int, "body": str}.
     Convert that (or a normal HTTPX Response) into (status-code, payload).
     """
     if isinstance(resp, dict) and {"status", "body"} <= resp.keys():
@@ -635,7 +636,7 @@ def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
             payload = body_raw
         return status, payload
 
-    # already a JSON-payload (e.g. other agent commands)
+    # already a JSON-payload (e.g. other remote commands)
     return 200, resp
 
 
@@ -746,27 +747,27 @@ async def _forward_frame_request(
 
         raise HTTPException(status_code=400, detail="Unable to reach frame")
 
-    # The agent HTTP command wants a *string* while httpx needs either
+    # The remote HTTP command wants a *string* while httpx needs either
     #   • json=<obj>   for real JSON payloads
     #   • content=<bytes> for arbitrary binary bodies.
-    body_for_agent: str | None = None
+    body_for_remote: str | None = None
     if json_body is not None:
         if isinstance(json_body, (bytes, bytearray)):
             # keep the bytes unchanged – use latin-1 for a 1-to-1 mapping
-            body_for_agent = json_body.decode("latin1")
+            body_for_remote = json_body.decode("latin1")
         else:
-            body_for_agent = json.dumps(json_body)
+            body_for_remote = json.dumps(json_body)
 
-    if await _use_agent(frame, redis):
-        agent_resp = await http_get_on_frame(
+    if await _use_remote(frame, redis):
+        remote_resp = await http_get_on_frame(
             frame.id,
             _build_frame_path(frame, path, method),
             method=method.upper(),
-            body=body_for_agent,
+            body=body_for_remote,
             headers=_auth_headers(frame),
             redis=redis,
         )
-        status, payload = _normalise_agent_response(agent_resp)
+        status, payload = _normalise_remote_response(remote_resp)
         if status == 200:
             if cache_key:
                 if isinstance(payload, (bytes, bytearray)):
@@ -780,7 +781,7 @@ async def _forward_frame_request(
                         pass
             return payload
 
-        raise HTTPException(status_code=400, detail=f"Agent error: {status} {payload}")
+        raise HTTPException(status_code=400, detail=f"Remote error: {status} {payload}")
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
@@ -963,9 +964,9 @@ async def _remote_file_md5(
     remote_path: str,
 ) -> Tuple[str, bool]:
     """
-    Return (md5, exists). Prefer the websocket agent, fall back to SSH.
+    Return (md5, exists). Prefer the websocket remote, fall back to SSH.
     """
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         resp = await file_md5_on_frame(frame.id, remote_path, redis=redis)
         return resp.get("md5", ""), bool(resp.get("exists", False))
 
@@ -999,9 +1000,9 @@ async def _remote_download_file(
     remote_path: str,
 ) -> bytes:
     """
-    Download *remote_path* – agent first, SSH SCP otherwise.
+    Download *remote_path* – remote first, SSH SCP otherwise.
     """
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         return await file_read_on_frame(frame.id, remote_path, redis=redis)
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -1609,7 +1610,7 @@ async def api_frame_get_asset(
 
         return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
 
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         try:
             data = await file_read_on_frame(frame.id, full_path, redis=redis)
         except Exception:  # file_read returns RuntimeError on missing file
@@ -1959,7 +1960,7 @@ async def _load_frame_assets(
     frame: Frame,
     assets_path: str,
 ) -> list[dict[str, Any]]:
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
         return assets
@@ -2322,7 +2323,7 @@ async def api_frame_clear_build_cache(
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    if await _use_agent(frame, redis):
+    if await _use_remote(frame, redis):
         try:
             await log(
                 db,
@@ -2402,8 +2403,8 @@ async def api_frame_reboot_event(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.post("/frames/{id:int}/deploy_agent")
-async def api_frame_deploy_agent_event(
+@api_project.post("/frames/{id:int}/deploy_remote")
+async def api_frame_deploy_remote_event(
     id: int,
     recompile: bool = False,
     transport: str = "auto",
@@ -2411,29 +2412,29 @@ async def api_frame_deploy_agent_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
-    agent_transport = _agent_task_transport(transport)
+    remote_transport = _remote_task_transport(transport)
     try:
-        from app.tasks import deploy_agent
+        from app.tasks import deploy_remote
 
-        await deploy_agent(frame.id, redis, recompile=recompile, transport=agent_transport)
+        await deploy_remote(frame.id, redis, recompile=recompile, transport=remote_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.post("/frames/{id:int}/restart_agent")
-async def api_frame_restart_agent_event(
+@api_project.post("/frames/{id:int}/restart_remote")
+async def api_frame_restart_remote_event(
     id: int,
     transport: str = "auto",
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
-    agent_transport = _agent_task_transport(transport)
+    remote_transport = _remote_task_transport(transport)
     try:
-        from app.tasks import restart_agent
+        from app.tasks import restart_remote
 
-        await restart_agent(frame.id, redis, transport=agent_transport)
+        await restart_remote(frame.id, redis, transport=remote_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

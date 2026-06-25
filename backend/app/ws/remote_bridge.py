@@ -9,15 +9,15 @@ from arq import ArqRedis as Redis
 
 from app.utils.env import get_env_float
 
-CMD_KEY  = "agent:cmd:{id}"     # per-frame inbound   queue
-RESP_KEY = "agent:resp:{id}"    # per-command outbound queue
-STREAM_KEY = "agent:cmd:stream:{id}"
+CMD_KEY = "remote:cmd:{id}"     # per-frame inbound queue
+RESP_KEY = "remote:resp:{id}"   # per-command outbound queue
+STREAM_KEY = "remote:cmd:stream:{id}"
 
 _frame_locks: dict[int, asyncio.Lock] = {}
 
 
-DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT = get_env_float(
-    "AGENT_COMMAND_QUEUE_TIMEOUT",
+DEFAULT_REMOTE_COMMAND_QUEUE_TIMEOUT = get_env_float(
+    "REMOTE_COMMAND_QUEUE_TIMEOUT",
     30.0,
 )
 
@@ -33,7 +33,7 @@ def _get_frame_lock(frame_id: int) -> asyncio.Lock:
 @asynccontextmanager
 async def frame_command_slot(
     frame_id: int,
-    queue_timeout: float | None = DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT,
+    queue_timeout: float | None = DEFAULT_REMOTE_COMMAND_QUEUE_TIMEOUT,
 ):
     lock = _get_frame_lock(frame_id)
     acquired = False
@@ -45,7 +45,7 @@ async def frame_command_slot(
                 await asyncio.wait_for(lock.acquire(), timeout=queue_timeout)
             except asyncio.TimeoutError as exc:
                 raise TimeoutError(
-                    f"agent command queue busy for frame {frame_id} after {queue_timeout:g}s"
+                    f"remote command queue busy for frame {frame_id} after {queue_timeout:g}s"
                 ) from exc
         acquired = True
         yield
@@ -60,7 +60,7 @@ async def send_cmd(
     *,
     blob: bytes | None = None,
     timeout: int = 120,
-    queue_timeout: float | None = DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT,
+    queue_timeout: float | None = DEFAULT_REMOTE_COMMAND_QUEUE_TIMEOUT,
 ):
     async with frame_command_slot(frame_id, queue_timeout):
         cmd_id = str(uuid.uuid4())
@@ -77,12 +77,12 @@ async def send_cmd(
 
         res = await redis.blpop(RESP_KEY.format(id=cmd_id), timeout=timeout)
         if res is None:                                    # ⏰ timed out
-            raise TimeoutError(f"agent timed-out after {timeout}s")
+            raise TimeoutError(f"remote timed-out after {timeout}s")
 
         key, raw = res
         reply = json.loads(raw)
         if not reply.get("ok"):
-            raise RuntimeError(reply.get("result", {}).get("error") or reply.get("error", "agent error"))
+            raise RuntimeError(reply.get("result", {}).get("error") or reply.get("error", "remote error"))
 
         if reply.get("binary"):
             return base64.b64decode(reply["result"])

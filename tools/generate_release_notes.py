@@ -24,7 +24,7 @@ DIFF_PREFIXES = (
     "backend/",
     "frontend/src/",
     "frontend/*.json",
-    "frameos/agent/",
+    "frameos/remote/",
     "frameos/frontend/src/",
     "frameos/src/",
     "repo/apps/",

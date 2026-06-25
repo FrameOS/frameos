@@ -83,8 +83,8 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         systemctl_calls = self._stub_log("systemctl.log")
         self.assertIn("enable frameos.service", systemctl_calls)
         self.assertIn("restart frameos.service", systemctl_calls)
-        self.assertIn("disable --now frameos_agent.service", systemctl_calls)
-        self.assertNotIn("restart frameos_agent.service", systemctl_calls)
+        self.assertIn("disable --now frameos-remote.service", systemctl_calls)
+        self.assertNotIn("restart frameos-remote.service", systemctl_calls)
 
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
@@ -184,8 +184,8 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(frame_json["schedule"], {"events": [{"id": "keep-me"}]})
 
         systemctl_calls = self._stub_log("systemctl.log")
-        self.assertIn("enable frameos_agent.service", systemctl_calls)
-        self.assertIn("restart frameos_agent.service", systemctl_calls)
+        self.assertIn("enable frameos-remote.service", systemctl_calls)
+        self.assertIn("restart frameos-remote.service", systemctl_calls)
 
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
@@ -250,9 +250,9 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             """,
         )
         self._write_executable(
-            artifact_root / "frameos_agent",
+            artifact_root / "frameos_remote",
             """#!/bin/sh
-            echo "$@" >> /tmp/out/frameos-agent-binary.log
+            echo "$@" >> /tmp/out/frameos-remote-binary.log
             exit 0
             """,
         )
@@ -318,7 +318,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             "FRAMEOS_RELEASE_VERSION": VERSION,
             "FRAMEOS_RELEASE_BASE_URL": "file:///tmp/releases",
             "FRAMEOS_DIR": "/tmp/out/srv/frameos",
-            "FRAMEOS_AGENT_DIR": "/tmp/out/srv/frameos/agent",
+            "FRAMEOS_AGENT_DIR": "/tmp/out/srv/frameos/remote",
             "FRAMEOS_ASSETS_DIR": "/tmp/out/srv/assets",
             "FRAMEOS_NETWORK_CHECK_TIMEOUT_SECONDS": "30",
             "FRAMEOS_NETWORK_CHECK_URL": "https://networkcheck.frameos.net/",
@@ -340,7 +340,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             "import json, os\n"
             "checks = {\n"
             "  'frameos_service_installed': os.path.isfile('/etc/systemd/system/frameos.service'),\n"
-            "  'agent_service_installed': os.path.isfile('/etc/systemd/system/frameos_agent.service'),\n"
+            "  'agent_service_installed': os.path.isfile('/etc/systemd/system/frameos-remote.service'),\n"
             "}\n"
             "open('/tmp/out/container-checks.json', 'w').write(json.dumps(checks))\n"
             "PY"

@@ -305,7 +305,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             ) : null}
             {connected ? (
               <FrameConnectionDot
-                title={healthy ? 'Frame is healthy and agent connected' : 'FrameOS agent connected'}
+                title={healthy ? 'Frame is healthy and FrameOS Remote connected' : 'FrameOS Remote connected'}
               />
             ) : healthy ? (
               <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" />

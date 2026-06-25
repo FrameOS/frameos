@@ -11,7 +11,7 @@ import zippy
 const
   DefaultConfigPath* = "./frame.json" # secure location
   MaxBackoffSeconds* = 60             # don’t wait longer than this
-  frameosAgentVersion* {.strdefine.} = "0.0.0"
+  frameosRemoteVersion* {.strdefine.} = "0.0.0"
 
 # ----------------------------------------------------------------------------
 # Types
@@ -27,7 +27,7 @@ type
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
 
-  AgentConfig* = ref object
+  RemoteConfig* = ref object
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
@@ -52,7 +52,7 @@ type
     debug*: bool
     timeZone*: string
     network*: NetworkConfig
-    agent*: AgentConfig
+    agent*: RemoteConfig
 
   WhichStream* = enum stdoutStr, stderrStr
 
@@ -415,7 +415,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
   try:
     case name
     of "version":
-      await sendResp(ws, cfg, id, true, %*{"version": frameosAgentVersion})
+      await sendResp(ws, cfg, id, true, %*{"version": frameosRemoteVersion})
 
     of "http":
       let methodArg = args{"method"}.getStr("GET")
@@ -535,11 +535,12 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
           copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
           pos += frame.len
 
+        let compression = args{"compression"}.getStr("gzip")
         let payload =
-          if currentUpload.compression == "zlib":
-            uncompress(buf) # zippy
-          else:
+          if compression == "none":
             buf
+          else:
+            uncompress(buf) # zippy supports the gzip/zlib formats we send
 
         createDir(parentDir(path))
         writeFile(path, payload)
@@ -646,9 +647,9 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
 
 proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
   ## Implements the protocol:
-  ##   0) agent  → {action:"hello", serverApiKey}
+  ##   0) remote → {action:"hello", serverApiKey}
   ##   1) server → {action:"challenge", c:<hex-rand>}
-  ##   2) agent  → {action:"handshake", mac:<hmac-sha256(serverApiKey || c, sharedSecret)>}
+  ##   2) remote → {action:"handshake", mac:<hmac-sha256(serverApiKey || c, sharedSecret)>}
   ##   3) server → {action:"handshake/ok"}
 
   if len(cfg.serverApiKey) == 0:
@@ -656,14 +657,18 @@ proc doHandshake(ws: WebSocket; cfg: FrameConfig): Future[void] {.async.} =
     raise newException(Exception, "⚠️  serverApiKey is empty, cannot connect")
 
   if len(cfg.agent.agentSharedSecret) == 0:
-    echo "⚠️  agentSharedSecret is empty, cannot connect"
-    raise newException(Exception, "⚠️  agent.agentSharedSecret is empty, cannot connect")
+    echo "⚠️  remote shared secret is empty, cannot connect"
+    raise newException(Exception, "⚠️  agent.agentSharedSecret is empty, FrameOS Remote cannot connect")
 
   # --- Step 0: say hello ----------------------------------------------------
   var hello = %*{
     "action": "hello",
     "serverApiKey": cfg.serverApiKey,
-    "agentVersion": frameosAgentVersion
+    "remoteVersion": frameosRemoteVersion,
+    "agentVersion": frameosRemoteVersion,
+    "remoteCapabilities": {
+      "fileWriteStream": true
+    }
   }
   await ws.send($hello)
 
@@ -717,7 +722,7 @@ proc calcBackoff(elapsed: int): int =
 # Run-forever loop with exponential back-off
 # ----------------------------------------------------------------------------
 
-proc runAgent(cfg: FrameConfig) {.async.} =
+proc runRemote(cfg: FrameConfig) {.async.} =
   var disconnectAt = getMonoTime()
   var wasConnected = false # did we ever finish handshake?
   while true:
@@ -725,7 +730,7 @@ proc runAgent(cfg: FrameConfig) {.async.} =
       # --- Connect ----------------------------------------------------------
       let port = (if cfg.serverPort <= 0: 443 else: cfg.serverPort)
       let scheme = (if port mod 1000 == 443: "wss" else: "ws")
-      let url = &"{scheme}://{cfg.serverHost}:{port}/ws/agent"
+      let url = &"{scheme}://{cfg.serverHost}:{port}/ws/remote"
       echo &"🔗 Connecting → {url} …"
 
       var ws = await newWebSocket(url)
@@ -772,10 +777,10 @@ when isMainModule:
   try:
     var cfg = loadConfig()
     if not cfg.agent.agentEnabled:
-      echo "ℹ️  agentEnabled = false  →  no websocket connection started. Exiting in 10s."
+      echo "ℹ️  agentEnabled = false  →  no FrameOS Remote websocket connection started. Exiting in 10s."
       waitFor sleepAsync(10_000)
       quit(0) # graceful, zero-exit
 
-    waitFor runAgent(cfg)
+    waitFor runRemote(cfg)
   except Exception as e:
     fatal(e.msg)

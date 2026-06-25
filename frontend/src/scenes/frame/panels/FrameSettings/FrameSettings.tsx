@@ -14,7 +14,7 @@ import {
   frameLogic,
   normalizeFrameErrorBehavior,
 } from '../../frameLogic'
-import { frameCompilationModeOptions, frameCrossCompilationOptions } from '../../../../utils/frameBuildOptions'
+import { frameCompilationModeOptions } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
@@ -794,7 +794,7 @@ export function FrameSettings({
               </Field>
               <Field
                 name="compilationMode"
-                label="Compilation mode"
+                label="Installation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
@@ -905,34 +905,17 @@ export function FrameSettings({
           {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
             <Group name="rpios">
               <Field
-                name="crossCompilation"
-                label="Cross compilation"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      Choose how to build the FrameOS binary: auto follows the build environment selected in global
-                      settings, always fails if server-side compilation is disabled or unavailable, and never always
-                      builds on the device.
-                    </p>
-                    <p>Configure Docker, a build host, or Modal sandboxes from global settings.</p>
-                  </div>
-                }
-              >
-                <Select name="rpios.crossCompilation" options={frameCrossCompilationOptions} />
-              </Field>
-              <Field
                 name="compilationMode"
-                label="Compilation mode"
+                label="Installation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers are shared libraries, or if compiled scenes are bundled in a
-                      single shared library, or linked directly into the FrameOS executable.
+                      Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS release
+                      for the current version when the frame only uses interpreted scenes.
                     </p>
                     <p>
-                      Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it
-                      will fall back to a shared scenes library when compiled scenes exist, or a single executable
-                      otherwise.
+                      If source builds are needed, choose whether to install one self-contained executable, separate
+                      driver and scene libraries, or a combined scenes library next to the FrameOS binary.
                     </p>
                   </div>
                 }
@@ -995,7 +978,7 @@ export function FrameSettings({
                         <p>
                           The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.
                         </p>
-                        <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
+                        <p>You can leave it blank if you only use FrameOS Remote to communicate.</p>
                       </>
                     )}
                   </div>
@@ -1089,27 +1072,27 @@ export function FrameSettings({
             {!isEmbeddedMode ? (
               <>
                 <H6 id="frame-settings-agent">
-                  Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+                  Remote control - beta <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
                 </H6>
                 <div className="pl-2 @md:pl-8 space-y-2">
                   <Group name="agent">
                     <Field
                       name="agentEnabled"
-                      label="Agent enabled"
+                      label="Remote enabled"
                       tooltip={
                         <div className="space-y-2">
                           <p>
-                            The FrameOS Agent opens a websocket connection from the frame to the backend, which is then
+                            FrameOS Remote opens a websocket connection from the frame to the backend, which is then
                             used by the backend to control the frame. This allows you to control the frame even if it's
                             behind a firewall. The backend must be publicly accessible for this to work.
                           </p>
                           <p>
-                            This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
-                            connect to the backend to await further commands.
+                            This is still beta. Enable both toggles, then save and deploy the frame. FrameOS Remote will
+                            then connect to the backend to await further commands.
                           </p>
                           <p>
-                            Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                            Agent" menu in the top.
+                            Note: after enabling FrameOS Remote, you must manually deploy it from the "..." -&gt;
+                            "Deploy Remote" menu in the top.
                           </p>
                         </div>
                       }
@@ -1123,7 +1106,7 @@ export function FrameSettings({
                           label="Allow remote control"
                           tooltip={
                             <div className="space-y-2">
-                              <p>Can the FrameOS agent actually run commands and execute updates?</p>
+                              <p>Can FrameOS Remote actually run commands and execute updates?</p>
                               <p>
                                 This is a second "are you really sure?" toggle, as this comes with risk when enabled on
                                 an unsecure connection.
@@ -1143,7 +1126,7 @@ export function FrameSettings({
                         </Field>
                         <Field
                           name="agentSharedSecret"
-                          label={<div>Agent shared secret</div>}
+                          label={<div>Remote shared secret</div>}
                           labelRight={
                             <Button
                               color="secondary"

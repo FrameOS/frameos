@@ -485,11 +485,22 @@ def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
     tar.extractall(path=path, filter="data")
 
 
+def _remote_binary_path(root: Path) -> Path:
+    remote_binary = root / "frameos_remote"
+    if remote_binary.is_file():
+        return remote_binary
+    return root / "frameos_agent"
+
+
+def _has_remote_binary(root: Path) -> bool:
+    return _remote_binary_path(root).is_file()
+
+
 def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
     candidates: list[Path] = []
     for metadata_path in extract_dir.rglob("metadata.json"):
         root = metadata_path.parent
-        if not (root / "frameos").is_file() or not (root / "frameos_agent").is_file():
+        if not (root / "frameos").is_file() or not _has_remote_binary(root):
             continue
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -500,7 +511,7 @@ def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
         candidates.append(root)
 
     legacy = extract_dir / "prebuilt-cross" / target
-    if (legacy / "frameos").is_file() and (legacy / "frameos_agent").is_file():
+    if (legacy / "frameos").is_file() and _has_remote_binary(legacy):
         return legacy
     if len(candidates) == 1:
         return candidates[0]
@@ -509,7 +520,7 @@ def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
 
 def _precompiled_archive_path(prebuilt_cross_dir: Path, target: str, version: str) -> Path:
     target_dir = prebuilt_cross_dir / target
-    if (target_dir / "frameos").is_file() and (target_dir / "frameos_agent").is_file():
+    if (target_dir / "frameos").is_file() and _has_remote_binary(target_dir):
         return target_dir
 
     candidates = sorted(prebuilt_cross_dir.glob(f"frameos-*-{target}.tar.gz"))
@@ -611,7 +622,7 @@ async def build_release_image(args: argparse.Namespace) -> None:
             bootstrap_frame=frame,
             setup_payload=get_frame_json(None, frame),
             frameos_build=frameos_build,
-            agent_binary=str(artifact_root / "frameos_agent"),
+            remote_binary=str(_remote_binary_path(artifact_root)),
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)

@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from app.models.frame import Frame, normalize_https_proxy
 from app.utils.env import get_env_float, get_env_int
 from app.utils.network import is_safe_host
-from app.utils.remote_exec import _use_agent
-from app.ws.agent_ws import http_get_on_frame
+from app.utils.remote_exec import _use_remote
+from app.ws.remote_ws import http_get_on_frame
 from arq import ArqRedis as Redis
 
 
@@ -37,7 +37,7 @@ def _build_frame_path(
     Build the relative path used when talking to the device.
 
     * For **GET** we keep the historical `?k=` query parameter so the
-      WebSocket agent (which cannot add headers) can authenticate.
+      WebSocket remote (which cannot add headers) can authenticate.
     * For **POST** and every other verb we **omit** the query parameter
       – the plain-HTTP fallback is able to use the `Authorization`
       header instead.
@@ -134,17 +134,17 @@ async def _fetch_frame_http_bytes(
     headers: Optional[dict[str, str]] = None,
 ) -> tuple[int, bytes, dict[str, str]]:
     """Fetch *path* from the frame returning (status, body-bytes, headers)."""
-    if await _use_agent(frame, redis):
-        agent_body: str | None
+    if await _use_remote(frame, redis):
+        remote_body: str | None
         if isinstance(body, bytes):
-            agent_body = body.decode("latin1")
+            remote_body = body.decode("latin1")
         else:
-            agent_body = body
+            remote_body = body
         resp = await http_get_on_frame(
             frame.id,
             _build_frame_path(frame, path, method),
             method=method,
-            body=agent_body,
+            body=remote_body,
             headers=_auth_headers(frame, headers),
             redis=redis,
         )
@@ -159,7 +159,7 @@ async def _fetch_frame_http_bytes(
                 str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()
             }
             return status, body, hdrs
-        raise HTTPException(status_code=500, detail="Bad agent response")
+        raise HTTPException(status_code=500, detail="Bad remote response")
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame, headers)

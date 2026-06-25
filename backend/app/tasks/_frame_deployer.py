@@ -86,6 +86,10 @@ DRIVER_LIBRARY_LDFLAGS = ("-Wl,--gc-sections",)
 
 LOCAL_SOURCE_IGNORE_PATTERNS = (
     ".DS_Store",
+    ".flox",
+    ".git",
+    ".pnpm-store",
+    ".venv",
     "__pycache__",
     "*.pyc",
     "node_modules",
@@ -104,6 +108,7 @@ LOCAL_SOURCE_IGNORE_PATTERNS = (
     "*.admin_session_salt",
 )
 
+DEFAULT_FRAMEOS_SOURCE_ROOT = Path(__file__).resolve().parents[3] / "frameos"
 FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
 
 
@@ -473,7 +478,7 @@ class FrameDeployer:
     def create_local_source_folder(self, temp_dir: str, source_root: str | None = None) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
         os.makedirs(source_dir, exist_ok=True)
-        base = Path(source_root or "../frameos").resolve()
+        base = Path(source_root).resolve() if source_root else DEFAULT_FRAMEOS_SOURCE_ROOT
         shutil.copytree(
             base,
             source_dir,

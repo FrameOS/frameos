@@ -131,15 +131,15 @@ on-activate = '''
     printf '%s' "$frameos_nim_hash" > "$frameos_nim_stamp"
   fi
 
-  agent_nim_hash="$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')"
-  agent_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256"
-  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f "$agent_nim_stamp" ] || [ "$(cat "$agent_nim_stamp")" != "$agent_nim_hash" ]; then
-    echo "Syncing FrameOS agent Nim dependencies..."
+  remote_nim_hash="$(sha256sum frameos/remote/frameos_remote.nimble | awk '{print $1}')"
+  remote_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-remote-nim.sha256"
+  if [ ! -f frameos/remote/nimble.paths ] || [ ! -f "$remote_nim_stamp" ] || [ "$(cat "$remote_nim_stamp")" != "$remote_nim_hash" ]; then
+    echo "Syncing FrameOS Remote Nim dependencies..."
     (
-      cd frameos/agent
+      cd frameos/remote
       nimble install -dy
     )
-    printf '%s' "$agent_nim_hash" > "$agent_nim_stamp"
+    printf '%s' "$remote_nim_hash" > "$remote_nim_stamp"
   fi
 '''
 

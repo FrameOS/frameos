@@ -27,13 +27,13 @@ function nextCommandHistory(history: string[], command: string): string[] {
   return next.length > MAX_HISTORY_SIZE ? next.slice(next.length - MAX_HISTORY_SIZE) : next
 }
 
-function hasActiveAgentConnection(frame: FrameType): boolean {
+function hasActiveRemoteConnection(frame: FrameType): boolean {
   return (frame.active_connections ?? 0) > 0
 }
 
-function shouldUseAgentTerminal(frame: FrameType): boolean {
+function shouldUseRemoteTerminal(frame: FrameType): boolean {
   return Boolean(
-    hasActiveAgentConnection(frame) &&
+    hasActiveRemoteConnection(frame) &&
       frame.agent?.agentEnabled &&
       frame.agent?.agentRunCommands &&
       frame.agent?.deployWithAgent !== false
@@ -51,7 +51,7 @@ function terminalSshTarget(frame: FrameType): string {
   return host || 'frame'
 }
 
-function terminalAgentTarget(frame: FrameType): string {
+function terminalRemoteTarget(frame: FrameType): string {
   return frame.name?.trim() || 'frame'
 }
 
@@ -141,14 +141,14 @@ export const terminalLogic = kea<terminalLogicType>([
       if (!frame) {
         return
       }
-      const useAgentTerminal = shouldUseAgentTerminal(frame)
+      const useRemoteTerminal = shouldUseRemoteTerminal(frame)
       cache.manualDisconnect = false
       cache.receivedTerminalOutput = false
       actions.setConnectionState('connecting')
       actions.initializeHistory(frame.terminal_history || [])
       actions.appendText(
-        useAgentTerminal
-          ? `***connecting to ${terminalAgentTarget(frame)} via FrameOS agent***\n`
+        useRemoteTerminal
+          ? `***connecting to ${terminalRemoteTarget(frame)} via FrameOS Remote***\n`
           : `***connecting to ${terminalSshTarget(frame)} via SSH***\n`
       )
       const wsPath = await projectWebSocketPath(`/ws/terminal/${frame.id}`)

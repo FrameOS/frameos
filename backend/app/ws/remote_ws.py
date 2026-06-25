@@ -24,11 +24,11 @@ from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.utils.request_ip import extract_client_ip
-from app.ws.agent_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
+from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
 
-MAX_AGENTS = 1000         # simple DoS safeguard
+MAX_REMOTES = 1000        # simple DoS safeguard
 CONN_TTL   = 60           # seconds – Redis key self-expiry
 
 # frame_id → list[websocket] (only for UI statistics)
@@ -56,14 +56,26 @@ async def mark_sd_image_booted_if_needed(redis: Redis, frame_id: int) -> None:
         db.close()
 
 
-def agent_version_from_hello(hello_msg: dict[str, Any]) -> str | None:
-    version = hello_msg.get("agentVersion")
+def remote_version_from_hello(hello_msg: dict[str, Any]) -> str | None:
+    version = hello_msg.get("remoteVersion") or hello_msg.get("agentVersion")
     if isinstance(version, str) and version.strip():
         return version.strip()
     return None
 
 
-async def store_connected_agent_version(redis: Redis, frame: Frame, agent_version: str | None) -> None:
+def remote_capabilities_from_hello(hello_msg: dict[str, Any]) -> dict[str, bool] | None:
+    capabilities = hello_msg.get("remoteCapabilities")
+    if not isinstance(capabilities, dict):
+        return None
+    return {str(key): value for key, value in capabilities.items() if isinstance(value, bool)}
+
+
+async def store_connected_remote_version(
+    redis: Redis,
+    frame: Frame,
+    remote_version: str | None,
+    remote_capabilities: dict[str, bool] | None = None,
+) -> None:
     db = SessionLocal()
     try:
         stored_frame = db.get(Frame, frame.id)
@@ -71,10 +83,14 @@ async def store_connected_agent_version(redis: Redis, frame: Frame, agent_versio
             return
 
         agent = dict(stored_frame.agent or {})
-        if agent_version:
-            agent["agentVersion"] = agent_version
+        if remote_version:
+            agent["agentVersion"] = remote_version
         else:
             agent.pop("agentVersion", None)
+        if remote_capabilities:
+            agent["remoteCapabilities"] = remote_capabilities
+        else:
+            agent.pop("remoteCapabilities", None)
 
         if agent == (stored_frame.agent or {}):
             frame.agent = agent
@@ -179,7 +195,7 @@ async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
         resp = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(resp, dict) and "assets" in resp:
         return resp["assets"]
-    raise RuntimeError("bad response from agent assets_list")
+    raise RuntimeError("bad response from remote assets_list")
 
 
 async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
@@ -206,7 +222,7 @@ async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
         res = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(res, (bytes, bytearray)):
         return bytes(res)
-    raise RuntimeError("bad response from agent file_read")
+    raise RuntimeError("bad response from remote file_read")
 
 
 async def file_write_on_frame(frame_id: int, path: str, data: bytes,
@@ -292,7 +308,7 @@ async def pump_commands(
     redis: Redis,
 ) -> None:
     """
-    Forever task: pop jobs from Redis, forward them to the agent,
+    Forever task: pop jobs from Redis, forward them to the Remote,
     optionally stream upload blobs, and stash a byte-buffer for any
     binary download that follows.
     """
@@ -329,7 +345,7 @@ async def pump_commands(
         pass    # let caller handle final cleanup
 
 
-async def handle_agent_stream_chunk(
+async def handle_remote_stream_chunk(
     ws: WebSocket,
     redis: Redis,
     frame: Frame,
@@ -367,18 +383,19 @@ async def handle_agent_stream_chunk(
 # ────────────────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws/agent")
-async def ws_agent_endpoint(
+@router.websocket("/ws/remote")
+async def ws_remote_endpoint(
     ws: WebSocket,
     redis: Redis = Depends(get_redis),
 ):
     # ----- rudimentary DoS guard (per-worker) ------------------------------
-    if len(active_sockets) >= MAX_AGENTS:
+    if len(active_sockets) >= MAX_REMOTES:
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
     await ws.accept()
 
-    # STEP 0 – agent → hello
+    # STEP 0 – remote → hello
     try:
         hello_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
@@ -409,7 +426,7 @@ async def ws_agent_endpoint(
     challenge = secrets.token_hex(32)
     await ws.send_json({"action": "challenge", "c": challenge})
 
-    # STEP 2 – agent → handshake
+    # STEP 2 – remote → handshake
     try:
         hs_msg = await asyncio.wait_for(ws.receive_json(), timeout=30)
     except (asyncio.TimeoutError, WebSocketDisconnect):
@@ -429,7 +446,12 @@ async def ws_agent_endpoint(
 
     # STEP 3 – server → handshake/ok  +  start pump
     await ws.send_json({"action": "handshake/ok"})
-    await store_connected_agent_version(redis, frame, agent_version_from_hello(hello_msg))
+    await store_connected_remote_version(
+        redis,
+        frame,
+        remote_version_from_hello(hello_msg),
+        remote_capabilities_from_hello(hello_msg),
+    )
     send_task = asyncio.create_task(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
@@ -453,7 +475,7 @@ async def ws_agent_endpoint(
          "id": frame.id,
          "project_id": frame.project_id}
     )
-    await write_log(redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
+    await write_log(redis, frame.id, "remote", f'Frame "{frame.name}" connected', ip=client_ip)
 
     # =======================================================================
     #                           RECEIVE LOOP
@@ -542,7 +564,7 @@ async def ws_agent_endpoint(
 
             # ② live stream chunk -------------------------------------------
             if pl.get("type") == "cmd/stream":
-                await handle_agent_stream_chunk(ws, redis, frame, pl, client_ip)
+                await handle_remote_stream_chunk(ws, redis, frame, pl, client_ip)
                 continue
 
     except WebSocketDisconnect:
@@ -570,4 +592,4 @@ async def ws_agent_endpoint(
              "id": frame.id,
              "project_id": frame.project_id}
         )
-        await write_log(redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)
+        await write_log(redis, frame.id, "remote", f'Frame "{frame.name}" disconnected', ip=client_ip)

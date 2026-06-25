@@ -1,8 +1,8 @@
 import std/[json, os, times]
-import ../src/frameos_agent
+import ../src/frameos_remote
 
-block test_agent_loads_main_frameos_frame_json_payload:
-  let tempRoot = getTempDir() / ("frameos-agent-config-" & $epochTime().int64)
+block test_remote_loads_main_frameos_frame_json_payload:
+  let tempRoot = getTempDir() / ("frameos-remote-config-" & $epochTime().int64)
   let configPath = tempRoot / "frame.json"
   createDir(tempRoot)
   writeFile(configPath, pretty(%*{

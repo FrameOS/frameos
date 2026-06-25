@@ -21,6 +21,7 @@ import pytest
 from app.codegen.drivers_nim import COMPILATION_MODE_STATIC
 from app.models.frame import Frame
 from app.models.log import Log
+from app.models.settings import Settings
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks import precompiled_frameos
 from app.tasks.frame_deploy_workflow import FrameDeployPlan, FrameDeployWorkflow
@@ -31,7 +32,6 @@ from app.tenancy import ensure_default_project
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 RUN_DEPLOY_E2E = os.environ.get("FRAMEOS_E2E_DEPLOY", "").lower() in TRUE_VALUES
-PRECOMPILED_TARGET = "debian-bookworm-amd64"
 
 pytestmark = pytest.mark.skipif(
     not RUN_DEPLOY_E2E,
@@ -280,6 +280,20 @@ def _frame(
     return frame
 
 
+def _set_build_environment_provider(db, frame: Frame, provider: str) -> None:
+    setting = (
+        db.query(Settings)
+        .filter(Settings.project_id == frame.project_id, Settings.key == "buildEnvironment")
+        .one_or_none()
+    )
+    value = {"provider": provider}
+    if setting is None:
+        db.add(Settings(project_id=frame.project_id, key="buildEnvironment", value=value))
+    else:
+        setting.value = value
+    db.commit()
+
+
 async def _run_full_deploy(
     db,
     redis: NullRedis,
@@ -364,11 +378,15 @@ async def _download_remote_file(target: SshTarget, remote_path: str, local_path:
         await asyncssh.scp((ssh, remote_path), str(local_path))
 
 
-def _build_precompiled_release_archive(binary_path: Path, release_root: Path) -> Path:
+def _build_precompiled_release_archive(
+    binary_path: Path,
+    release_root: Path,
+    precompiled_target: str,
+) -> Path:
     version = release_version()
     assert version
     release_dir = release_root / f"v{version}"
-    archive_root_name = f"frameos-{version}-{PRECOMPILED_TARGET}"
+    archive_root_name = f"frameos-{version}-{precompiled_target}"
     artifact_root = release_root / "payload" / archive_root_name
     release_dir.mkdir(parents=True, exist_ok=True)
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -379,7 +397,7 @@ def _build_precompiled_release_archive(binary_path: Path, release_root: Path) ->
     (artifact_root / "metadata.json").write_text(
         json.dumps(
             {
-                "slug": PRECOMPILED_TARGET,
+                "slug": precompiled_target,
                 "release_artifact": True,
                 "driver_libraries": [],
             },
@@ -390,7 +408,7 @@ def _build_precompiled_release_archive(binary_path: Path, release_root: Path) ->
         encoding="utf-8",
     )
 
-    archive_path = release_dir / f"frameos-{version}-{PRECOMPILED_TARGET}.tar.gz"
+    archive_path = release_dir / f"frameos-{version}-{precompiled_target}.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.add(artifact_root, arcname=archive_root_name)
     _say(f"packaged local precompiled release archive {archive_path}")
@@ -447,8 +465,9 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
             db,
             ssh_target,
             name="DeployE2ERemote",
-            rpios={"crossCompilation": "never", "compilationMode": COMPILATION_MODE_STATIC},
+            rpios={"compilationMode": COMPILATION_MODE_STATIC},
         )
+        _set_build_environment_provider(db, remote_frame, "none")
         remote_plan = await _run_full_deploy(
             db,
             redis,
@@ -474,11 +493,12 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
     assert remote_frame.last_successful_deploy["https_proxy"]["port"] == 9443
 
     with _phase("full deploy with backend cross compile"):
+        _set_build_environment_provider(db, remote_frame, "docker")
         cross_frame = _frame(
             db,
             ssh_target,
             name="DeployE2ECross",
-            rpios={"crossCompilation": "always"},
+            rpios={"compilationMode": COMPILATION_MODE_STATIC},
         )
         cross_plan = await _run_full_deploy(
             db,
@@ -501,7 +521,9 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
 
     release_root = tmp_path / "precompiled-release"
     with _phase("package local precompiled release archive"):
-        _build_precompiled_release_archive(compiled_binary, release_root)
+        precompiled_target = cross_plan.full_deploy.binary_plan.prebuilt_target
+        assert precompiled_target
+        _build_precompiled_release_archive(compiled_binary, release_root, precompiled_target)
     monkeypatch.setattr(precompiled_frameos, "RELEASE_BASE_URL", "")
 
     with _phase("full deploy using precompiled binary"):
@@ -511,7 +533,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
                 db,
                 ssh_target,
                 name="DeployE2EPrecompiled",
-                rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+                rpios={"compilationMode": "precompiled"},
             )
             precompiled_plan = await _run_full_deploy(
                 db,

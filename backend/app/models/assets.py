@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, mapped_column
 from app.models.frame import Frame
 from app.database import Base
 from arq import ArqRedis as Redis
-from app.utils.remote_exec import _use_agent, run_commands, run_command, upload_file
+from app.utils.remote_exec import _use_remote, run_commands, run_command, upload_file
 from app.models.log import new_log as log
 
 default_assets_path = "/srv/assets"
@@ -59,8 +59,8 @@ async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_pat
     await run_commands(db, redis, frame, [cmd])
 
 async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_path: str):
-    if await _use_agent(frame, redis):
-        from app.ws.agent_ws import assets_list_on_frame
+    if await _use_remote(frame, redis):
+        from app.ws.remote_ws import assets_list_on_frame
         assets = await assets_list_on_frame(frame.id, assets_path + "/fonts", redis=redis)
         remote_fonts = {a["path"]: int(a.get("size", 0)) for a in assets}
     else:

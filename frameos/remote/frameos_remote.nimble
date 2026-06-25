@@ -2,11 +2,11 @@
 
 version       = "0.1.0"
 author        = "Marius Andra"
-description   = "FrameOS agent"
+description   = "FrameOS Remote"
 license       = "AGPL"
 srcDir        = "src"
 binDir        = "build"
-bin           = @["frameos_agent"]
+bin           = @["frameos_remote"]
 
 
 # Dependencies
@@ -17,3 +17,6 @@ requires "jsony >= 1.1.5"
 requires "nimcrypto >= 0.6.0"
 requires "checksums >= 0.2.1"
 requires "zippy >= 0.10.16"
+
+task test, "Run tests":
+  exec "testament pattern './tests/*.nim' --lineTrace:on"

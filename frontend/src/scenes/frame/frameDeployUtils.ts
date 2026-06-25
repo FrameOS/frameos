@@ -1,10 +1,6 @@
 import type { FrameType } from '../../types'
 import versions from '../../../../versions.json'
-import {
-  type FrameCompilationMode,
-  normalizeFrameCompilationMode,
-  normalizeFrameCrossCompilation,
-} from '../../utils/frameBuildOptions'
+import { type FrameCompilationMode, normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 export interface ChangeDetail {
@@ -106,7 +102,7 @@ export interface DeployRecommendation {
   descriptionEmphasis?: string
 }
 
-export interface AgentUpgradeNotice {
+export interface RemoteUpgradeNotice {
   previousVersion: string | null
   currentVersion: string
 }
@@ -114,7 +110,7 @@ export interface AgentUpgradeNotice {
 type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
 
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
-export const CURRENT_FRAMEOS_AGENT_VERSION = (versions.agent || 'dev').split('+')[0]
+export const CURRENT_FRAMEOS_REMOTE_VERSION = ((versions as any).remote || (versions as any).agent || 'dev').split('+')[0]
 export const FRAMEOS_GITHUB_RELEASES_URL = 'https://github.com/FrameOS/frameos/releases'
 
 const INKY_BUTTON_DEVICES = new Set([
@@ -267,28 +263,19 @@ function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: Depl
     return compilationMode === 'precompiled' && !precompiledSkipReason(frame)
   }
 
-  const crossCompilation = normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
-  return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
+  return compilationMode === 'precompiled' && !precompiledSkipReason(frame)
 }
 
 function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
   const isBuildroot = frame?.mode === 'buildroot'
   const compilationMode = frameCompilationMode(frame)
-  const crossCompilation = isBuildroot ? 'auto' : normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   const skipReason = precompiledSkipReason(frame)
   let crossCompileText = 'Use the global build environment'
   if (isBuildroot) {
     crossCompileText = 'Cross-compile for Buildroot'
-  } else if (crossCompilation === 'never') {
-    crossCompileText = 'Build on device'
-  } else if (crossCompilation === 'always') {
-    crossCompileText = 'Cross-compile'
   }
 
   if (compilationMode === 'precompiled') {
-    if (crossCompilation === 'always') {
-      return 'Cross-compile because cross-compilation is required'
-    }
     if (!skipReason) {
       return 'Download and install the precompiled FrameOS release'
     }
@@ -302,16 +289,14 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 }
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
-  const isBuildroot = frame?.mode === 'buildroot'
   const compilationMode = frameCompilationMode(frame)
-  const crossCompilation = isBuildroot ? 'auto' : normalizeFrameCrossCompilation(frame?.rpios?.crossCompilation)
   if (compilationMode === 'shared') {
     return 'Shared libraries deployed next to the FrameOS binary'
   }
   if (compilationMode === 'shared-scenes') {
     return 'Compiled scenes bundled into scenes.so next to the FrameOS binary'
   }
-  if (compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)) {
+  if (compilationMode === 'precompiled' && !precompiledSkipReason(frame)) {
     return 'Precompiled FrameOS binary and shared driver libraries'
   }
   return 'Single FrameOS executable'
@@ -380,8 +365,8 @@ export function frameosGitHubReleaseUrl(version: unknown): string {
   return `${FRAMEOS_GITHUB_RELEASES_URL}/tag/v${encodeURIComponent(normalizedVersion)}`
 }
 
-export function buildAgentUpgradeNotice(frame?: Partial<FrameType> | null): AgentUpgradeNotice | null {
-  const currentVersion = normalizeFrameosVersion(CURRENT_FRAMEOS_AGENT_VERSION)
+export function buildRemoteUpgradeNotice(frame?: Partial<FrameType> | null): RemoteUpgradeNotice | null {
+  const currentVersion = normalizeFrameosVersion(CURRENT_FRAMEOS_REMOTE_VERSION)
   if (!currentVersion || currentVersion === 'dev' || (frame?.active_connections ?? 0) <= 0) {
     return null
   }
@@ -468,7 +453,7 @@ export function buildFullDeployPlanSummary(
         ? `Cross-compile via ${fullPlan.binary.build_executor}`
         : 'Cross-compile locally on this server'
       : fullPlan.binary.cross_compile_supported
-      ? 'Build on device because cross-compilation is disabled'
+      ? 'Build on device because the global build environment is disabled'
       : 'Build on device because cross-compilation is unavailable for this target',
   }
   let compilationItem: SummaryItem | null = null

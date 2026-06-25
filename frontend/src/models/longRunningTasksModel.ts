@@ -9,8 +9,8 @@ export type LongRunningTaskKind =
   | 'preview'
   | 'activate'
   | 'upload'
-  | 'agentDeploy'
-  | 'agentRestart'
+  | 'remoteDeploy'
+  | 'remoteRestart'
   | 'buildrootImage'
   | 'embeddedFirmware'
   | 'embeddedOta'
@@ -215,7 +215,9 @@ function parseWebhookEvent(log: LogType): Record<string, any> | null {
   }
 }
 
-function deployTaskSignal(log: LogType): { taskId: string; action: 'started' | 'completed' | 'failed'; detail: string } | null {
+function deployTaskSignal(
+  log: LogType
+): { taskId: string; action: 'started' | 'completed' | 'failed'; detail: string } | null {
   if (log.type !== 'stdout' && log.type !== 'stderr') {
     return null
   }
@@ -234,8 +236,8 @@ function frameStatus(frame: Partial<FrameType>): string | null {
   return typeof frame.status === 'string' ? frame.status : null
 }
 
-function isAgentTaskKind(kind?: LongRunningTaskKind): kind is 'agentDeploy' | 'agentRestart' {
-  return kind === 'agentDeploy' || kind === 'agentRestart'
+function isRemoteTaskKind(kind?: LongRunningTaskKind): kind is 'remoteDeploy' | 'remoteRestart' {
+  return kind === 'remoteDeploy' || kind === 'remoteRestart'
 }
 
 function shouldAppendLogToTask(task: LongRunningTask, log: LogType): boolean {
@@ -246,17 +248,19 @@ function shouldAppendLogToTask(task: LongRunningTask, log: LogType): boolean {
     const signal = deployTaskSignal(log)
     return log.type !== 'webhook' && (!signal || signal.taskId === task.id)
   }
-  return !(isAgentTaskKind(task.kind) && log.type === 'webhook')
+  return !(isRemoteTaskKind(task.kind) && log.type === 'webhook')
 }
 
-function agentTaskFailureDetail(log: LogType, lowerLine: string): string | null {
+function remoteTaskFailureDetail(log: LogType, lowerLine: string): string | null {
   if (log.type !== 'stderr') {
     return null
   }
   if (
     lowerLine.includes('falling back') ||
     lowerLine.includes('agent deployment completed') ||
+    lowerLine.includes('remote deployment completed') ||
     lowerLine.includes('skipping agent deployment') ||
+    lowerLine.includes('skipping remote deployment') ||
     lowerLine.includes('[frameos-cross] container uname')
   ) {
     return null
@@ -271,7 +275,7 @@ function agentTaskFailureDetail(log: LogType, lowerLine: string): string | null 
     lowerLine.includes('error') ||
     lowerLine.includes('not found')
   ) {
-    return log.line || 'Agent task failed'
+    return log.line || 'Remote task failed'
   }
   return null
 }
@@ -400,7 +404,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             })
           }
         }, DEPLOY_SIGNAL_TIMEOUT_MS)
-      } else if (isAgentTaskKind(task.kind)) {
+      } else if (isRemoteTaskKind(task.kind)) {
         window.setTimeout(
           () => {
             const stillRunning = values.tasks.some(
@@ -411,11 +415,13 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
                 frameId: task.frameId,
                 kind: task.kind,
                 detail:
-                  task.kind === 'agentRestart' ? 'No agent restart signal received' : 'No agent deploy signal received',
+                  task.kind === 'remoteRestart'
+                    ? 'No remote restart signal received'
+                    : 'No remote deploy signal received',
               })
             }
           },
-          task.kind === 'agentRestart' ? AGENT_RESTART_SIGNAL_TIMEOUT_MS : AGENT_DEPLOY_SIGNAL_TIMEOUT_MS
+          task.kind === 'remoteRestart' ? AGENT_RESTART_SIGNAL_TIMEOUT_MS : AGENT_DEPLOY_SIGNAL_TIMEOUT_MS
         )
       }
     },
@@ -471,49 +477,50 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
         }
       }
 
-      const agentFailureDetail = agentTaskFailureDetail(log, lowerLine)
-      if (agentFailureDetail) {
-        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentDeploy' })) {
+      const remoteFailureDetail = remoteTaskFailureDetail(log, lowerLine)
+      if (remoteFailureDetail) {
+        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'remoteDeploy' })) {
           actions.taskFailed({
             frameId: log.frame_id,
-            kind: 'agentDeploy',
-            detail: agentFailureDetail,
+            kind: 'remoteDeploy',
+            detail: remoteFailureDetail,
           })
         }
-        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentRestart' })) {
+        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'remoteRestart' })) {
           actions.taskFailed({
             frameId: log.frame_id,
-            kind: 'agentRestart',
-            detail: agentFailureDetail,
+            kind: 'remoteRestart',
+            detail: remoteFailureDetail,
           })
         }
       }
 
-      if (lowerLine.includes('agent deployment completed')) {
+      if (lowerLine.includes('agent deployment completed') || lowerLine.includes('remote deployment completed')) {
         actions.finishTask({
           frameId: log.frame_id,
-          kind: 'agentDeploy',
+          kind: 'remoteDeploy',
           status: 'success',
-          detail: 'Agent deployed and restarted',
+          detail: 'Remote deployed and restarted',
         })
-      } else if (lowerLine.includes('skipping agent deployment')) {
+      } else if (lowerLine.includes('skipping agent deployment') || lowerLine.includes('skipping remote deployment')) {
         actions.finishTask({
           frameId: log.frame_id,
-          kind: 'agentDeploy',
+          kind: 'remoteDeploy',
           status: 'success',
-          detail: 'Agent deploy skipped',
+          detail: 'Remote deploy skipped',
         })
       }
 
       if (
         lowerLine.includes('frameos agent restart command completed') ||
-        (log.type === 'agent' && lowerLine.includes('connected'))
+        lowerLine.includes('frameos remote restart command completed') ||
+        ((log.type === 'agent' || log.type === 'remote') && lowerLine.includes('connected'))
       ) {
         actions.finishTask({
           frameId: log.frame_id,
-          kind: 'agentRestart',
+          kind: 'remoteRestart',
           status: 'success',
-          detail: 'Agent restarted',
+          detail: 'Remote restarted',
         })
       }
 

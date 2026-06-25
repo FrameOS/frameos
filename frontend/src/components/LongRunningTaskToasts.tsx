@@ -33,7 +33,7 @@ const TASK_LOG_SCROLL_SETTLE_FRAMES = 3
 const TASK_TOAST_EDGE_PADDING_PX = 0
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
-  if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
+  if (kind === 'deploy' || kind === 'remoteDeploy' || kind === 'remoteRestart') {
     return <RocketLaunchIcon className="h-5 w-5" />
   }
   if (kind === 'preview') {
@@ -346,7 +346,7 @@ function taskLogLineClassName(log: LongRunningTaskLog, formattedLine: string, th
     return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
   }
 
@@ -430,10 +430,10 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
     } catch (error) {}
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return (
       <>
-        <span className={theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[AGENT]'}</span>{' '}
+        <span className={theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[REMOTE]'}</span>{' '}
         {insertBreaks(formattedLine)}
       </>
     )

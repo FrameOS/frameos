@@ -1,5 +1,5 @@
 import { Edge, Node } from 'reactflow'
-import type { FrameCompilationModeOptionValue, FrameCrossCompilationOptionValue } from './utils/frameBuildOptions'
+import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 
@@ -748,7 +748,7 @@ export interface FrameBuildrootConfig {
 
 export interface FrameRpiOSConfig {
   platform?: string
-  crossCompilation?: FrameCrossCompilationOptionValue
+  crossCompilation?: '' | 'auto' | 'always' | 'never'
   compilationMode?: FrameCompilationModeOptionValue
 }
 

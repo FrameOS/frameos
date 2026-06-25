@@ -57,7 +57,7 @@ async def test_api_frame_get_found(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
+async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
     frame.device = 'framebuffer'
     frame.scenes = [
@@ -92,7 +92,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     assert script_response.status_code == 200
     assert script_response.headers['content-type'].startswith('text/x-shellscript')
     script = script_response.text
-    assert 'frameos_agent' in script
+    assert 'frameos_remote' in script
     assert 'frameos.service' in script
     assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
@@ -116,11 +116,11 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     assert './frameos setup' in script
     assert 'install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service' in script
     assert (
-        'install -m 0644 "$agent_release_dir/frameos_agent.service" '
-        '/etc/systemd/system/frameos_agent.service'
+        'install -m 0644 "$remote_release_dir/frameos-remote.service" '
+        '/etc/systemd/system/frameos-remote.service'
     ) in script
-    assert 'FrameOS and the FrameOS agent are installed and started' in script
-    assert 'compile_frameos_agent' not in script
+    assert 'FrameOS and FrameOS Remote are installed and started' in script
+    assert 'compile_frameos_remote' not in script
     assert 'sh compile' not in script
     syntax_check = subprocess.run(["sh", "-n"], input=script, text=True, capture_output=True)
     assert syntax_check.returncode == 0, syntax_check.stderr
@@ -153,13 +153,26 @@ async def test_api_frame_bootstrap_command_can_preserve_deploy_transport(async_c
     db.add(frame)
     db.commit()
 
-    response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?select_agent=0')
+    response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?select_remote=0')
 
     assert response.status_code == 200
     db.refresh(frame)
     assert frame.agent['agentEnabled'] is True
     assert frame.agent['agentRunCommands'] is True
     assert frame.agent['deployWithAgent'] is False
+
+    legacy_frame = await new_frame(db, redis, 'BootstrapLegacyFrame', 'legacy-frame.local', 'backend.local')
+    legacy_frame.agent = {'deployWithAgent': False}
+    db.add(legacy_frame)
+    db.commit()
+
+    legacy_response = await async_client.post(f'/api/frames/{legacy_frame.id}/frame_bootstrap?select_agent=0')
+
+    assert legacy_response.status_code == 200
+    db.refresh(legacy_frame)
+    assert legacy_frame.agent['agentEnabled'] is True
+    assert legacy_frame.agent['agentRunCommands'] is True
+    assert legacy_frame.agent['deployWithAgent'] is False
 
 
 @pytest.mark.asyncio
@@ -171,7 +184,7 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
     first_payload = first_response.json()
     first_script_path = urlparse(first_payload['script_url']).path
     db.refresh(frame)
-    first_agent_secret = frame.agent['agentSharedSecret']
+    first_remote_secret = frame.agent['agentSharedSecret']
 
     second_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?regenerate=1')
     assert second_response.status_code == 200
@@ -180,13 +193,13 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
     db.refresh(frame)
 
     assert second_payload['script_url'] != first_payload['script_url']
-    assert frame.agent['agentSharedSecret'] != first_agent_secret
+    assert frame.agent['agentSharedSecret'] != first_remote_secret
     assert (await no_auth_client.get(first_script_path)).status_code == 404
     assert (await no_auth_client.get(second_script_path)).status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
+async def test_api_frame_remote_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
     import app.tasks as tasks_package
 
     frame = await new_frame(
@@ -200,17 +213,17 @@ async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db,
 
     captured: list[tuple[str, int, dict]] = []
 
-    async def fake_deploy_agent(id, _redis, **kwargs):
+    async def fake_deploy_remote(id, _redis, **kwargs):
         captured.append(("deploy", id, kwargs))
 
-    async def fake_restart_agent(id, _redis, **kwargs):
+    async def fake_restart_remote(id, _redis, **kwargs):
         captured.append(("restart", id, kwargs))
 
-    monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
-    monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
+    monkeypatch.setattr(tasks_package, "deploy_remote", fake_deploy_remote)
+    monkeypatch.setattr(tasks_package, "restart_remote", fake_restart_remote)
 
-    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_agent?recompile=1')
-    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_agent')
+    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_remote?recompile=1')
+    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_remote')
 
     assert deploy_response.status_code == 200
     assert restart_response.status_code == 200

@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
-import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
+import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
@@ -41,7 +41,7 @@ import {
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
-import { normalizeFrameCompilationMode, normalizeFrameCrossCompilation } from '../../utils/frameBuildOptions'
+import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
 
@@ -62,7 +62,7 @@ export interface FrameLogicProps {
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
 
-function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
+function isRemoteDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
 }
 
@@ -225,7 +225,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   schedule: 'Schedule',
   gpio_buttons: 'GPIO buttons',
   network: 'Network settings',
-  agent: 'Agent settings',
+  agent: 'Remote settings',
   mountpoints: 'Mountpoints',
   error_behavior: 'Global error handling',
   palette: 'Palette',
@@ -555,12 +555,11 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
 
 function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
+  const { platform: _platform, compilationMode, crossCompilation: _crossCompilation, ...rest } = source
 
   return {
     ...rest,
     compilationMode: normalizeFrameCompilationMode(compilationMode),
-    crossCompilation: normalizeFrameCrossCompilation(crossCompilation),
   }
 }
 
@@ -591,7 +590,7 @@ function normalizeTimezoneForComparison(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function normalizeAgentForComparison(value: unknown): Record<string, unknown> {
+function normalizeRemoteForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   return {
     agentEnabled: Boolean(source.agentEnabled),
@@ -606,7 +605,7 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
   }
 
   if (key === 'agent') {
-    return normalizeAgentForComparison(value)
+    return normalizeRemoteForComparison(value)
   }
 
   if (key === 'timezone') {
@@ -983,10 +982,13 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
         }
       : frame.buildroot
   const rpios = frame.rpios
-    ? {
-        ...frame.rpios,
-        compilationMode: frame.rpios.compilationMode ?? '',
-      }
+    ? (() => {
+        const { crossCompilation: _crossCompilation, ...rpiosConfig } = frame.rpios
+        return {
+          ...rpiosConfig,
+          compilationMode: frame.rpios.compilationMode ?? '',
+        }
+      })()
     : frame.rpios
 
   return {
@@ -1015,12 +1017,12 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
-function preferSshTransportWhenAgentUnavailable(
+function preferSshTransportWhenRemoteUnavailable(
   frame: Partial<FrameType>,
-  agentConnected: boolean
+  remoteConnected: boolean
 ): Partial<FrameType> {
   const agent = frame.agent
-  if (!agentConnected && isAgentDeployConfigured(agent) && agent?.deployWithAgent !== false) {
+  if (!remoteConnected && isRemoteDeployConfigured(agent) && agent?.deployWithAgent !== false) {
     return { ...frame, agent: { ...agent, deployWithAgent: false } }
   }
   return frame
@@ -1135,11 +1137,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+    deployRemote: (recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       recompile: recompile || false,
       transport,
     }),
-    restartAgent: (transport: AgentTaskTransport = 'auto') => ({ transport }),
+    restartRemote: (transport: RemoteTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
@@ -1568,7 +1570,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame) => {
         const agent = frameForm?.agent ?? frame?.agent
-        if (!isAgentDeployConfigured(agent)) {
+        if (!isRemoteDeployConfigured(agent)) {
           return false
         }
         if ((frame?.active_connections ?? 0) <= 0) {
@@ -1581,10 +1583,10 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
         const agent = frameForm?.agent ?? frame?.agent
-        return isAgentDeployConfigured(agent)
+        return isRemoteDeployConfigured(agent)
       },
     ],
-    agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
+    remoteDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -1603,7 +1605,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
     },
     saveAndDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1617,7 +1619,7 @@ export const frameLogic = kea<frameLogicType>([
       )
     },
     saveAndFastDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1628,7 +1630,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.deployFrame(props.frameId, true)
     },
     saveAndFullDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
       if (frameForm !== values.frameForm) {
         actions.setFrameFormValues({ agent: frameForm.agent })
         await saveFrameForm(frameForm, props.frameId, values.nextAction)
@@ -1650,8 +1652,8 @@ export const frameLogic = kea<frameLogicType>([
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployAgent: ({ recompile, transport }) => framesModel.actions.deployAgent(props.frameId, recompile, transport),
-    restartAgent: ({ transport }) => framesModel.actions.restartAgent(props.frameId, transport),
+    deployRemote: ({ recompile, transport }) => framesModel.actions.deployRemote(props.frameId, recompile, transport),
+    restartRemote: ({ transport }) => framesModel.actions.restartRemote(props.frameId, transport),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
     },

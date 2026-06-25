@@ -23,7 +23,7 @@ import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
 import { buildrootPlatforms, devices, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../devices'
-import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
+import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import type { FrameOSSettings, FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
@@ -36,12 +36,8 @@ import {
   type DeployRecommendation,
   type SummaryItem,
 } from '../frame/frameLogic'
-import { buildAgentUpgradeNotice, frameosGitHubReleaseUrl, type AgentUpgradeNotice } from '../frame/frameDeployUtils'
-import {
-  frameCompilationModeOptions,
-  frameCrossCompilationOptions,
-  normalizeFrameCrossCompilation,
-} from '../../utils/frameBuildOptions'
+import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNotice } from '../frame/frameDeployUtils'
+import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
@@ -191,7 +187,7 @@ function deployPlanLogTone(
       : { dot: 'bg-amber-500', timestamp: 'text-amber-600/80', text: 'text-amber-700' }
   }
 
-  if (log.type === 'agent') {
+  if (log.type === 'agent' || log.type === 'remote') {
     return theme === 'dark'
       ? { dot: 'bg-blue-300', timestamp: 'text-blue-200/80', text: 'text-blue-300' }
       : { dot: 'bg-blue-500', timestamp: 'text-blue-600/80', text: 'frameos-primary-text' }
@@ -317,13 +313,14 @@ function DeployBuildOptionsSection({
     ...(frame.buildroot ?? {}),
     ...(frameForm.buildroot ?? {}),
   }
-  const crossCompilation = normalizeFrameCrossCompilation(rpios.crossCompilation)
   const compilationMode = String((isBuildroot ? buildroot.compilationMode : rpios.compilationMode) ?? '')
   const selectClassName =
     'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 
   const updateRpios = (field: keyof NonNullable<FrameType['rpios']>, value: string): void => {
-    setFrameFormValues({ rpios: { ...rpios, [field]: value } })
+    const nextRpios = { ...rpios, [field]: value }
+    delete nextRpios.crossCompilation
+    setFrameFormValues({ rpios: nextRpios })
     touchFrameFormField(`rpios.${field}`)
   }
 
@@ -334,7 +331,7 @@ function DeployBuildOptionsSection({
 
   return (
     <section className="space-y-2">
-      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>FrameOS compilation</DrawerHeading>
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Installation mode</DrawerHeading>
       <label className="block space-y-1">
         <select
           className={selectClassName}
@@ -350,25 +347,6 @@ function DeployBuildOptionsSection({
               {option.label}
             </option>
           ))}
-        </select>
-      </label>
-      <label className="block space-y-1">
-        <span className="frame-tool-heading text-sm font-semibold">Build strategy</span>
-        <select
-          className={selectClassName}
-          value={isBuildroot ? 'buildroot' : crossCompilation}
-          disabled={isBuildroot}
-          onChange={(event) => updateRpios('crossCompilation', event.target.value)}
-        >
-          {isBuildroot ? (
-            <option value="buildroot">Build the configured Buildroot target</option>
-          ) : (
-            frameCrossCompilationOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))
-          )}
         </select>
       </label>
     </section>
@@ -526,30 +504,30 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
   )
 }
 
-function agentUpgradeLabel(notice: AgentUpgradeNotice): string {
+function remoteUpgradeLabel(notice: RemoteUpgradeNotice): string {
   return `${notice.previousVersion ?? 'unreported'} to ${notice.currentVersion}`
 }
 
-function AgentUpgradeIndicator({ notice }: { notice: AgentUpgradeNotice }): JSX.Element {
+function RemoteUpgradeIndicator({ notice }: { notice: RemoteUpgradeNotice }): JSX.Element {
   return (
     <ExclamationCircleIcon
       className="h-4 w-4 text-amber-500"
-      aria-label={`FrameOS agent ${agentUpgradeLabel(notice)}`}
+      aria-label={`FrameOS Remote ${remoteUpgradeLabel(notice)}`}
     />
   )
 }
 
-function DeployAgentLabel({ notice }: { notice: AgentUpgradeNotice | null }): JSX.Element {
+function DeployRemoteLabel({ notice }: { notice: RemoteUpgradeNotice | null }): JSX.Element {
   if (!notice) {
-    return <>Deploy agent</>
+    return <>Deploy Remote</>
   }
 
   return (
     <span className="min-w-0">
-      <span>Deploy agent</span>{' '}
+      <span>Deploy Remote</span>{' '}
       <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
-        <AgentUpgradeIndicator notice={notice} />
-        <span>{agentUpgradeLabel(notice)}</span>
+        <RemoteUpgradeIndicator notice={notice} />
+        <span>{remoteUpgradeLabel(notice)}</span>
       </span>
     </span>
   )
@@ -557,37 +535,36 @@ function DeployAgentLabel({ notice }: { notice: AgentUpgradeNotice | null }): JS
 
 function DeployTransportToggle({
   frameId,
-  agentConnected,
-  agentUpgradeNotice,
-  canDeployAgent,
+  remoteConnected,
+  remoteUpgradeNotice,
+  canDeployRemote,
   canCopyBootstrapScript,
-  showRecompileAgent,
-  onDeployAgent,
-  onRestartAgent,
+  showRecompileRemote,
+  onDeployRemote,
+  onRestartRemote,
   deployWithAgent,
   onChange,
 }: {
   frameId: number
-  agentConnected: boolean
-  agentUpgradeNotice: AgentUpgradeNotice | null
-  canDeployAgent: boolean
+  remoteConnected: boolean
+  remoteUpgradeNotice: RemoteUpgradeNotice | null
+  canDeployRemote: boolean
   canCopyBootstrapScript: boolean
-  showRecompileAgent: boolean
-  onDeployAgent: (recompile?: boolean, transport?: AgentTaskTransport) => void
-  onRestartAgent: (transport?: AgentTaskTransport) => void
+  showRecompileRemote: boolean
+  onDeployRemote: (recompile?: boolean, transport?: RemoteTaskTransport) => void
+  onRestartRemote: (transport?: RemoteTaskTransport) => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
   const bootstrapLogicProps = { frameId }
   const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(frameBootstrapLogic(bootstrapLogicProps))
   const { copyFrameBootstrapScript } = useActions(frameBootstrapLogic(bootstrapLogicProps))
-  const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
-  const selectedConnectionLabel = deployWithAgent ? 'agent' : 'SSH'
-  const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
-  const selectedConnectionUnavailableTitle =
-    'The FrameOS agent is not connected. Select SSH or wait for the agent to connect.'
+  const selectedTransport: RemoteTaskTransport = deployWithAgent ? 'remote' : 'ssh'
+  const selectedConnectionLabel = deployWithAgent ? 'FrameOS Remote' : 'SSH'
+  const selectedRemoteDisconnected = selectedTransport === 'remote' && !remoteConnected
+  const selectedConnectionUnavailableTitle = 'FrameOS Remote is not connected. Select SSH or wait for it to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
-  const agentUpgradeTitle = agentUpgradeNotice ? `FrameOS agent ${agentUpgradeLabel(agentUpgradeNotice)}` : undefined
+  const remoteUpgradeTitle = remoteUpgradeNotice ? `FrameOS Remote ${remoteUpgradeLabel(remoteUpgradeNotice)}` : undefined
 
   return (
     <section className="mb-4">
@@ -600,11 +577,11 @@ function DeployTransportToggle({
             title={
               <div className="space-y-1">
                 <div>
-                  SSH needs direct network access from the backend to the frame. The agent runs on the frame, and keeps
-                  a connection open to the backend.
+                  SSH needs direct network access from the backend to the frame. FrameOS Remote runs on the frame, and
+                  keeps a connection open to the backend.
                 </div>
                 <div>
-                  To use the agent, enable it under{' '}
+                  To use FrameOS Remote, enable it under{' '}
                   <Link
                     href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
                     className="frameos-link underline underline-offset-2 hover:no-underline"
@@ -636,22 +613,22 @@ function DeployTransportToggle({
             <button
               type="button"
               aria-pressed={deployWithAgent}
-              title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
+              title={remoteConnected ? 'FrameOS Remote connected' : 'FrameOS Remote not connected'}
               onClick={() => onChange(true)}
               className={clsx(
                 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                 deployWithAgent ? 'frameos-primary-action' : 'frameos-secondary-button'
               )}
             >
-              {agentConnected ? (
-                <FrameConnectionDot size="sm" title="FrameOS agent connected" />
+              {remoteConnected ? (
+                <FrameConnectionDot size="sm" title="FrameOS Remote connected" />
               ) : (
                 <span
                   aria-hidden="true"
                   className="h-2 w-2 shrink-0 rounded-full bg-slate-300 ring-1 ring-inset ring-slate-400/50"
                 />
               )}
-              <span>Agent</span>
+              <span>Remote</span>
             </button>
           </div>
           <DropdownMenu
@@ -659,9 +636,9 @@ function DeployTransportToggle({
             horizontal
             className="frameos-secondary-button flex h-9 w-9 items-center justify-center rounded-xl !px-0 !py-0 !shadow-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             buttonAdornment={
-              agentUpgradeNotice ? (
-                <span title={agentUpgradeTitle}>
-                  <AgentUpgradeIndicator notice={agentUpgradeNotice} />
+              remoteUpgradeNotice ? (
+                <span title={remoteUpgradeTitle}>
+                  <RemoteUpgradeIndicator notice={remoteUpgradeNotice} />
                 </span>
               ) : undefined
             }
@@ -677,30 +654,30 @@ function DeployTransportToggle({
                   ]
                 : []),
               {
-                label: 'Restart agent',
-                title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
-                disabled: selectedAgentDisconnected,
-                onClick: () => onRestartAgent(selectedTransport),
+                label: 'Restart Remote',
+                title: selectedRemoteDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                disabled: selectedRemoteDisconnected,
+                onClick: () => onRestartRemote(selectedTransport),
               },
-              ...(canDeployAgent
+              ...(canDeployRemote
                 ? [
                     {
-                      label: <DeployAgentLabel notice={agentUpgradeNotice} />,
-                      title: selectedAgentDisconnected
+                      label: <DeployRemoteLabel notice={remoteUpgradeNotice} />,
+                      title: selectedRemoteDisconnected
                         ? selectedConnectionUnavailableTitle
-                        : agentUpgradeTitle ?? selectedConnectionTitle,
-                      disabled: selectedAgentDisconnected,
-                      onClick: () => onDeployAgent(false, selectedTransport),
+                        : remoteUpgradeTitle ?? selectedConnectionTitle,
+                      disabled: selectedRemoteDisconnected,
+                      onClick: () => onDeployRemote(false, selectedTransport),
                     },
-                    ...(showRecompileAgent
+                    ...(showRecompileRemote
                       ? [
                           {
-                            label: 'Recompile and deploy agent',
-                            title: selectedAgentDisconnected
+                            label: 'Recompile and deploy Remote',
+                            title: selectedRemoteDisconnected
                               ? selectedConnectionUnavailableTitle
                               : selectedConnectionTitle,
-                            disabled: selectedAgentDisconnected,
-                            onClick: () => onDeployAgent(true, selectedTransport),
+                            disabled: selectedRemoteDisconnected,
+                            onClick: () => onDeployRemote(true, selectedTransport),
                           },
                         ]
                       : []),
@@ -719,7 +696,7 @@ function FrameBootstrapHelp(): JSX.Element {
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
-      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect the agent."
+      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect FrameOS Remote."
     >
       <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS bootstrap help" />
     </Tooltip>
@@ -972,7 +949,7 @@ function BuildrootSdCardSection({
             </select>
           </label>
           <label className="block space-y-1">
-            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Compilation mode</span>
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
             <select
               className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
               value={compilationMode}
@@ -1075,7 +1052,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
     setError(null)
     try {
       const response = await apiFetch(
-        `/api/frames/${frame.id}/frame_bootstrap?select_agent=1&regenerate=${regenerate ? 1 : 0}`,
+        `/api/frames/${frame.id}/frame_bootstrap?select_remote=1&regenerate=${regenerate ? 1 : 0}`,
         {
           method: 'POST',
         }
@@ -1116,9 +1093,9 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs FrameOS, starts the remote management
-          agent, and connects back to this backend. The installer supports most major Debian and Ubuntu releases,
-          including Raspberry Pi OS releases based on Debian.
+          Run this command on the device as a user with sudo access. It installs FrameOS, starts FrameOS Remote, and
+          connects back to this backend. The installer supports most major Debian and Ubuntu releases, including
+          Raspberry Pi OS releases based on Debian.
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
@@ -1263,7 +1240,7 @@ function EmbeddedFirmwareSection({
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
-    agentDeployConnected,
+    remoteDeployConnected,
     deployChangeDetails,
     deployPlansError,
     deployPlansLoading,
@@ -1277,9 +1254,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
     hideDeployPlanModal,
-    deployAgent,
+    deployRemote,
     loadDeployPlans,
-    restartAgent,
+    restartRemote,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setDeployDrawerView,
@@ -1307,11 +1284,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     ? 'embedded'
     : deployDrawerView
   const closeOnlyDrawerView = directSdCardFirstInstall || (isEmbeddedFrame && !embeddedFastDeployReady)
-  const canDeployAgent = true
+  const canDeployRemote = true
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
-  const showRecompileAgent = import.meta.env?.DEV === true
-  const agentUpgradeNotice = buildAgentUpgradeNotice(frame)
+  const showRecompileRemote = import.meta.env?.DEV === true
+  const remoteUpgradeNotice = buildRemoteUpgradeNotice(frame)
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -1405,13 +1382,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {deployTransportToggleVisible && !firstInstall ? (
                 <DeployTransportToggle
                   frameId={frame.id}
-                  agentConnected={agentDeployConnected}
-                  agentUpgradeNotice={agentUpgradeNotice}
-                  canDeployAgent={canDeployAgent}
+                  remoteConnected={remoteDeployConnected}
+                  remoteUpgradeNotice={remoteUpgradeNotice}
+                  canDeployRemote={canDeployRemote}
                   canCopyBootstrapScript={canCopyBootstrapScript}
-                  showRecompileAgent={showRecompileAgent}
-                  onDeployAgent={deployAgent}
-                  onRestartAgent={restartAgent}
+                  showRecompileRemote={showRecompileRemote}
+                  onDeployRemote={deployRemote}
+                  onRestartRemote={restartRemote}
                   deployWithAgent={deployWithAgent}
                   onChange={setDeployWithAgent}
                 />

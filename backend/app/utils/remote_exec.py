@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Tuple
+from typing import Literal, Tuple, cast
 
 import asyncio
 import base64
@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.ws.agent_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
-from app.ws.agent_bridge import frame_command_slot
+from app.ws.remote_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
+from app.ws.remote_bridge import frame_command_slot
 
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -43,20 +43,30 @@ CHUNK_ZLEVEL = 6               # good compromise
 UPLOAD_PROGRESS_INTERVAL_SECONDS = 30  # how often to log upload progress
 SCP_STALL_TIMEOUT_SECONDS = 90         # abort the transfer when no bytes move for this long
 SCP_MAX_ATTEMPTS = 3
+SHELL_UPLOAD_BASE64_CHUNK_SIZE = 48 * 1024
+REMOTE_SHELL_UPLOAD_MAX_SIZE = 8 * 1024 * 1024
 
-RemoteTransport = Literal["auto", "agent", "ssh"]
+RemoteTransport = Literal["auto", "remote", "ssh"]
+REMOTE_TRANSPORT_VALUES = {"auto", "remote", "agent", "ssh"}
+
+
+def normalize_remote_transport(transport: str) -> RemoteTransport:
+    if transport == "agent":
+        return "remote"
+    if transport not in {"auto", "remote", "ssh"}:
+        raise ValueError(f"Invalid remote transport: {transport}")
+    return cast(RemoteTransport, transport)
 
 # ---------------------------------------------------------------------------#
 # internal helpers                                                           #
 # ---------------------------------------------------------------------------#
 
 
-async def _use_agent(frame: Frame, redis: Redis, transport: RemoteTransport = "auto") -> bool:
+async def _use_remote(frame: Frame, redis: Redis, transport: str = "auto") -> bool:
     """
-    Returns True if we can use the WebSocket agent for this frame.
+    Returns True if we can use the WebSocket Remote for this frame.
     """
-    if transport not in {"auto", "agent", "ssh"}:
-        raise ValueError(f"Invalid remote transport: {transport}")
+    transport = normalize_remote_transport(transport)
     if transport == "ssh":
         return False
 
@@ -65,14 +75,14 @@ async def _use_agent(frame: Frame, redis: Redis, transport: RemoteTransport = "a
         if transport == "auto" and agent.get("deployWithAgent") is False:
             return False
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
-            raise RuntimeError(f"Frame {frame.id} agent disconnected, can't run commands. Try running over SSH instead.")
+            raise RuntimeError(f"Frame {frame.id} remote disconnected, can't run commands. Try running over SSH instead.")
         return True
-    if transport == "agent":
-        raise RuntimeError(f"Frame {frame.id} agent command transport is not enabled")
+    if transport == "remote":
+        raise RuntimeError(f"Frame {frame.id} remote command transport is not enabled")
     return False
 
 
-async def _exec_via_agent(
+async def _exec_via_remote(
     redis: Redis,
     frame: Frame,
     cmd: str,
@@ -92,13 +102,13 @@ async def _exec_via_agent(
             "timeout": timeout,
         }
 
-        await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
+        await redis.rpush(f"remote:cmd:{frame.id}", json.dumps(message).encode())
 
-        resp_key = f"agent:resp:{cmd_id}"
+        resp_key = f"remote:resp:{cmd_id}"
         res = await redis.blpop(resp_key, timeout=timeout)
         if res is None:  # ⬅︎ handle timeout
             raise TimeoutError(
-                f"_exec_via_agent via agent timed-out after {timeout}s "
+                f"_exec_via_remote via remote timed-out after {timeout}s "
                 f"(frame {frame.id}, command: {cmd})"
             )
 
@@ -106,10 +116,10 @@ async def _exec_via_agent(
         reply = json.loads(raw)
 
         if not reply.get("ok"):
-            raise RuntimeError(reply.get("error", "agent error"))
+            raise RuntimeError(reply.get("error", "remote error"))
 
 
-async def _file_write_via_agent(
+async def _file_write_via_remote(
     redis: Redis,
     frame: Frame,
     remote_path: str,
@@ -122,7 +132,7 @@ async def _file_write_via_agent(
         payload = {
             "type": "cmd",
             "name": "file_write",
-            "args": {"path": remote_path, "size": len(zipped)},
+            "args": {"path": remote_path, "size": len(zipped), "compression": "gzip"},
         }
 
         message = {
@@ -133,13 +143,13 @@ async def _file_write_via_agent(
             "blob": base64.b64encode(zipped).decode(),
         }
 
-        await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
+        await redis.rpush(f"remote:cmd:{frame.id}", json.dumps(message).encode())
 
-        resp_key = f"agent:resp:{cmd_id}"
+        resp_key = f"remote:resp:{cmd_id}"
         res = await redis.blpop(resp_key, timeout=timeout)
         if res is None:  # ⬅︎ handle timeout
             raise TimeoutError(
-                f"file_write via agent timed-out after {timeout}s "
+                f"file_write via remote timed-out after {timeout}s "
                 f"(frame {frame.id}, path {remote_path})"
             )
 
@@ -147,23 +157,126 @@ async def _file_write_via_agent(
         reply = json.loads(raw)
 
         if not reply.get("ok"):
-            raise RuntimeError(reply.get("error", "agent error"))
+            raise RuntimeError(reply.get("error", "remote error"))
 
-async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
+async def _stream_file_via_remote(db, redis, frame, remote_path, data, timeout: int = 120):
     size = len(data)
     last_report = time.monotonic()
-    await file_write_open_on_frame(frame.id, remote_path,
-                                   meta={"compression": "zlib"}, redis=redis)
+    try:
+        await file_write_open_on_frame(frame.id, remote_path,
+                                       meta={"compression": "zlib"}, redis=redis)
+    except Exception as exc:
+        raise RuntimeError(f"file_write_open failed: {exc}") from exc
+
     for off in range(0, len(data), CHUNK_SIZE):
         raw  = data[off:off+CHUNK_SIZE]
         comp = zlib.compress(raw, CHUNK_ZLEVEL)
-        await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+        try:
+            await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+        except Exception as exc:
+            raise RuntimeError(f"file_write_chunk failed: {exc}") from exc
         if time.monotonic() - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
             last_report = time.monotonic()
             sent = min(off + CHUNK_SIZE, size)
             await log(db, redis, frame.id, "stdout",
                       f"> upload progress: {print_size(sent)} / {print_size(size)}")
-    await file_write_close_on_frame(frame.id, redis=redis)
+    try:
+        await file_write_close_on_frame(frame.id, redis=redis)
+    except Exception as exc:
+        raise RuntimeError(f"file_write_close failed: {exc}") from exc
+
+
+def _remote_stream_upload_can_fallback(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "file_write_open missing" in message:
+        return True
+    if "file_write_open" not in message and "file_write_chunk" not in message:
+        return False
+    return any(token in message for token in ("unknown", "missing", "timed-out", "timeout"))
+
+
+def _remote_supports_stream_upload(frame: Frame) -> bool:
+    agent = frame.agent or {}
+    capabilities = agent.get("remoteCapabilities")
+    return isinstance(capabilities, dict) and capabilities.get("fileWriteStream") is True
+
+
+async def _shell_upload_via_remote(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    remote_path: str,
+    data: bytes,
+    timeout: int,
+) -> None:
+    encoded = base64.b64encode(data).decode("ascii")
+    parent = os.path.dirname(remote_path) or "."
+    upload_id = uuid.uuid4().hex
+    b64_path = f"{remote_path}.frameos-upload-{upload_id}.b64"
+    tmp_path = f"{remote_path}.frameos-upload-{upload_id}.tmp"
+    quoted_remote = shlex.quote(remote_path)
+    quoted_parent = shlex.quote(parent)
+    quoted_b64 = shlex.quote(b64_path)
+    quoted_tmp = shlex.quote(tmp_path)
+
+    await log(
+        db,
+        redis,
+        frame.id,
+        "stdout",
+        f"> using shell/base64 upload for {remote_path} ({print_size(len(data))})",
+    )
+    try:
+        await _exec_via_remote(
+            redis,
+            frame,
+            f"set -eu; mkdir -p {quoted_parent}; : > {quoted_b64}; rm -f {quoted_tmp}",
+            timeout,
+        )
+        last_report = time.monotonic()
+        for off in range(0, len(encoded), SHELL_UPLOAD_BASE64_CHUNK_SIZE):
+            chunk = encoded[off:off + SHELL_UPLOAD_BASE64_CHUNK_SIZE]
+            await _exec_via_remote(
+                redis,
+                frame,
+                f"printf %s {shlex.quote(chunk)} >> {quoted_b64}",
+                timeout,
+            )
+            if time.monotonic() - last_report >= UPLOAD_PROGRESS_INTERVAL_SECONDS:
+                last_report = time.monotonic()
+                sent = min((off + SHELL_UPLOAD_BASE64_CHUNK_SIZE) * 3 // 4, len(data))
+                await log(
+                    db,
+                    redis,
+                    frame.id,
+                    "stdout",
+                    f"> shell/base64 upload progress: {print_size(sent)} / {print_size(len(data))}",
+                )
+
+        await _exec_via_remote(
+            redis,
+            frame,
+            "set -eu; "
+            "if command -v base64 >/dev/null 2>&1; then "
+            f"base64 -d {quoted_b64} > {quoted_tmp}; "
+            "elif command -v python3 >/dev/null 2>&1; then "
+            "python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))' "
+            f"< {quoted_b64} > {quoted_tmp}; "
+            "else echo 'base64 command missing' >&2; exit 127; fi; "
+            f"mv {quoted_tmp} {quoted_remote}; rm -f {quoted_b64}",
+            timeout,
+        )
+    except Exception:
+        try:
+            await _exec_via_remote(
+                redis,
+                frame,
+                f"rm -f {quoted_b64} {quoted_tmp}",
+                min(timeout, 30),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        raise
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -181,21 +294,21 @@ async def run_commands(
     transport: RemoteTransport = "auto",
 ) -> None:
     """
-    Execute *commands* (in order) on the frame. Either via the WebSocket agent or via SSH.
+    Execute *commands* (in order) on the frame. Either via the WebSocket Remote or via SSH.
     """
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
-                await _exec_via_agent(redis, frame, cmd, timeout)
+                await _exec_via_remote(redis, frame, cmd, timeout)
             except Exception as e:
                 await log(
                     db,
                     redis,
                     frame.id,
                     "stderr",
-                    f"Agent exec error: {e}",
+                    f"Remote exec error: {e}",
                 )
                 raise
 
@@ -294,22 +407,41 @@ async def upload_file(
     """
     size = len(data)
 
-    if await _use_agent(frame, redis, transport):
+    if await _use_remote(frame, redis, transport):
         try:
-            await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
-            await _stream_file_via_agent(db, redis, frame, remote_path, data)
-            # TODO: restore faster path for smaller files?
-            # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
-            # else:
-            #     await _file_write_via_agent(redis, frame, remote_path, data, timeout)
+            await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via remote)")
+            if size <= REMOTE_SHELL_UPLOAD_MAX_SIZE and not _remote_supports_stream_upload(frame):
+                await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                return
+            await _stream_file_via_remote(db, redis, frame, remote_path, data)
             return
         except Exception as e:  # noqa: BLE001
+            if _remote_stream_upload_can_fallback(e):
+                await log(
+                    db,
+                    redis,
+                    frame.id,
+                    "stdout",
+                    f"> remote streaming upload unavailable for {remote_path}: {e}",
+                )
+                try:
+                    await _shell_upload_via_remote(db, redis, frame, remote_path, data, timeout)
+                    return
+                except Exception as fallback_exc:
+                    await log(
+                        db,
+                        redis,
+                        frame.id,
+                        "stderr",
+                        f"> ERROR writing {remote_path} ({print_size(size)} via remote fallback) - {fallback_exc}",
+                    )
+                    raise
             await log(
                 db,
                 redis,
                 frame.id,
                 "stderr",
-                f"> ERROR writing {remote_path} ({print_size(size)} via agent) - {e}",
+                f"> ERROR writing {remote_path} ({print_size(size)} via remote) - {e}",
             )
             raise
 
@@ -355,15 +487,15 @@ async def delete_path(
 ) -> None:
     """Delete a file or directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
-        from app.ws.agent_ws import file_delete_on_frame
+    if await _use_remote(frame, redis, transport):
+        from app.ws.remote_ws import file_delete_on_frame
 
         try:
-            await log(db, redis, frame.id, "stdout", f"> rm -rf {remote_path} (agent)")
+            await log(db, redis, frame.id, "stdout", f"> rm -rf {remote_path} (remote)")
             await file_delete_on_frame(frame.id, remote_path, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
-            await log(db, redis, frame.id, "stderr", f"Agent delete error ({e})")
+            await log(db, redis, frame.id, "stderr", f"Remote delete error ({e})")
             raise
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -386,15 +518,15 @@ async def rename_path(
 ) -> None:
     """Rename a file or directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
-        from app.ws.agent_ws import file_rename_on_frame
+    if await _use_remote(frame, redis, transport):
+        from app.ws.remote_ws import file_rename_on_frame
 
         try:
-            await log(db, redis, frame.id, "stdout", f"> mv {src} {dst} (agent)")
+            await log(db, redis, frame.id, "stdout", f"> mv {src} {dst} (remote)")
             await file_rename_on_frame(frame.id, src, dst, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
-            await log(db, redis, frame.id, "stderr", f"Agent rename error ({e})")
+            await log(db, redis, frame.id, "stderr", f"Remote rename error ({e})")
             raise
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -416,17 +548,17 @@ async def make_dir(
 ) -> None:
     """Create a directory on the device."""
 
-    if await _use_agent(frame, redis, transport):
-        from app.ws.agent_ws import file_mkdir_on_frame
+    if await _use_remote(frame, redis, transport):
+        from app.ws.remote_ws import file_mkdir_on_frame
 
         try:
             await log(
-                db, redis, frame.id, "stdout", f"> mkdir -p {remote_path} (agent)"
+                db, redis, frame.id, "stdout", f"> mkdir -p {remote_path} (remote)"
             )
             await file_mkdir_on_frame(frame.id, remote_path, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
-            await log(db, redis, frame.id, "stderr", f"Agent mkdir error ({e})")
+            await log(db, redis, frame.id, "stderr", f"Remote mkdir error ({e})")
             raise
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -437,7 +569,7 @@ async def make_dir(
         await remove_ssh_connection(db, redis, ssh, frame)
 
 
-async def _run_command_agent(
+async def _run_command_remote(
     db: Session,
     redis: Redis,
     frame: Frame,
@@ -448,8 +580,8 @@ async def _run_command_agent(
     log_command: str | bool = True,
 ) -> Tuple[int, str, str]:
     """
-    Execute *cmd* via the WebSocket agent, collecting stdout/stderr that are
-    streamed through Redis (see STREAM_KEY in app.ws.agent_bridge).
+    Execute *cmd* via the WebSocket Remote, collecting stdout/stderr that are
+    streamed through Redis (see STREAM_KEY in app.ws.remote_bridge).
     Returns (exit_status, stdout, stderr).
     """
     async with frame_command_slot(frame.id):
@@ -459,7 +591,7 @@ async def _run_command_agent(
         if log_command:
             await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
-        from app.ws.agent_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
+        from app.ws.remote_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
 
         job = {
             "id":       cmd_id,
@@ -481,7 +613,7 @@ async def _run_command_agent(
         while True:
             res = await redis.blpop([stream_key, resp_key], timeout=timeout)
             if res is None:
-                raise TimeoutError(f"agent timed-out after {timeout}s (cmd: {cmd})")
+                raise TimeoutError(f"remote timed-out after {timeout}s (cmd: {cmd})")
 
             key_bytes, raw = res
             key = key_bytes.decode()
@@ -598,11 +730,11 @@ async def run_command(
     """
     Run a single *command* on *frame* and capture its textual output.
 
-    • If the WebSocket agent is enabled & connected it is used first
+    • If the WebSocket Remote is enabled & connected it is used first
     • Otherwise the function falls back to SSH.
 
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
-    if await _use_agent(frame, redis, transport):
-        return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
+    if await _use_remote(frame, redis, transport):
+        return await _run_command_remote(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
     return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)

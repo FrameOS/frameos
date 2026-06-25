@@ -2,10 +2,10 @@
   "projects": {
     "frameos": {
       "include": ["frameos"],
-      "exclude": ["frameos/agent"]
+      "exclude": ["frameos/remote"]
     },
-    "agent": {
-      "include": ["frameos/agent"]
+    "remote": {
+      "include": ["frameos/remote"]
     },
     "docker": {
       "include": ["repo", "backend", "frontend", "frameos", "Dockerfile", ".dockerignore", ".github/workflows/docker-publish-multi.yml", "project-folders.json"]

@@ -31,7 +31,12 @@ def main(argv: list[str]) -> int:
     if argv and argv[0].startswith("--key="):
         key = argv.pop(0).split("=", 1)[1].strip()
         if key:
-            keys = (key,)
+            if key == "remote":
+                keys = ("remote", "agent")
+            elif key == "agent":
+                keys = ("agent", "remote")
+            else:
+                keys = (key,)
     for arg in argv:
         version = version_from_json(Path(arg), keys)
         if version:

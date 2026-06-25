@@ -1,7 +1,7 @@
+import versions from '../../../versions.json'
+
 export type FrameCompilationMode = 'static' | 'shared' | 'shared-scenes' | 'precompiled'
 export type FrameCompilationModeOptionValue = '' | FrameCompilationMode
-export type FrameCrossCompilation = 'auto' | 'always' | 'never'
-export type FrameCrossCompilationOptionValue = '' | FrameCrossCompilation
 
 export interface FrameBuildOption<T extends string = string> {
   value: T
@@ -9,25 +9,15 @@ export interface FrameBuildOption<T extends string = string> {
 }
 
 export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeOptionValue>[] = [
-  { value: '', label: 'Use binaries if possible, compile from source if not' },
-  { value: 'precompiled', label: 'Use precompiled binaries if exist for target OS' },
-  { value: 'static', label: 'Compile a single binary' },
-  { value: 'shared', label: 'Compile drivers and scenes separately' },
-  { value: 'shared-scenes', label: 'Compile drivers separately, scenes as one library' },
-]
-
-export const frameCrossCompilationOptions: FrameBuildOption<FrameCrossCompilation>[] = [
-  { value: 'auto', label: 'Use global build environment' },
-  { value: 'always', label: 'Always compile on backend (this server)' },
-  { value: 'never', label: 'Always compile on device' },
+  { value: '', label: 'Prefer binaries, build from source if needed' },
+  { value: 'precompiled', label: `Install precompiled binaries (version ${versions.frameos.split('+')[0]})` },
+  { value: 'static', label: 'Build from source - single binary' },
+  { value: 'shared', label: 'Build from source - drivers and scenes separately' },
+  { value: 'shared-scenes', label: 'Build from source - drivers separately, scenes combined' },
 ]
 
 export function normalizeFrameCompilationMode(value: unknown): FrameCompilationMode {
   return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
     ? value
     : 'precompiled'
-}
-
-export function normalizeFrameCrossCompilation(value: unknown): FrameCrossCompilation {
-  return value === 'always' || value === 'never' ? value : 'auto'
 }

@@ -207,8 +207,8 @@ export function FrameConnection({ frame }: FrameConnectionProps): JSX.Element | 
     <FrameConnectionDot
       title={
         frame?.agent?.agentRunCommands
-          ? 'FrameOS agent connected and ready to run commands'
-          : 'FrameOS agent connected'
+          ? 'FrameOS Remote connected and ready to run commands'
+          : 'FrameOS Remote connected'
       }
     />
   ) : null
