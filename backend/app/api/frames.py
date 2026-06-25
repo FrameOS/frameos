@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 import contextlib
 import aiofiles
@@ -3182,6 +3182,157 @@ async def api_frame_delete(
         raise HTTPException(status_code=404, detail="Frame not found")
 
 
+REBOOT_CONTEXT_LOOKBACK = timedelta(minutes=30)
+
+
+def _json_log_payload(line: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(line)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _reboot_kind_from_service_result(service_result: str | None) -> str | None:
+    if not service_result:
+        return None
+    if service_result == "oom-kill":
+        return "oom"
+    if service_result == "watchdog":
+        return "watchdog"
+    if service_result == "success":
+        return "initiated"
+    return "error"
+
+
+def _reboot_details_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    reboot = payload.get("reboot")
+    if not isinstance(reboot, dict):
+        return {}
+
+    details: dict[str, Any] = {}
+    field_map = {
+        "bootId": "boot_id",
+        "boot_id": "boot_id",
+        "previousBootId": "previous_boot_id",
+        "previous_boot_id": "previous_boot_id",
+        "kind": "kind",
+        "reason": "reason",
+        "source": "source",
+        "message": "message",
+        "error": "error",
+        "serviceResult": "service_result",
+        "service_result": "service_result",
+        "exitCode": "exit_code",
+        "exit_code": "exit_code",
+        "exitStatus": "exit_status",
+        "exit_status": "exit_status",
+    }
+    for source_key, target_key in field_map.items():
+        value = reboot.get(source_key)
+        if value is not None and value != "":
+            details[target_key] = str(value)
+
+    if "kind" not in details:
+        kind = _reboot_kind_from_service_result(details.get("service_result"))
+        if kind:
+            details["kind"] = kind
+    return details
+
+
+def _line_without_prompt(line: str) -> str:
+    return line[2:].strip() if line.startswith("> ") else line.strip()
+
+
+def _reboot_hint_from_log(log: Log) -> dict[str, Any] | None:
+    line = _line_without_prompt(log.line)
+    lower = line.lower()
+
+    if any(token in lower for token in ("oom-kill", "oom killer", "out of memory", "killed process")):
+        return {"kind": "oom", "reason": "OOM restart", "source": "system", "message": line}
+
+    if "reload failed" in lower or "reload request failed" in lower:
+        return {"kind": "error", "reason": "Reload error triggered FrameOS restart", "source": "backend", "error": line}
+
+    if log.type == "stderr" or any(token in lower for token in (" failed", " error", "exception")):
+        return {"kind": "error", "reason": "Error before restart", "source": "backend", "error": line}
+
+    if "rebooting device" in lower:
+        return {"kind": "initiated", "reason": line, "source": "backend", "message": line}
+
+    if line in {"sudo reboot", "/sbin/shutdown -r now", "sudo shutdown -r now"} or "systemctl reboot" in lower:
+        return {"kind": "initiated", "reason": "Device reboot requested", "source": "backend", "message": line}
+
+    if "restarting frameos" in lower or line in {
+        "sudo systemctl restart frameos.service",
+        "systemctl restart frameos.service",
+        "sudo systemctl start frameos.service",
+    }:
+        return {"kind": "initiated", "reason": "FrameOS restart requested", "source": "backend", "message": line}
+
+    return None
+
+
+def _reboot_hint_for_boot(logs_before_boot: list[Log]) -> dict[str, Any]:
+    for log in reversed(logs_before_boot):
+        hint = _reboot_hint_from_log(log)
+        if hint:
+            return hint
+    return {}
+
+
+def _merge_reboot_details(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
+    if not secondary:
+        return primary
+    merged = {**primary}
+    primary_kind = primary.get("kind")
+    secondary_kind = secondary.get("kind")
+    if not primary_kind or primary_kind in {"initiated", "clean", "unknown"} or secondary_kind in {"oom", "error"}:
+        merged.update(secondary)
+    return merged
+
+
+def _frame_reboot_markers(db: Session, frame: Frame, since: Optional[datetime] = None) -> list[dict[str, Any]]:
+    query = db.query(Log).filter_by(project_id=frame.project_id, frame_id=frame.id)
+    if since is not None:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        query = query.filter(Log.timestamp >= (since_utc - REBOOT_CONTEXT_LOOKBACK).replace(tzinfo=None))
+
+    markers: list[dict[str, Any]] = []
+    context_logs: list[Log] = []
+    for log_entry in query.order_by(Log.timestamp).all():
+        payload = _json_log_payload(log_entry.line) if log_entry.type == "webhook" else None
+        if payload and payload.get("event") == "bootup":
+            details = _reboot_details_from_payload(payload)
+            lookback_start = log_entry.timestamp - REBOOT_CONTEXT_LOOKBACK
+            nearby_context = [log for log in context_logs if log.timestamp >= lookback_start]
+            details = _merge_reboot_details(details, _reboot_hint_for_boot(nearby_context))
+            timestamp = log_entry.timestamp
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            else:
+                timestamp = timestamp.astimezone(timezone.utc)
+            markers.append(
+                {
+                    "timestamp": timestamp.isoformat(),
+                    "log_id": log_entry.id,
+                    **details,
+                }
+            )
+        context_logs.append(log_entry)
+        if len(context_logs) > 200:
+            context_logs = context_logs[-200:]
+
+    if since is not None:
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        return [
+            marker
+            for marker in markers
+            if datetime.fromisoformat(marker["timestamp"]).astimezone(timezone.utc) >= since_utc
+        ]
+    return markers
+
+
 @api_project.get("/frames/{id:int}/metrics", response_model=FrameMetricsResponse)
 async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
@@ -3189,7 +3340,7 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
         metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
-        return {"metrics": [metric.to_dict() for metric in metrics]}
+        return {"metrics": [metric.to_dict() for metric in metrics], "reboots": _frame_reboot_markers(db, frame)}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -3210,6 +3361,6 @@ async def api_frame_recent_metrics(
             since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
             query = query.filter(Metrics.timestamp >= since_utc.replace(tzinfo=None))
         metrics = query.order_by(Metrics.timestamp.desc()).limit(limit).all()
-        return {"metrics": [metric.to_dict() for metric in reversed(metrics)]}
+        return {"metrics": [metric.to_dict() for metric in reversed(metrics)], "reboots": _frame_reboot_markers(db, frame, since)}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

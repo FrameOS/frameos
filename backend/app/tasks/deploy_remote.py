@@ -218,6 +218,7 @@ class RemoteDeployer(FrameDeployer):
                             await self._verify_remote_transport("before switching release")
 
                         # 4. Atomically switch *current* → new release + housekeeping
+                        previous_remote_connections = await self._remote_connection_keys()
                         previous_remote_process = await self._remote_service_process_signature()
                         await self._switch_current_release()
 
@@ -228,6 +229,7 @@ class RemoteDeployer(FrameDeployer):
                         else:
                             await self.restart_service(REMOTE_SERVICE)
                             await self._wait_for_remote_release(previous_remote_process)
+                        await self._wait_for_remote_websocket_reconnection(previous_remote_connections)
                         await self._disable_legacy_service()
 
                         await self._cleanup_old_builds()
@@ -748,6 +750,15 @@ class RemoteDeployer(FrameDeployer):
         signature = "\n".join(output).strip()
         return signature or None
 
+    async def _remote_connection_keys(self) -> set[str]:
+        if self.redis is None:
+            return set()
+
+        keys: set[str] = set()
+        async for key in self.redis.scan_iter(match=f"frame:{self.frame.id}:conn:*"):
+            keys.add(key.decode(errors="replace") if isinstance(key, bytes) else str(key))
+        return keys
+
     async def _wait_for_remote_release(self, previous_process_signature: str | None = None) -> None:
         expected_binary = f"{self._release_dir()}/frameos_remote"
         quoted_expected = shlex.quote(expected_binary)
@@ -782,6 +793,23 @@ class RemoteDeployer(FrameDeployer):
             await asyncio.sleep(3)
 
         raise RuntimeError(f"Restarted FrameOS Remote did not report the staged release: {last_error}")
+
+    async def _wait_for_remote_websocket_reconnection(self, previous_connection_keys: set[str]) -> None:
+        if self.redis is None:
+            return
+
+        deadline = asyncio.get_event_loop().time() + 90
+        await self.log("stdout", "- Waiting for FrameOS Remote websocket reconnection")
+
+        while asyncio.get_event_loop().time() < deadline:
+            current_connection_keys = await self._remote_connection_keys()
+            new_connection_keys = current_connection_keys - previous_connection_keys
+            if new_connection_keys or (not previous_connection_keys and current_connection_keys):
+                await self.log("stdout", "- FrameOS Remote reconnected to this backend")
+                return
+            await asyncio.sleep(3)
+
+        raise RuntimeError("FrameOS Remote restarted but did not reconnect to this backend")
 
     # --------------- MISC ------------------------------------------------ #
 

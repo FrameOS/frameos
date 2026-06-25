@@ -26,6 +26,7 @@ import { secureToken } from '../../utils/secureToken'
 import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
   type ChangeDetail,
+  CURRENT_FRAMEOS_REMOTE_VERSION,
   CURRENT_FRAMEOS_VERSION,
   type DeployPlanResponse,
   type DeployRecommendation,
@@ -64,6 +65,18 @@ export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy
 
 function isRemoteDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+}
+
+function remoteCanBeDeployed(agent?: FrameType['agent']): boolean {
+  return Boolean(agent?.agentEnabled && agent?.agentSharedSecret)
+}
+
+function normalizeVersion(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const version = value.trim()
+  return version ? version.split('+')[0] : null
 }
 
 function frameCanUseFastDeploy(frame: FrameType | null | undefined, requiresRecompilation: boolean): boolean {
@@ -359,6 +372,16 @@ function keyLabel(key: keyof FrameType): string {
   return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function deploymentModeLabel(mode: unknown): string {
+  if (mode === 'buildroot') {
+    return 'Buildroot'
+  }
+  if (mode === 'embedded') {
+    return 'ESP32'
+  }
+  return 'Raspberry Pi OS'
+}
+
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   if (mode === 'buildroot') {
     return FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
@@ -446,6 +469,45 @@ function sceneChangeDetails(
   return details
 }
 
+function frameChangeDetailLabel(key: keyof FrameType, previousValue: unknown, nextValue: unknown): string {
+  if (key === 'mode') {
+    return `${deploymentModeLabel(previousValue)} → ${deploymentModeLabel(nextValue)}`
+  }
+  return keyLabel(key)
+}
+
+function remoteUpgradeChangeDetail(frame: Partial<FrameType> | null | undefined): ChangeDetail | null {
+  const currentVersion = normalizeVersion(CURRENT_FRAMEOS_REMOTE_VERSION)
+  if (!currentVersion || currentVersion === 'dev' || !remoteCanBeDeployed(frame?.agent)) {
+    return null
+  }
+
+  const previousVersion = normalizeVersion(frame?.agent?.agentVersion)
+  if (previousVersion === currentVersion) {
+    return null
+  }
+
+  return {
+    label: `FrameOS Remote ${previousVersion ?? 'unreported'} -> ${currentVersion}`,
+    requiresFullDeploy: true,
+    remoteVersionChange: {
+      previousVersion,
+      currentVersion,
+    },
+  }
+}
+
+function deployChangeDetails(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined,
+  mode: FrameType['mode'],
+  includeFrameosVersion = true
+): ChangeDetail[] {
+  const details = computeChangeDetails(previous, next, mode, includeFrameosVersion)
+  const remoteUpgrade = remoteUpgradeChangeDetail(next)
+  return remoteUpgrade ? [...details, remoteUpgrade] : details
+}
+
 function computeChangeDetails(
   previous: Partial<FrameType> | null | undefined,
   next: Partial<FrameType> | null | undefined,
@@ -459,8 +521,9 @@ function computeChangeDetails(
   for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
-        label: keyLabel(key),
+        label: frameChangeDetailLabel(key, previous?.[key], next?.[key]),
         requiresFullDeploy:
+          key === 'mode' ||
           recompileFields.has(key) ||
           (includeFrameosVersion && frameKeyRequiresVersionUpgrade(key, previousFrameosVersion)),
       })
@@ -471,7 +534,7 @@ function computeChangeDetails(
 
   if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
-      label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
+      label: `FrameOS ${previousFrameosVersion ?? 'unreported'} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
       frameosVersionChange: {
         kind: 'upgrade',
@@ -529,26 +592,29 @@ function firstDeployChangeDetails(
       mode === 'buildroot' ? 'Install Buildroot target and frame services' : 'Install Raspberry Pi OS frame services',
     requiresFullDeploy: true,
   })
+  const remoteUpgrade = remoteUpgradeChangeDetail(frame)
+  if (remoteUpgrade) {
+    details.push(remoteUpgrade)
+  }
 
   return details
 }
 
 function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
+  const priority = (change: ChangeDetail): number => {
+    if (change.remoteVersionChange) {
+      return 0
+    }
+    if (change.frameosVersionChange) {
+      return 1
+    }
+    return change.requiresFullDeploy ? 2 : 3
+  }
+
   return changes
     .map((change, index) => ({ change, index }))
     .sort((first, second) => {
-      const firstPriority = first.change.label.startsWith('FrameOS upgrade')
-        ? 0
-        : first.change.requiresFullDeploy
-        ? 1
-        : 2
-      const secondPriority = second.change.label.startsWith('FrameOS upgrade')
-        ? 0
-        : second.change.requiresFullDeploy
-        ? 1
-        : 2
-
-      return firstPriority - secondPriority || first.index - second.index
+      return priority(first.change) - priority(second.change) || first.index - second.index
     })
     .map(({ change }) => change)
 }
@@ -674,7 +740,7 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
     case 'ssh_pass':
       return summarizeSecret(value)
     case 'mode':
-      return value === 'buildroot' ? 'Buildroot' : 'Raspberry Pi OS'
+      return deploymentModeLabel(value)
     case 'frame_admin_auth': {
       const auth = value as FrameType['frame_admin_auth']
       if (!auth?.enabled) {
@@ -1465,7 +1531,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
       (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
-        !isFrameAdminMode && !frame?.archived && computeChangeDetails(lastDeploy, frame, mode).length > 0,
+        !isFrameAdminMode && !frame?.archived && deployChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -1474,7 +1540,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChangeDetails: [
       (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
       (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode || frame?.archived ? [] : computeChangeDetails(lastDeploy, frame, mode),
+        isFrameAdminMode || frame?.archived ? [] : deployChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -1489,7 +1555,7 @@ export const frameLogic = kea<frameLogicType>([
           return false
         }
         const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
-        return computeChangeDetails(lastDeploy, pendingFrame, mode).some((change) => change.requiresFullDeploy)
+        return deployChangeDetails(lastDeploy, pendingFrame, mode).some((change) => change.requiresFullDeploy)
       },
     ],
     deployChangeDetails: [
@@ -1498,7 +1564,7 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-          ? sortDeployChangeDetails(computeChangeDetails(lastDeploy, frameForm, mode))
+          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
           : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [

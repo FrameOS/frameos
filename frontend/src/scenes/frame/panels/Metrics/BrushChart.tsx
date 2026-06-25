@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { scaleTime, scaleLinear } from '@visx/scale'
 import { Brush } from '@visx/brush'
 import { Bounds } from '@visx/brush/lib/types'
@@ -331,34 +331,141 @@ function RebootMarkers({
   stroke: string
   compact?: boolean
 }) {
+  const [hoveredMarker, setHoveredMarker] = useState<(RebootMarker & { x: number }) | null>(null)
+
   if (markers.length === 0 || xMax <= 0 || yMax <= 0) {
     return null
   }
 
-  return (
-    <Group pointerEvents="none">
-      {markers.map((marker) => {
-        const x = xScale(marker.timestamp)
-        if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > xMax) {
-          return null
-        }
-        return (
+  const visibleMarkers = markers
+    .map((marker) => {
+      const x = xScale(marker.timestamp)
+      return typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= xMax ? { ...marker, x } : null
+    })
+    .filter(Boolean) as (RebootMarker & { x: number })[]
+
+  if (visibleMarkers.length === 0) {
+    return null
+  }
+
+  if (compact) {
+    return (
+      <Group pointerEvents="none">
+        {visibleMarkers.map((marker) => (
           <line
-            key={marker.logId ?? marker.timestamp.getTime()}
-            x1={x}
-            x2={x}
+            key={marker.logId ?? marker.metricId ?? marker.timestamp.getTime()}
+            x1={marker.x}
+            x2={marker.x}
             y1={0}
             y2={yMax}
             stroke={stroke}
-            strokeWidth={compact ? 1 : 1.5}
-            strokeDasharray={compact ? '3 3' : '4 3'}
-            opacity={compact ? 0.7 : 0.85}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            opacity={0.7}
           >
-            <title>{`Reboot ${rebootTimestampFormatter.format(marker.timestamp)}`}</title>
+            <title>{rebootTooltipTitle(marker)}</title>
           </line>
-        )
-      })}
+        ))}
+      </Group>
+    )
+  }
+
+  return (
+    <Group>
+      {visibleMarkers.map((marker) => (
+        <React.Fragment key={marker.logId ?? marker.metricId ?? marker.timestamp.getTime()}>
+          <line
+            x1={marker.x}
+            x2={marker.x}
+            y1={0}
+            y2={yMax}
+            stroke={stroke}
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            opacity={0.85}
+          />
+          <rect
+            x={Math.max(marker.x - 6, 0)}
+            y={0}
+            width={Math.min(12, xMax - Math.max(marker.x - 6, 0))}
+            height={yMax}
+            fill="transparent"
+            pointerEvents="all"
+            onPointerEnter={() => setHoveredMarker(marker)}
+            onPointerMove={() => setHoveredMarker(marker)}
+            onPointerLeave={() => setHoveredMarker(null)}
+          />
+        </React.Fragment>
+      ))}
+      {hoveredMarker ? <RebootMarkerTooltip marker={hoveredMarker} xMax={xMax} yMax={yMax} stroke={stroke} /> : null}
     </Group>
+  )
+}
+
+function rebootKindLabel(kind?: string): string {
+  switch (kind) {
+    case 'initiated':
+      return 'Initiated restart'
+    case 'oom':
+      return 'OOM restart'
+    case 'error':
+      return 'Error restart'
+    case 'watchdog':
+      return 'Watchdog restart'
+    case 'clean':
+      return 'Clean restart'
+    default:
+      return 'Restart'
+  }
+}
+
+function rebootTooltipRows(marker: RebootMarker): string[] {
+  return [
+    rebootTimestampFormatter.format(marker.timestamp),
+    marker.reason || rebootKindLabel(marker.kind),
+    marker.source ? `Source: ${marker.source}` : '',
+    marker.message ? `Message: ${marker.message}` : '',
+    marker.error ? `Error: ${marker.error}` : '',
+    marker.serviceResult ? `Service result: ${marker.serviceResult}` : '',
+    marker.exitCode ? `Exit code: ${marker.exitCode}` : '',
+    marker.exitStatus ? `Exit status: ${marker.exitStatus}` : '',
+    marker.previousBootId && marker.bootId ? `Boot: ${marker.previousBootId} -> ${marker.bootId}` : '',
+  ].filter(Boolean)
+}
+
+function rebootTooltipTitle(marker: RebootMarker): string {
+  return rebootTooltipRows(marker).join('\n')
+}
+
+function RebootMarkerTooltip({
+  marker,
+  xMax,
+  yMax,
+  stroke,
+}: {
+  marker: RebootMarker & { x: number }
+  xMax: number
+  yMax: number
+  stroke: string
+}) {
+  const rows = rebootTooltipRows(marker)
+  const widestRowLength = rows.reduce((length, row) => Math.max(length, row.length), 0)
+  const tooltipWidth = Math.min(Math.max(190, widestRowLength * 6.5 + 24), Math.max(190, xMax))
+  const tooltipHeight = 18 + rows.length * 16
+  const rawLeft = marker.x + tooltipWidth + 12 <= xMax ? marker.x + 12 : marker.x - tooltipWidth - 12
+  const left = Math.min(Math.max(rawLeft, 0), Math.max(xMax - tooltipWidth, 0))
+  const top = Math.min(Math.max(12, 0), Math.max(yMax - tooltipHeight, 0))
+
+  return (
+    <g transform={`translate(${left}, ${top})`} pointerEvents="none">
+      <rect x={2} y={3} width={tooltipWidth} height={tooltipHeight} rx={6} fill="rgba(0,0,0,0.22)" />
+      <rect width={tooltipWidth} height={tooltipHeight} rx={6} fill="rgba(17,24,39,0.94)" stroke={stroke} />
+      {rows.map((row, index) => (
+        <text key={`${row}-${index}`} x={10} y={18 + index * 16} fontFamily="Arial" fontSize={11} fill="#f8fafc">
+          {row}
+        </text>
+      ))}
+    </g>
   )
 }
 

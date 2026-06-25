@@ -11,6 +11,10 @@ export interface ChangeDetail {
     previousVersion?: string | null
     currentVersion: string
   }
+  remoteVersionChange?: {
+    previousVersion?: string | null
+    currentVersion: string
+  }
 }
 
 export interface SummaryItem {
@@ -64,6 +68,11 @@ export interface FullDeployPlanResponse {
     installed: boolean
   }
   ssh_keys_need_install: boolean
+  remote_upgrade?: {
+    previous_version?: string | null
+    current_version: string
+    transport: 'remote' | 'ssh' | string
+  } | null
   post_deploy?: {
     i2c?: {
       needs_boot_config_line?: boolean
@@ -522,6 +531,14 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.ssh_keys_need_install) {
     items.push({ label: 'SSH keys', value: 'Selected deploy keys will be installed on the frame' })
   }
+  if (fullPlan.remote_upgrade) {
+    items.push({
+      label: 'FrameOS Remote',
+      value: `Upgrade ${fullPlan.remote_upgrade.previous_version ?? 'unreported'} -> ${
+        fullPlan.remote_upgrade.current_version
+      } before full deploy`,
+    })
+  }
   if (fullPlan.post_deploy?.bootconfig_changes?.length) {
     items.push({
       label: 'Boot config',
@@ -611,7 +628,7 @@ export function buildDeployRecommendation(
 ): DeployRecommendation {
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
   const fullDeployChanges = deployChangeDetails
-    .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
+    .filter((change) => change.requiresFullDeploy && !change.frameosVersionChange)
     .map((change) => change.label)
 
   if (!hasPreviousDeploy) {

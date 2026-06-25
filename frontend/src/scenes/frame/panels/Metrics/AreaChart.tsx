@@ -133,6 +133,9 @@ function formatMetricTick(value: number, unit?: MetricSeries['unit']): string {
   if (unit === 'pixels') {
     return `${value}px`
   }
+  if (unit === 'seconds') {
+    return `${value}s`
+  }
   return value >= 1000000
     ? `${Math.floor(value / 100000) / 10}M`
     : value >= 1000
@@ -159,6 +162,9 @@ function formatMetricValue(value: number, unit?: MetricSeries['unit']): string {
   }
   if (unit === 'pixels') {
     return `${formatMetricNumber(value)}px`
+  }
+  if (unit === 'seconds') {
+    return `${formatMetricNumber(value)}s`
   }
   return formatMetricNumber(value)
 }

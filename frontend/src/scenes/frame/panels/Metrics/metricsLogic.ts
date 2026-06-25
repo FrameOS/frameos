@@ -1,11 +1,13 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { MetricsType } from '../../../../types'
+import { router, urlToAction } from 'kea-router'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
 import type { metricsLogicType } from './metricsLogicType'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { urls } from '../../../../urls'
 
 export interface metricsLogicProps {
   frameId: number
@@ -21,7 +23,7 @@ export interface MetricSeries {
   label: string
   color: string
   axis: 'left' | 'right'
-  unit?: 'bytes' | 'percent' | 'pixels'
+  unit?: 'bytes' | 'percent' | 'pixels' | 'seconds'
   data: MetricPoint[]
 }
 
@@ -36,21 +38,57 @@ export interface RebootMarker {
   metricId?: string
   bootId?: string
   previousBootId?: string
+  kind?: string
+  reason?: string
+  source?: string
+  message?: string
+  error?: string
+  serviceResult?: string
+  exitCode?: string
+  exitStatus?: string
 }
+
+type RebootMarkerStringField =
+  | 'bootId'
+  | 'previousBootId'
+  | 'kind'
+  | 'reason'
+  | 'source'
+  | 'message'
+  | 'error'
+  | 'serviceResult'
+  | 'exitCode'
+  | 'exitStatus'
 
 interface MetricsResponseReboot {
   timestamp?: string
   log_id?: number | string
+  boot_id?: string
+  previous_boot_id?: string
+  kind?: string
+  reason?: string
+  source?: string
+  message?: string
+  error?: string
+  service_result?: string
+  exit_code?: string
+  exit_status?: string
 }
 
-export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | 'all' | 'custom'
+interface MetricsResponse {
+  metrics: MetricsType[]
+  reboots?: MetricsResponseReboot[]
+}
+
+export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '3d' | '7d' | 'all' | 'custom'
 
 export const metricsTimeRangeOptions: { value: MetricsTimeRangePreset; label: string }[] = [
   { value: '1h', label: 'Last 1h' },
   { value: '6h', label: 'Last 6h' },
   { value: '12h', label: 'Last 12h' },
   { value: '24h', label: 'Last 24h' },
-  { value: '7d', label: 'Last 7d' },
+  { value: '3d', label: 'Last 3 days' },
+  { value: '7d', label: 'Last 7 days' },
   { value: 'all', label: 'All' },
 ]
 
@@ -64,14 +102,20 @@ const MIN_VISIBLE_MS = 1000
 const CURRENT_TIME_UPDATE_MS = 60 * 1000
 const GAP_THRESHOLD_MULTIPLIER = 1.75
 const MIN_GAP_CONNECTION_MS = 20 * 60 * 1000
+const LOG_REBOOT_MARKER_DUPLICATE_WINDOW_MS = 5 * 60 * 1000
 const DEFAULT_TIME_RANGE_PRESET: MetricsTimeRangePreset = '1h'
+const METRICS_RANGE_HASH_KEY = 'metricsRange'
+const METRICS_RANGE_START_HASH_KEY = 'metricsStart'
+const METRICS_RANGE_END_HASH_KEY = 'metricsEnd'
 const METRICS_TIME_RANGE_MS: Partial<Record<MetricsTimeRangePreset, number>> = {
   '1h': 60 * 60 * 1000,
   '6h': 6 * 60 * 60 * 1000,
   '12h': 12 * 60 * 60 * 1000,
   '24h': 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
 }
+const METRICS_TIME_RANGE_PRESET_VALUES = ['1h', '6h', '12h', '24h', '3d', '7d', 'all'] as const
 const SINGLE_SERIES_COLOR = 'var(--frameos-color-evergreen)'
 const METRIC_SERIES_COLORS = [
   'var(--frameos-color-brass)',
@@ -99,6 +143,17 @@ function parseMetricTimestamp(timestamp: string): number {
   return Date.parse(hasTimeZone ? timestamp : `${timestamp}Z`)
 }
 
+function routeValue(params: Record<string, unknown>, key: string): string | null {
+  const value = params[key]
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value) && typeof value[0] === 'string') {
+    return value[0]
+  }
+  return null
+}
+
 function parseRebootMarker(marker: MetricsResponseReboot): RebootMarker | null {
   if (!marker.timestamp) {
     return null
@@ -110,7 +165,52 @@ function parseRebootMarker(marker: MetricsResponseReboot): RebootMarker | null {
   return {
     timestamp: new Date(timestamp),
     logId: marker.log_id === undefined ? undefined : String(marker.log_id),
+    bootId: marker.boot_id === undefined ? undefined : String(marker.boot_id),
+    previousBootId: marker.previous_boot_id === undefined ? undefined : String(marker.previous_boot_id),
+    kind: marker.kind === undefined ? undefined : String(marker.kind),
+    reason: marker.reason === undefined ? undefined : String(marker.reason),
+    source: marker.source === undefined ? undefined : String(marker.source),
+    message: marker.message === undefined ? undefined : String(marker.message),
+    error: marker.error === undefined ? undefined : String(marker.error),
+    serviceResult: marker.service_result === undefined ? undefined : String(marker.service_result),
+    exitCode: marker.exit_code === undefined ? undefined : String(marker.exit_code),
+    exitStatus: marker.exit_status === undefined ? undefined : String(marker.exit_status),
   }
+}
+
+function rebootMarkerFromRecord(
+  record: Record<string, unknown>,
+  fallbackTimestamp: Date,
+  fallbackMetricId?: string
+): RebootMarker {
+  const timestampValue = record.timestamp
+  const timestamp =
+    typeof timestampValue === 'string' && Number.isFinite(parseMetricTimestamp(timestampValue))
+      ? new Date(parseMetricTimestamp(timestampValue))
+      : fallbackTimestamp
+  const marker: RebootMarker = {
+    timestamp,
+    metricId: fallbackMetricId,
+  }
+  const stringFields: [RebootMarkerStringField, string[]][] = [
+    ['bootId', ['bootId', 'boot_id']],
+    ['previousBootId', ['previousBootId', 'previous_boot_id']],
+    ['kind', ['kind', 'type']],
+    ['reason', ['reason']],
+    ['source', ['source']],
+    ['message', ['message']],
+    ['error', ['error']],
+    ['serviceResult', ['serviceResult', 'service_result']],
+    ['exitCode', ['exitCode', 'exit_code']],
+    ['exitStatus', ['exitStatus', 'exit_status']],
+  ]
+  stringFields.forEach(([field, keys]) => {
+    const value = keys.map((key) => record[key]).find((value) => value !== undefined && value !== null)
+    if (value !== undefined && value !== null) {
+      marker[field] = String(value)
+    }
+  })
+  return marker
 }
 
 function sortAndDedupeRebootMarkers(markers: RebootMarker[]): RebootMarker[] {
@@ -146,6 +246,21 @@ function metricBootId(metricValues: unknown): string | null {
   return value === undefined || value === null ? null : String(value)
 }
 
+function metricRebootValue(metricValues: unknown): unknown {
+  if (!metricValues || typeof metricValues !== 'object' || Array.isArray(metricValues)) {
+    return null
+  }
+  const values = metricValues as Record<string, unknown>
+  if (values.reboot !== undefined) {
+    return values.reboot
+  }
+  const runtime = values.runtime
+  if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
+    return (runtime as Record<string, unknown>).reboot
+  }
+  return null
+}
+
 function metricRebootMarker(
   metric: MetricsType,
   bootId: string | null,
@@ -160,17 +275,12 @@ function metricRebootMarker(
     timestamp: new Date(timestamp),
     metricId: String(metric.id),
   }
-  const reboot = metric.metrics?.reboot
+  const reboot = metricRebootValue(metric.metrics)
   if (reboot && typeof reboot === 'object' && !Array.isArray(reboot)) {
-    const rebootValues = reboot as Record<string, unknown>
-    const rebootBootId = rebootValues.bootId ?? rebootValues.boot_id
-    const rebootPreviousBootId = rebootValues.previousBootId ?? rebootValues.previous_boot_id
-    if (rebootBootId !== undefined && rebootBootId !== null) {
-      marker.bootId = String(rebootBootId)
-    }
-    if (rebootPreviousBootId !== undefined && rebootPreviousBootId !== null) {
-      marker.previousBootId = String(rebootPreviousBootId)
-    }
+    Object.assign(
+      marker,
+      rebootMarkerFromRecord(reboot as Record<string, unknown>, marker.timestamp, String(metric.id))
+    )
   } else if (bootId !== null) {
     marker.bootId = bootId
     if (previousBootId !== null) {
@@ -185,7 +295,7 @@ function rebootMarkersFromMetrics(metrics: MetricsType[]): RebootMarker[] {
   let previousBootId: string | null = null
 
   metrics.forEach((metric) => {
-    const reboot = metric.metrics?.reboot
+    const reboot = metricRebootValue(metric.metrics)
     const bootId = metricBootId(metric.metrics)
     const explicitReboot =
       reboot === true ||
@@ -206,6 +316,21 @@ function rebootMarkersFromMetrics(metrics: MetricsType[]): RebootMarker[] {
   })
 
   return sortAndDedupeRebootMarkers(markers)
+}
+
+function rebootMarkersFromResponse(response: MetricsResponse): RebootMarker[] {
+  return sortAndDedupeRebootMarkers((response.reboots ?? []).map(parseRebootMarker).filter(Boolean) as RebootMarker[])
+}
+
+function mergeRebootMarkers(metricMarkers: RebootMarker[], logMarkers: RebootMarker[]): RebootMarker[] {
+  const filteredMetricMarkers = metricMarkers.filter((metricMarker) => {
+    const metricTime = metricMarker.timestamp.getTime()
+    return !logMarkers.some((logMarker) => {
+      const delta = metricTime - logMarker.timestamp.getTime()
+      return delta >= 0 && delta <= LOG_REBOOT_MARKER_DUPLICATE_WINDOW_MS
+    })
+  })
+  return sortAndDedupeRebootMarkers([...filteredMetricMarkers, ...logMarkers])
 }
 
 function metricIntervalMs(metric: MetricsType): number | null {
@@ -246,6 +371,80 @@ function normalizeTimeRange(start: number, end: number): TimeRange {
 
 function sameTimeRange(first: TimeRange | null, second: TimeRange | null): boolean {
   return first?.start === second?.start && first?.end === second?.end
+}
+
+function isMetricsTimeRangePreset(value: string | null): value is Exclude<MetricsTimeRangePreset, 'custom'> {
+  return value !== null && (METRICS_TIME_RANGE_PRESET_VALUES as readonly string[]).includes(value)
+}
+
+function routeNumberValue(params: Record<string, unknown>, key: string): number | null {
+  const value = routeValue(params, key)
+  if (value === null) {
+    return null
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function metricsTimeRangeFromHash(
+  hash: Record<string, unknown>
+): { preset: MetricsTimeRangePreset; timeRange: TimeRange | null } | null {
+  const preset = routeValue(hash, METRICS_RANGE_HASH_KEY)
+  const start = routeNumberValue(hash, METRICS_RANGE_START_HASH_KEY)
+  const end = routeNumberValue(hash, METRICS_RANGE_END_HASH_KEY)
+
+  if ((preset === 'custom' || !preset) && start !== null && end !== null) {
+    return { preset: 'custom', timeRange: normalizeTimeRange(start, end) }
+  }
+  if (isMetricsTimeRangePreset(preset)) {
+    return { preset, timeRange: null }
+  }
+  return null
+}
+
+function metricsTimeRangeHash(
+  preset: MetricsTimeRangePreset,
+  timeRange: TimeRange | null,
+  hash: Record<string, unknown> = router.values.hashParams
+): Record<string, unknown> {
+  const nextHash = { ...hash }
+  const nextPreset = preset === 'custom' && !timeRange ? DEFAULT_TIME_RANGE_PRESET : preset
+  nextHash[METRICS_RANGE_HASH_KEY] = nextPreset
+
+  if (nextPreset === 'custom' && timeRange) {
+    nextHash[METRICS_RANGE_START_HASH_KEY] = String(Math.round(timeRange.start))
+    nextHash[METRICS_RANGE_END_HASH_KEY] = String(Math.round(timeRange.end))
+  } else {
+    delete nextHash[METRICS_RANGE_START_HASH_KEY]
+    delete nextHash[METRICS_RANGE_END_HASH_KEY]
+  }
+  return nextHash
+}
+
+function sameRouteParams(first: Record<string, unknown>, second: Record<string, unknown>): boolean {
+  const keys = new Set([...Object.keys(first), ...Object.keys(second)])
+  return [...keys].every((key) => JSON.stringify(first[key]) === JSON.stringify(second[key]))
+}
+
+function isMetricsRouteForFrame(frameId: number): boolean {
+  return (
+    router.values.location.pathname === urls.frame(frameId) &&
+    routeValue(router.values.searchParams, 'tool') === 'metrics'
+  )
+}
+
+function updateMetricsTimeRangeHash(
+  frameId: number,
+  preset: MetricsTimeRangePreset,
+  timeRange: TimeRange | null
+): void {
+  if (!isMetricsRouteForFrame(frameId)) {
+    return
+  }
+  const nextHash = metricsTimeRangeHash(preset, timeRange)
+  if (!sameRouteParams(router.values.hashParams, nextHash)) {
+    router.actions.replace(router.values.location.pathname, router.values.searchParams, nextHash)
+  }
 }
 
 function trailingVisibleTimeRange(timeRange: TimeRange | null, visibleMs: number): TimeRange | null {
@@ -342,6 +541,41 @@ function getOrCreateMetricSeries(
     categorySeries.push(series)
   }
   return series
+}
+
+function humanizeMetricLabel(key: string): string {
+  const explicitLabels: Record<string, string> = {
+    openFileDescriptors: 'Open file descriptors',
+    cpuUsage: 'CPU usage',
+    cpuTemperature: 'CPU temperature',
+    cpuCount: 'CPU count',
+    'runtime.sequence': 'Render sequence index (keeps incrementing)',
+    'runtime.lastCompletedAgoMs': 'Seconds since last render',
+  }
+  if (explicitLabels[key]) {
+    return explicitLabels[key]
+  }
+  return key
+    .replace(/^cpu/, 'CPU ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\./g, ' ')
+}
+
+function metricUnit(key: string, subKey?: string): MetricSeries['unit'] | undefined {
+  if (key === 'cpuUsage' || subKey === 'percentage') {
+    return 'percent'
+  }
+  if (key === 'runtime' && subKey === 'lastCompletedAgoMs') {
+    return 'seconds'
+  }
+  return undefined
+}
+
+function metricValue(key: string, subKey: string | undefined, value: number): number {
+  if (key === 'runtime' && subKey === 'lastCompletedAgoMs') {
+    return value / 1000
+  }
+  return value
 }
 
 function normalizeMemoryUsageEntries(value: Record<string, unknown>): [string, number][] {
@@ -527,6 +761,7 @@ export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<str
           }
           if (typeof subValue === 'number') {
             const fullSubKey = `${key}.${subKey}`
+            const value = metricValue(key, subKey, subValue)
             const series =
               key === 'memoryUsage'
                 ? getOrCreateMetricSeries(
@@ -558,13 +793,29 @@ export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<str
                     'left',
                     'bytes'
                   )
-                : getOrCreateMetricSeries(metricsByCategory, fullSubKey, fullSubKey, fullSubKey, SINGLE_SERIES_COLOR)
-            series.data.push({ x: timestamp, y: subValue })
+                : getOrCreateMetricSeries(
+                    metricsByCategory,
+                    fullSubKey,
+                    fullSubKey,
+                    humanizeMetricLabel(fullSubKey),
+                    SINGLE_SERIES_COLOR,
+                    'left',
+                    metricUnit(key, subKey)
+                  )
+            series.data.push({ x: timestamp, y: value })
           }
         }
       } else if (typeof value === 'number') {
-        const series = getOrCreateMetricSeries(metricsByCategory, key, key, key, SINGLE_SERIES_COLOR)
-        series.data.push({ x: timestamp, y: value })
+        const series = getOrCreateMetricSeries(
+          metricsByCategory,
+          key,
+          key,
+          humanizeMetricLabel(key),
+          SINGLE_SERIES_COLOR,
+          'left',
+          metricUnit(key)
+        )
+        series.data.push({ x: timestamp, y: metricValue(key, undefined, value) })
       }
     }
   })
@@ -593,13 +844,15 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRange: (start: number, end: number) => ({ start, end }),
     resetSelectedTimeRange: true,
     setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
+    syncSelectedTimeRangeFromHash: (hash: Record<string, unknown>) => ({ hash }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
+    setApiRebootMarkers: (markers: RebootMarker[]) => ({ markers }),
     requestMetrics: true,
     requestMetricsSuccess: true,
     requestMetricsFailure: (error: string) => ({ error }),
   }),
-  loaders(({ props, values }) => ({
+  loaders(({ props, values, actions }) => ({
     metrics: [
       [] as MetricsType[],
       {
@@ -609,8 +862,9 @@ export const metricsLogic = kea<metricsLogicType>([
             if (!response.ok) {
               throw new Error('Failed to fetch logs')
             }
-            const data = await response.json()
-            return data.metrics as MetricsType[]
+            const data = (await response.json()) as MetricsResponse
+            actions.setApiRebootMarkers(rebootMarkersFromResponse(data))
+            return data.metrics
           } catch (error) {
             console.error(error)
             return []
@@ -640,11 +894,17 @@ export const metricsLogic = kea<metricsLogicType>([
             if (!response.ok) {
               throw new Error('Failed to fetch metrics')
             }
-            const data = await response.json()
+            const data = (await response.json()) as MetricsResponse
+            const responseRebootMarkers = rebootMarkersFromResponse(data)
+            if (responseRebootMarkers.length > 0) {
+              actions.setApiRebootMarkers(
+                sortAndDedupeRebootMarkers([...(values.apiRebootMarkers ?? []), ...responseRebootMarkers])
+              )
+            }
             // Dedup by timestamp: a sample may arrive both live (newLog) and in
             // this since-query, and the two sources use different id schemes.
             const seen = new Set(existing.map((metric) => metric.timestamp))
-            const fresh = (data.metrics as MetricsType[]).filter((metric) => !seen.has(metric.timestamp))
+            const fresh = data.metrics.filter((metric) => !seen.has(metric.timestamp))
             if (fresh.length === 0) {
               return existing
             }
@@ -667,7 +927,7 @@ export const metricsLogic = kea<metricsLogicType>([
         },
         resetSelectedTimeRange: () => null,
         setSelectedTimeRangePreset: () => null,
-        loadMetricsSuccess: () => null,
+        syncSelectedTimeRangeFromHash: (_, { hash }) => metricsTimeRangeFromHash(hash)?.timeRange ?? null,
       },
     ],
     selectedTimeRangePreset: [
@@ -676,7 +936,8 @@ export const metricsLogic = kea<metricsLogicType>([
         setSelectedTimeRange: () => 'custom' as MetricsTimeRangePreset,
         resetSelectedTimeRange: () => DEFAULT_TIME_RANGE_PRESET,
         setSelectedTimeRangePreset: (_, { preset }) => preset,
-        loadMetricsSuccess: (state) => (state === 'custom' ? DEFAULT_TIME_RANGE_PRESET : state),
+        syncSelectedTimeRangeFromHash: (_, { hash }) =>
+          metricsTimeRangeFromHash(hash)?.preset ?? DEFAULT_TIME_RANGE_PRESET,
       },
     ],
     currentTime: [
@@ -719,6 +980,12 @@ export const metricsLogic = kea<metricsLogicType>([
         return state
       },
     },
+    apiRebootMarkers: [
+      [] as RebootMarker[],
+      {
+        setApiRebootMarkers: (_, { markers }) => markers,
+      },
+    ],
     logRebootMarkers: [
       [] as RebootMarker[],
       {
@@ -730,6 +997,12 @@ export const metricsLogic = kea<metricsLogicType>([
             const payload = JSON.parse(log.line)
             if (payload.event === 'bootup') {
               const marker = parseRebootMarker({ timestamp: log.timestamp, log_id: log.id })
+              if (marker && payload.reboot && typeof payload.reboot === 'object' && !Array.isArray(payload.reboot)) {
+                Object.assign(
+                  marker,
+                  rebootMarkerFromRecord(payload.reboot as Record<string, unknown>, marker.timestamp)
+                )
+              }
               return marker ? sortAndDedupeRebootMarkers([...state, marker]) : state
             }
           } catch (error) {}
@@ -739,6 +1012,15 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
   })),
   listeners(({ actions, props }) => ({
+    setSelectedTimeRange: ({ start, end }) => {
+      updateMetricsTimeRangeHash(props.frameId, 'custom', normalizeTimeRange(start, end))
+    },
+    resetSelectedTimeRange: () => {
+      updateMetricsTimeRangeHash(props.frameId, DEFAULT_TIME_RANGE_PRESET, null)
+    },
+    setSelectedTimeRangePreset: ({ preset }) => {
+      updateMetricsTimeRangeHash(props.frameId, preset, null)
+    },
     [socketLogic.actionTypes.socketReconnected]: () => {
       // Samples missed during the outage are fetched incrementally (only those
       // newer than our latest timestamp), not by reloading the whole history.
@@ -760,6 +1042,18 @@ export const metricsLogic = kea<metricsLogicType>([
       }
     },
   })),
+  urlToAction(({ actions, props }) => ({
+    [urls.frame(':id')]: ({ id }, search, hash) => {
+      const frameId = Number(id)
+      if (frameId !== props.frameId || routeValue(search, 'tool') !== 'metrics') {
+        return
+      }
+      actions.syncSelectedTimeRangeFromHash(hash)
+      if (!metricsTimeRangeFromHash(hash)) {
+        updateMetricsTimeRangeHash(props.frameId, DEFAULT_TIME_RANGE_PRESET, null)
+      }
+    },
+  })),
   selectors({
     sortedMetrics: [
       (s) => [s.metrics],
@@ -767,9 +1061,9 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     metricRebootMarkers: [(s) => [s.sortedMetrics], (metrics) => rebootMarkersFromMetrics(metrics)],
     rebootMarkers: [
-      (s) => [s.metricRebootMarkers, s.logRebootMarkers],
-      (metricRebootMarkers, logRebootMarkers) =>
-        sortAndDedupeRebootMarkers([...metricRebootMarkers, ...logRebootMarkers]),
+      (s) => [s.metricRebootMarkers, s.logRebootMarkers, s.apiRebootMarkers],
+      (metricRebootMarkers, logRebootMarkers, apiRebootMarkers) =>
+        mergeRebootMarkers(metricRebootMarkers, sortAndDedupeRebootMarkers([...logRebootMarkers, ...apiRebootMarkers])),
     ],
     metricsTimeRange: [
       (s) => [s.sortedMetrics, s.currentTime],
@@ -845,7 +1139,12 @@ export const metricsLogic = kea<metricsLogicType>([
       (metrics): Record<string, string> => latestMetricSummariesByCategoryFromMetrics(metrics),
     ],
   }),
-  afterMount(({ actions, cache }) => {
+  afterMount(({ actions, cache, props }) => {
+    const hashTimeRange = metricsTimeRangeFromHash(router.values.hashParams)
+    actions.syncSelectedTimeRangeFromHash(router.values.hashParams)
+    if (!hashTimeRange) {
+      updateMetricsTimeRangeHash(props.frameId, DEFAULT_TIME_RANGE_PRESET, null)
+    }
     actions.loadMetrics()
     actions.setCurrentTime(Date.now())
     cache.currentTimeInterval = window.setInterval(() => actions.setCurrentTime(Date.now()), CURRENT_TIME_UPDATE_MS)

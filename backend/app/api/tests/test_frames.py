@@ -100,6 +100,8 @@ async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(asy
     assert 'TTYPath=/dev/tty1' in script
     assert 'StandardInput=tty-force' in script
     assert 'TTYReset=yes' in script
+    assert 'ExecStopPost=-+/bin/sh -lc' in script
+    assert '/srv/frameos/runtime/frameos-last-exit' in script
     assert (
         "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 "
         "/bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | "
@@ -355,7 +357,7 @@ async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_cl
 
 
 @pytest.mark.asyncio
-async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_client, db, redis):
+async def test_api_frame_metrics_returns_metrics_separately_from_reboot_markers(async_client, db, redis):
     frame = await new_frame(db, redis, 'MetricsFrame', 'localhost', 'localhost')
     boot_timestamp = datetime(2026, 6, 2, 3, 4, 5)
     metric_timestamp = datetime(2026, 6, 2, 3, 5, 0)
@@ -389,6 +391,65 @@ async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_cl
     assert response.status_code == 200
     payload = response.json()
     assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
+    assert payload['reboots'][0]['timestamp'] == boot_timestamp.replace(tzinfo=timezone.utc).isoformat()
+    assert payload['reboots'][0]['log_id'] is not None
+
+
+@pytest.mark.asyncio
+async def test_api_frame_metrics_attaches_reboot_context(async_client, db, redis):
+    frame = await new_frame(db, redis, 'MetricsRebootContextFrame', 'localhost', 'localhost')
+    db.add_all(
+        [
+            Log(
+                frame_id=frame.id,
+                type='stdinfo',
+                line='OK Deployed! Rebooting device after boot config changes',
+                timestamp=datetime(2026, 6, 2, 3, 4, 0),
+            ),
+            Log(
+                frame_id=frame.id,
+                type='webhook',
+                line=json.dumps(
+                    {
+                        "event": "bootup",
+                        "reboot": {
+                            "serviceResult": "success",
+                            "exitCode": "exited",
+                            "exitStatus": "0",
+                        },
+                    }
+                ),
+                timestamp=datetime(2026, 6, 2, 3, 5, 0),
+            ),
+            Log(
+                frame_id=frame.id,
+                type='webhook',
+                line=json.dumps(
+                    {
+                        "event": "bootup",
+                        "reboot": {
+                            "serviceResult": "oom-kill",
+                            "exitCode": "killed",
+                            "exitStatus": "KILL",
+                        },
+                    }
+                ),
+                timestamp=datetime(2026, 6, 2, 3, 10, 0),
+            ),
+        ]
+    )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics')
+
+    assert response.status_code == 200
+    reboots = response.json()['reboots']
+    assert reboots[0]['kind'] == 'initiated'
+    assert reboots[0]['source'] == 'backend'
+    assert reboots[0]['reason'] == 'OK Deployed! Rebooting device after boot config changes'
+    assert reboots[0]['service_result'] == 'success'
+    assert reboots[1]['kind'] == 'oom'
+    assert reboots[1]['service_result'] == 'oom-kill'
 
 
 @pytest.mark.asyncio

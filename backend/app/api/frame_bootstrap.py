@@ -410,6 +410,7 @@ WatchdogSec=900
 MemoryHigh=${{mem_high_kb}}K
 MemoryMax=${{mem_max_kb}}K
 MemorySwapMax=64M
+ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%s\\nexitCode=%s\\nexitStatus=%s\\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
 {frameos_service_tty}
 
 [Install]

@@ -325,7 +325,7 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   const onlyFrameosUpgrade =
     !unsavedChanges &&
     undeployedChangeDetails.length > 0 &&
-    undeployedChangeDetails.every((change) => change.label.startsWith('FrameOS upgrade'))
+    undeployedChangeDetails.every((change) => change.frameosVersionChange || change.remoteVersionChange)
   const changeLabel = unsavedChanges
     ? 'unsaved'
     : onlyFrameosUpgrade

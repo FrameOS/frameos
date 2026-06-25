@@ -369,6 +369,25 @@ function FrameosReleaseLink({ version }: { version: string }): JSX.Element {
 
 function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
   const frameosVersionChange = change.frameosVersionChange
+  const remoteVersionChange = change.remoteVersionChange
+  if (!frameosVersionChange && !remoteVersionChange) {
+    return <>{change.label}</>
+  }
+
+  if (remoteVersionChange) {
+    return (
+      <>
+        FrameOS Remote{' '}
+        {remoteVersionChange.previousVersion ? (
+          <FrameosReleaseLink version={remoteVersionChange.previousVersion} />
+        ) : (
+          'unreported'
+        )}{' '}
+        -&gt; <FrameosReleaseLink version={remoteVersionChange.currentVersion} />
+      </>
+    )
+  }
+
   if (!frameosVersionChange) {
     return <>{change.label}</>
   }
@@ -383,7 +402,7 @@ function ChangeLabel({ change }: { change: ChangeDetail }): JSX.Element {
 
   return (
     <>
-      FrameOS upgrade{' '}
+      FrameOS{' '}
       {frameosVersionChange.previousVersion ? (
         <FrameosReleaseLink version={frameosVersionChange.previousVersion} />
       ) : (

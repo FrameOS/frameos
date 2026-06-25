@@ -627,6 +627,47 @@ async def test_buildroot_run_allows_precompiled_sd_image_without_build_environme
 
 
 @pytest.mark.asyncio
+async def test_buildroot_run_hassio_precompiled_uses_container_even_with_build_host(monkeypatch):
+    monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
+    frame = SimpleNamespace(
+        id=1,
+        project_id=7,
+        mode="buildroot",
+        buildroot={"compilationMode": "precompiled"},
+        scenes=[{"id": "scene-1", "settings": {"execution": "interpreted"}}],
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+
+    async def fake_run_with_context():
+        assert builder.build_environment_provider == "none"
+        assert builder.build_executor_config is None
+        assert builder.executor is not None
+        assert builder.executor.uses_local_filesystem is True
+        return {"status": "ready"}
+
+    def fail_selected_build_executor():
+        raise AssertionError("precompiled Home Assistant SD image customization should not select a build host")
+
+    monkeypatch.setattr(
+        buildroot_image_module,
+        "_get_frame_settings",
+        lambda _db, _frame: {
+            "buildEnvironment": {"provider": "buildHost"},
+            "buildHost": {
+                "enabled": True,
+                "host": "builder.local",
+                "user": "ubuntu",
+                "sshKey": "dummy-key",
+            },
+        },
+    )
+    monkeypatch.setattr(builder, "_selected_build_executor", fail_selected_build_executor)
+    monkeypatch.setattr(builder, "_run_with_context", fake_run_with_context)
+
+    assert await builder.run() == {"status": "ready"}
+
+
+@pytest.mark.asyncio
 async def test_precompiled_sd_image_patch_uses_local_boot_tools_without_docker(monkeypatch):
     builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
     builder.build_environment_provider = "docker"
@@ -1497,6 +1538,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     frameos_service = (release_dir / "frameos.service").read_text(encoding="utf-8")
     assert "User=root" in frameos_service
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in frameos_service
+    assert "/srv/frameos/runtime/frameos-last-exit" in frameos_service
     assert (
         "Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib"
         in frameos_service
