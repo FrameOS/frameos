@@ -375,6 +375,18 @@ async def test_deploy_remote_leaves_writable_root_alone(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_cleanup_old_builds_is_quiet_when_no_builds_exist(tmp_path: Path):
+    deployer = FakeRemoteDeployer(tmp_path)
+
+    await deployer._cleanup_old_builds()
+
+    assert len(deployer.commands) == 2
+    assert "if ls -dt1 remote_* >/dev/null 2>&1" in deployer.commands[0]
+    assert "xargs -r rm -rf" in deployer.commands[0]
+    assert "xargs -r rm -rf" in deployer.commands[1]
+
+
+@pytest.mark.asyncio
 async def test_remount_root_rw_detects_readonly_root(tmp_path: Path):
     deployer = FakeRemoteDeployer(tmp_path)
 

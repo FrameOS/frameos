@@ -788,11 +788,14 @@ class RemoteDeployer(FrameDeployer):
         """Keep only the 10 most-recent builds + releases on the device."""
         # Prune `/build`
         await self.exec_command(
-            "cd /srv/frameos/remote/build && ls -dt1 remote_* | tail -n +11 | xargs rm -rf"
+            "cd /srv/frameos/remote/build && "
+            "if ls -dt1 remote_* >/dev/null 2>&1; then "
+            "ls -dt1 remote_* | tail -n +11 | xargs -r rm -rf; "
+            "fi"
         )
         # Prune `/releases` except for the one currently linked
         await self.exec_command(
             "cd /srv/frameos/remote/releases && "
             'ls -dt1 release_* | grep -v "$(basename $(readlink ../current))" | '
-            "tail -n +11 | xargs rm -rf"
+            "tail -n +11 | xargs -r rm -rf"
         )
