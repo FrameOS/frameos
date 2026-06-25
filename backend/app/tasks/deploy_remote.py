@@ -70,7 +70,9 @@ def delayed_agent_restart_command(suffix: str = "manual") -> str:
         "sleep 1; "
         "systemctl enable frameos-remote.service; "
         "systemctl restart frameos-remote.service; "
-        "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true"
+        "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; "
+        "rm -f /etc/systemd/system/frameos_agent.service; "
+        "systemctl daemon-reload"
     )
     fallback_script = f"nohup sh -c {shlex.quote(restart_script)} >/dev/null 2>&1 &"
     fallback = f"sudo sh -c {shlex.quote(fallback_script)}"
@@ -687,6 +689,8 @@ class AgentDeployer(FrameDeployer):
         )
 
     async def _disable_legacy_agent_service(self) -> None:
+        if self.remote_transport == "remote":
+            return
         await self.exec_command(
             self._sudo_system_command(
                 "systemctl disable --now frameos_agent.service >/dev/null 2>&1 || true; "

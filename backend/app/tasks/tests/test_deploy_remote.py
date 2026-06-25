@@ -198,6 +198,8 @@ def test_delayed_agent_restart_command_uses_immediate_transient_service():
     assert "/bin/sh -lc" in command
     assert "systemctl enable frameos-remote.service; systemctl restart frameos-remote.service" in command
     assert "systemctl disable --now frameos_agent.service" in command
+    assert "rm -f /etc/systemd/system/frameos_agent.service" in command
+    assert "systemctl daemon-reload" in command
 
 
 @pytest.mark.asyncio
@@ -392,6 +394,28 @@ async def test_remount_root_ro_does_not_raise_on_failure(tmp_path: Path):
 
     assert any("mount -o remount,ro /" in command for command in deployer.commands)
     assert any("stays read-write" in message for _level, message in deployer.logs)
+
+
+@pytest.mark.asyncio
+async def test_disable_legacy_agent_service_skips_remote_transport(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.remote_transport = "remote"
+
+    await deployer._disable_legacy_agent_service()
+
+    assert deployer.commands == []
+
+
+@pytest.mark.asyncio
+async def test_disable_legacy_agent_service_runs_over_ssh_transport(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.remote_transport = "ssh"
+
+    await deployer._disable_legacy_agent_service()
+
+    assert len(deployer.commands) == 1
+    assert "systemctl disable --now frameos_agent.service" in deployer.commands[0]
+    assert "rm -f /etc/systemd/system/frameos_agent.service" in deployer.commands[0]
 
 
 @pytest.mark.asyncio
