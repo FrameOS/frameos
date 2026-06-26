@@ -12,6 +12,7 @@ from app.models.frame import (
     normalize_reboot_crontab,
     update_frame,
 )
+from app.database import SessionLocal
 from app.models.settings import Settings
 from app.schemas.frames import FrameErrorBehavior
 
@@ -84,6 +85,44 @@ async def test_update_frame(mock_publish, db, redis):
     assert updated.frame_host == "updated_host"
     # 2 calls to publish_message: "new_frame" & "update_frame"
     assert mock_publish.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_update_frame_publishes_committed_state_after_external_update(mock_publish, db, redis):
+    frame = await new_frame(db, redis, "RemoteVersionFrame", "localhost", "server_host", "dev")
+    frame.agent = {
+        "agentEnabled": True,
+        "agentRunCommands": True,
+        "agentSharedSecret": "secret",
+        "agentVersion": "2026.1.1",
+    }
+    await update_frame(db, redis, frame)
+
+    external_db = SessionLocal()
+    try:
+        external_frame = external_db.get(Frame, frame.id)
+        assert external_frame is not None
+        external_frame.agent = {
+            **external_frame.agent,
+            "agentVersion": "2026.2.0",
+            "remoteCapabilities": {"fileWriteStream": True},
+        }
+        external_db.add(external_frame)
+        external_db.commit()
+    finally:
+        external_db.close()
+
+    frame.status = "starting"
+    await update_frame(db, redis, frame)
+
+    assert frame.agent["agentVersion"] == "2026.2.0"
+    assert frame.agent["remoteCapabilities"] == {"fileWriteStream": True}
+    _redis, event, payload = mock_publish.await_args.args
+    assert event == "update_frame"
+    assert payload["status"] == "starting"
+    assert payload["agent"]["agentVersion"] == "2026.2.0"
+    assert payload["agent"]["remoteCapabilities"] == {"fileWriteStream": True}
 
 
 @pytest.mark.asyncio

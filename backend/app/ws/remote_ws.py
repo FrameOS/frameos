@@ -30,6 +30,7 @@ router = APIRouter()
 
 MAX_REMOTES = 1000        # simple DoS safeguard
 CONN_TTL   = 60           # seconds – Redis key self-expiry
+REMOTE_DISCONNECTED_ERROR = "remote websocket disconnected before command completed"
 
 # frame_id → list[websocket] (only for UI statistics)
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
@@ -324,16 +325,17 @@ async def pump_commands(
             payload["id"] = cmd_id
             blob_b64 = job.get("blob")
 
-            env = make_envelope(payload, api_key, shared_secret)
-            await ws.send_json(env)
-
-            # store buffer for incoming Binary frames (if any)
+            # Mark the command before writing to the socket. If the websocket
+            # drops during send, the waiter still gets a failure response.
             ws.scope["cmd_buffers"][cmd_id] = bytearray()
             ws.scope["cmd_log_output"][cmd_id] = bool(job.get("log", True))
 
             # These two commands always stream binary data back first
             if payload.get("name") in ("file_read", "http"):
                 ws.scope["current_bin_cmd"] = cmd_id
+
+            env = make_envelope(payload, api_key, shared_secret)
+            await ws.send_json(env)
 
             # Optional upload blob (file_write)
             if blob_b64:
@@ -343,6 +345,39 @@ async def pump_commands(
 
     except (asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
         pass    # let caller handle final cleanup
+    finally:
+        await fail_pending_commands(ws, redis)
+
+
+async def fail_pending_commands(
+    ws: WebSocket,
+    redis: Redis,
+    reason: str = REMOTE_DISCONNECTED_ERROR,
+) -> None:
+    """Unblock commands already popped from Redis when their websocket dies."""
+    cmd_buffers = ws.scope.get("cmd_buffers")
+    if not isinstance(cmd_buffers, dict):
+        return
+
+    pending_ids = list(cmd_buffers.keys())
+    if not pending_ids:
+        return
+
+    log_output = ws.scope.get("cmd_log_output")
+    if not isinstance(log_output, dict):
+        log_output = {}
+
+    for cmd_id in pending_ids:
+        cmd_buffers.pop(cmd_id, None)
+        log_output.pop(cmd_id, None)
+        if ws.scope.get("current_bin_cmd") == cmd_id:
+            ws.scope.pop("current_bin_cmd", None)
+
+        await redis.rpush(
+            RESP_KEY.format(id=cmd_id),
+            json.dumps({"ok": False, "error": reason, "result": {"error": reason}}).encode(),
+        )
+        await redis.expire(RESP_KEY.format(id=cmd_id), 60)
 
 
 async def handle_remote_stream_chunk(

@@ -1277,8 +1277,15 @@ class FrameDeployWorkflow:
 
     async def _remount_root_ro(self, context: str) -> None:
         await self.deployer.log("stdout", f"Restoring root filesystem to read-only after {context}")
-        await self._exec_host_root_command("sync", fallback_command="sudo sync", raise_on_error=False)
-        await self._exec_host_root_command("mount -o remount,ro /", fallback_command="sudo mount -o remount,ro /")
+        await self._exec_host_root_command("sync", fallback_command="sudo sync", raise_on_error=False, timeout=30)
+        status = await self._exec_host_root_command(
+            "mount -o remount,ro /",
+            fallback_command="sudo mount -o remount,ro /",
+            raise_on_error=False,
+            timeout=30,
+        )
+        if status != 0:
+            await self.deployer.log("stderr", "Failed to remount root filesystem read-only; it stays read-write until reboot")
 
     def _host_root_command(self, command: str, *, fallback_command: str | None = None) -> str:
         if not _deploy_uses_remote(self.frame):

@@ -458,6 +458,59 @@ async def test_remote_command_slot_times_out_when_frame_busy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pump_commands_fails_pending_command_when_websocket_send_drops() -> None:
+    from app.ws.remote_bridge import RESP_KEY
+    from app.ws.remote_ws import REMOTE_DISCONNECTED_ERROR, pump_commands
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.pushed: list[tuple[str, bytes]] = []
+            self.expired: list[tuple[str, int]] = []
+
+        async def blpop(self, key: str, timeout=0):
+            job = {
+                "id": "cmd-1",
+                "frame_id": 42,
+                "payload": {"type": "cmd", "name": "shell", "args": {"cmd": "sync"}},
+                "timeout": 30,
+            }
+            return key.encode(), json.dumps(job).encode()
+
+        async def rpush(self, key: str, value: bytes) -> None:
+            self.pushed.append((key, value))
+
+        async def expire(self, key: str, seconds: int) -> None:
+            self.expired.append((key, seconds))
+
+    class DroppingWebSocket:
+        def __init__(self) -> None:
+            self.scope: dict[str, object] = {}
+
+        async def send_json(self, _payload) -> None:
+            raise RuntimeError("socket closed")
+
+        async def send_bytes(self, _payload) -> None:
+            raise AssertionError("no blob should be sent")
+
+    redis = FakeRedis()
+    ws = DroppingWebSocket()
+
+    await pump_commands(ws, 42, "server-key", "shared-secret", redis)  # type: ignore[arg-type]
+
+    assert ws.scope["cmd_buffers"] == {}
+    assert redis.expired == [(RESP_KEY.format(id="cmd-1"), 60)]
+    assert len(redis.pushed) == 1
+    key, raw = redis.pushed[0]
+    assert key == RESP_KEY.format(id="cmd-1")
+    reply = json.loads(raw)
+    assert reply == {
+        "ok": False,
+        "error": REMOTE_DISCONNECTED_ERROR,
+        "result": {"error": REMOTE_DISCONNECTED_ERROR},
+    }
+
+
+@pytest.mark.asyncio
 async def test_remote_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
     from app.ws import remote_ws
 

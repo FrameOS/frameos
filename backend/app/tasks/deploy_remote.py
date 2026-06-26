@@ -575,10 +575,11 @@ class RemoteDeployer(FrameDeployer):
 
     async def _remount_root_ro(self) -> None:
         await self.log("stdout", "- Restoring root filesystem to read-only")
-        await self.exec_command(self._sudo_system_command("sync"), raise_on_error=False)
+        await self.exec_command(self._sudo_system_command("sync"), raise_on_error=False, timeout=30)
         status = await self.exec_command(
             self._sudo_system_command("mount -o remount,ro /"),
             raise_on_error=False,
+            timeout=30,
         )
         if status != 0:
             await self.log("stderr", "Failed to remount root filesystem read-only; it stays read-write until reboot")

@@ -527,6 +527,7 @@ def refresh_tls_certificate_validity_dates(frame: Frame):
 async def update_frame(db: Session, redis: Redis, frame: Frame):
     db.add(frame)
     db.commit()
+    db.refresh(frame)
     await publish_message(redis, "update_frame", frame.to_dict())
 
 
