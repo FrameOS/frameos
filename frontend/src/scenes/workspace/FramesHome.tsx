@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import type { MouseEvent } from 'react'
 import {
@@ -12,6 +12,7 @@ import {
   PlusIcon,
   RocketLaunchIcon,
   SparklesIcon,
+  Squares2X2Icon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -49,6 +50,9 @@ import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { setFrameosSceneDragData } from './sceneDrag'
+import { SplitScreenLayoutDrawer } from './SplitScreenLayoutDrawer'
+import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
@@ -369,8 +373,10 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
   return (
     <button
       type="button"
+      draggable
       data-workspace-scene-tile={scene.id}
       data-workspace-scene-tile-frame={frame.id}
+      onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       onClick={() => {
         hideForm()
         openSceneControl(frame.id, scene.id)
@@ -453,9 +459,16 @@ export function TemplateDrawer(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
+  const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
+  const { generatorOpen } = useValues(splitLogic)
 
   return (
-    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div
+      className={clsx(
+        'workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl',
+        generatorOpen ? 'w-[620px] max-w-[calc(100vw-2.5rem)]' : 'w-[430px] max-w-[calc(100vw-2.5rem)]'
+      )}
+    >
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
@@ -474,10 +487,14 @@ export function TemplateDrawer(): JSX.Element | null {
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <AddSceneDrawerActions frame={frame} />
-              <Templates persistOnInstall />
-            </div>
+            {generatorOpen ? (
+              <SplitScreenLayoutDrawer frame={frame} />
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <AddSceneDrawerActions frame={frame} />
+                <Templates persistOnInstall />
+              </div>
+            )}
             <EditTemplateModal />
           </div>
         </BindLogic>
@@ -488,7 +505,7 @@ export function TemplateDrawer(): JSX.Element | null {
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
-  const { openChatDrawer } = useActions(workspaceLogic)
+  const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
 
   return (
     <div className="mb-4 grid gap-3">
@@ -503,14 +520,37 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <PlusIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">New blank scene</span>
-          <span className="frameos-muted block truncate text-xs text-slate-500">Start with a render event</span>
+          <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
+          <span className="frameos-muted block truncate text-xs">Start with a render event</span>
         </span>
       </button>
       <button
         type="button"
         onClick={() => {
-          openChatDrawer(frame.id, null)
+          openGenerator()
+        }}
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+          <Squares2X2Icon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="frameos-strong block truncate text-sm font-semibold">Split screen</span>
+          <span className="frameos-muted block truncate text-xs">Split the screen between multiple scenes</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const searchParams: Record<string, unknown> = {
+            ...router.values.searchParams,
+            drawer: 'chat',
+            drawerSource: 'templates',
+            frameId: String(frame.id),
+          }
+          delete searchParams.sceneId
+          delete searchParams.nodeId
+          router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
@@ -518,8 +558,8 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <SparklesIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">Generate scene</span>
-          <span className="frameos-muted block truncate text-xs text-slate-500">Open AI chat for this frame</span>
+          <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
+          <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
         </span>
       </button>
     </div>

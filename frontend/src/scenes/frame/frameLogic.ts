@@ -5,6 +5,7 @@ import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
   AppNodeData,
+  DiagramEdge,
   DiagramNode,
   FrameErrorBehavior,
   FrameScene,
@@ -45,6 +46,7 @@ import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
+import type { SplitLayoutBranch, SplitLayoutNode, SplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -1112,6 +1114,109 @@ function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank sc
         },
       ],
       edges: [],
+      fields: [],
+      settings: { execution: 'interpreted' },
+    },
+    frame
+  )
+}
+
+function splitRatioString(ratios: number[], length: number): string {
+  return Array.from({ length }, (_, index) => {
+    const ratio = Number(ratios[index])
+    return Number.isFinite(ratio) && ratio > 0 ? Number(ratio.toFixed(3)).toString() : '1'
+  }).join(' ')
+}
+
+function splitNodeConfig(branch: SplitLayoutBranch): Record<string, any> {
+  const rows = branch.direction === 'column' ? branch.children.length : 1
+  const columns = branch.direction === 'row' ? branch.children.length : 1
+  return {
+    rows: String(rows),
+    columns: String(columns),
+    hideEmpty: false,
+    gap: '0',
+    margin: '0',
+    ...(branch.direction === 'row'
+      ? { width_ratios: splitRatioString(branch.ratios, branch.children.length) }
+      : { height_ratios: splitRatioString(branch.ratios, branch.children.length) }),
+  }
+}
+
+export function buildSplitScene(frame: Partial<FrameType>, layout: SplitScreenSceneLayout): FrameScene {
+  const nodes: DiagramNode[] = []
+  const edges: DiagramEdge[] = []
+  let visualIndex = 0
+
+  const eventNode: DiagramNode = {
+    id: uuidv4(),
+    type: 'event',
+    position: { x: 121, y: 113 },
+    data: { keyword: 'render' },
+  }
+  nodes.push(eventNode)
+
+  const addEdge = (source: string, sourceHandle: string, target: string, targetHandle = 'prev'): void => {
+    edges.push({
+      id: uuidv4(),
+      source,
+      sourceHandle,
+      target,
+      targetHandle,
+      type: 'appNodeEdge',
+    })
+  }
+
+  const addSceneNode = (child: SplitLayoutNode, depth: number): string | null => {
+    if (child.type !== 'leaf' || !child.sceneId) {
+      return null
+    }
+    const nodeId = uuidv4()
+    nodes.push({
+      id: nodeId,
+      type: 'scene',
+      position: { x: 760 + depth * 320, y: 120 + visualIndex * 110 },
+      data: { keyword: child.sceneId, config: {} } satisfies SceneNodeData,
+    })
+    visualIndex += 1
+    return nodeId
+  }
+
+  const addSplitNode = (branch: SplitLayoutBranch, depth: number): string => {
+    const nodeId = uuidv4()
+    nodes.push({
+      id: nodeId,
+      type: 'app',
+      position: { x: 400 + depth * 320, y: 100 + visualIndex * 40 },
+      data: {
+        keyword: 'render/split',
+        name: depth === 0 ? 'Split screen' : 'Nested split',
+        config: splitNodeConfig(branch),
+      } satisfies AppNodeData,
+    })
+
+    branch.children.forEach((child, index) => {
+      const targetNodeId = child.type === 'split' ? addSplitNode(child, depth + 1) : addSceneNode(child, depth + 1)
+      if (!targetNodeId) {
+        return
+      }
+      const row = branch.direction === 'column' ? index + 1 : 1
+      const column = branch.direction === 'row' ? index + 1 : 1
+      addEdge(nodeId, `field/render_functions[${row}][${column}]`, targetNodeId)
+    })
+
+    return nodeId
+  }
+
+  const rootNodeId = addSplitNode(layout.root, 0)
+  addEdge(eventNode.id, 'next', rootNodeId)
+
+  return sanitizeScene(
+    {
+      id: uuidv4(),
+      name: layout.name || 'Split screen',
+      nodes,
+      edges,
       fields: [],
       settings: { execution: 'interpreted' },
     },

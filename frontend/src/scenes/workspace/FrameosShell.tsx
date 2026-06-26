@@ -3,6 +3,7 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
+  ArrowLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
@@ -193,15 +194,17 @@ function WorkspaceChatDrawer({
   frameId,
   nodeId,
   sceneId,
+  source,
 }: {
   frameId: number
   nodeId?: string | null
   sceneId: string | null
+  source?: 'templates' | null
 }): JSX.Element | null {
   useMountedLogic(chatLogic({ frameId, sceneId }))
   useMountedLogic(workspaceChatDrawerLogic({ frameId, nodeId, sceneId }))
   const { frames } = useValues(framesModel)
-  const { closeChatDrawer } = useActions(workspaceLogic)
+  const { closeChatDrawer, openTemplateDrawer } = useActions(workspaceLogic)
   const frame = frames[frameId]
   const frameLogicProps = { frameId }
 
@@ -215,10 +218,23 @@ function WorkspaceChatDrawer({
         <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
-              <div className="min-w-0">
-                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
-                <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
-                  {frame.name || frameHost(frame)}
+              <div className="flex min-w-0 items-start gap-3">
+                {source === 'templates' ? (
+                  <button
+                    type="button"
+                    title="Back to Add scene"
+                    aria-label="Back to Add scene"
+                    onClick={() => openTemplateDrawer(frameId)}
+                    className="frameos-icon-button mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <ArrowLeftIcon className="h-5 w-5" />
+                  </button>
+                ) : null}
+                <div className="min-w-0">
+                  <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
+                  <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
+                    {frame.name || frameHost(frame)}
+                  </div>
                 </div>
               </div>
               <button
@@ -314,6 +330,7 @@ export function FrameosShell({
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
+  const chatDrawerSource = router.values.searchParams.drawerSource === 'templates' ? 'templates' : null
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
   const frameChangeDrawer =
     frameChangeDrawerSelection && frameChangeDrawerFrame ? (
@@ -328,6 +345,7 @@ export function FrameosShell({
       frameId={chatDrawerSelection.frameId}
       nodeId={chatDrawerSelection.nodeId}
       sceneId={chatDrawerSelection.sceneId}
+      source={chatDrawerSource}
     />
   ) : frameChangeDrawer ? (
     frameChangeDrawer
