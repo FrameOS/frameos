@@ -3,6 +3,8 @@ import type { splitScreenLayoutLogicType } from './splitScreenLayoutLogicType'
 import {
   assignSceneToSplitLayoutLeaf,
   cloneSplitLayoutNode,
+  cloneSplitScreenSceneLayout,
+  defaultSplitScreenBackground,
   configuredSplitLayoutLeafCount,
   defaultSplitScreenSceneLayout,
   splitLayoutPresetById,
@@ -28,9 +30,19 @@ function defaultPresetId(): string {
   return splitScreenLayoutPresets[0].id
 }
 
-function layoutForPreset(presetId: string): SplitScreenSceneLayout {
+function clampBorderWidth(borderWidth: number): number {
+  return Math.max(0, Math.min(48, Math.round(Number(borderWidth) || 0)))
+}
+
+function clampOpacity(opacity: number): number {
+  return Math.max(0, Math.min(1, Number(opacity) || 0))
+}
+
+function layoutForPreset(presetId: string, previous?: SplitScreenSceneLayout | null): SplitScreenSceneLayout {
   return {
-    name: 'Split screen',
+    name: previous?.name ?? 'Split screen',
+    borderWidth: previous?.borderWidth ?? 0,
+    background: previous?.background ?? { ...defaultSplitScreenBackground },
     root: cloneSplitLayoutNode(splitLayoutPresetById(presetId).root),
   }
 }
@@ -55,12 +67,20 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
   props({} as SplitScreenLayoutLogicProps),
   key((props) => props.frameId),
   actions({
-    openGenerator: true,
+    openGenerator: (sceneId?: string | null, layout?: SplitScreenSceneLayout | null) => ({
+      layout: layout ?? null,
+      sceneId: sceneId ?? null,
+    }),
     closeGenerator: true,
     showMorePresets: true,
     selectPreset: (presetId: string) => ({ presetId }),
     selectLeaf: (leafId: string | null) => ({ leafId }),
     setLayoutName: (name: string) => ({ name }),
+    setBorderWidth: (borderWidth: number) => ({ borderWidth }),
+    setBackgroundColor: (color: string) => ({ color }),
+    setBackgroundScene: (sceneId: string | null) => ({ sceneId }),
+    setBackgroundOpacity: (opacity: number) => ({ opacity }),
+    setSceneSearch: (search: string) => ({ search }),
     assignSceneToLeaf: (leafId: string, sceneId: string | null) => ({ leafId, sceneId }),
     startResize: (
       parentId: string,
@@ -87,10 +107,17 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         closeGenerator: () => false,
       },
     ],
-    selectedPresetId: [
-      defaultPresetId(),
+    editingSceneId: [
+      null as string | null,
       {
-        openGenerator: () => defaultPresetId(),
+        openGenerator: (_, { sceneId }) => sceneId,
+        closeGenerator: () => null,
+      },
+    ],
+    selectedPresetId: [
+      defaultPresetId() as string | null,
+      {
+        openGenerator: (_, { layout }) => (layout ? null : defaultPresetId()),
         selectPreset: (_, { presetId }) => presetId,
       },
     ],
@@ -110,14 +137,39 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         selectLeaf: (_, { leafId }) => leafId,
       },
     ],
+    sceneSearch: [
+      '',
+      {
+        openGenerator: () => '',
+        closeGenerator: () => '',
+        setSceneSearch: (_, { search }) => search,
+      },
+    ],
     layout: [
       defaultSplitScreenSceneLayout(),
       {
-        openGenerator: () => layoutForPreset(defaultPresetId()),
-        selectPreset: (_, { presetId }) => layoutForPreset(presetId),
+        openGenerator: (_, { layout }) =>
+          layout ? cloneSplitScreenSceneLayout(layout) : layoutForPreset(defaultPresetId()),
+        selectPreset: (state, { presetId }) => layoutForPreset(presetId, state),
         setLayoutName: (state, { name }) => ({
           ...state,
           name,
+        }),
+        setBorderWidth: (state, { borderWidth }) => ({
+          ...state,
+          borderWidth: clampBorderWidth(borderWidth),
+        }),
+        setBackgroundColor: (state, { color }) => ({
+          ...state,
+          background: { ...state.background, color },
+        }),
+        setBackgroundScene: (state, { sceneId }) => ({
+          ...state,
+          background: { ...state.background, sceneId },
+        }),
+        setBackgroundOpacity: (state, { opacity }) => ({
+          ...state,
+          background: { ...state.background, opacity: clampOpacity(opacity) },
         }),
         assignSceneToLeaf: (state, { leafId, sceneId }) => ({
           ...state,

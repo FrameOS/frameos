@@ -43,6 +43,52 @@ const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> |
   return { ...scene, fields }
 }
 
+function referencedSceneIds(scene: FrameScene): string[] {
+  const sceneIds = new Set<string>()
+
+  for (const node of scene.nodes ?? []) {
+    const data = node.data as any
+    if (node.type === 'scene' && typeof data?.keyword === 'string' && data.keyword) {
+      sceneIds.add(data.keyword)
+    } else if (node.type === 'dispatch' && data?.keyword === 'setCurrentScene') {
+      const targetSceneId = data?.config?.sceneId
+      if (typeof targetSceneId === 'string' && targetSceneId) {
+        sceneIds.add(targetSceneId)
+      }
+    }
+  }
+
+  return Array.from(sceneIds)
+}
+
+function collectScenePreviewPayloadScenes(
+  rootScene: FrameScene,
+  scenes: FrameScene[],
+  resolvedState: Record<string, any> | null
+): FrameScene[] {
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]))
+  const result: FrameScene[] = []
+  const visited = new Set<string>()
+
+  const visit = (scene: FrameScene, isRoot = false): void => {
+    if (visited.has(scene.id)) {
+      return
+    }
+    visited.add(scene.id)
+    result.push(isRoot ? applyStateToSceneFields(scene, resolvedState) : scene)
+
+    for (const referencedSceneId of referencedSceneIds(scene)) {
+      const referencedScene = sceneById.get(referencedSceneId)
+      if (referencedScene) {
+        visit(referencedScene)
+      }
+    }
+  }
+
+  visit(rootScene, true)
+  return result
+}
+
 export const scenesLogic = kea<scenesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'scenesLogic']),
   props({} as ScenesLogicProps),
@@ -640,9 +686,9 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
-        const payloadScene = applyStateToSceneFields(scene, resolvedState)
+        const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, resolvedState)
         const payload = {
-          scenes: [payloadScene],
+          scenes: payloadScenes,
           sceneId: scene.id,
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }

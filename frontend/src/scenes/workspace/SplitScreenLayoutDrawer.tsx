@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useRef, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react'
 import { ArrowLeftIcon, EllipsisHorizontalIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import type { FrameScene, FrameType } from '../../types'
@@ -10,13 +11,16 @@ import { apiFetch } from '../../utils/apiFetch'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
 import {
   assignSceneToSplitLayoutLeaf,
+  splitLayoutLeafBorderEdges,
   splitLayoutDividers,
   splitLayoutLeafRects,
   splitLayoutLeaves,
   splitScreenLayoutPresets,
   type SplitLayoutDivider,
+  type SplitLayoutLeafBorderEdges,
   type SplitLayoutLeafRect,
   type SplitLayoutNode,
+  type SplitScreenBackground,
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
@@ -140,45 +144,69 @@ function MoreLayoutsButton({ onClick }: { onClick: () => void }): JSX.Element {
 function SceneSourceStrip({
   frame,
   onPickScene,
+  onSearchChange,
+  search,
 }: {
   frame: FrameType
   onPickScene: (sceneId: string) => void
-}): JSX.Element | null {
+  onSearchChange: (search: string) => void
+  search: string
+}): JSX.Element {
   const scenes = frame.scenes ?? []
-  if (scenes.length === 0) {
-    return null
-  }
+  const searchTerm = search.trim().toLowerCase()
+  const filteredScenes = searchTerm
+    ? scenes.filter((scene) => `${scene.name || ''} ${scene.id}`.toLowerCase().includes(searchTerm))
+    : scenes
 
   return (
     <div className="min-w-0">
-      <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Scenes</div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {scenes.map((scene) => (
-          <button
-            key={scene.id}
-            type="button"
-            draggable
-            onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
-            onClick={() => onPickScene(scene.id)}
-            title={scene.name || 'Untitled'}
-            className="frameos-card group w-36 shrink-0 overflow-hidden rounded-lg border text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:w-32"
-          >
-            <div className="frameos-card-media relative h-16">
-              <FrameImage
-                frameId={frame.id}
-                sceneId={scene.id}
-                thumb
-                refreshable={false}
-                objectFit="cover"
-                className="h-full w-full rounded-none"
-              />
-            </div>
-            <div className="frameos-scene-source-title frameos-strong px-2 py-1.5 text-xs font-semibold leading-snug">
-              {scene.name || 'Untitled'}
-            </div>
-          </button>
-        ))}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scenes</div>
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search"
+          className="frameos-form-control h-7 min-w-0 flex-1 rounded-md border px-2 text-xs font-medium outline-none transition focus:ring-1 focus:ring-blue-400 sm:max-w-44"
+        />
       </div>
+      {scenes.length === 0 ? (
+        <div className="frameos-muted frameos-inset rounded-lg border px-3 py-3 text-center text-xs font-semibold">
+          No scenes available
+        </div>
+      ) : filteredScenes.length === 0 ? (
+        <div className="frameos-muted frameos-inset rounded-lg border px-3 py-3 text-center text-xs font-semibold">
+          No matching scenes
+        </div>
+      ) : (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {filteredScenes.map((scene) => (
+            <button
+              key={scene.id}
+              type="button"
+              draggable
+              onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
+              onClick={() => onPickScene(scene.id)}
+              title={scene.name || 'Untitled'}
+              className="frameos-card group w-36 shrink-0 overflow-hidden rounded-lg border text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:w-32"
+            >
+              <div className="frameos-card-media relative h-16">
+                <FrameImage
+                  frameId={frame.id}
+                  sceneId={scene.id}
+                  thumb
+                  refreshable={false}
+                  objectFit="cover"
+                  className="h-full w-full rounded-none"
+                />
+              </div>
+              <div className="frameos-scene-source-title frameos-strong px-2 py-1.5 text-xs font-semibold leading-snug">
+                {scene.name || 'Untitled'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -208,6 +236,8 @@ async function saveSplitScreenThumbnail(
 }
 
 function SplitPreviewCell({
+  borderEdges,
+  borderWidth,
   frame,
   rect,
   scene,
@@ -216,6 +246,8 @@ function SplitPreviewCell({
   onRemoveScene,
   onSelect,
 }: {
+  borderEdges: SplitLayoutLeafBorderEdges
+  borderWidth: number
   frame: FrameType
   rect: SplitLayoutLeafRect
   scene: FrameScene | null
@@ -248,6 +280,12 @@ function SplitPreviewCell({
     onRemoveScene(rect.leafId)
   }
 
+  const halfBorderWidth = Math.max(0, borderWidth) / 2
+  const paddingTop = borderEdges.top ? halfBorderWidth : 0
+  const paddingRight = borderEdges.right ? halfBorderWidth : 0
+  const paddingBottom = borderEdges.bottom ? halfBorderWidth : 0
+  const paddingLeft = borderEdges.left ? halfBorderWidth : 0
+
   return (
     <div
       aria-selected={selected}
@@ -255,49 +293,198 @@ function SplitPreviewCell({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       className={clsx(
-        'frameos-split-cell absolute cursor-pointer overflow-hidden border transition',
-        scene ? 'shadow-inner' : 'frameos-split-cell-empty',
+        'frameos-split-cell-shell absolute cursor-pointer transition',
         selected && 'frameos-split-cell-selected'
       )}
       style={{
         height: `${rect.height}%`,
         left: `${rect.x}%`,
+        paddingBottom: `${paddingBottom}px`,
+        paddingLeft: `${paddingLeft}px`,
+        paddingRight: `${paddingRight}px`,
+        paddingTop: `${paddingTop}px`,
         top: `${rect.y}%`,
         width: `${rect.width}%`,
       }}
     >
-      {scene ? (
-        <>
-          <FrameImage
-            frameId={frame.id}
-            sceneId={scene.id}
-            thumb
-            refreshable={false}
-            objectFit="cover"
-            className="h-full w-full rounded-none"
-          />
-          <div className="frameos-split-cell-label frameos-strong absolute inset-x-0 bottom-0 px-2 py-1 text-xs font-semibold backdrop-blur">
-            <span className="block truncate">{scene.name || 'Untitled scene'}</span>
+      <div
+        className={clsx(
+          'frameos-split-cell relative h-full w-full overflow-hidden',
+          scene ? 'shadow-inner' : 'frameos-split-cell-empty'
+        )}
+      >
+        {scene ? (
+          <>
+            <FrameImage
+              frameId={frame.id}
+              sceneId={scene.id}
+              thumb
+              refreshable={false}
+              objectFit="cover"
+              className="h-full w-full rounded-none"
+            />
+            <div className="frameos-split-cell-label frameos-strong absolute inset-x-0 bottom-0 px-2 py-1 text-xs font-semibold backdrop-blur">
+              <span className="block truncate">{scene.name || 'Untitled scene'}</span>
+            </div>
+            <button
+              type="button"
+              title="Remove scene"
+              aria-label="Remove scene"
+              onClick={handleRemove}
+              className="frameos-icon-button absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg shadow-sm backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <XMarkIcon className="h-4 w-4" />
+            </button>
+          </>
+        ) : (
+          <div className="frameos-muted flex h-full w-full items-center justify-center px-2 text-center text-xs font-semibold">
+            <span className="frameos-split-drop-label">Drop scene</span>
           </div>
-          <button
-            type="button"
-            title="Remove scene"
-            aria-label="Remove scene"
-            onClick={handleRemove}
-            className="frameos-icon-button absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg shadow-sm backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <XMarkIcon className="h-4 w-4" />
-          </button>
-        </>
-      ) : (
-        <div className="frameos-muted flex h-full w-full items-center justify-center px-2 text-center text-xs font-semibold">
-          Drop scene
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
 
+function SplitRenderControls({
+  background,
+  borderWidth,
+  frame,
+  scenes,
+  onSetBackgroundColor,
+  onSetBackgroundOpacity,
+  onSetBackgroundScene,
+  onSetBorderWidth,
+}: {
+  background: SplitScreenBackground
+  borderWidth: number
+  frame: FrameType
+  scenes: FrameScene[]
+  onSetBackgroundColor: (color: string) => void
+  onSetBackgroundOpacity: (opacity: number) => void
+  onSetBackgroundScene: (sceneId: string | null) => void
+  onSetBorderWidth: (borderWidth: number) => void
+}): JSX.Element {
+  const backgroundScene = background.sceneId ? scenes.find((scene) => scene.id === background.sceneId) ?? null : null
+  const hasBackgroundScene = Boolean(background.sceneId)
+
+  const handleSceneDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleSceneDrop = (event: DragEvent<HTMLDivElement>): void => {
+    const sceneId = getFrameosSceneDragData(event.dataTransfer)
+    if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) {
+      return
+    }
+    event.preventDefault()
+    onSetBackgroundScene(sceneId)
+  }
+
+  return (
+    <div
+      className={clsx(
+        'frameos-card grid gap-3 rounded-lg border px-3 py-3 shadow-sm',
+        hasBackgroundScene ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+      )}
+    >
+      <label className="min-w-0">
+        <span className="frameos-muted mb-1 block text-xs font-semibold uppercase tracking-wide">Background color</span>
+        <ColorInput
+          value={background.color}
+          onChange={onSetBackgroundColor}
+          className="!h-10 !min-w-0"
+          placeholder="#f8fafc"
+        />
+      </label>
+
+      <label className="min-w-0">
+        <span className="frameos-muted mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+          <span>Border</span>
+          <span>{borderWidth}px</span>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={48}
+          step={1}
+          value={borderWidth}
+          onChange={(event) => onSetBorderWidth(Number(event.target.value))}
+          className="w-full accent-[var(--frameos-primary)]"
+        />
+      </label>
+
+      <div className="min-w-0">
+        <span className="frameos-muted mb-1 block truncate text-xs font-semibold uppercase tracking-wide">
+          Background scene
+        </span>
+        <div
+          onDragOver={handleSceneDragOver}
+          onDrop={handleSceneDrop}
+          className={clsx(
+            'frameos-inset flex h-10 min-w-0 items-center overflow-hidden rounded-lg border transition',
+            hasBackgroundScene ? 'shadow-inner' : 'border-dashed'
+          )}
+        >
+          {background.sceneId ? (
+            <>
+              <FrameImage
+                frameId={frame.id}
+                sceneId={background.sceneId}
+                thumb
+                refreshable={false}
+                objectFit="cover"
+                className="h-full w-10 shrink-0 rounded-none"
+              />
+              <span className="frameos-strong min-w-0 flex-1 truncate px-2 text-xs font-semibold">
+                {backgroundScene?.name || 'Background scene'}
+              </span>
+              <button
+                type="button"
+                title="Remove background scene"
+                aria-label="Remove background scene"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSetBackgroundScene(null)
+                }}
+                className="frameos-secondary-button mr-1 inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <XMarkIcon className="h-4 w-4" />
+                Remove
+              </button>
+            </>
+          ) : (
+            <div className="frameos-muted flex h-full w-full items-center justify-center px-2 text-center text-xs font-semibold">
+              <span className="frameos-split-drop-label">Drop scene</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {hasBackgroundScene ? (
+        <label className="min-w-0">
+          <span className="frameos-muted mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+            <span>Scene opacity</span>
+            <span>{Math.round(background.opacity * 100)}%</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={background.opacity}
+            onChange={(event) => onSetBackgroundOpacity(Number(event.target.value))}
+            className="w-full accent-[var(--frameos-primary)]"
+          />
+        </label>
+      ) : null}
+    </div>
+  )
+}
 function SplitPreviewDivider({
   divider,
   previewRef,
@@ -338,15 +525,38 @@ function SplitPreviewDivider({
 export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.Element {
   const logic = splitScreenLayoutLogic({ frameId: frame.id })
   const frameKea = frameLogic({ frameId: frame.id })
-  const { configuredLeafCount, layout, morePresetsOpen, resizing, selectedLeafId, selectedPresetId } = useValues(logic)
-  const { assignSceneToLeaf, closeGenerator, selectLeaf, selectPreset, setLayoutName, showMorePresets, startResize } =
-    useActions(logic)
+  const {
+    configuredLeafCount,
+    editingSceneId,
+    layout,
+    morePresetsOpen,
+    resizing,
+    sceneSearch,
+    selectedLeafId,
+    selectedPresetId,
+  } = useValues(logic)
+  const {
+    assignSceneToLeaf,
+    closeGenerator,
+    selectLeaf,
+    selectPreset,
+    setBackgroundColor,
+    setBackgroundOpacity,
+    setBackgroundScene,
+    setBorderWidth,
+    setLayoutName,
+    setSceneSearch,
+    showMorePresets,
+    startResize,
+  } = useActions(logic)
   const { updateScene } = useActions(frameKea)
   const { updateEntityImage } = useActions(entityImagesModel)
   const { openSceneControl } = useActions(workspaceLogic)
   const previewRef = useRef<HTMLDivElement>(null)
   const scenes = sceneById(frame)
+  const frameScenes = frame.scenes ?? []
   const rects = splitLayoutLeafRects(layout.root)
+  const borderEdges = splitLayoutLeafBorderEdges(rects)
   const dividers = splitLayoutDividers(layout.root)
   const suggestedTitle = suggestedSplitSceneTitle(layout, scenes)
   const visiblePresets = morePresetsOpen
@@ -412,7 +622,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
       ...layout,
       name: layout.name.trim() || suggestedTitle,
     }
-    const scene = buildSplitScene(frame, saveLayout)
+    const scene = buildSplitScene(frame, saveLayout, editingSceneId)
     updateScene(scene.id, scene)
     await frameKea.asyncActions.submitFrameForm()
     openSceneControl(frame.id, scene.id)
@@ -443,7 +653,6 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
           <span>Add scene</span>
         </button>
         <label className="order-3 w-full min-w-0 sm:order-none sm:min-w-[11rem] sm:flex-1">
-          <span className="frameos-muted mb-1 block text-xs font-semibold uppercase tracking-wide">Title</span>
           <input
             type="text"
             value={layout.name}
@@ -462,65 +671,104 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {visiblePresets.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              title={preset.name}
-              onClick={() => selectPreset(preset.id)}
-              className={clsx(
-                'frameos-split-preset-button frameos-card rounded-lg border p-1.5 text-left shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                selectedPresetId === preset.id && 'frameos-split-preset-button-selected ring-2'
-              )}
-            >
-              <LayoutThumbnail root={preset.root} />
-              <span className="frameos-muted mt-1 block truncate text-center text-[11px] font-semibold">
-                {preset.name}
-              </span>
-            </button>
-          ))}
-          {!morePresetsOpen && <MoreLayoutsButton onClick={showMorePresets} />}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {visiblePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                title={preset.name}
+                onClick={() => selectPreset(preset.id)}
+                className={clsx(
+                  'frameos-split-preset-button frameos-card rounded-lg border p-1.5 text-left shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  selectedPresetId === preset.id && 'frameos-split-preset-button-selected ring-2'
+                )}
+              >
+                <LayoutThumbnail root={preset.root} />
+                <span className="frameos-muted mt-1 block truncate text-center text-[11px] font-semibold">
+                  {preset.name}
+                </span>
+              </button>
+            ))}
+            {!morePresetsOpen && <MoreLayoutsButton onClick={showMorePresets} />}
+          </div>
+
+          <SplitRenderControls
+            background={layout.background}
+            borderWidth={layout.borderWidth}
+            frame={frame}
+            scenes={frameScenes}
+            onSetBackgroundColor={setBackgroundColor}
+            onSetBackgroundOpacity={setBackgroundOpacity}
+            onSetBackgroundScene={setBackgroundScene}
+            onSetBorderWidth={setBorderWidth}
+          />
+
+          <div
+            ref={previewRef}
+            tabIndex={0}
+            onKeyDown={handlePreviewKeyDown}
+            className={clsx(
+              'frameos-split-preview relative mx-auto w-full overflow-hidden rounded-lg border shadow-inner ring-1 focus:outline-none',
+              resizing && 'select-none'
+            )}
+            style={{
+              aspectRatio: frameAspectRatio(frame),
+              backgroundColor: layout.background.color,
+              maxHeight: `${PREVIEW_MAX_HEIGHT_VH}vh`,
+              maxWidth: previewMaxWidth(frame),
+            }}
+          >
+            {layout.background.sceneId ? (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ opacity: layout.background.opacity }}
+                aria-hidden
+              >
+                <FrameImage
+                  frameId={frame.id}
+                  sceneId={layout.background.sceneId}
+                  thumb
+                  refreshable={false}
+                  objectFit="cover"
+                  className="h-full w-full rounded-none"
+                />
+              </div>
+            ) : null}
+            {rects.map((rect) => (
+              <SplitPreviewCell
+                key={rect.leafId}
+                borderEdges={borderEdges.get(rect.leafId) ?? { top: false, right: false, bottom: false, left: false }}
+                borderWidth={layout.borderWidth}
+                frame={frame}
+                rect={rect}
+                scene={rect.sceneId ? scenes.get(rect.sceneId) ?? null : null}
+                selected={selectedLeafId === rect.leafId}
+                onDropScene={handleDropScene}
+                onRemoveScene={(leafId) => assignSceneWithTitle(leafId, null)}
+                onSelect={selectPreviewLeaf}
+              />
+            ))}
+            {dividers.map((divider) => (
+              <SplitPreviewDivider
+                key={`${divider.parentId}:${divider.index}`}
+                divider={divider}
+                previewRef={previewRef}
+                onStartResize={handleStartResize}
+              />
+            ))}
+          </div>
         </div>
 
-        <div
-          ref={previewRef}
-          tabIndex={0}
-          onKeyDown={handlePreviewKeyDown}
-          className={clsx(
-            'frameos-split-preview relative mx-auto w-full overflow-hidden rounded-lg border shadow-inner ring-1 focus:outline-none',
-            resizing && 'select-none'
-          )}
-          style={{
-            aspectRatio: frameAspectRatio(frame),
-            maxHeight: `${PREVIEW_MAX_HEIGHT_VH}vh`,
-            maxWidth: previewMaxWidth(frame),
-          }}
-        >
-          {rects.map((rect) => (
-            <SplitPreviewCell
-              key={rect.leafId}
-              frame={frame}
-              rect={rect}
-              scene={rect.sceneId ? scenes.get(rect.sceneId) ?? null : null}
-              selected={selectedLeafId === rect.leafId}
-              onDropScene={handleDropScene}
-              onRemoveScene={(leafId) => assignSceneWithTitle(leafId, null)}
-              onSelect={selectPreviewLeaf}
-            />
-          ))}
-          {dividers.map((divider) => (
-            <SplitPreviewDivider
-              key={`${divider.parentId}:${divider.index}`}
-              divider={divider}
-              previewRef={previewRef}
-              onStartResize={handleStartResize}
-            />
-          ))}
+        <div className="frameos-divider shrink-0 border-t px-4 py-3 sm:px-5">
+          <SceneSourceStrip
+            frame={frame}
+            search={sceneSearch}
+            onPickScene={handlePickScene}
+            onSearchChange={setSceneSearch}
+          />
         </div>
-
-        <SceneSourceStrip frame={frame} onPickScene={handlePickScene} />
       </div>
     </div>
   )

@@ -1,8 +1,13 @@
 import type { FrameType } from '../types'
 import { getBasePath } from './getBasePath'
 import { projectApiPath } from './projectApi'
-import type { SplitScreenSceneLayout } from './splitScreenLayouts'
-import { splitLayoutLeafRects } from './splitScreenLayouts'
+import {
+  defaultSplitScreenBackground,
+  splitLayoutLeafBorderEdges,
+  splitLayoutLeafRects,
+  type SplitScreenBackground,
+  type SplitScreenSceneLayout,
+} from './splitScreenLayouts'
 
 function frameDisplayDimensions(frame: Pick<FrameType, 'width' | 'height' | 'rotate'>): {
   width: number
@@ -77,6 +82,14 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'))
 }
 
+function splitBackground(layout: SplitScreenSceneLayout): SplitScreenBackground {
+  return {
+    ...defaultSplitScreenBackground,
+    ...(layout.background ?? {}),
+    opacity: Math.max(0, Math.min(1, Number(layout.background?.opacity ?? defaultSplitScreenBackground.opacity) || 0)),
+  }
+}
+
 export async function buildSplitScreenThumbnail(
   frame: Pick<FrameType, 'id' | 'width' | 'height' | 'rotate'>,
   layout: SplitScreenSceneLayout
@@ -96,36 +109,65 @@ export async function buildSplitScreenThumbnail(
     return null
   }
 
-  context.fillStyle = '#f8fafc'
+  const background = splitBackground(layout)
+  context.fillStyle = background.color
   context.fillRect(0, 0, canvas.width, canvas.height)
 
+  let backgroundImage: HTMLImageElement | null = null
+  if (background.sceneId) {
+    backgroundImage = await fetchSceneImage(frame.id, background.sceneId)
+    if (backgroundImage) {
+      context.save()
+      context.globalAlpha = background.opacity
+      drawCover(context, backgroundImage, 0, 0, canvas.width, canvas.height)
+      context.restore()
+    }
+  }
+
   const rects = splitLayoutLeafRects(layout.root)
+  const borderEdges = splitLayoutLeafBorderEdges(rects)
   const sceneIds = Array.from(new Set(rects.map((rect) => rect.sceneId).filter(Boolean))) as string[]
   const images = new Map<string, HTMLImageElement | null>()
-  await Promise.all(sceneIds.map(async (sceneId) => images.set(sceneId, await fetchSceneImage(frame.id, sceneId))))
+  if (background.sceneId && backgroundImage) {
+    images.set(background.sceneId, backgroundImage)
+  }
+  await Promise.all(
+    sceneIds
+      .filter((sceneId) => !images.has(sceneId))
+      .map(async (sceneId) => images.set(sceneId, await fetchSceneImage(frame.id, sceneId)))
+  )
+
+  const scale = canvas.width / dimensions.width
+  const borderWidth = Math.max(0, Math.round((Number(layout.borderWidth) || 0) * scale))
+  const halfBorderWidth = borderWidth / 2
 
   for (const rect of rects) {
     const x = Math.round((rect.x / 100) * canvas.width)
     const y = Math.round((rect.y / 100) * canvas.height)
     const width = Math.max(1, Math.round((rect.width / 100) * canvas.width))
     const height = Math.max(1, Math.round((rect.height / 100) * canvas.height))
+    const edges = borderEdges.get(rect.leafId) ?? { top: false, right: false, bottom: false, left: false }
+    const insetTop = edges.top ? halfBorderWidth : 0
+    const insetRight = edges.right ? halfBorderWidth : 0
+    const insetBottom = edges.bottom ? halfBorderWidth : 0
+    const insetLeft = edges.left ? halfBorderWidth : 0
+    const cellX = Math.round(x + insetLeft)
+    const cellY = Math.round(y + insetTop)
+    const cellWidth = Math.max(1, Math.round(width - insetLeft - insetRight))
+    const cellHeight = Math.max(1, Math.round(height - insetTop - insetBottom))
     const image = rect.sceneId ? images.get(rect.sceneId) : null
 
     context.save()
     context.beginPath()
-    context.rect(x, y, width, height)
+    context.rect(cellX, cellY, cellWidth, cellHeight)
     context.clip()
     if (image) {
-      drawCover(context, image, x, y, width, height)
+      drawCover(context, image, cellX, cellY, cellWidth, cellHeight)
     } else {
       context.fillStyle = '#e2e8f0'
-      context.fillRect(x, y, width, height)
+      context.fillRect(cellX, cellY, cellWidth, cellHeight)
     }
     context.restore()
-
-    context.strokeStyle = '#ffffff'
-    context.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) * 0.008))
-    context.strokeRect(x, y, width, height)
   }
 
   return await canvasToBlob(canvas)

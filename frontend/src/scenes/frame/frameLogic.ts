@@ -46,7 +46,14 @@ import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
-import type { SplitLayoutBranch, SplitLayoutNode, SplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
+import {
+  cloneSplitScreenSceneLayout,
+  defaultSplitScreenBackground,
+  type SplitLayoutBranch,
+  type SplitLayoutNode,
+  type SplitScreenBackground,
+  type SplitScreenSceneLayout,
+} from '../../utils/splitScreenLayouts'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -1128,14 +1135,26 @@ function splitRatioString(ratios: number[], length: number): string {
   }).join(' ')
 }
 
-function splitNodeConfig(branch: SplitLayoutBranch): Record<string, any> {
+function splitLayoutBorderWidth(layout: SplitScreenSceneLayout): number {
+  return Math.max(0, Math.min(48, Math.round(Number(layout.borderWidth) || 0)))
+}
+
+function splitLayoutBackground(layout: SplitScreenSceneLayout): SplitScreenBackground {
+  return {
+    ...defaultSplitScreenBackground,
+    ...(layout.background ?? {}),
+    opacity: Math.max(0, Math.min(1, Number(layout.background?.opacity ?? defaultSplitScreenBackground.opacity) || 0)),
+  }
+}
+
+function splitNodeConfig(branch: SplitLayoutBranch, borderWidth: number): Record<string, any> {
   const rows = branch.direction === 'column' ? branch.children.length : 1
   const columns = branch.direction === 'row' ? branch.children.length : 1
   return {
     rows: String(rows),
     columns: String(columns),
     hideEmpty: false,
-    gap: '0',
+    gap: String(borderWidth),
     margin: '0',
     ...(branch.direction === 'row'
       ? { width_ratios: splitRatioString(branch.ratios, branch.children.length) }
@@ -1143,10 +1162,16 @@ function splitNodeConfig(branch: SplitLayoutBranch): Record<string, any> {
   }
 }
 
-export function buildSplitScene(frame: Partial<FrameType>, layout: SplitScreenSceneLayout): FrameScene {
+export function buildSplitScene(
+  frame: Partial<FrameType>,
+  layout: SplitScreenSceneLayout,
+  sceneId?: string | null
+): FrameScene {
   const nodes: DiagramNode[] = []
   const edges: DiagramEdge[] = []
   let visualIndex = 0
+  const borderWidth = splitLayoutBorderWidth(layout)
+  const background = splitLayoutBackground(layout)
 
   const eventNode: DiagramNode = {
     id: uuidv4(),
@@ -1165,6 +1190,41 @@ export function buildSplitScene(frame: Partial<FrameType>, layout: SplitScreenSc
       targetHandle,
       type: 'appNodeEdge',
     })
+  }
+
+  const addBackgroundNode = (): { firstNodeId: string; lastNodeId: string } | null => {
+    let firstNodeId: string | null = null
+    let lastNodeId: string | null = null
+
+    if (background.sceneId) {
+      const nodeId = uuidv4()
+      nodes.push({
+        id: nodeId,
+        type: 'scene',
+        position: { x: 390, y: -70 },
+        data: { keyword: background.sceneId, config: {} } satisfies SceneNodeData,
+      })
+      firstNodeId = nodeId
+      lastNodeId = nodeId
+    }
+
+    if (firstNodeId && lastNodeId && background.opacity < 1) {
+      const opacityNodeId = uuidv4()
+      nodes.push({
+        id: opacityNodeId,
+        type: 'app',
+        position: { x: 390, y: 20 },
+        data: {
+          keyword: 'render/opacity',
+          name: 'Background opacity',
+          config: { opacity: background.opacity },
+        } satisfies AppNodeData,
+      })
+      addEdge(lastNodeId, 'next', opacityNodeId)
+      lastNodeId = opacityNodeId
+    }
+
+    return firstNodeId && lastNodeId ? { firstNodeId, lastNodeId } : null
   }
 
   const addSceneNode = (child: SplitLayoutNode, depth: number): string | null => {
@@ -1191,7 +1251,7 @@ export function buildSplitScene(frame: Partial<FrameType>, layout: SplitScreenSc
       data: {
         keyword: 'render/split',
         name: depth === 0 ? 'Split screen' : 'Nested split',
-        config: splitNodeConfig(branch),
+        config: splitNodeConfig(branch, borderWidth),
       } satisfies AppNodeData,
     })
 
@@ -1209,16 +1269,26 @@ export function buildSplitScene(frame: Partial<FrameType>, layout: SplitScreenSc
   }
 
   const rootNodeId = addSplitNode(layout.root, 0)
-  addEdge(eventNode.id, 'next', rootNodeId)
+  const backgroundNodes = addBackgroundNode()
+  if (backgroundNodes) {
+    addEdge(eventNode.id, 'next', backgroundNodes.firstNodeId)
+    addEdge(backgroundNodes.lastNodeId, 'next', rootNodeId)
+  } else {
+    addEdge(eventNode.id, 'next', rootNodeId)
+  }
 
   return sanitizeScene(
     {
-      id: uuidv4(),
+      id: sceneId || uuidv4(),
       name: layout.name || 'Split screen',
       nodes,
       edges,
       fields: [],
-      settings: { execution: 'interpreted' },
+      settings: {
+        backgroundColor: background.color,
+        execution: 'interpreted',
+        splitScreenLayout: cloneSplitScreenSceneLayout(layout) as unknown as Record<string, any>,
+      },
     },
     frame
   )
@@ -1784,10 +1854,7 @@ export const frameLogic = kea<frameLogicType>([
       } else {
         await asyncActions.submitFrameForm()
       }
-      framesModel.actions.deployFrame(
-        props.frameId,
-        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
-      )
+      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
     },
     saveAndFastDeployFrame: async () => {
       const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
@@ -1816,10 +1883,7 @@ export const frameLogic = kea<frameLogicType>([
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
     deployFrame: () => {
-      framesModel.actions.deployFrame(
-        props.frameId,
-        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
-      )
+      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
