@@ -17,6 +17,10 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc clearTransientInputs(self: App) =
+  self.appConfig.inputImage = none(Image)
+  self.appConfig.image = nil
+
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
     let sourceImage = self.appConfig.image
@@ -53,13 +57,19 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     scaleAndDrawImage(image, errorImage, self.appConfig.placement)
 
 proc run*(self: App, context: ExecutionContext) =
-  render(self, context, context.image)
+  try:
+    render(self, context, context.image)
+  finally:
+    self.clearTransientInputs()
 
 proc get*(self: App, context: ExecutionContext): Image =
-  result = if self.appConfig.inputImage.isSome:
-    self.appConfig.inputImage.get()
-  elif context.hasImage:
-    newImage(context.image.width, context.image.height)
-  else:
-    newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
-  render(self, context, result)
+  try:
+    result = if self.appConfig.inputImage.isSome:
+      self.appConfig.inputImage.get()
+    elif context.hasImage:
+      newImage(context.image.width, context.image.height)
+    else:
+      newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
+    render(self, context, result)
+  finally:
+    self.clearTransientInputs()

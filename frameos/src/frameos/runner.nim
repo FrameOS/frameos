@@ -16,6 +16,7 @@ import frameos/utils/time
 import frameos/scenes
 import frameos/boot_guard
 import frameos/runtime_diagnostics
+import frameos/utils/memory
 import frameos/watchdog
 
 import drivers/drivers as drivers
@@ -225,7 +226,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       self.triggerRenderNext = false # used to debounce render events received while rendering
 
       let interval = currentScene.refreshInterval
-      let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene.get(), currentScene)
+      var renderResult = self.renderSceneImage(exportedScene.get(), currentScene)
+      var lastRotatedImage = renderResult[0]
+      let nextSleep = renderResult[1]
       reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
       clearBootCrashCount()
       successfulSceneRenders += 1
@@ -261,6 +264,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       except Exception as e:
         self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
       finally:
+        lastRotatedImage = nil
+        renderResult[0] = nil
+        if self.frameConfig.device == "framebuffer":
+          reclaimRenderMemory()
         clearNextRenderSeconds()
       markRuntimeDone()
 

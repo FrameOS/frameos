@@ -45,6 +45,7 @@ suite "render/image app":
   test "run renders onto context image in place":
     let source = newImage(1, 1)
     source.data[0] = rgbx(200, 100, 50, 255)
+    let input = newImage(3, 2)
     let config = makeConfig(3, 2)
     let app = App(
       frameConfig: config,
@@ -58,7 +59,7 @@ suite "render/image app":
         blendMode: "normal"
       )
     )
-    let context = ExecutionContext(image: newImage(3, 2), hasImage: true)
+    let context = ExecutionContext(image: input, hasImage: true)
 
     app.run(context)
 
@@ -66,6 +67,33 @@ suite "render/image app":
     check sample.r > 0
     check sample.g > 0
     check sample.b > 0
+    check app.appConfig.image.isNil
+    check app.appConfig.inputImage.isNone
+
+  test "get clears transient source images after returning output":
+    let source = newImage(1, 1)
+    source.data[0] = rgbx(50, 200, 100, 255)
+    let input = newImage(3, 2)
+    let config = makeConfig(3, 2)
+    let app = App(
+      frameConfig: config,
+      scene: makeScene(config),
+      appConfig: AppConfig(
+        inputImage: some(input),
+        image: source,
+        placement: "stretch",
+        offsetX: 0,
+        offsetY: 0,
+        blendMode: "normal"
+      )
+    )
+
+    let output = app.get(ExecutionContext(hasImage: false))
+
+    check output == input
+    check pixel(output, 2, 1).g > 0
+    check app.appConfig.image.isNil
+    check app.appConfig.inputImage.isNone
 
   test "missing source image is handled by error path without raising":
     let config = makeConfig(4, 3)
