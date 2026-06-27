@@ -14,6 +14,7 @@ import {
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
@@ -39,6 +40,22 @@ async function fetchFirmwareStatus(frameId: number): Promise<FirmwareStatus> {
   return firmware
 }
 
+async function startFirmwareBuild(frameId: number, force = false): Promise<FirmwareStatus> {
+  const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    let detail = 'Failed to start firmware build'
+    try {
+      detail = (await response.json())?.detail || detail
+    } catch (error) {}
+    throw new Error(detail)
+  }
+  const firmware = ((await response.json())?.firmware ?? {}) as FirmwareStatus
+  framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
+  return firmware
+}
+
 function normalizeFlashSize(value: unknown): EspFlashSize {
   if (typeof value !== 'string') {
     return '8MB'
@@ -55,21 +72,32 @@ function firmwareFlashSize(frame: FrameType, firmware?: FirmwareStatus | null): 
 async function ensureFirmwareReady(frameId: number, onStatus: (message: string) => void): Promise<FirmwareStatus> {
   let firmware = await fetchFirmwareStatus(frameId)
   if (firmware.status !== 'ready') {
-    onStatus('Building firmware image')
-    const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware`, { method: 'POST' })
-    if (!response.ok) {
-      let detail = 'Failed to start firmware build'
-      try {
-        detail = (await response.json())?.detail || detail
-      } catch (error) {}
-      throw new Error(detail)
-    }
-    firmware = ((await response.json())?.firmware ?? {}) as FirmwareStatus
-    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
+    onStatus(
+      firmware.status === 'stale'
+        ? 'Rebuilding firmware from current settings'
+        : firmware.status === 'missing'
+        ? 'Rebuilding missing firmware image'
+        : 'Building firmware image'
+    )
+    firmware = await startFirmwareBuild(frameId, firmware.status === 'stale' || firmware.status === 'missing')
 
     const deadline = Date.now() + FIRMWARE_POLL_TIMEOUT_MS
+    let recoveryAttempts = 0
     while (firmware.status !== 'ready') {
-      if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
+      if (firmware.status === 'missing' || firmware.status === 'stale') {
+        if (recoveryAttempts >= 2) {
+          throw new Error(firmware.error || 'Firmware image needs to be rebuilt')
+        }
+        recoveryAttempts += 1
+        onStatus(
+          firmware.status === 'stale'
+            ? 'Rebuilding firmware from current settings'
+            : 'Rebuilding missing firmware image'
+        )
+        firmware = await startFirmwareBuild(frameId, true)
+        continue
+      }
+      if (firmware.status === 'error') {
         throw new Error(firmware.error || 'Firmware build failed')
       }
       if (Date.now() > deadline) {
@@ -100,7 +128,8 @@ export function EmbeddedWebFlasher({
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const { openFrameTool } = useActions(workspaceLogic)
+  const { setDeployDrawerView } = useActions(frameLogic({ frameId: frame.id }))
+  const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
@@ -128,6 +157,7 @@ export function EmbeddedWebFlasher({
     setPhase('connecting')
     setProgress(null)
     setMessage('Selecting USB port')
+    setDeployDrawerView('embedded')
     try {
       // Must run inside the click gesture, before any other await
       const activeLogPort = embeddedUsbLogStreamSessionPort(frame.id)
@@ -137,6 +167,7 @@ export function EmbeddedWebFlasher({
         setMessage(null)
         return
       }
+      openFrameToolBehindDrawer(frame.id, 'logs')
 
       // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
       const { ESPLoader, Transport } = await import('esptool-js')
@@ -207,7 +238,7 @@ export function EmbeddedWebFlasher({
       }
       if (streamLogsAfterFlash && port) {
         await startEmbeddedUsbLogStream(frame.id, port)
-        openFrameTool(frame.id, 'logs')
+        openFrameToolBehindDrawer(frame.id, 'logs')
       }
     }
   }
@@ -215,7 +246,7 @@ export function EmbeddedWebFlasher({
   const streamUsbLogs = async (): Promise<void> => {
     const started = await startEmbeddedUsbLogStream(frame.id)
     if (started) {
-      openFrameTool(frame.id, 'logs')
+      openFrameToolBehindDrawer(frame.id, 'logs')
     }
   }
 

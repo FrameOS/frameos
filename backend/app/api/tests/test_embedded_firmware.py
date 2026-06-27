@@ -259,6 +259,8 @@ async def test_firmware_build_queues_job(async_client, db, redis):
     assert data['firmware']['platform'] == 'esp32-s3'
     assert data['firmware']['flashSize'] == '8MB'
     assert data['firmware']['otaSupported'] is True
+    assert data['firmware']['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert data['firmware']['layout']['ram']['renderWorkingBytes'] > 0
     assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
 
     stored = db.get(Frame, frame['id'])

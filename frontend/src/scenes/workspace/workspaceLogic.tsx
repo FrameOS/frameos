@@ -767,6 +767,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     rememberAppsHref: (href: string) => ({ href }),
     navigateToFrame: (frameId: number) => ({ frameId }),
     openFrameTool: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
+    openFrameToolBehindDrawer: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
     navigateToSceneFrame: (frameId: number) => ({ frameId }),
     navigateToScene: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     openScenePreview: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
@@ -864,6 +865,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         focusFrame: (_, { frameId }) => frameId,
         setRouteSelection: (_, { frameId }) => frameId,
         openFrameTool: (_, { frameId }) => frameId,
+        openFrameToolBehindDrawer: (_, { frameId }) => frameId,
       },
     ],
     selectedSceneIdsByFrame: [
@@ -982,6 +984,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         openUtilityPanel: (_, { panel }) => panel,
         openFrameTool: (_, { panel }) => panel,
+        openFrameToolBehindDrawer: (_, { panel }) => panel,
         closeUtilityPanel: () => null,
       },
     ],
@@ -1336,6 +1339,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
           { tool: panel },
           utilityDrawerClosedHash(workspaceContentNavigationHash())
         )
+      },
+      openFrameToolBehindDrawer: ({ frameId, panel }) => {
+        const search: Record<string, unknown> = {
+          ...router.values.searchParams,
+          tool: panel,
+        }
+        if (String(search.frameId ?? '') === String(frameId)) {
+          delete search.frameId
+        }
+        router.actions.push(urls.frame(frameId), search, utilityDrawerClosedHash(workspaceContentNavigationHash()))
       },
       navigateToSceneFrame: ({ frameId }) => {
         actions.selectFrame(frameId)

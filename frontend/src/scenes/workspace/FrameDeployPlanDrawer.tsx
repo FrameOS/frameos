@@ -1471,7 +1471,19 @@ function EmbeddedFirmwareSection({
             Status: {firmware.status}
           </div>
         ) : null}
-        {firmware?.error ? <div className="mt-2 text-sm font-semibold text-red-500">{firmware.error}</div> : null}
+        {firmware?.error ? (
+          <div
+            className={clsx(
+              'mt-2 text-sm font-semibold',
+              firmware.status === 'stale' || firmware.status === 'missing' ? 'text-amber-600' : 'text-red-500'
+            )}
+          >
+            {firmware.error}
+            {firmware.status === 'stale' || firmware.status === 'missing'
+              ? ' It will be rebuilt automatically before flashing or downloading.'
+              : null}
+          </div>
+        ) : null}
       </div>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
@@ -1744,6 +1756,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     </section>
                   ) : null}
                   <DeployBuildOptionsSection frame={frame} frameForm={frameForm} />
+                  {isEmbeddedFrame ? <FirmwareFootprintVisualization frame={frame} /> : null}
                 </div>
               )}
             </>
