@@ -5,8 +5,9 @@ import { ArrowLeftIcon, EllipsisHorizontalIcon, XMarkIcon } from '@heroicons/rea
 import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import { entityImagesModel } from '../../models/entityImagesModel'
-import type { FrameScene, FrameType } from '../../types'
+import type { FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
+import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { apiFetch } from '../../utils/apiFetch'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
 import {
@@ -15,8 +16,10 @@ import {
   splitLayoutDividers,
   splitLayoutLeafRects,
   splitLayoutLeaves,
+  splitLayoutOuterBorderEdges,
   splitScreenLayoutPresets,
   type SplitLayoutDivider,
+  type SplitLayoutLeaf,
   type SplitLayoutLeafBorderEdges,
   type SplitLayoutLeafRect,
   type SplitLayoutNode,
@@ -239,6 +242,7 @@ function SplitPreviewCell({
   borderEdges,
   borderWidth,
   frame,
+  outerBorderWidth,
   rect,
   scene,
   selected,
@@ -249,6 +253,7 @@ function SplitPreviewCell({
   borderEdges: SplitLayoutLeafBorderEdges
   borderWidth: number
   frame: FrameType
+  outerBorderWidth: number
   rect: SplitLayoutLeafRect
   scene: FrameScene | null
   selected: boolean
@@ -281,10 +286,11 @@ function SplitPreviewCell({
   }
 
   const halfBorderWidth = Math.max(0, borderWidth) / 2
-  const paddingTop = borderEdges.top ? halfBorderWidth : 0
-  const paddingRight = borderEdges.right ? halfBorderWidth : 0
-  const paddingBottom = borderEdges.bottom ? halfBorderWidth : 0
-  const paddingLeft = borderEdges.left ? halfBorderWidth : 0
+  const outerEdges = outerBorderWidth > 0 ? splitLayoutOuterBorderEdges(rect) : null
+  const paddingTop = borderEdges.top ? halfBorderWidth : outerEdges?.top ? outerBorderWidth : 0
+  const paddingRight = borderEdges.right ? halfBorderWidth : outerEdges?.right ? outerBorderWidth : 0
+  const paddingBottom = borderEdges.bottom ? halfBorderWidth : outerEdges?.bottom ? outerBorderWidth : 0
+  const paddingLeft = borderEdges.left ? halfBorderWidth : outerEdges?.left ? outerBorderWidth : 0
 
   return (
     <div
@@ -350,20 +356,24 @@ function SplitRenderControls({
   background,
   borderWidth,
   frame,
+  outerBorderWidth,
   scenes,
   onSetBackgroundColor,
   onSetBackgroundOpacity,
   onSetBackgroundScene,
   onSetBorderWidth,
+  onSetOuterBorderWidth,
 }: {
   background: SplitScreenBackground
   borderWidth: number
   frame: FrameType
+  outerBorderWidth: number
   scenes: FrameScene[]
   onSetBackgroundColor: (color: string) => void
   onSetBackgroundOpacity: (opacity: number) => void
   onSetBackgroundScene: (sceneId: string | null) => void
   onSetBorderWidth: (borderWidth: number) => void
+  onSetOuterBorderWidth: (outerBorderWidth: number) => void
 }): JSX.Element {
   const backgroundScene = background.sceneId ? scenes.find((scene) => scene.id === background.sceneId) ?? null : null
   const hasBackgroundScene = Boolean(background.sceneId)
@@ -385,26 +395,22 @@ function SplitRenderControls({
     onSetBackgroundScene(sceneId)
   }
 
+  const handleRemoveBackgroundScene = (event: MouseEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    onSetBackgroundScene(null)
+  }
+
   return (
     <div
       className={clsx(
         'frameos-card grid gap-3 rounded-lg border px-3 py-3 shadow-sm',
-        hasBackgroundScene ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+        hasBackgroundScene ? 'sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]' : 'sm:grid-cols-3'
       )}
     >
-      <label className="min-w-0">
-        <span className="frameos-muted mb-1 block text-xs font-semibold uppercase tracking-wide">Background color</span>
-        <ColorInput
-          value={background.color}
-          onChange={onSetBackgroundColor}
-          className="!h-10 !min-w-0"
-          placeholder="#f8fafc"
-        />
-      </label>
-
-      <label className="min-w-0">
+      <div className="min-w-0">
         <span className="frameos-muted mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
-          <span>Border</span>
+          <span>Gap</span>
           <span>{borderWidth}px</span>
         </span>
         <input
@@ -416,12 +422,46 @@ function SplitRenderControls({
           onChange={(event) => onSetBorderWidth(Number(event.target.value))}
           className="w-full accent-[var(--frameos-primary)]"
         />
+        <span className="frameos-muted mb-1 mt-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+          <span>Border</span>
+          <span>{outerBorderWidth}px</span>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={48}
+          step={1}
+          value={outerBorderWidth}
+          onChange={(event) => onSetOuterBorderWidth(Number(event.target.value))}
+          className="w-full accent-[var(--frameos-primary)]"
+        />
+      </div>
+
+      <label className="min-w-0">
+        <span className="frameos-muted mb-1 block text-xs font-semibold uppercase tracking-wide">Background color</span>
+        <ColorInput
+          value={background.color}
+          onChange={onSetBackgroundColor}
+          className="!h-10 !min-w-[60px]"
+          placeholder="#f8fafc"
+        />
       </label>
 
       <div className="min-w-0">
-        <span className="frameos-muted mb-1 block truncate text-xs font-semibold uppercase tracking-wide">
-          Background scene
-        </span>
+        <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+          <span className="frameos-muted block  text-xs font-semibold uppercase tracking-wide">Background scene</span>
+          {hasBackgroundScene ? (
+            <button
+              type="button"
+              title="Remove background scene"
+              aria-label="Remove background scene"
+              onClick={handleRemoveBackgroundScene}
+              className="frameos-secondary-button inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <XMarkIcon className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
         <div
           onDragOver={handleSceneDragOver}
           onDrop={handleSceneDrop}
@@ -443,19 +483,6 @@ function SplitRenderControls({
               <span className="frameos-strong min-w-0 flex-1 truncate px-2 text-xs font-semibold">
                 {backgroundScene?.name || 'Background scene'}
               </span>
-              <button
-                type="button"
-                title="Remove background scene"
-                aria-label="Remove background scene"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onSetBackgroundScene(null)
-                }}
-                className="frameos-secondary-button mr-1 inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <XMarkIcon className="h-4 w-4" />
-                Remove
-              </button>
             </>
           ) : (
             <div className="frameos-muted flex h-full w-full items-center justify-center px-2 text-center text-xs font-semibold">
@@ -463,28 +490,106 @@ function SplitRenderControls({
             </div>
           )}
         </div>
+        {hasBackgroundScene ? (
+          <label className="mt-2 block min-w-0">
+            <span className="frameos-muted mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+              <span>Opacity</span>
+              <span>{Math.round(background.opacity * 100)}%</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={background.opacity}
+              onChange={(event) => onSetBackgroundOpacity(Number(event.target.value))}
+              className="w-full accent-[var(--frameos-primary)]"
+            />
+          </label>
+        ) : null}
       </div>
-
-      {hasBackgroundScene ? (
-        <label className="min-w-0">
-          <span className="frameos-muted mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
-            <span>Scene opacity</span>
-            <span>{Math.round(background.opacity * 100)}%</span>
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={background.opacity}
-            onChange={(event) => onSetBackgroundOpacity(Number(event.target.value))}
-            className="w-full accent-[var(--frameos-primary)]"
-          />
-        </label>
-      ) : null}
     </div>
   )
 }
+
+function SplitSceneOptionsPanel({
+  leaf,
+  scene,
+  onSetSceneStateValue,
+}: {
+  leaf: SplitLayoutLeaf | null
+  scene: FrameScene | null
+  onSetSceneStateValue: (leafId: string, field: StateField, value: any) => void
+}): JSX.Element {
+  if (!leaf) {
+    return (
+      <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
+        <span className="frameos-muted">Click a scene panel to set its options.</span>
+      </div>
+    )
+  }
+
+  if (!leaf.sceneId) {
+    return (
+      <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
+        <span className="frameos-muted">Drop a scene into the selected panel before setting options.</span>
+      </div>
+    )
+  }
+
+  if (!scene) {
+    return (
+      <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
+        <span className="frameos-muted">The selected scene is not available.</span>
+      </div>
+    )
+  }
+
+  const fields = (scene.fields ?? []).filter((field) => field.access === 'public')
+  const state = leaf.state ?? {}
+
+  return (
+    <div className="frameos-card rounded-lg border px-3 py-3 shadow-sm">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scene options</div>
+          <div className="frameos-strong truncate text-sm font-semibold">{scene.name || 'Untitled scene'}</div>
+        </div>
+        {Object.keys(state).length > 0 ? (
+          <span className="frameos-muted shrink-0 text-xs font-semibold">{Object.keys(state).length} changed</span>
+        ) : null}
+      </div>
+
+      {fields.length === 0 ? (
+        <div className="frameos-muted text-sm font-semibold">This scene does not expose public options.</div>
+      ) : (
+        <div className="space-y-3 @container">
+          {fields.map((field) => {
+            const changed = Object.prototype.hasOwnProperty.call(state, field.name)
+            return (
+              <div key={field.name} className="space-y-1 @md:flex @md:gap-2">
+                <label className="frameos-muted text-sm font-semibold @md:w-1/3">
+                  {field.label || field.name}
+                  {changed ? <span className="frameos-primary-text ml-1 text-xs">modified</span> : null}
+                </label>
+                <div className="w-full">
+                  <StateFieldEdit
+                    field={field}
+                    value={state[field.name] ?? field.value ?? ''}
+                    onChange={(value) => onSetSceneStateValue(leaf.id, field, value)}
+                    currentState={{}}
+                    stateChanges={state}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SplitPreviewDivider({
   divider,
   previewRef,
@@ -544,7 +649,9 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     setBackgroundOpacity,
     setBackgroundScene,
     setBorderWidth,
+    setLeafSceneStateValue,
     setLayoutName,
+    setOuterBorderWidth,
     setSceneSearch,
     showMorePresets,
     startResize,
@@ -555,6 +662,9 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const previewRef = useRef<HTMLDivElement>(null)
   const scenes = sceneById(frame)
   const frameScenes = frame.scenes ?? []
+  const leaves = splitLayoutLeaves(layout.root)
+  const selectedLeaf = selectedLeafId ? leaves.find((leaf) => leaf.id === selectedLeafId) ?? null : null
+  const selectedLeafScene = selectedLeaf?.sceneId ? scenes.get(selectedLeaf.sceneId) ?? null : null
   const rects = splitLayoutLeafRects(layout.root)
   const borderEdges = splitLayoutLeafBorderEdges(rects)
   const dividers = splitLayoutDividers(layout.root)
@@ -562,6 +672,14 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const visiblePresets = morePresetsOpen
     ? splitScreenLayoutPresets
     : splitScreenLayoutPresets.slice(0, INITIAL_SPLIT_PRESET_COUNT)
+  const editingSplit = Boolean(editingSceneId)
+
+  const handleBack = (): void => {
+    closeGenerator()
+    if (editingSceneId) {
+      openSceneControl(frame.id, editingSceneId)
+    }
+  }
 
   const selectPreviewLeaf = (leafId: string): void => {
     selectLeaf(leafId)
@@ -643,16 +761,18 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
 
   return (
     <div className="split-screen-layout-drawer flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-2 px-4 py-3 sm:px-5">
         <button
           type="button"
-          onClick={closeGenerator}
-          className="frameos-secondary-button order-1 inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:order-none"
+          onClick={handleBack}
+          title={editingSplit ? 'Back to scene' : 'Back to Add scene'}
+          aria-label={editingSplit ? 'Back to scene' : 'Back to Add scene'}
+          className="frameos-secondary-button inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <ArrowLeftIcon className="h-4 w-4" />
-          <span>Add scene</span>
         </button>
-        <label className="order-3 w-full min-w-0 sm:order-none sm:min-w-[11rem] sm:flex-1">
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">Split scene title</span>
           <input
             type="text"
             value={layout.name}
@@ -665,27 +785,28 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
           type="button"
           onClick={handleSave}
           disabled={configuredLeafCount === 0}
-          className="frameos-primary-action order-2 inline-flex shrink-0 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40 sm:order-none"
+          className="frameos-primary-action inline-flex h-10 shrink-0 items-center justify-center rounded-lg px-4 text-sm font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Save split scene
+          Save
         </button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="frameos-muted text-xs font-semibold">click multiple times to rotate</div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {visiblePresets.map((preset) => (
               <button
                 key={preset.id}
                 type="button"
                 title={preset.name}
-                onClick={() => selectPreset(preset.id)}
+                onClick={() => selectPreset(preset.id, selectedPresetId === preset.id)}
                 className={clsx(
                   'frameos-split-preset-button frameos-card rounded-lg border p-1.5 text-left shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                   selectedPresetId === preset.id && 'frameos-split-preset-button-selected ring-2'
                 )}
               >
-                <LayoutThumbnail root={preset.root} />
+                <LayoutThumbnail root={selectedPresetId === preset.id ? layout.root : preset.root} />
                 <span className="frameos-muted mt-1 block truncate text-center text-[11px] font-semibold">
                   {preset.name}
                 </span>
@@ -698,11 +819,13 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
             background={layout.background}
             borderWidth={layout.borderWidth}
             frame={frame}
+            outerBorderWidth={layout.outerBorderWidth}
             scenes={frameScenes}
             onSetBackgroundColor={setBackgroundColor}
             onSetBackgroundOpacity={setBackgroundOpacity}
             onSetBackgroundScene={setBackgroundScene}
             onSetBorderWidth={setBorderWidth}
+            onSetOuterBorderWidth={setOuterBorderWidth}
           />
 
           <div
@@ -742,6 +865,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
                 borderEdges={borderEdges.get(rect.leafId) ?? { top: false, right: false, bottom: false, left: false }}
                 borderWidth={layout.borderWidth}
                 frame={frame}
+                outerBorderWidth={layout.outerBorderWidth}
                 rect={rect}
                 scene={rect.sceneId ? scenes.get(rect.sceneId) ?? null : null}
                 selected={selectedLeafId === rect.leafId}
@@ -759,6 +883,12 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
               />
             ))}
           </div>
+
+          <SplitSceneOptionsPanel
+            leaf={selectedLeaf}
+            scene={selectedLeafScene}
+            onSetSceneStateValue={setLeafSceneStateValue}
+          />
         </div>
 
         <div className="frameos-divider shrink-0 border-t px-4 py-3 sm:px-5">

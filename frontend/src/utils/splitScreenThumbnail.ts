@@ -5,6 +5,7 @@ import {
   defaultSplitScreenBackground,
   splitLayoutLeafBorderEdges,
   splitLayoutLeafRects,
+  splitLayoutOuterBorderEdges,
   type SplitScreenBackground,
   type SplitScreenSceneLayout,
 } from './splitScreenLayouts'
@@ -140,6 +141,8 @@ export async function buildSplitScreenThumbnail(
   const scale = canvas.width / dimensions.width
   const borderWidth = Math.max(0, Math.round((Number(layout.borderWidth) || 0) * scale))
   const halfBorderWidth = borderWidth / 2
+  const rawOuterBorderWidth = layout.outerBorderWidth ?? ((layout as any).outerBorder ? layout.borderWidth : 0)
+  const outerBorderWidth = Math.max(0, Math.round((Number(rawOuterBorderWidth) || 0) * scale))
 
   for (const rect of rects) {
     const x = Math.round((rect.x / 100) * canvas.width)
@@ -147,10 +150,11 @@ export async function buildSplitScreenThumbnail(
     const width = Math.max(1, Math.round((rect.width / 100) * canvas.width))
     const height = Math.max(1, Math.round((rect.height / 100) * canvas.height))
     const edges = borderEdges.get(rect.leafId) ?? { top: false, right: false, bottom: false, left: false }
-    const insetTop = edges.top ? halfBorderWidth : 0
-    const insetRight = edges.right ? halfBorderWidth : 0
-    const insetBottom = edges.bottom ? halfBorderWidth : 0
-    const insetLeft = edges.left ? halfBorderWidth : 0
+    const outerEdges = outerBorderWidth > 0 ? splitLayoutOuterBorderEdges(rect) : null
+    const insetTop = edges.top ? halfBorderWidth : outerEdges?.top ? outerBorderWidth : 0
+    const insetRight = edges.right ? halfBorderWidth : outerEdges?.right ? outerBorderWidth : 0
+    const insetBottom = edges.bottom ? halfBorderWidth : outerEdges?.bottom ? outerBorderWidth : 0
+    const insetLeft = edges.left ? halfBorderWidth : outerEdges?.left ? outerBorderWidth : 0
     const cellX = Math.round(x + insetLeft)
     const cellY = Math.round(y + insetTop)
     const cellWidth = Math.max(1, Math.round(width - insetLeft - insetRight))

@@ -461,7 +461,8 @@ export function TemplateDrawer(): JSX.Element | null {
 
   const frameLogicProps = { frameId: frame.id }
   const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
-  const { generatorOpen } = useValues(splitLogic)
+  const { editingSceneId, generatorOpen } = useValues(splitLogic)
+  const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : 'Add scene'
 
   return (
     <div
@@ -478,7 +479,9 @@ export function TemplateDrawer(): JSX.Element | null {
                 <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Add scene</h2>
+                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+                  {drawerTitle}
+                </h2>
               </div>
               <button
                 type="button"

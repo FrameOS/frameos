@@ -7,12 +7,15 @@ import {
   defaultSplitScreenBackground,
   configuredSplitLayoutLeafCount,
   defaultSplitScreenSceneLayout,
+  rotateSplitLayoutNode,
   splitLayoutPresetById,
   splitScreenLayoutPresets,
+  setSplitLayoutLeafStateValue,
   updateSplitLayoutAdjacentRatio,
   type SplitLayoutBranch,
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
+import type { StateField } from '../../types'
 
 export interface SplitScreenLayoutLogicProps {
   frameId: number
@@ -42,6 +45,7 @@ function layoutForPreset(presetId: string, previous?: SplitScreenSceneLayout | n
   return {
     name: previous?.name ?? 'Split screen',
     borderWidth: previous?.borderWidth ?? 0,
+    outerBorderWidth: previous?.outerBorderWidth ?? 0,
     background: previous?.background ?? { ...defaultSplitScreenBackground },
     root: cloneSplitLayoutNode(splitLayoutPresetById(presetId).root),
   }
@@ -73,14 +77,16 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
     }),
     closeGenerator: true,
     showMorePresets: true,
-    selectPreset: (presetId: string) => ({ presetId }),
+    selectPreset: (presetId: string, rotate?: boolean) => ({ presetId, rotate: Boolean(rotate) }),
     selectLeaf: (leafId: string | null) => ({ leafId }),
     setLayoutName: (name: string) => ({ name }),
     setBorderWidth: (borderWidth: number) => ({ borderWidth }),
+    setOuterBorderWidth: (outerBorderWidth: number) => ({ outerBorderWidth }),
     setBackgroundColor: (color: string) => ({ color }),
     setBackgroundScene: (sceneId: string | null) => ({ sceneId }),
     setBackgroundOpacity: (opacity: number) => ({ opacity }),
     setSceneSearch: (search: string) => ({ search }),
+    setLeafSceneStateValue: (leafId: string, field: StateField, value: any) => ({ field, leafId, value }),
     assignSceneToLeaf: (leafId: string, sceneId: string | null) => ({ leafId, sceneId }),
     startResize: (
       parentId: string,
@@ -150,7 +156,8 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
       {
         openGenerator: (_, { layout }) =>
           layout ? cloneSplitScreenSceneLayout(layout) : layoutForPreset(defaultPresetId()),
-        selectPreset: (state, { presetId }) => layoutForPreset(presetId, state),
+        selectPreset: (state, { presetId, rotate }) =>
+          rotate ? { ...state, root: rotateSplitLayoutNode(state.root) } : layoutForPreset(presetId, state),
         setLayoutName: (state, { name }) => ({
           ...state,
           name,
@@ -158,6 +165,10 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         setBorderWidth: (state, { borderWidth }) => ({
           ...state,
           borderWidth: clampBorderWidth(borderWidth),
+        }),
+        setOuterBorderWidth: (state, { outerBorderWidth }) => ({
+          ...state,
+          outerBorderWidth: clampBorderWidth(outerBorderWidth),
         }),
         setBackgroundColor: (state, { color }) => ({
           ...state,
@@ -174,6 +185,10 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         assignSceneToLeaf: (state, { leafId, sceneId }) => ({
           ...state,
           root: assignSceneToSplitLayoutLeaf(state.root, leafId, sceneId),
+        }),
+        setLeafSceneStateValue: (state, { leafId, field, value }) => ({
+          ...state,
+          root: setSplitLayoutLeafStateValue(state.root, leafId, field, value),
         }),
         resizeLayout: (state, { parentId, index, positionRatio }) => ({
           ...state,

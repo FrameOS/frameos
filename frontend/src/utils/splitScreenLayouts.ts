@@ -1,9 +1,12 @@
+import type { StateField } from '../types'
+
 export type SplitLayoutDirection = 'row' | 'column'
 
 export interface SplitLayoutLeaf {
   id: string
   type: 'leaf'
   sceneId?: string | null
+  state?: Record<string, any>
 }
 
 export interface SplitLayoutBranch {
@@ -25,6 +28,7 @@ export interface SplitScreenBackground {
 export interface SplitScreenSceneLayout {
   name: string
   borderWidth: number
+  outerBorderWidth: number
   background: SplitScreenBackground
   root: SplitLayoutBranch
 }
@@ -75,7 +79,7 @@ export const defaultSplitScreenBackground: SplitScreenBackground = {
 }
 
 function leaf(id: string): SplitLayoutLeaf {
-  return { id, type: 'leaf', sceneId: null }
+  return { id, type: 'leaf', sceneId: null, state: {} }
 }
 
 function split(
@@ -90,17 +94,12 @@ function split(
 export const splitScreenLayoutPresets: SplitLayoutPreset[] = [
   {
     id: 'two-columns',
-    name: '2 vertical',
+    name: '2',
     root: split('two-columns/root', 'row', [1, 1], [leaf('two-columns/a'), leaf('two-columns/b')]),
   },
   {
-    id: 'two-rows',
-    name: '2 horizontal',
-    root: split('two-rows/root', 'column', [1, 1], [leaf('two-rows/a'), leaf('two-rows/b')]),
-  },
-  {
     id: 'three-columns',
-    name: '3 vertical',
+    name: '3',
     root: split(
       'three-columns/root',
       'row',
@@ -118,32 +117,6 @@ export const splitScreenLayoutPresets: SplitLayoutPreset[] = [
       [
         leaf('left-plus-two/a'),
         split('left-plus-two/right', 'column', [1, 1], [leaf('left-plus-two/b'), leaf('left-plus-two/c')]),
-      ]
-    ),
-  },
-  {
-    id: 'two-plus-right',
-    name: '2 + 1',
-    root: split(
-      'two-plus-right/root',
-      'row',
-      [1, 1.45],
-      [
-        split('two-plus-right/left', 'column', [1, 1], [leaf('two-plus-right/a'), leaf('two-plus-right/b')]),
-        leaf('two-plus-right/c'),
-      ]
-    ),
-  },
-  {
-    id: 'top-plus-two',
-    name: '1 over 2',
-    root: split(
-      'top-plus-two/root',
-      'column',
-      [1.35, 1],
-      [
-        leaf('top-plus-two/a'),
-        split('top-plus-two/bottom', 'row', [1, 1], [leaf('top-plus-two/b'), leaf('top-plus-two/c')]),
       ]
     ),
   },
@@ -180,71 +153,12 @@ export const splitScreenLayoutPresets: SplitLayoutPreset[] = [
   },
   {
     id: 'four-columns',
-    name: '4 vertical',
+    name: '4',
     root: split(
       'four-columns/root',
       'row',
       [1, 1, 1, 1],
       [leaf('four-columns/a'), leaf('four-columns/b'), leaf('four-columns/c'), leaf('four-columns/d')]
-    ),
-  },
-  {
-    id: 'four-rows',
-    name: '4 horizontal',
-    root: split(
-      'four-rows/root',
-      'column',
-      [1, 1, 1, 1],
-      [leaf('four-rows/a'), leaf('four-rows/b'), leaf('four-rows/c'), leaf('four-rows/d')]
-    ),
-  },
-  {
-    id: 'two-over-one',
-    name: '2 over 1',
-    root: split(
-      'two-over-one/root',
-      'column',
-      [1, 1.25],
-      [
-        split('two-over-one/top', 'row', [1, 1], [leaf('two-over-one/a'), leaf('two-over-one/b')]),
-        leaf('two-over-one/c'),
-      ]
-    ),
-  },
-  {
-    id: 'three-over-one',
-    name: '3 over 1',
-    root: split(
-      'three-over-one/root',
-      'column',
-      [1, 1.25],
-      [
-        split(
-          'three-over-one/top',
-          'row',
-          [1, 1, 1],
-          [leaf('three-over-one/a'), leaf('three-over-one/b'), leaf('three-over-one/c')]
-        ),
-        leaf('three-over-one/d'),
-      ]
-    ),
-  },
-  {
-    id: 'one-over-three',
-    name: '1 over 3',
-    root: split(
-      'one-over-three/root',
-      'column',
-      [1.25, 1],
-      [
-        leaf('one-over-three/a'),
-        split(
-          'one-over-three/bottom',
-          'row',
-          [1, 1, 1],
-          [leaf('one-over-three/b'), leaf('one-over-three/c'), leaf('one-over-three/d')]
-        ),
-      ]
     ),
   },
   {
@@ -262,24 +176,6 @@ export const splitScreenLayoutPresets: SplitLayoutPreset[] = [
           [1, 1, 1],
           [leaf('one-plus-three/b'), leaf('one-plus-three/c'), leaf('one-plus-three/d')]
         ),
-      ]
-    ),
-  },
-  {
-    id: 'three-plus-one',
-    name: '3 + 1',
-    root: split(
-      'three-plus-one/root',
-      'row',
-      [1, 1.55],
-      [
-        split(
-          'three-plus-one/left',
-          'column',
-          [1, 1, 1],
-          [leaf('three-plus-one/a'), leaf('three-plus-one/b'), leaf('three-plus-one/c')]
-        ),
-        leaf('three-plus-one/d'),
       ]
     ),
   },
@@ -310,10 +206,29 @@ export function cloneSplitLayoutNode<T extends SplitLayoutNode>(node: T): T {
   return JSON.parse(JSON.stringify(node)) as T
 }
 
+export function rotateSplitLayoutNode<T extends SplitLayoutNode>(node: T): T {
+  if (node.type === 'leaf') {
+    return { ...node } as T
+  }
+
+  const rotatedChildren = node.children.map((child) => rotateSplitLayoutNode(child))
+  const rotatedRatios = [...node.ratios]
+  const reverseOrder = node.direction === 'column'
+
+  return {
+    ...node,
+    direction: node.direction === 'row' ? 'column' : 'row',
+    ratios: reverseOrder ? rotatedRatios.reverse() : rotatedRatios,
+    children: reverseOrder ? rotatedChildren.reverse() : rotatedChildren,
+  } as T
+}
+
 export function cloneSplitScreenSceneLayout(layout: SplitScreenSceneLayout): SplitScreenSceneLayout {
+  const outerBorderWidth = layout.outerBorderWidth ?? ((layout as any).outerBorder ? layout.borderWidth : 0)
   return {
     name: layout.name || 'Split screen',
     borderWidth: Math.max(0, Math.min(48, Math.round(Number(layout.borderWidth) || 0))),
+    outerBorderWidth: Math.max(0, Math.min(48, Math.round(Number(outerBorderWidth) || 0))),
     background: {
       color: layout.background?.color || defaultSplitScreenBackground.color,
       sceneId: layout.background?.sceneId || null,
@@ -326,6 +241,13 @@ export function cloneSplitScreenSceneLayout(layout: SplitScreenSceneLayout): Spl
   }
 }
 
+function normalizedLeafState(value: any): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key))
+}
+
 function normalizeSplitLayoutNode(value: any): SplitLayoutNode | null {
   if (!value || typeof value !== 'object' || typeof value.id !== 'string') {
     return null
@@ -336,6 +258,7 @@ function normalizeSplitLayoutNode(value: any): SplitLayoutNode | null {
       id: value.id,
       type: 'leaf',
       sceneId: typeof value.sceneId === 'string' ? value.sceneId : null,
+      state: normalizedLeafState(value.state),
     }
   }
 
@@ -379,6 +302,10 @@ export function normalizeSplitScreenSceneLayout(value: any): SplitScreenSceneLay
   return {
     name: typeof value.name === 'string' && value.name.trim() ? value.name : 'Split screen',
     borderWidth: Math.max(0, Math.min(48, Math.round(Number(value.borderWidth) || 0))),
+    outerBorderWidth: Math.max(
+      0,
+      Math.min(48, Math.round(Number(value.outerBorderWidth ?? (value.outerBorder ? value.borderWidth : 0)) || 0))
+    ),
     background: {
       color: typeof value.background?.color === 'string' ? value.background.color : defaultSplitScreenBackground.color,
       sceneId: typeof value.background?.sceneId === 'string' ? value.background.sceneId : null,
@@ -392,6 +319,7 @@ export function defaultSplitScreenSceneLayout(): SplitScreenSceneLayout {
   return {
     name: 'Split screen',
     borderWidth: 0,
+    outerBorderWidth: 0,
     background: { ...defaultSplitScreenBackground },
     root: cloneSplitLayoutNode(splitScreenLayoutPresets[0].root),
   }
@@ -429,9 +357,69 @@ export function assignSceneToSplitLayoutLeaf(
   leafId: string,
   sceneId: string | null
 ): SplitLayoutBranch {
-  return mapSplitLayoutNode(root, (node) =>
-    node.type === 'leaf' && node.id === leafId ? { ...node, sceneId } : node
-  ) as SplitLayoutBranch
+  return mapSplitLayoutNode(root, (node) => {
+    if (node.type !== 'leaf' || node.id !== leafId) {
+      return node
+    }
+    return {
+      ...node,
+      sceneId,
+      state: node.sceneId === sceneId ? node.state ?? {} : {},
+    }
+  }) as SplitLayoutBranch
+}
+
+function normalizeSceneStateValue(field: StateField, value: any): any {
+  if (value === null || value === undefined) {
+    return undefined
+  }
+  if (field.type === 'boolean') {
+    if (value === '') {
+      return undefined
+    }
+    return value === true || value === 'true'
+  }
+  if (field.type === 'integer') {
+    const parsed = parseInt(String(value), 10)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  if (field.type === 'float') {
+    const parsed = parseFloat(String(value))
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  return value
+}
+
+function stateValuesMatch(first: any, second: any): boolean {
+  if ((first === '' && second === undefined) || (first === undefined && second === '')) {
+    return true
+  }
+  return JSON.stringify(first ?? null) === JSON.stringify(second ?? null)
+}
+
+export function setSplitLayoutLeafStateValue(
+  root: SplitLayoutBranch,
+  leafId: string,
+  field: StateField,
+  value: any
+): SplitLayoutBranch {
+  return mapSplitLayoutNode(root, (node) => {
+    if (node.type !== 'leaf' || node.id !== leafId) {
+      return node
+    }
+    const nextState = { ...(node.state ?? {}) }
+    const normalizedValue = normalizeSceneStateValue(field, value)
+    const normalizedDefault = normalizeSceneStateValue(field, field.value)
+    if (normalizedValue === undefined || stateValuesMatch(normalizedValue, normalizedDefault)) {
+      delete nextState[field.name]
+    } else {
+      nextState[field.name] = normalizedValue
+    }
+    return { ...node, state: nextState }
+  }) as SplitLayoutBranch
 }
 
 export function updateSplitLayoutAdjacentRatio(
@@ -549,6 +537,17 @@ export function splitLayoutLeafBorderEdges(rects: SplitLayoutLeafRect[]): Map<st
   }
 
   return edges
+}
+
+export function splitLayoutOuterBorderEdges(rect: SplitLayoutLeafRect): SplitLayoutLeafBorderEdges {
+  const right = rect.x + rect.width
+  const bottom = rect.y + rect.height
+  return {
+    top: closeEnough(rect.y, 0),
+    right: closeEnough(right, 100),
+    bottom: closeEnough(bottom, 100),
+    left: closeEnough(rect.x, 0),
+  }
 }
 
 export function splitLayoutDividers(root: SplitLayoutNode): SplitLayoutDivider[] {

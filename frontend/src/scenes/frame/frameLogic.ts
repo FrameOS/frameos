@@ -1139,6 +1139,11 @@ function splitLayoutBorderWidth(layout: SplitScreenSceneLayout): number {
   return Math.max(0, Math.min(48, Math.round(Number(layout.borderWidth) || 0)))
 }
 
+function splitLayoutOuterBorderWidth(layout: SplitScreenSceneLayout): number {
+  const value = layout.outerBorderWidth ?? ((layout as any).outerBorder ? layout.borderWidth : 0)
+  return Math.max(0, Math.min(48, Math.round(Number(value) || 0)))
+}
+
 function splitLayoutBackground(layout: SplitScreenSceneLayout): SplitScreenBackground {
   return {
     ...defaultSplitScreenBackground,
@@ -1147,15 +1152,15 @@ function splitLayoutBackground(layout: SplitScreenSceneLayout): SplitScreenBackg
   }
 }
 
-function splitNodeConfig(branch: SplitLayoutBranch, borderWidth: number): Record<string, any> {
+function splitNodeConfig(branch: SplitLayoutBranch, gapWidth: number, outerBorderWidth: number): Record<string, any> {
   const rows = branch.direction === 'column' ? branch.children.length : 1
   const columns = branch.direction === 'row' ? branch.children.length : 1
   return {
     rows: String(rows),
     columns: String(columns),
     hideEmpty: false,
-    gap: String(borderWidth),
-    margin: '0',
+    gap: String(gapWidth),
+    margin: String(outerBorderWidth),
     ...(branch.direction === 'row'
       ? { width_ratios: splitRatioString(branch.ratios, branch.children.length) }
       : { height_ratios: splitRatioString(branch.ratios, branch.children.length) }),
@@ -1171,6 +1176,7 @@ export function buildSplitScene(
   const edges: DiagramEdge[] = []
   let visualIndex = 0
   const borderWidth = splitLayoutBorderWidth(layout)
+  const outerBorderWidth = splitLayoutOuterBorderWidth(layout)
   const background = splitLayoutBackground(layout)
 
   const eventNode: DiagramNode = {
@@ -1236,7 +1242,7 @@ export function buildSplitScene(
       id: nodeId,
       type: 'scene',
       position: { x: 760 + depth * 320, y: 120 + visualIndex * 110 },
-      data: { keyword: child.sceneId, config: {} } satisfies SceneNodeData,
+      data: { keyword: child.sceneId, config: { ...(child.state ?? {}) } } satisfies SceneNodeData,
     })
     visualIndex += 1
     return nodeId
@@ -1251,7 +1257,7 @@ export function buildSplitScene(
       data: {
         keyword: 'render/split',
         name: depth === 0 ? 'Split screen' : 'Nested split',
-        config: splitNodeConfig(branch, borderWidth),
+        config: splitNodeConfig(branch, borderWidth, depth === 0 ? outerBorderWidth : 0),
       } satisfies AppNodeData,
     })
 
