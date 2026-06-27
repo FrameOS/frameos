@@ -181,16 +181,8 @@ suite "frame api route behavior":
       check runtimeReloadReceived
       check runtimeReloadPayload[1] == "reload"
 
-      let loginAgain = httpRequest(
-        server.port,
-        "POST",
-        "/api/admin/login",
-        headers = [("Content-Type", "application/json")],
-        body = $(%*{"username": "admin", "password": "new-secret"}),
-      )
-      let freshAdminCookie = adminCookieFrom(loginAgain)
       drainEventChannel()
-      let restart = httpRequest(server.port, "POST", "/api/frames/1/restart", headers = [("Cookie", freshAdminCookie)])
+      let restart = httpRequest(server.port, "POST", "/api/frames/1/restart", headers = [("Cookie", refreshedCookie)])
       check restart.status == 200
       check parseJson(restart.body)["action"].getStr() == "restart"
       let (restartReceived, restartPayload) = eventChannel.tryRecv()

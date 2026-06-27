@@ -283,7 +283,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         # object other threads are reading is a use-after-free waiting to
         # happen under ORC.
         discard loadConfig()
-        clearAdminSessions()
       sendEvent("reload", %*{})
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:

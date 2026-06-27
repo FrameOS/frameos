@@ -477,6 +477,8 @@ function FrameTree({
   unsavedChanges: boolean
   undeployedChanges: boolean
 }): JSX.Element {
+  const inFrameAdminMode = isInFrameAdminMode()
+
   return (
     <div className="@container space-y-4">
       <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
@@ -487,7 +489,7 @@ function FrameTree({
           mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} />
+          {!inFrameAdminMode ? <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} /> : null}
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>

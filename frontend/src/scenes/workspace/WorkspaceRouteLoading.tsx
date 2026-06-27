@@ -187,7 +187,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? urls.frameControlScenes() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
   const scenesHref = selectedFrame
     ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
     : inFrameAdminMode
@@ -199,7 +199,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
-  const preloadHome = () => preloadSceneComponent(inFrameAdminMode ? 'sceneWorkspace' : 'frames')
+  const preloadHome = () => preloadSceneComponent('frames')
 
   return (
     <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
@@ -217,7 +217,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
         >
           <a
             href={homeHref}
-            title={inFrameAdminMode ? 'Scenes' : 'Frames home'}
+            title={inFrameAdminMode ? 'Frame' : 'Frames home'}
             onPointerEnter={preloadHome}
             onFocus={preloadHome}
             onMouseDown={preloadHome}

@@ -93,7 +93,7 @@ suite "web route behavior":
     check frameRootWithAdminSession.status == 302
     check frameRootWithAdminSession.header("location") == "/admin"
 
-    for path in ["/frames/1?tool=settings", "/scenes/1/demo", "/apps/1/demo/node-1"]:
+    for path in ["/frames/1?tool=settings", "/frames/1?tool=schedule", "/scenes/1/demo", "/apps/1/demo/node-1"]:
       let adminDeepLink = httpRequest(
         server.port,
         "GET",

@@ -326,7 +326,7 @@ export function FrameosShell({
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? urls.frameControlScenes() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
   const scenesHref = selectedFrame
     ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
     : inFrameAdminMode
@@ -378,7 +378,7 @@ export function FrameosShell({
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
     browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
-  const preloadHome = () => preloadSceneComponent(inFrameAdminMode ? 'sceneWorkspace' : 'frames')
+  const preloadHome = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -408,7 +408,7 @@ export function FrameosShell({
         >
           <a
             href={homeHref}
-            title={inFrameAdminMode ? 'Scenes' : 'Frames home'}
+            title={inFrameAdminMode ? 'Frame' : 'Frames home'}
             onPointerEnter={preloadHome}
             onFocus={preloadHome}
             onMouseDown={preloadHome}

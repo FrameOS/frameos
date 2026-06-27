@@ -84,7 +84,6 @@ proc queueRuntimeControl(request: Request, action: string, eventName: string) {.
   try:
     {.gcsafe.}:
       discard loadConfig()
-      clearAdminSessions()
     sendEvent(eventName, %*{})
     jsonResponse(request, Http200, %*{"status": "ok", "action": action})
   except CatchableError as e:

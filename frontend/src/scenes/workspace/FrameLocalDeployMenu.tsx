@@ -1,5 +1,6 @@
 import { useActions } from 'kea'
 import { ArrowPathIcon, CloudArrowUpIcon, PowerIcon, RocketLaunchIcon } from '@heroicons/react/24/outline'
+import { EllipsisHorizontalIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 
@@ -7,7 +8,6 @@ import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownM
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { frameLogic } from '../frame/frameLogic'
-import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 interface FrameLocalDeployMenuProps {
   frameId: number
@@ -41,8 +41,9 @@ export function FrameLocalDeployMenu({
       buttonContent={
         buttonContent ?? (
           <>
-            <DeployToFrameIcon className="h-4 w-4 shrink-0" />
-            <span>Deploy</span>
+            <ArrowPathIcon className="h-4 w-4 shrink-0" />
+            <span>Reload</span>
+            <EllipsisHorizontalIcon className="h-4 w-4 shrink-0 opacity-70" />
           </>
         )
       }

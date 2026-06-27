@@ -14,7 +14,7 @@ interface HeaderProps {
 
 export function Header({ title, version, right, buttons }: HeaderProps) {
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? urls.frameControlScenes() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
 
   return (
     <span
