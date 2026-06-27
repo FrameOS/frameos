@@ -1222,98 +1222,105 @@ export function FrameSettings({
                           }}
                           fullWidth
                         />
-                        <Select
-                          value={preset}
-                          options={[
-                            { value: 'custom', label: 'Custom pins' },
-                            { value: 'waveshare_esp32_s3_photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' },
-                            {
-                              value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
-                              label: 'Waveshare ESP32-S3 ePaper 13.3E6',
-                            },
-                          ]}
-                          onChange={(nextPreset) => {
-                            const nextSdCardAssets = {
-                              preset: nextPreset as Esp32SdCardAssets['preset'],
-                              pins: esp32SdCardPinsForPreset(nextPreset),
-                            }
-                            if (
-                              embeddedHardwarePreset !== 'custom' &&
-                              nextPreset !== ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
-                            ) {
-                              setEsp32HardwarePresetCustom({
-                                device_config: {
-                                  ...(frameForm.device_config ?? {}),
-                                  sdCardAssets: {
-                                    ...sdCardAssets,
-                                    ...nextSdCardAssets,
-                                    mountPath: '/srv/assets',
-                                  },
+                        {sdCardAssets.enabled ? (
+                          <>
+                            <Select
+                              value={preset}
+                              options={[
+                                { value: 'custom', label: 'Custom pins' },
+                                {
+                                  value: 'waveshare_esp32_s3_photopainter',
+                                  label: 'Waveshare ESP32-S3 PhotoPainter',
                                 },
-                              })
-                            } else {
-                              updateSdCardAssets(nextSdCardAssets)
-                            }
-                          }}
-                        />
-                        <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
-                          {ESP32_SD_CARD_PIN_FIELDS.map(({ key, label }) => (
-                            <label key={key} className="space-y-1">
-                              <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
-                              <NumberTextInput
-                                value={sdCardAssets.pins[key]}
-                                placeholder={String(esp32SdCardPinsForPreset(preset)[key])}
-                                onChange={(nextValue) => {
-                                  const nextSdCardAssets = {
-                                    preset: 'custom',
-                                    pins: {
-                                      ...sdCardAssets.pins,
-                                      [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
+                                {
+                                  value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+                                  label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+                                },
+                              ]}
+                              onChange={(nextPreset) => {
+                                const nextSdCardAssets = {
+                                  preset: nextPreset as Esp32SdCardAssets['preset'],
+                                  pins: esp32SdCardPinsForPreset(nextPreset),
+                                }
+                                if (
+                                  embeddedHardwarePreset !== 'custom' &&
+                                  nextPreset !== ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+                                ) {
+                                  setEsp32HardwarePresetCustom({
+                                    device_config: {
+                                      ...(frameForm.device_config ?? {}),
+                                      sdCardAssets: {
+                                        ...sdCardAssets,
+                                        ...nextSdCardAssets,
+                                        mountPath: '/srv/assets',
+                                      },
                                     },
-                                  } as Partial<Esp32SdCardAssets>
-                                  if (embeddedHardwarePreset !== 'custom') {
+                                  })
+                                } else {
+                                  updateSdCardAssets(nextSdCardAssets)
+                                }
+                              }}
+                            />
+                            <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
+                              {ESP32_SD_CARD_PIN_FIELDS.map(({ key, label }) => (
+                                <label key={key} className="space-y-1">
+                                  <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
+                                  <NumberTextInput
+                                    value={sdCardAssets.pins[key]}
+                                    placeholder={String(esp32SdCardPinsForPreset(preset)[key])}
+                                    onChange={(nextValue) => {
+                                      const nextSdCardAssets = {
+                                        preset: 'custom',
+                                        pins: {
+                                          ...sdCardAssets.pins,
+                                          [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
+                                        },
+                                      } as Partial<Esp32SdCardAssets>
+                                      if (embeddedHardwarePreset !== 'custom') {
+                                        setEsp32HardwarePresetCustom({
+                                          device_config: {
+                                            ...(frameForm.device_config ?? {}),
+                                            sdCardAssets: {
+                                              ...sdCardAssets,
+                                              ...nextSdCardAssets,
+                                              mountPath: '/srv/assets',
+                                            },
+                                          },
+                                        })
+                                      } else {
+                                        updateSdCardAssets(nextSdCardAssets)
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <label className="space-y-1 block">
+                              <span className="frame-tool-muted block text-xs font-semibold">Max frequency (kHz)</span>
+                              <NumberTextInput
+                                value={sdCardAssets.maxFrequencyKHz}
+                                placeholder="20000"
+                                onChange={(nextValue) => {
+                                  const maxFrequencyKHz = normalizeEsp32SdCardFrequency(nextValue)
+                                  if (embeddedHardwarePreset !== 'custom' && maxFrequencyKHz !== 20000) {
                                     setEsp32HardwarePresetCustom({
                                       device_config: {
                                         ...(frameForm.device_config ?? {}),
                                         sdCardAssets: {
                                           ...sdCardAssets,
-                                          ...nextSdCardAssets,
+                                          maxFrequencyKHz,
                                           mountPath: '/srv/assets',
                                         },
                                       },
                                     })
                                   } else {
-                                    updateSdCardAssets(nextSdCardAssets)
+                                    updateSdCardAssets({ maxFrequencyKHz })
                                   }
                                 }}
                               />
                             </label>
-                          ))}
-                        </div>
-                        <label className="space-y-1 block">
-                          <span className="frame-tool-muted block text-xs font-semibold">Max frequency (kHz)</span>
-                          <NumberTextInput
-                            value={sdCardAssets.maxFrequencyKHz}
-                            placeholder="20000"
-                            onChange={(nextValue) => {
-                              const maxFrequencyKHz = normalizeEsp32SdCardFrequency(nextValue)
-                              if (embeddedHardwarePreset !== 'custom' && maxFrequencyKHz !== 20000) {
-                                setEsp32HardwarePresetCustom({
-                                  device_config: {
-                                    ...(frameForm.device_config ?? {}),
-                                    sdCardAssets: {
-                                      ...sdCardAssets,
-                                      maxFrequencyKHz,
-                                      mountPath: '/srv/assets',
-                                    },
-                                  },
-                                })
-                              } else {
-                                updateSdCardAssets({ maxFrequencyKHz })
-                              }
-                            }}
-                          />
-                        </label>
+                          </>
+                        ) : null}
                       </div>
                     )
                   }}
