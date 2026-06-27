@@ -31,8 +31,9 @@ static const char *TAG = "fos_http";
 
 #define FOS_HTTPS_MAX_OPEN_SOCKETS 1
 #define FOS_HTTPS_BACKLOG_CONN 1
-#define FOS_HTTPS_MIN_INTERNAL_FREE (96 * 1024)
-#define FOS_HTTPS_MIN_INTERNAL_BLOCK (24 * 1024)
+#define FOS_HTTPS_WARN_INTERNAL_FREE (96 * 1024)
+#define FOS_HTTPS_MIN_INTERNAL_FREE (48 * 1024)
+#define FOS_HTTPS_MIN_INTERNAL_BLOCK (40 * 1024)
 
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
@@ -56,9 +57,15 @@ static bool https_heap_ready(void)
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free_internal < FOS_HTTPS_MIN_INTERNAL_FREE ||
         largest_internal < FOS_HTTPS_MIN_INTERNAL_BLOCK) {
-        ESP_LOGW(TAG, "https server skipped: internal=%u largest=%u",
-                 (unsigned)free_internal, (unsigned)largest_internal);
+        ESP_LOGW(TAG, "https server skipped: internal=%u largest=%u min_internal=%u min_largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal,
+                 (unsigned)FOS_HTTPS_MIN_INTERNAL_FREE,
+                 (unsigned)FOS_HTTPS_MIN_INTERNAL_BLOCK);
         return false;
+    }
+    if (free_internal < FOS_HTTPS_WARN_INTERNAL_FREE) {
+        ESP_LOGW(TAG, "starting https server with low internal heap: internal=%u largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal);
     }
     return true;
 }
