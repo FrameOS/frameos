@@ -48,7 +48,7 @@ export const socketLogic = kea<socketLogicType>([
       }
 
       cache.ws.onmessage = function (event: any) {
-        if (frameControlMode && event.data === 'render') {
+        if ((frameControlMode || isFrameOSAdmin) && event.data === 'render') {
           actions.frameRendered(getFrameControlFrameId())
           return
         }

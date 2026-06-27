@@ -59,7 +59,7 @@ export function FrameLocalDeployMenu({
           icon: <CloudArrowUpIcon className="h-5 w-5" />,
         },
         {
-          label: 'Refresh display',
+          label: 'Re-render display',
           title: 'Re-render the current scene',
           onClick: () => renderFrame(frameId),
           icon: <ArrowPathIcon className="h-5 w-5" />,
