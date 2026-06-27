@@ -17,6 +17,7 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
 from app.models.metrics import Metrics
+from app.models.scene_image import SceneImage
 from app.models.settings import Settings
 from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
@@ -584,6 +585,68 @@ async def test_api_frame_get_image_converts_bmp_preview(async_client, db, redis)
         assert image.size == (2, 1)
     cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
     assert cached.startswith(b'\x89PNG')
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_caches_uploaded_preview_under_original_scene_id(async_client, db, redis):
+    frame = await new_frame(db, redis, 'UploadedPreviewImageFrame', 'localhost', 'localhost')
+    frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    png = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(png, format='PNG')
+    png_body = png.getvalue()
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        return 200, png_body, {'content-type': 'image/png', 'x-scene-id': 'uploaded/scene-1'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.content == png_body
+    assert (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='scene-1')
+        .first()
+        is not None
+    )
+    assert (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='uploaded/scene-1')
+        .first()
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_caches_unsaved_uploaded_preview_under_original_scene_id(async_client, db, redis):
+    frame = await new_frame(db, redis, 'UnsavedUploadedPreviewImageFrame', 'localhost', 'localhost')
+
+    png = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(png, format='PNG')
+    png_body = png.getvalue()
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        return 200, png_body, {'content-type': 'image/png', 'x-scene-id': 'uploaded/new-scene'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='new-scene')
+        .first()
+        is not None
+    )
+    assert (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='uploaded/new-scene')
+        .first()
+        is None
+    )
 
 
 @pytest.mark.asyncio

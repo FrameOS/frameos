@@ -20,6 +20,13 @@
       "@types/react": "18.0.19",
       "@types/react-dom": "18.0.6",
       "csstype": "3.2.3"
+    },
+    "packageExtensions": {
+      "kea-forms@*": {
+        "peerDependencies": {
+          "typescript": ">=5.0.0"
+        }
+      }
     }
   },
   "devDependencies": {

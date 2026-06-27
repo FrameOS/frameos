@@ -1275,10 +1275,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
           installMethod === 'sd_card'
             ? 'sdCard'
             : installMethod === 'script'
-              ? 'script'
-              : installMethod === 'embedded'
-                ? 'embedded'
-                : 'main'
+            ? 'script'
+            : installMethod === 'embedded'
+            ? 'embedded'
+            : 'main'
         actions.setSearch('')
         actions.selectFrame(frameId)
         cache.skipNextFrameChangeDrawerScrollPreserve = true
@@ -1567,10 +1567,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
     },
   })),
   afterMount(({ actions, cache, values }) => {
+    cache.scrollGuardUnmounted = false
     applyFrameosTheme(values.theme)
     if (typeof window !== 'undefined') {
       const mobileWorkspaceQuery = window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY)
-      const syncScrollGuardForViewport = () => applyWorkspaceScrollGuard(workspaceLogic.values.secondarySidebarOpen)
+      const syncScrollGuardForViewport = () => {
+        if (cache.scrollGuardUnmounted) {
+          return
+        }
+        applyWorkspaceScrollGuard(values.secondarySidebarOpen)
+      }
       if (mobileWorkspaceQuery) {
         cache.mobileWorkspaceQuery = mobileWorkspaceQuery
         cache.syncScrollGuardForViewport = syncScrollGuardForViewport
@@ -1593,6 +1599,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
   }),
   events(({ cache }) => ({
     beforeUnmount: () => {
+      cache.scrollGuardUnmounted = true
       if (cache.mobileWorkspaceQuery?.removeEventListener) {
         cache.mobileWorkspaceQuery.removeEventListener('change', cache.syncScrollGuardForViewport)
       } else {

@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import type { MouseEvent } from 'react'
 import {
@@ -12,7 +12,7 @@ import {
   PlusIcon,
   RocketLaunchIcon,
   SparklesIcon,
-  TrashIcon,
+  Squares2X2Icon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
@@ -40,6 +40,7 @@ import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
+import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
@@ -49,8 +50,12 @@ import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { setFrameosSceneDragData } from './sceneDrag'
+import { SplitScreenLayoutDrawer } from './SplitScreenLayoutDrawer'
+import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { normalizeSplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -369,8 +374,10 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
   return (
     <button
       type="button"
+      draggable
       data-workspace-scene-tile={scene.id}
       data-workspace-scene-tile-frame={frame.id}
+      onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       onClick={() => {
         hideForm()
         openSceneControl(frame.id, scene.id)
@@ -453,9 +460,17 @@ export function TemplateDrawer(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
+  const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
+  const { editingSceneId, generatorOpen } = useValues(splitLogic)
+  const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : 'Add scene'
 
   return (
-    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div
+      className={clsx(
+        'workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl',
+        generatorOpen ? 'w-[620px] max-w-[calc(100vw-2.5rem)]' : 'w-[430px] max-w-[calc(100vw-2.5rem)]'
+      )}
+    >
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
@@ -464,7 +479,9 @@ export function TemplateDrawer(): JSX.Element | null {
                 <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Add scene</h2>
+                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+                  {drawerTitle}
+                </h2>
               </div>
               <button
                 type="button"
@@ -474,10 +491,14 @@ export function TemplateDrawer(): JSX.Element | null {
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <AddSceneDrawerActions frame={frame} />
-              <Templates persistOnInstall />
-            </div>
+            {generatorOpen ? (
+              <SplitScreenLayoutDrawer frame={frame} />
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <AddSceneDrawerActions frame={frame} />
+                <Templates persistOnInstall />
+              </div>
+            )}
             <EditTemplateModal />
           </div>
         </BindLogic>
@@ -488,7 +509,8 @@ export function TemplateDrawer(): JSX.Element | null {
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
-  const { openChatDrawer } = useActions(workspaceLogic)
+  const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
+  const hasScenes = (frame.scenes?.length ?? 0) > 0
 
   return (
     <div className="mb-4 grid gap-3">
@@ -503,14 +525,39 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <PlusIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">New blank scene</span>
-          <span className="frameos-muted block truncate text-xs text-slate-500">Start with a render event</span>
+          <span className="frameos-strong block truncate text-sm font-semibold">New blank scene</span>
+          <span className="frameos-muted block truncate text-xs">Start with a render event</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        disabled={!hasScenes}
+        title={hasScenes ? 'Split screen' : 'Add at least one scene before creating a split screen'}
+        onClick={() => {
+          openGenerator()
+        }}
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-white/80 disabled:hover:shadow-sm"
+      >
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+          <Squares2X2Icon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="frameos-strong block truncate text-sm font-semibold">Split screen</span>
+          <span className="frameos-muted block truncate text-xs">Split the screen between multiple scenes</span>
         </span>
       </button>
       <button
         type="button"
         onClick={() => {
-          openChatDrawer(frame.id, null)
+          const searchParams: Record<string, unknown> = {
+            ...router.values.searchParams,
+            drawer: 'chat',
+            drawerSource: 'templates',
+            frameId: String(frame.id),
+          }
+          delete searchParams.sceneId
+          delete searchParams.nodeId
+          router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
@@ -518,8 +565,8 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <SparklesIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">Generate scene</span>
-          <span className="frameos-muted block truncate text-xs text-slate-500">Open AI chat for this frame</span>
+          <span className="frameos-strong block truncate text-sm font-semibold">Generate scene</span>
+          <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
         </span>
       </button>
     </div>
@@ -650,17 +697,26 @@ export function SceneControlPanel(): JSX.Element | null {
 }
 
 function resolveSceneControlSelection(
-  frame: FrameType,
+  savedFrame: FrameType,
+  editingFrame: Partial<FrameType>,
   sceneId: string,
   uploadedScenes: FrameScene[]
 ): { scene: FrameScene | null; sceneId: string; saved: boolean } {
   const uploadedSceneId = sceneId.startsWith(uploadedScenePrefix) ? sceneId.slice(uploadedScenePrefix.length) : null
   const savedScene =
-    frame.scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? frame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
+    savedFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
+    (uploadedSceneId ? savedFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
 
   if (savedScene) {
     return { scene: savedScene, sceneId: savedScene.id, saved: true }
+  }
+
+  const editingScene =
+    editingFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
+    (uploadedSceneId ? editingFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
+
+  if (editingScene) {
+    return { scene: editingScene, sceneId: editingScene.id, saved: false }
   }
 
   const uploadedScene = uploadedSceneId
@@ -676,19 +732,30 @@ function SceneControlPanelContent({
   sceneControlSelection: { frameId: number; sceneId: string }
 }): JSX.Element | null {
   const { frames } = useValues(framesModel)
-  const { closeSceneControl } = useActions(workspaceLogic)
+  const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
   const frame = frames[sceneControlSelection.frameId]
   const {
     sceneId: currentSceneId,
     uploadedScenes,
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
+  const frameLogicProps = { frameId: sceneControlSelection.frameId }
+  const { frameForm, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
+  const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
+  const { undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic(frameLogicProps))
+  const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
 
   if (!frame) {
     return null
   }
 
-  const { scene, sceneId, saved } = resolveSceneControlSelection(frame, sceneControlSelection.sceneId, uploadedScenes)
+  const editingFrame = { ...frame, ...(frameForm ?? {}) } as Partial<FrameType>
+  const { scene, sceneId, saved } = resolveSceneControlSelection(
+    frame,
+    editingFrame,
+    sceneControlSelection.sceneId,
+    uploadedScenes
+  )
 
   if (!scene) {
     return (
@@ -717,8 +784,19 @@ function SceneControlPanelContent({
     )
   }
 
-  const frameLogicProps = { frameId: frame.id }
   const selectedSceneIsActive = sceneIsActive(scene, currentSceneId)
+  const sceneIsEditable = Boolean(editingFrame.scenes?.some((candidate) => candidate.id === sceneId))
+  const sceneIsUnsaved = sceneIsEditable && (!saved || unsavedSceneIds.has(sceneId))
+  const sceneIsUndeployed = sceneIsEditable && (!saved || undeployedSceneIds.has(sceneId))
+  const splitLayout = normalizeSplitScreenSceneLayout(scene.settings?.splitScreenLayout)
+
+  const handleEditSplit = (): void => {
+    if (!splitLayout) {
+      return
+    }
+    openTemplateDrawer(frame.id)
+    openGenerator(scene.id, splitLayout)
+  }
 
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
@@ -782,21 +860,39 @@ function SceneControlPanelContent({
                   />
                   <A
                     href={urls.scenes(frame.id, scene.id)}
-                    className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    className="frameos-secondary-button inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
                     <PencilSquareIcon className="h-5 w-5" />
                     Open editor
                   </A>
-                  <DeleteInstalledSceneButton frame={frame} scene={scene} />
+                  {splitLayout ? (
+                    <button
+                      type="button"
+                      onClick={handleEditSplit}
+                      className="frameos-secondary-button inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      <Squares2X2Icon className="h-5 w-5" />
+                      Edit split
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               <SceneControlPanelModeTitle />
+              <SceneControlChangeNotice
+                frameUndeployedChanges={undeployedChanges}
+                frameUnsavedChanges={unsavedChanges}
+                sceneIsUndeployed={sceneIsUndeployed}
+                sceneIsUnsaved={sceneIsUnsaved}
+                onDeploy={saveAndDeployFrame}
+                onSave={saveFrame}
+              />
               <ExpandedScene
                 frameId={frame.id}
                 sceneId={sceneId}
                 scene={scene}
                 showEditButton={false}
-                isUndeployed={!saved}
+                isUndeployed={sceneIsUndeployed}
+                isUnsaved={sceneIsUnsaved}
               />
             </div>
           </div>
@@ -814,26 +910,56 @@ function SceneControlPanelModeTitle(): JSX.Element {
   )
 }
 
-function DeleteInstalledSceneButton({ frame, scene }: { frame: FrameType; scene: FrameScene }): JSX.Element {
-  const { deleteSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
-  const { closeSceneControl } = useActions(workspaceLogic)
+function SceneControlChangeNotice({
+  frameUndeployedChanges,
+  frameUnsavedChanges,
+  sceneIsUndeployed,
+  sceneIsUnsaved,
+  onDeploy,
+  onSave,
+}: {
+  frameUndeployedChanges: boolean
+  frameUnsavedChanges: boolean
+  sceneIsUndeployed: boolean
+  sceneIsUnsaved: boolean
+  onDeploy: () => void
+  onSave: () => void
+}): JSX.Element | null {
+  if (!sceneIsUnsaved && !sceneIsUndeployed) {
+    return null
+  }
+
+  const statusText = sceneIsUnsaved
+    ? sceneIsUndeployed
+      ? 'This scene has unsaved changes that are not deployed to the frame.'
+      : 'This scene has unsaved changes.'
+    : 'This scene is saved but not deployed to the frame.'
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (!window.confirm(`Delete "${scene.name || 'Untitled scene'}" from ${frame.name || frameHost(frame)}?`)) {
-          return
-        }
-        deleteSceneAndSave(scene.id)
-        closeSceneControl()
-      }}
-      className="frameos-secondary-button flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      title="Delete scene"
-    >
-      <TrashIcon className="h-5 w-5" />
-      Delete
-    </button>
+    <div className="frameos-warning-button mb-4 rounded-xl border px-3 py-3 shadow-sm">
+      <div className="text-sm font-semibold">{statusText}</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {sceneIsUnsaved ? (
+          <button
+            type="button"
+            onClick={onSave}
+            className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Save changes
+          </button>
+        ) : null}
+        {sceneIsUnsaved || sceneIsUndeployed || frameUnsavedChanges || frameUndeployedChanges ? (
+          <button
+            type="button"
+            onClick={onDeploy}
+            className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <RocketLaunchIcon className="h-4 w-4" />
+            {sceneIsUnsaved ? 'Save & deploy' : 'Deploy changes'}
+          </button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

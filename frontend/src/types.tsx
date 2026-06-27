@@ -559,6 +559,7 @@ export interface FrameSceneSettings {
   execution?: 'compiled' | 'interpreted'
   prompt?: string
   autoArrangeOnLoad?: boolean
+  splitScreenLayout?: Record<string, any>
 }
 
 export interface FrameScene {

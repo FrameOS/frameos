@@ -22,7 +22,14 @@ export interface ExpandedSceneProps {
   isUndeployed?: boolean
 }
 
-export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true, isUndeployed }: ExpandedSceneProps) {
+export function ExpandedScene({
+  frameId,
+  sceneId,
+  scene,
+  showEditButton = true,
+  isUnsaved,
+  isUndeployed,
+}: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
@@ -34,7 +41,8 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true, 
 
   const currentState = states[sceneId] ?? {}
   const sceneIsUndeployed = isUndeployed ?? undeployedSceneIds.has(sceneId)
-  const sceneHasChanges = changedScenes.has(sceneId) || sceneIsUndeployed
+  const sceneIsUnsaved = isUnsaved ?? changedScenes.has(sceneId)
+  const sceneHasChanges = sceneIsUnsaved || sceneIsUndeployed
   const canPreviewUnsavedChanges = sceneHasChanges
   const activateLabel =
     sceneIsUndeployed && sceneId !== currentSceneId
@@ -42,7 +50,7 @@ export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true, 
       : sceneId === currentSceneId
       ? 'Update active scene'
       : 'Activate scene'
-  const previewLabel = sceneIsUndeployed ? 'Preview undeployed scene' : 'Preview unsaved scene'
+  const previewLabel = 'Preview scene with changes'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }

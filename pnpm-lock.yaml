@@ -9,6 +9,8 @@ overrides:
   '@types/react-dom': 18.0.6
   csstype: 3.2.3
 
+packageExtensionsChecksum: sha256-vsSjLdIOYVSo9NEFqxgkMNt3v3VTzjXkaTYuz7XdnIM=
+
 importers:
 
   .:
@@ -120,7 +122,7 @@ importers:
         version: 3.1.7(react@18.2.0)
       kea-forms:
         specifier: ^3.2.0
-        version: 3.2.0(kea@3.1.7(react@18.2.0))
+        version: 3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.8.3)
       kea-loaders:
         specifier: 3.1.1
         version: 3.1.1(kea@3.1.7(react@18.2.0))
@@ -307,7 +309,7 @@ importers:
         version: 3.1.7(react@18.2.0)
       kea-forms:
         specifier: ^3.2.0
-        version: 3.2.0(kea@3.1.7(react@18.2.0))
+        version: 3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.9.3)
       kea-loaders:
         specifier: ^3.1.1
         version: 3.1.1(kea@3.1.7(react@18.2.0))
@@ -412,8 +414,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.4(kea@3.1.7(react@18.2.0))
       kea-typegen:
-        specifier: 3.3.4
-        version: 3.3.4(typescript@5.8.3)
+        specifier: 3.7.1
+        version: 3.7.1(typescript@5.9.3)
       postcss:
         specifier: ^8.4.27
         version: 8.5.8
@@ -436,8 +438,8 @@ importers:
         specifier: ^1.3.0
         version: 1.5.1
       typescript:
-        specifier: 5.8.3
-        version: 5.8.3
+        specifier: 5.9.3
+        version: 5.9.3
       vite:
         specifier: ^7.3.1
         version: 7.3.1(jiti@1.21.7)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)
@@ -2983,6 +2985,7 @@ packages:
     resolution: {integrity: sha512-R/ECGx6FxOZ2TEJv2GcFNLcQJePUK5Qd4Km81rN/7lBHd2hG4CAJglODVpcolWZ0RtcLcvMhHeTg/iqNz5pynw==}
     peerDependencies:
       kea: '>= 3.0.1'
+      typescript: '>=5.0.0'
 
   kea-loaders@3.1.1:
     resolution: {integrity: sha512-FZcOh5PSTIh5+Of5kZno7bXENmY4rCcRYnTB4e709Mbkc7KzriEZ6b/mIWvYx2vkDEgilIsvibUsGOADZ6wqPw==}
@@ -3009,11 +3012,11 @@ packages:
     peerDependencies:
       kea: '>= 3'
 
-  kea-typegen@3.3.4:
-    resolution: {integrity: sha512-5bj9EOq0q0JZC5Krkdt5uf1MqBTYHKL+FbbRbSRUey3BMaLMlaSxD7GYL532BEgwvQ/zMTb0nTJ1EY8t4sreDw==}
+  kea-typegen@3.7.1:
+    resolution: {integrity: sha512-hQuV38I9OyCui/0HviWsgblabeN6iE8t2sOCF8cmoAd1Zk5nR3/5kkaepQGvkaqgwBjy8XcWzVgkCimE8jExoQ==}
     hasBin: true
     peerDependencies:
-      typescript: '>=4.9.5'
+      typescript: '>=5.9.0'
 
   kea-waitfor@0.2.1:
     resolution: {integrity: sha512-oXZ42wZl46+KShuPORgAHKFQr1ewrNJ1ZVBUFLDyn4J3XTndQqCvN0GaFrSCIR0qeBzGHtNu/WwPgVGsmDH8DA==}
@@ -3741,6 +3744,11 @@ packages:
     engines: {node: '>=10.13.0'}
     hasBin: true
 
+  prettier@3.8.5:
+    resolution: {integrity: sha512-zxcTTCedNGJM4R8sj/Cq/F0W/c4iE0afWBcBwMTRtw4WHYP9TWkYjdiH3npPRUYsXQCPR0hTU9yjovOu+E6EQA==}
+    engines: {node: '>=14'}
+    hasBin: true
+
   prismjs@1.30.0:
     resolution: {integrity: sha512-DEvV2ZF2r2/63V+tK8hQvrR2ZGn10srHbXviTlcv7Kpzw8jWiNTqbVgjO3IY8RxrrOUF8VPMQQFysYYYv0YZxw==}
     engines: {node: '>=6'}
@@ -4246,6 +4254,11 @@ packages:
 
   typescript@5.8.3:
     resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -6489,10 +6502,10 @@ snapshots:
 
   commander@4.1.1: {}
 
-  compatfactory@3.0.0(typescript@5.8.3):
+  compatfactory@3.0.0(typescript@5.9.3):
     dependencies:
       helpertypes: 0.0.19
-      typescript: 5.8.3
+      typescript: 5.9.3
 
   concurrently@7.6.0:
     dependencies:
@@ -7155,9 +7168,15 @@ snapshots:
     optionalDependencies:
       graceful-fs: 4.2.11
 
-  kea-forms@3.2.0(kea@3.1.7(react@18.2.0)):
+  kea-forms@3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.8.3):
     dependencies:
       kea: 3.1.7(react@18.2.0)
+      typescript: 5.8.3
+
+  kea-forms@3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.9.3):
+    dependencies:
+      kea: 3.1.7(react@18.2.0)
+      typescript: 5.9.3
 
   kea-loaders@3.1.1(kea@3.1.7(react@18.2.0)):
     dependencies:
@@ -7181,15 +7200,15 @@ snapshots:
       kea: 3.1.7(react@18.2.0)
       kea-waitfor: 0.2.1(kea@3.1.7(react@18.2.0))
 
-  kea-typegen@3.3.4(typescript@5.8.3):
+  kea-typegen@3.7.1(typescript@5.9.3):
     dependencies:
       '@babel/core': 7.29.0
       '@babel/preset-env': 7.29.0(@babel/core@7.29.0)
       '@babel/preset-typescript': 7.28.5(@babel/core@7.29.0)
-      prettier: 2.8.8
+      prettier: 3.8.5
       recast: 0.23.11
-      ts-clone-node: 3.0.0(typescript@5.8.3)
-      typescript: 5.8.3
+      ts-clone-node: 3.0.0(typescript@5.9.3)
+      typescript: 5.9.3
       yargs: 16.2.0
     transitivePeerDependencies:
       - supports-color
@@ -8128,6 +8147,8 @@ snapshots:
 
   prettier@2.8.8: {}
 
+  prettier@3.8.5: {}
+
   prismjs@1.30.0: {}
 
   prop-types@15.8.1:
@@ -8713,10 +8734,10 @@ snapshots:
 
   trough@2.2.0: {}
 
-  ts-clone-node@3.0.0(typescript@5.8.3):
+  ts-clone-node@3.0.0(typescript@5.9.3):
     dependencies:
-      compatfactory: 3.0.0(typescript@5.8.3)
-      typescript: 5.8.3
+      compatfactory: 3.0.0(typescript@5.9.3)
+      typescript: 5.9.3
 
   ts-interface-checker@0.1.13: {}
 
@@ -8740,6 +8761,8 @@ snapshots:
   typescript@5.4.5: {}
 
   typescript@5.8.3: {}
+
+  typescript@5.9.3: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 

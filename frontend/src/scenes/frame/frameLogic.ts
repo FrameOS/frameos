@@ -5,6 +5,7 @@ import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
   AppNodeData,
+  DiagramEdge,
   DiagramNode,
   FrameErrorBehavior,
   FrameScene,
@@ -45,6 +46,14 @@ import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
+import {
+  cloneSplitScreenSceneLayout,
+  defaultSplitScreenBackground,
+  type SplitLayoutBranch,
+  type SplitLayoutNode,
+  type SplitScreenBackground,
+  type SplitScreenSceneLayout,
+} from '../../utils/splitScreenLayouts'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -1119,6 +1128,178 @@ function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank sc
   )
 }
 
+function splitRatioString(ratios: number[], length: number): string {
+  return Array.from({ length }, (_, index) => {
+    const ratio = Number(ratios[index])
+    return Number.isFinite(ratio) && ratio > 0 ? Number(ratio.toFixed(3)).toString() : '1'
+  }).join(' ')
+}
+
+function splitLayoutBorderWidth(layout: SplitScreenSceneLayout): number {
+  return Math.max(0, Math.min(48, Math.round(Number(layout.borderWidth) || 0)))
+}
+
+function splitLayoutOuterBorderWidth(layout: SplitScreenSceneLayout): number {
+  const value = layout.outerBorderWidth ?? ((layout as any).outerBorder ? layout.borderWidth : 0)
+  return Math.max(0, Math.min(48, Math.round(Number(value) || 0)))
+}
+
+function splitLayoutBackground(layout: SplitScreenSceneLayout): SplitScreenBackground {
+  return {
+    ...defaultSplitScreenBackground,
+    ...(layout.background ?? {}),
+    opacity: Math.max(0, Math.min(1, Number(layout.background?.opacity ?? defaultSplitScreenBackground.opacity) || 0)),
+  }
+}
+
+function splitNodeConfig(branch: SplitLayoutBranch, gapWidth: number, outerBorderWidth: number): Record<string, any> {
+  const rows = branch.direction === 'column' ? branch.children.length : 1
+  const columns = branch.direction === 'row' ? branch.children.length : 1
+  return {
+    rows: String(rows),
+    columns: String(columns),
+    hideEmpty: false,
+    gap: String(gapWidth),
+    margin: String(outerBorderWidth),
+    ...(branch.direction === 'row'
+      ? { width_ratios: splitRatioString(branch.ratios, branch.children.length) }
+      : { height_ratios: splitRatioString(branch.ratios, branch.children.length) }),
+  }
+}
+
+export function buildSplitScene(
+  frame: Partial<FrameType>,
+  layout: SplitScreenSceneLayout,
+  sceneId?: string | null
+): FrameScene {
+  const nodes: DiagramNode[] = []
+  const edges: DiagramEdge[] = []
+  let visualIndex = 0
+  const borderWidth = splitLayoutBorderWidth(layout)
+  const outerBorderWidth = splitLayoutOuterBorderWidth(layout)
+  const background = splitLayoutBackground(layout)
+
+  const eventNode: DiagramNode = {
+    id: uuidv4(),
+    type: 'event',
+    position: { x: 121, y: 113 },
+    data: { keyword: 'render' },
+  }
+  nodes.push(eventNode)
+
+  const addEdge = (source: string, sourceHandle: string, target: string, targetHandle = 'prev'): void => {
+    edges.push({
+      id: uuidv4(),
+      source,
+      sourceHandle,
+      target,
+      targetHandle,
+      type: 'appNodeEdge',
+    })
+  }
+
+  const addBackgroundNode = (): { firstNodeId: string; lastNodeId: string } | null => {
+    let firstNodeId: string | null = null
+    let lastNodeId: string | null = null
+
+    if (background.sceneId) {
+      const nodeId = uuidv4()
+      nodes.push({
+        id: nodeId,
+        type: 'scene',
+        position: { x: 390, y: -70 },
+        data: { keyword: background.sceneId, config: {} } satisfies SceneNodeData,
+      })
+      firstNodeId = nodeId
+      lastNodeId = nodeId
+    }
+
+    if (firstNodeId && lastNodeId && background.opacity < 1) {
+      const opacityNodeId = uuidv4()
+      nodes.push({
+        id: opacityNodeId,
+        type: 'app',
+        position: { x: 390, y: 20 },
+        data: {
+          keyword: 'render/opacity',
+          name: 'Background opacity',
+          config: { opacity: background.opacity },
+        } satisfies AppNodeData,
+      })
+      addEdge(lastNodeId, 'next', opacityNodeId)
+      lastNodeId = opacityNodeId
+    }
+
+    return firstNodeId && lastNodeId ? { firstNodeId, lastNodeId } : null
+  }
+
+  const addSceneNode = (child: SplitLayoutNode, depth: number): string | null => {
+    if (child.type !== 'leaf' || !child.sceneId) {
+      return null
+    }
+    const nodeId = uuidv4()
+    nodes.push({
+      id: nodeId,
+      type: 'scene',
+      position: { x: 760 + depth * 320, y: 120 + visualIndex * 110 },
+      data: { keyword: child.sceneId, config: { ...(child.state ?? {}) } } satisfies SceneNodeData,
+    })
+    visualIndex += 1
+    return nodeId
+  }
+
+  const addSplitNode = (branch: SplitLayoutBranch, depth: number): string => {
+    const nodeId = uuidv4()
+    nodes.push({
+      id: nodeId,
+      type: 'app',
+      position: { x: 400 + depth * 320, y: 100 + visualIndex * 40 },
+      data: {
+        keyword: 'render/split',
+        name: depth === 0 ? 'Split screen' : 'Nested split',
+        config: splitNodeConfig(branch, borderWidth, depth === 0 ? outerBorderWidth : 0),
+      } satisfies AppNodeData,
+    })
+
+    branch.children.forEach((child, index) => {
+      const targetNodeId = child.type === 'split' ? addSplitNode(child, depth + 1) : addSceneNode(child, depth + 1)
+      if (!targetNodeId) {
+        return
+      }
+      const row = branch.direction === 'column' ? index + 1 : 1
+      const column = branch.direction === 'row' ? index + 1 : 1
+      addEdge(nodeId, `field/render_functions[${row}][${column}]`, targetNodeId)
+    })
+
+    return nodeId
+  }
+
+  const rootNodeId = addSplitNode(layout.root, 0)
+  const backgroundNodes = addBackgroundNode()
+  if (backgroundNodes) {
+    addEdge(eventNode.id, 'next', backgroundNodes.firstNodeId)
+    addEdge(backgroundNodes.lastNodeId, 'next', rootNodeId)
+  } else {
+    addEdge(eventNode.id, 'next', rootNodeId)
+  }
+
+  return sanitizeScene(
+    {
+      id: sceneId || uuidv4(),
+      name: layout.name || 'Split screen',
+      nodes,
+      edges,
+      fields: [],
+      settings: {
+        backgroundColor: background.color,
+        execution: 'interpreted',
+        splitScreenLayout: cloneSplitScreenSceneLayout(layout) as unknown as Record<string, any>,
+      },
+    },
+    frame
+  )
+}
+
 async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
   const normalizedFrame = normalizeFrameForSubmit(frame)
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
@@ -1679,10 +1860,7 @@ export const frameLogic = kea<frameLogicType>([
       } else {
         await asyncActions.submitFrameForm()
       }
-      framesModel.actions.deployFrame(
-        props.frameId,
-        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
-      )
+      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
     },
     saveAndFastDeployFrame: async () => {
       const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
@@ -1711,10 +1889,7 @@ export const frameLogic = kea<frameLogicType>([
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
     deployFrame: () => {
-      framesModel.actions.deployFrame(
-        props.frameId,
-        frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
-      )
+      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),

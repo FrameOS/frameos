@@ -251,6 +251,32 @@ def _frame_image_cache_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image"
 
 
+UPLOADED_SCENE_PREFIX = "uploaded/"
+
+
+def _configured_scene_ids(frame: Frame) -> set[str]:
+    scene_ids: set[str] = set()
+    for scene in frame.scenes or []:
+        scene_id = scene.get("id") if isinstance(scene, dict) else None
+        if isinstance(scene_id, str):
+            scene_ids.add(scene_id)
+    return scene_ids
+
+
+def _scene_image_scene_id_for_frame(frame: Frame, scene_id: str) -> str:
+    if not scene_id.startswith(UPLOADED_SCENE_PREFIX):
+        return scene_id
+
+    original_scene_id = scene_id[len(UPLOADED_SCENE_PREFIX) :]
+    configured_scene_ids = _configured_scene_ids(frame)
+    if scene_id in configured_scene_ids and original_scene_id not in configured_scene_ids:
+        return scene_id
+    if original_scene_id in configured_scene_ids:
+        return original_scene_id
+
+    return original_scene_id
+
+
 def _coerce_frame_image_to_png(body: bytes, headers: dict[str, str]) -> bytes:
     content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type not in ("image/bmp", "image/x-ms-bmp"):
@@ -1820,6 +1846,8 @@ async def api_frame_get_image(
                     encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
                     if encoded_scene_id:
                         scene_id = encoded_scene_id.decode("utf-8")
+                if scene_id:
+                    scene_id = _scene_image_scene_id_for_frame(frame, scene_id)
                 if scene_id:
                     from app.models.scene_image import SceneImage
                     from app.api.scene_images import _generate_thumbnail
