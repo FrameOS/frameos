@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 import ssl
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -71,6 +71,40 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     scheme, port = _frame_scheme_port(frame)
     url = f"{scheme}://{frame.frame_host}:{port}{_build_frame_path(frame, path, method)}"
     return url
+
+
+def _embedded_last_boot_ip(frame: Frame) -> str | None:
+    if (frame.mode or "rpios") != "embedded":
+        return None
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    last_boot = embedded.get("lastBoot")
+    if not isinstance(last_boot, dict):
+        return None
+    ip = last_boot.get("ip")
+    if not isinstance(ip, str) or not ip.strip() or not is_safe_host(ip):
+        return None
+    return ip.strip()
+
+
+def _build_direct_frame_url(frame: Frame, host: str, scheme: str, port: int, path: str, method: str) -> str:
+    if not is_safe_host(host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+    return f"{scheme}://{host}:{port}{_build_frame_path(frame, path, method)}"
+
+
+def _frame_http_direct_candidates(frame: Frame, path: str, method: str) -> list[tuple[str, Any]]:
+    scheme, port = _frame_scheme_port(frame)
+    candidates: list[tuple[str, Any]] = [
+        (_build_direct_frame_url(frame, frame.frame_host, scheme, port, path, method), _httpx_verify(frame))
+    ]
+
+    boot_ip = _embedded_last_boot_ip(frame)
+    if boot_ip:
+        fallback_port = int(frame.frame_port or 80)
+        fallback_url = _build_direct_frame_url(frame, boot_ip, "http", fallback_port, path, method)
+        if fallback_url != candidates[0][0]:
+            candidates.append((fallback_url, True))
+    return candidates
 
 
 def _httpx_verify(frame: Frame):
@@ -161,48 +195,55 @@ async def _fetch_frame_http_bytes(
             return status, body, hdrs
         raise HTTPException(status_code=500, detail="Bad remote response")
 
-    url = _build_frame_url(frame, path, method)
+    candidates = _frame_http_direct_candidates(frame, path, method)
     hdrs = _auth_headers(frame, headers)
-    verify = _httpx_verify(frame)
     timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
     attempts = max(1, FRAME_HTTP_RETRIES)
+    last_error: HTTPException | None = None
     async with _frame_http_semaphore:
-        async with httpx.AsyncClient(verify=verify) as client:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = await client.request(
-                        method,
-                        url,
-                        headers=hdrs,
-                        content=body,
-                        timeout=FRAME_HTTP_TIMEOUT,
-                    )
-                    break
-                except timeout_errors:
-                    if attempt >= attempts:
-                        raise HTTPException(
+        for candidate_index, (url, verify) in enumerate(candidates):
+            async with httpx.AsyncClient(verify=verify) as client:
+                for attempt in range(1, attempts + 1):
+                    try:
+                        response = await client.request(
+                            method,
+                            url,
+                            headers=hdrs,
+                            content=body,
+                            timeout=FRAME_HTTP_TIMEOUT,
+                        )
+                        return response.status_code, response.content, dict(response.headers)
+                    except timeout_errors:
+                        if attempt < attempts:
+                            await asyncio.sleep(0.15 * attempt)
+                            continue
+                        last_error = HTTPException(
                             status_code=HTTPStatus.REQUEST_TIMEOUT,
                             detail=f"Timeout to {url}",
                         )
-                    await asyncio.sleep(0.15 * attempt)
-                except httpx.PoolTimeout:
-                    raise HTTPException(
-                        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                        detail="Frame request queue is saturated",
-                    )
-                except httpx.ConnectError as exc:
-                    if detail := _tls_connect_error_detail(frame, str(exc)):
+                    except httpx.PoolTimeout:
                         raise HTTPException(
-                            status_code=HTTPStatus.BAD_GATEWAY,
-                            detail=detail,
+                            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                            detail="Frame request queue is saturated",
                         )
-                    raise HTTPException(
-                        status_code=HTTPStatus.BAD_GATEWAY,
-                        detail=str(exc),
-                    )
-                except Exception as exc:
-                    raise HTTPException(
-                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-                    )
+                    except httpx.ConnectError as exc:
+                        if detail := _tls_connect_error_detail(frame, str(exc)):
+                            raise HTTPException(
+                                status_code=HTTPStatus.BAD_GATEWAY,
+                                detail=detail,
+                            )
+                        last_error = HTTPException(
+                            status_code=HTTPStatus.BAD_GATEWAY,
+                            detail=str(exc),
+                        )
+                    except Exception as exc:
+                        raise HTTPException(
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                        )
+                    break
+            if candidate_index < len(candidates) - 1:
+                continue
 
-    return response.status_code, response.content, dict(response.headers)
+    if last_error is not None:
+        raise last_error
+    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Frame request failed")

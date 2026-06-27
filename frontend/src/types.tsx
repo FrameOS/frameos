@@ -776,6 +776,20 @@ export interface FrameEmbeddedConfig {
   platform?: string
   flashSize?: FrameEmbeddedFlashSize
   hardwarePreset?: FrameEmbeddedHardwarePreset
+  lastBoot?: {
+    at?: string
+    source?: string
+    version?: string
+    frameosVersion?: string
+    ip?: string
+    width?: number
+    height?: number
+    pixelFormat?: number
+    mode?: string
+    renderMode?: string
+    panel?: string
+    wifi?: string
+  }
   firmware?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     requestId?: string

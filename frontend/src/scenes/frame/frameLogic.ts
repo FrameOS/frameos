@@ -409,6 +409,22 @@ function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVer
   return introducedVersion ? isFrameosVersionBefore(previousFrameosVersion, introducedVersion) : false
 }
 
+function frameosVersionRequiresDeploy(previousFrameosVersion: string | null): boolean {
+  if (!previousFrameosVersion) {
+    return true
+  }
+  if (previousFrameosVersion === CURRENT_FRAMEOS_VERSION) {
+    return false
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(previousFrameosVersion)) {
+    return true
+  }
+  if (isFrameosVersionBefore(previousFrameosVersion, CURRENT_FRAMEOS_VERSION)) {
+    return true
+  }
+  return false
+}
+
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
   return FRAME_KEYS
 }
@@ -544,7 +560,7 @@ function computeChangeDetails(
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [], mode)
 
-  if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
+  if (includeFrameosVersion && frameosVersionRequiresDeploy(previousFrameosVersion)) {
     details.push({
       label: `FrameOS ${previousFrameosVersion ?? 'unreported'} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
