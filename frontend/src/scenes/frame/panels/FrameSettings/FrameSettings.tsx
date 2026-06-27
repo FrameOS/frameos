@@ -728,6 +728,13 @@ export function FrameSettings({
   const controlUrl = frameControlUrl(linkFrame)
   const adminUrl = frameAdminUrl(linkFrame)
   const imageUrl = frameImageUrl(linkFrame)
+  const embeddedAdminAuthMissing =
+    isEmbeddedMode &&
+    !(
+      linkFrame.frame_admin_auth?.enabled &&
+      linkFrame.frame_admin_auth.user &&
+      linkFrame.frame_admin_auth.pass
+    )
   const frameActionsMenu = hideDropdown ? null : (
     <DropdownMenu
       className="w-fit"
@@ -1839,60 +1846,76 @@ export function FrameSettings({
           ) : null}
         </div>
 
-        {!isEmbeddedMode ? (
-          <>
-            <H6 id="frame-settings-admin">Frame admin panel (BETA)</H6>
-            <p className="pl-2 @md:pl-8 text-sm text-gray-500">
-              Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still
-              in beta: you can't save any changes.{' '}
-            </p>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="frame_admin_auth.enabled"
-                label="Admin panel enabled"
-                labelRight={
-                  adminUrl ? (
-                    <A
-                      href={adminUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="frameos-link text-sm hover:underline"
-                    >
-                      Open
-                    </A>
-                  ) : (
-                    <></>
-                  )
-                }
-              >
-                <Switch />
-              </Field>
-              {frameForm.frame_admin_auth?.enabled ? (
-                <>
-                  <Field name="frame_admin_auth.user" label="Username">
-                    <TextInput />
-                  </Field>
-                  <Field
-                    name="frame_admin_auth.pass"
-                    label="Password"
-                    labelRight={
-                      <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
-                        Generate
-                      </Button>
-                    }
+        <>
+          <H6 id="frame-settings-admin">{isEmbeddedMode ? 'Frame setup access' : 'Frame admin panel (BETA)'}</H6>
+          <p className="pl-2 @md:pl-8 text-sm text-gray-500">
+            {isEmbeddedMode ? (
+              <>
+                Protects the ESP32 setup and control URL on normal Wi-Fi. Hotspot provisioning stays open so a new
+                device can be configured.
+              </>
+            ) : (
+              <>
+                Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is
+                still in beta: you can't save any changes.{' '}
+              </>
+            )}
+          </p>
+          <div className="pl-2 @md:pl-8 space-y-2">
+            {embeddedAdminAuthMissing ? (
+              <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+                <div>
+                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup
+                  URL is locked outside hotspot mode.
+                </div>
+              </div>
+            ) : null}
+            <Field
+              name="frame_admin_auth.enabled"
+              label={isEmbeddedMode ? 'Require username/password' : 'Admin panel enabled'}
+              labelRight={
+                !isEmbeddedMode && adminUrl ? (
+                  <A
+                    href={adminUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="frameos-link text-sm hover:underline"
                   >
-                    <TextInput
-                      onClick={() => touchFrameFormField('frame_admin_auth.pass')}
-                      type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
-                      placeholder=""
-                      required
-                    />
-                  </Field>
-                </>
-              ) : null}
-            </div>
-          </>
-        ) : null}
+                    Open
+                  </A>
+                ) : (
+                  <></>
+                )
+              }
+            >
+              <Switch />
+            </Field>
+            {frameForm.frame_admin_auth?.enabled ? (
+              <>
+                <Field name="frame_admin_auth.user" label="Username">
+                  <TextInput />
+                </Field>
+                <Field
+                  name="frame_admin_auth.pass"
+                  label="Password"
+                  labelRight={
+                    <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
+                      Generate
+                    </Button>
+                  }
+                >
+                  <TextInput
+                    onClick={() => touchFrameFormField('frame_admin_auth.pass')}
+                    type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
+                    placeholder=""
+                    required
+                  />
+                </Field>
+              </>
+            ) : null}
+          </div>
+        </>
 
         <H6 id="frame-http-proxy-section">
           {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}

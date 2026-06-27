@@ -35,6 +35,9 @@ static void load_defaults(void)
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
     strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
     strlcpy(s_config.tls_server_key, FRAMEOS_DEFAULT_TLS_SERVER_KEY, sizeof(s_config.tls_server_key));
+    s_config.admin_auth_enabled = FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE;
+    strlcpy(s_config.admin_user, FRAMEOS_DEFAULT_ADMIN_AUTH_USER, sizeof(s_config.admin_user));
+    strlcpy(s_config.admin_pass, FRAMEOS_DEFAULT_ADMIN_AUTH_PASS, sizeof(s_config.admin_pass));
     strlcpy(s_config.assets_path, FRAMEOS_DEFAULT_ASSETS_PATH, sizeof(s_config.assets_path));
     s_config.assets_sd.enabled = FRAMEOS_DEFAULT_ASSETS_SD_ENABLE;
     s_config.assets_sd.cs = FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS;
@@ -102,6 +105,8 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "hostname", s_config.hostname, sizeof(s_config.hostname));
     nvs_get_string(nvs, "panel", s_config.panel, sizeof(s_config.panel));
     nvs_get_string(nvs, "assets_path", s_config.assets_path, sizeof(s_config.assets_path));
+    nvs_get_string(nvs, "admin_user", s_config.admin_user, sizeof(s_config.admin_user));
+    nvs_get_string(nvs, "admin_pass", s_config.admin_pass, sizeof(s_config.admin_pass));
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
     size_t gpio_buttons_len = sizeof(gpio_buttons);
     esp_err_t buttons_err = nvs_get_str(nvs, "gpio_buttons", gpio_buttons, &gpio_buttons_len);
@@ -119,6 +124,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
+    if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
     int8_t i8;
     if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
@@ -136,11 +142,12 @@ esp_err_t fos_config_init(void)
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u assets_sd=%s buttons=%u wifi=%s backend=%s",
+    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
              (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
              s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
+             (s_config.admin_auth_enabled && s_config.admin_user[0] && s_config.admin_pass[0]) ? "on" : "off",
              s_config.assets_sd.enabled ? "on" : "off",
              (unsigned)s_config.gpio_button_count,
              s_config.wifi_ssid[0] ? s_config.wifi_ssid : "(unset)",
@@ -161,12 +168,15 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "hostname", s_config.hostname);
     nvs_set_str(nvs, "panel", s_config.panel);
     nvs_set_str(nvs, "assets_path", s_config.assets_path);
+    nvs_set_str(nvs, "admin_user", s_config.admin_user);
+    nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
+    nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
     nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
     nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);

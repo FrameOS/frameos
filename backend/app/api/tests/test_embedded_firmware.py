@@ -69,6 +69,9 @@ async def test_new_embedded_frame(async_client):
     assert frame['device_config']['pins']['cs'] == 3
     assert frame['device_config']['pins']['cs2'] == -1
     assert frame['embedded']['flashSize'] == EMBEDDED_DEFAULT_FLASH_SIZE
+    assert frame['frame_admin_auth']['enabled'] is True
+    assert frame['frame_admin_auth']['user'] == 'admin'
+    assert frame['frame_admin_auth']['pass']
 
 
 @pytest.mark.asyncio
@@ -521,10 +524,20 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
     assert frame.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame.device_config["pins"]["cs2"] == 8
     assert embedded_default_pins_for_frame(frame)["cs2"] == 8
+    assert frame.frame_admin_auth["enabled"] is True
+    assert frame.frame_admin_auth["user"] == "admin"
+    assert frame.frame_admin_auth["pass"]
 
     custom_port = Frame(device="waveshare.EPD_7in5_V2", frame_port=8081)
     ensure_embedded_frame_defaults(custom_port)
     assert custom_port.frame_port == 8081
+
+    disabled_admin = Frame(
+        device="waveshare.EPD_7in5_V2",
+        frame_admin_auth={"enabled": False, "user": "", "pass": ""},
+    )
+    ensure_embedded_frame_defaults(disabled_admin)
+    assert disabled_admin.frame_admin_auth == {"enabled": False, "user": "", "pass": ""}
 
     custom = Frame(
         device="waveshare.EPD_7in5_V2",
@@ -746,6 +759,22 @@ def test_generated_config_bakes_tls_settings():
     assert "#define FRAMEOS_DEFAULT_TLS_PORT 9443" in header
     assert 'FRAMEOS_DEFAULT_TLS_SERVER_CERT "-----BEGIN CERTIFICATE-----\\nserver\\n-----END CERTIFICATE-----\\n"' in header
     assert 'FRAMEOS_DEFAULT_TLS_SERVER_KEY "-----BEGIN RSA PRIVATE KEY-----\\nkey\\n-----END RSA PRIVATE KEY-----\\n"' in header
+
+
+def test_generated_config_bakes_admin_auth():
+    frame = Frame(
+        id=9,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        frame_admin_auth={"enabled": True, "user": "admin", "pass": "secret"},
+    )
+    header = _generated_config_header(frame)
+
+    assert "#define FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE 1" in header
+    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER "admin"' in header
+    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS "secret"' in header
 
 
 def test_generated_config_bakes_hostname_from_frame_host():

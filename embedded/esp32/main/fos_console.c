@@ -73,6 +73,9 @@ static int cmd_status(int argc, char **argv)
            (unsigned)config->tls_port,
            config->tls_server_cert[0] ? "yes" : "no",
            config->tls_server_key[0] ? "yes" : "no");
+    printf("admin_auth:  %s user=%s\n",
+           (config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0]) ? "enabled" : "disabled",
+           config->admin_user[0] ? config->admin_user : "(unset)");
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");

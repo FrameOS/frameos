@@ -16,6 +16,7 @@
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "mbedtls/base64.h"
 
 #include "cJSON.h"
 #include "fos_assets_sd.h"
@@ -236,6 +237,81 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     return ESP_OK;
 }
 
+static bool request_auth_header(httpd_req_t *req, char *out, size_t out_len)
+{
+    size_t len = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (!len || len >= out_len) return false;
+    return httpd_req_get_hdr_value_str(req, "Authorization", out, out_len) == ESP_OK;
+}
+
+static bool admin_auth_configured(const fos_config_t *config)
+{
+    return config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0];
+}
+
+static bool request_bearer_matches(httpd_req_t *req, const fos_config_t *config)
+{
+    if (!config->api_key[0]) return false;
+    char auth[FOS_STR_LEN + 16];
+    if (!request_auth_header(req, auth, sizeof(auth))) return false;
+    const char *prefix = "Bearer ";
+    size_t prefix_len = strlen(prefix);
+    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, config->api_key) == 0;
+}
+
+static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
+{
+    if (!admin_auth_configured(config)) return false;
+
+    char auth[384];
+    if (!request_auth_header(req, auth, sizeof(auth))) return false;
+
+    char raw[FOS_STR_LEN * 2 + 2];
+    snprintf(raw, sizeof(raw), "%s:%s", config->admin_user, config->admin_pass);
+
+    unsigned char encoded[384];
+    size_t encoded_len = 0;
+    int rc = mbedtls_base64_encode(
+        encoded,
+        sizeof(encoded) - 1,
+        &encoded_len,
+        (const unsigned char *)raw,
+        strlen(raw));
+    if (rc != 0 || encoded_len >= sizeof(encoded)) return false;
+    encoded[encoded_len] = '\0';
+
+    const char *prefix = "Basic ";
+    size_t prefix_len = strlen(prefix);
+    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, (const char *)encoded) == 0;
+}
+
+static esp_err_t require_protected_access(httpd_req_t *req)
+{
+    if (s_portal_mode) return ESP_OK;
+
+    fos_config_t *config = fos_config();
+    if (request_bearer_matches(req, config) || request_basic_matches(req, config)) {
+        return ESP_OK;
+    }
+
+    if (!admin_auth_configured(config)) {
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_send_err(
+            req,
+            HTTPD_403_FORBIDDEN,
+            "FrameOS setup is locked because admin credentials are not configured. "
+            "Connect through the FrameOS hotspot, or set frame admin auth in the backend and redeploy.");
+    }
+
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
+    return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
+}
+
+#define REQUIRE_PROTECTED_ACCESS() do { \
+        esp_err_t auth_err = require_protected_access(req); \
+        if (auth_err != ESP_OK) return auth_err; \
+    } while (0)
+
 esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
 {
     const char *payload = body;
@@ -344,6 +420,7 @@ static const char *SETUP_PAGE_HEAD =
     ".preview,.panel{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}"
     ".preview img{display:block;max-width:100%;height:auto;border:1px solid #ddd;background:#fff}"
     ".muted{color:#666;font-size:.9rem}"
+    ".warn{background:#fff8dc;border:1px solid #e5c25a;padding:.7rem;margin:.9rem 0}"
     ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}"
     ".metric{background:#f6f6f6;border:1px solid #ddd;padding:.5rem}.metric b{display:block}"
     "code{background:#eee;padding:0 .3rem}</style></head><body>"
@@ -351,6 +428,8 @@ static const char *SETUP_PAGE_HEAD =
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     fos_config_t *config = fos_config();
     char field[64];
     char pins[FOS_STR_LEN];
@@ -401,6 +480,27 @@ static esp_err_t root_get_handler(httpd_req_t *req)
                    " autocomplete='off' placeholder='Leave blank to keep current key'") != ESP_OK) {
         return ESP_FAIL;
     }
+
+    bool has_admin_auth = admin_auth_configured(config);
+    if (!has_admin_auth) {
+        if (sendstr(req, "<p class='warn'>Set an admin username and password before joining normal Wi-Fi. Without them, setup and control routes stay locked outside hotspot mode.</p>") != ESP_OK) {
+            return ESP_FAIL;
+        }
+    }
+    if (sendstr(req, "<label for='admin_auth'>Setup/control protection</label><select id='admin_auth' name='admin_auth'>") != ESP_OK) return ESP_FAIL;
+    bool protect_setup = config->admin_auth_enabled || !has_admin_auth;
+    if (send_option(req, "1", "Enabled with admin username/password", protect_setup) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Disabled (locked outside hotspot unless backend token is used)", !protect_setup) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "Admin username", "admin_user", "text",
+                   config->admin_user[0] ? config->admin_user : "admin", " autocomplete='username'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (send_input(req, "Admin password", "admin_pass", "password", "",
+                   " autocomplete='new-password' placeholder='Leave blank to keep current password'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->frame_id);
     if (send_input(req, "Frame ID", "frame_id", "number", field, " min='0'") != ESP_OK) return ESP_FAIL;
 
@@ -603,6 +703,8 @@ char *fos_http_status_json(void)
 
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char *json = fos_http_status_json();
     if (!json) {
         return httpd_resp_send_500(req);
@@ -841,6 +943,8 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
 
 static esp_err_t preview_bmp_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     uint8_t *bmp = NULL;
     size_t bmp_len = 0;
     char scene_id[128];
@@ -867,6 +971,8 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
 
 static esp_err_t setup_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 2048) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -886,6 +992,21 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
 
     fos_config_t *config = fos_config();
     char value[FOS_URL_LEN];
+    bool next_admin_auth_enabled = config->admin_auth_enabled;
+    char next_admin_user[FOS_STR_LEN];
+    char next_admin_pass[FOS_STR_LEN];
+    strlcpy(next_admin_user, config->admin_user, sizeof(next_admin_user));
+    strlcpy(next_admin_pass, config->admin_pass, sizeof(next_admin_pass));
+    if (form_value(body, "admin_auth", value, sizeof(value))) next_admin_auth_enabled = atoi(value) != 0;
+    if (form_value(body, "admin_user", value, sizeof(value))) strlcpy(next_admin_user, value, sizeof(next_admin_user));
+    if (form_value(body, "admin_pass", value, sizeof(value)) && value[0]) {
+        strlcpy(next_admin_pass, value, sizeof(next_admin_pass));
+    }
+    if (next_admin_auth_enabled && (!next_admin_user[0] || !next_admin_pass[0])) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "admin username and password required");
+    }
+
     if (form_value(body, "ssid", value, sizeof(value))) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));
     if (form_value(body, "pass", value, sizeof(value)) && value[0]) {
         strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
@@ -899,6 +1020,9 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "api_key", value, sizeof(value)) && value[0]) {
         strlcpy(config->api_key, value, sizeof(config->api_key));
     }
+    config->admin_auth_enabled = next_admin_auth_enabled;
+    strlcpy(config->admin_user, next_admin_user, sizeof(config->admin_user));
+    strlcpy(config->admin_pass, next_admin_pass, sizeof(config->admin_pass));
     if (form_value(body, "frame_id", value, sizeof(value))) config->frame_id = strtoul(value, NULL, 10);
     if (form_value(body, "panel", value, sizeof(value))) strlcpy(config->panel, value, sizeof(config->panel));
     if (form_value(body, "render_mode", value, sizeof(value))) config->render_mode = atoi(value) ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
@@ -928,6 +1052,8 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
 
 static esp_err_t action_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     fos_action_cb cb = (fos_action_cb)req->user_ctx;
     if (!cb) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "action not available");
@@ -940,6 +1066,8 @@ static esp_err_t action_handler(httpd_req_t *req)
 
 static esp_err_t scenes_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_info_json();
     if (!json || !json[0]) {
         json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
@@ -950,6 +1078,8 @@ static esp_err_t scenes_get_handler(httpd_req_t *req)
 
 static esp_err_t scene_state_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_state_json();
     if (!json || !json[0]) {
         json = "{}";
@@ -960,6 +1090,8 @@ static esp_err_t scene_state_get_handler(httpd_req_t *req)
 
 static esp_err_t state_alias_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *state_json = frameos_nim_scene_state_json();
     if (!state_json || !state_json[0]) state_json = "{}";
     char scene_id[128];
@@ -979,6 +1111,8 @@ static esp_err_t state_alias_get_handler(httpd_req_t *req)
 
 static esp_err_t states_alias_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *state_json = frameos_nim_scene_state_json();
     if (!state_json || !state_json[0]) state_json = "{}";
     char scene_id[128];
@@ -1004,6 +1138,8 @@ static esp_err_t states_alias_get_handler(httpd_req_t *req)
 
 static esp_err_t uploaded_scenes_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_info_json();
     if (!json || !json[0]) {
         json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
@@ -1025,12 +1161,16 @@ static esp_err_t ping_get_handler(httpd_req_t *req)
 
 static esp_err_t api_apps_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, "{\"apps\":[]}", HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t frame_api_ping_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req,
         "{\"ok\":true,\"mode\":\"http\",\"target\":\"frame\","
@@ -1069,16 +1209,22 @@ static esp_err_t frame_api_frame_payload(httpd_req_t *req, bool list)
 
 static esp_err_t frames_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     return frame_api_frame_payload(req, true);
 }
 
 static esp_err_t frame_detail_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     return frame_api_frame_payload(req, false);
 }
 
 static esp_err_t reload_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     log_http_command(req, "reload", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();
@@ -1170,6 +1316,8 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
 
 static esp_err_t event_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char path[256];
     if (!copy_request_path(req, path, sizeof(path))) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "URI too long");
@@ -1206,6 +1354,8 @@ static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 
 static esp_err_t frame_api_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char suffix[160];
     if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
@@ -1235,6 +1385,8 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
 
 static esp_err_t frame_api_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char suffix[160];
     if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
@@ -1255,6 +1407,8 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
 
 static esp_err_t scene_select_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 512) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -1293,6 +1447,8 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
  * touching the backend. */
 static esp_err_t scenes_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 512 * 1024) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -1325,6 +1481,8 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
 /* Force a backend scenes sync on the next render pass. */
 static esp_err_t scenes_sync_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     log_http_command(req, "scenes_sync", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();

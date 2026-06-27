@@ -67,6 +67,9 @@ typedef struct {
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
     char tls_server_cert[FOS_TLS_PEM_LEN];
     char tls_server_key[FOS_TLS_PEM_LEN];
+    bool admin_auth_enabled;       /* protect setup/control routes outside hotspot mode */
+    char admin_user[FOS_STR_LEN];
+    char admin_pass[FOS_STR_LEN];
     char assets_path[FOS_ASSETS_PATH_LEN]; /* VFS mount point for local assets, default /srv/assets */
     fos_assets_sd_config_t assets_sd;
     bool deep_sleep;               /* deep sleep between refreshes */

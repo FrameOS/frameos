@@ -214,7 +214,9 @@ def _auth_headers(
     Inject HTTP Authorization header when the frame is not public.
     """
     hdrs = dict(hdrs or {})
-    if frame.frame_access != "public" and frame.frame_access_key:
+    if _is_embedded_frame(frame) and frame.server_api_key:
+        hdrs.setdefault("Authorization", f"Bearer {frame.server_api_key}")
+    elif frame.frame_access != "public" and frame.frame_access_key:
         hdrs.setdefault("Authorization", f"Bearer {frame.frame_access_key}")
     return hdrs
 

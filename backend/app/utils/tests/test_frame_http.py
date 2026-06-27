@@ -4,7 +4,7 @@ import pytest
 from app.models.frame import Frame
 import app.utils.frame_http as frame_http
 from app.utils.tls import generate_frame_tls_material
-from app.utils.frame_http import _frame_http_direct_candidates, _tls_connect_error_detail
+from app.utils.frame_http import _auth_headers, _frame_http_direct_candidates, _tls_connect_error_detail
 
 
 def _frame(frame_host: str = "frame.local") -> Frame:
@@ -96,6 +96,16 @@ def test_embedded_direct_candidates_keep_https_ip_when_cert_covers_ip():
 
     assert candidates[0][0] == "https://10.8.0.232:8443/api/action/ota"
     assert candidates[1][0] == "http://10.8.0.232:80/api/action/ota"
+
+
+def test_embedded_auth_headers_use_server_api_key():
+    frame = _frame("10.8.0.232")
+    frame.mode = "embedded"
+    frame.server_api_key = "server-secret"
+    frame.frame_access = "private"
+    frame.frame_access_key = "frame-access-key"
+
+    assert _auth_headers(frame) == {"Authorization": "Bearer server-secret"}
 
 
 @pytest.mark.asyncio
