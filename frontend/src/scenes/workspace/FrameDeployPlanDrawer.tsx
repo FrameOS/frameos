@@ -1222,7 +1222,7 @@ function EmbeddedFirmwareSection({
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
-          demand, so the first flash can take a minute.
+          demand, so the first flash can take a few minutes.
         </div>
         <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
       </div>
