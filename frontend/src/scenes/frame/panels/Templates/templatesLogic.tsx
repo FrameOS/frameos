@@ -2,7 +2,7 @@ import { actions, kea, reducers, path, key, props, connect, listeners, selectors
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { FrameScene, RepositoryType, TemplateForm, TemplateType } from '../../../../types'
+import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
@@ -15,14 +15,6 @@ import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFav
 
 export interface TemplateLogicProps {
   frameId: number
-}
-
-function scenesForBulkTemplate(template: Partial<TemplateType>): FrameScene[] {
-  const scenes = template.scenes ?? []
-  if (scenes.length !== 1) {
-    return scenes
-  }
-  return [{ ...scenes[0], name: template.name || scenes[0].name }]
 }
 
 export const templatesLogic = kea<templatesLogicType>([
@@ -416,23 +408,23 @@ export const templatesLogic = kea<templatesLogicType>([
       if (!response.ok) {
         throw new Error('Failed to update frame')
       }
-      const scenes = await response.json()
+      const loadedTemplate = { ...template, scenes: await response.json() }
       if (persistOnInstall) {
-        actions.applyTemplateAndSave({ scenes }, openDrawer)
+        actions.applyTemplateAndSave(loadedTemplate, openDrawer)
       } else {
-        actions.applyTemplate({ scenes })
+        actions.applyTemplate(loadedTemplate)
       }
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
-      const scenes: FrameScene[] = []
+      const templates: Partial<TemplateType>[] = []
       for (const row of values.installableFavouriteTemplates) {
         if (!row.repository) {
-          scenes.push(...scenesForBulkTemplate(row.template))
+          templates.push(row.template)
           continue
         }
 
         if (row.template.scenes?.length) {
-          scenes.push(...scenesForBulkTemplate(row.template))
+          templates.push(row.template)
           continue
         }
 
@@ -455,11 +447,11 @@ export const templatesLogic = kea<templatesLogicType>([
         if (!response.ok) {
           throw new Error('Failed to load favourite scene')
         }
-        scenes.push(...scenesForBulkTemplate({ ...row.template, scenes: await response.json() }))
+        templates.push({ ...row.template, scenes: await response.json() })
       }
 
-      if (scenes.length) {
-        actions.applyTemplateAndSave({ scenes }, openDrawer)
+      if (templates.length) {
+        actions.applyTemplateAndSave({ __templateBatch: templates } as Partial<TemplateType>, openDrawer)
       }
     },
     saveAsTemplate: () => {
