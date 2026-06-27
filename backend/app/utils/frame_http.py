@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from http import HTTPStatus
+import ipaddress
 import ssl
 from typing import Any, Optional
 
 import httpx
+from cryptography import x509
+from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 
 from app.models.frame import Frame, normalize_https_proxy
@@ -86,24 +89,82 @@ def _embedded_last_boot_ip(frame: Frame) -> str | None:
     return ip.strip()
 
 
+def _is_embedded_frame(frame: Frame) -> bool:
+    return (frame.mode or "rpios") == "embedded"
+
+
+def _ip_address(host: str):
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
 def _build_direct_frame_url(frame: Frame, host: str, scheme: str, port: int, path: str, method: str) -> str:
     if not is_safe_host(host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
     return f"{scheme}://{host}:{port}{_build_frame_path(frame, path, method)}"
 
 
+def _https_certificate_covers_target(frame: Frame, host: str) -> bool:
+    target_ip = _ip_address(host)
+    if target_ip is None:
+        return True
+
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    cert_pem = (https_proxy.get("certs", {}).get("server") or "").strip()
+    if not https_proxy.get("enable") or not cert_pem:
+        return True
+
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
+    except ValueError:
+        return True
+
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        san = None
+
+    if san is not None:
+        return target_ip in san.get_values_for_type(x509.IPAddress)
+
+    return any(attr.value == host for attr in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME))
+
+
+def _add_direct_candidate(
+    candidates: list[tuple[str, Any]],
+    frame: Frame,
+    host: str,
+    scheme: str,
+    port: int,
+    path: str,
+    method: str,
+    verify: Any,
+) -> None:
+    url = _build_direct_frame_url(frame, host, scheme, port, path, method)
+    if not any(existing_url == url for existing_url, _ in candidates):
+        candidates.append((url, verify))
+
+
 def _frame_http_direct_candidates(frame: Frame, path: str, method: str) -> list[tuple[str, Any]]:
     scheme, port = _frame_scheme_port(frame)
-    candidates: list[tuple[str, Any]] = [
-        (_build_direct_frame_url(frame, frame.frame_host, scheme, port, path, method), _httpx_verify(frame))
-    ]
+    candidates: list[tuple[str, Any]] = []
+    verify = _httpx_verify(frame)
+    original_url = _build_direct_frame_url(frame, frame.frame_host, scheme, port, path, method)
+    if scheme != "https" or _https_certificate_covers_target(frame, frame.frame_host):
+        candidates.append((original_url, verify))
 
     boot_ip = _embedded_last_boot_ip(frame)
     if boot_ip:
         fallback_port = int(frame.frame_port or 80)
-        fallback_url = _build_direct_frame_url(frame, boot_ip, "http", fallback_port, path, method)
-        if fallback_url != candidates[0][0]:
-            candidates.append((fallback_url, True))
+        _add_direct_candidate(candidates, frame, boot_ip, "http", fallback_port, path, method, True)
+    elif _is_embedded_frame(frame) and scheme == "https" and _ip_address(frame.frame_host) is not None:
+        fallback_port = int(frame.frame_port or 80)
+        _add_direct_candidate(candidates, frame, frame.frame_host, "http", fallback_port, path, method, True)
+
+    if not candidates:
+        candidates.append((original_url, verify))
     return candidates
 
 
@@ -228,10 +289,11 @@ async def _fetch_frame_http_bytes(
                         )
                     except httpx.ConnectError as exc:
                         if detail := _tls_connect_error_detail(frame, str(exc)):
-                            raise HTTPException(
+                            last_error = HTTPException(
                                 status_code=HTTPStatus.BAD_GATEWAY,
                                 detail=detail,
                             )
+                            break
                         last_error = HTTPException(
                             status_code=HTTPStatus.BAD_GATEWAY,
                             detail=str(exc),
