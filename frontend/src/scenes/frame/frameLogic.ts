@@ -1348,6 +1348,8 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAct
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
+  } else if (isInFrameAdminMode()) {
+    json['skip_runtime_reload'] = true
   }
   const response = await apiFetch(`/api/frames/${frameId}`, {
     method: 'POST',

@@ -289,7 +289,9 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
           return
       try:
         persistFrameApiUpdate(payload)
-        sendEvent("reload", %*{})
+        let skipRuntimeReload = payload{"skip_runtime_reload"}.getBool(false)
+        if not skipRuntimeReload:
+          sendEvent("reload", %*{})
         let nextAction = payload{"next_action"}.getStr("")
         if nextAction == "render":
           sendEvent("render", %*{})

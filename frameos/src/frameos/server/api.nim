@@ -214,7 +214,7 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
 
   var frameApi = if result{"frameApi"} != nil and result{"frameApi"}.kind == JObject: copy(result["frameApi"]) else: %*{}
   for key in payload.keys:
-    if key != "next_action":
+    if key != "next_action" and key != "skip_runtime_reload":
       frameApi[key] = copy(payload[key])
   result["frameApi"] = frameApi
 
@@ -236,8 +236,6 @@ proc persistFrameApiUpdate*(payload: JsonNode) =
   if payload.hasKey("scenes"):
     persistScenesPayload(payload["scenes"])
   writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
-
-  updateFrameConfigFrom(globalFrameConfig, loadConfig())
 
 proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
   if controlCode == nil:
@@ -404,6 +402,25 @@ proc storedApiOrConfigValue(
     return copy(storedFrameApi[apiKey])
   storedConfigValue(configJson, configKey, fallback)
 
+proc storedFrameAdminAuthValue(configJson: JsonNode, storedFrameApi: JsonNode, exposeSecrets: bool): JsonNode =
+  let source =
+    if storedFrameApi.kind == JObject and storedFrameApi{"frame_admin_auth"} != nil and
+        storedFrameApi{"frame_admin_auth"}.kind == JObject:
+      storedFrameApi["frame_admin_auth"]
+    elif configJson.kind == JObject and configJson{"frameAdminAuth"} != nil and configJson{"frameAdminAuth"}.kind == JObject:
+      configJson["frameAdminAuth"]
+    elif globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
+      globalFrameConfig.frameAdminAuth
+    else:
+      %*{}
+
+  result = %*{
+    "enabled": source{"enabled"}.getBool(false),
+  }
+  if exposeSecrets:
+    result["user"] = %source{"user"}.getStr("")
+    result["pass"] = %source{"pass"}.getStr("")
+
 proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false): JsonNode =
   let configJson = loadConfigJson()
   let storedFrameApi = storedFrameApiPayload(configJson)
@@ -414,12 +431,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     if configJson.kind == JObject and configJson.hasKey("color"): configJson["color"] else: newJNull()
   let scenesPayload = loadScenePayload()
   let frameAccessKey = if exposeSecrets: globalFrameConfig.frameAccessKey else: ""
-  var frameAdminAuth = %*{
-    "enabled": globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false),
-  }
-  if exposeSecrets:
-    frameAdminAuth["user"] = %globalFrameConfig.frameAdminAuth{"user"}.getStr("")
-    frameAdminAuth["pass"] = %globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
+  let frameAdminAuth = storedFrameAdminAuthValue(configJson, storedFrameApi, exposeSecrets)
   let serverApiKey = if exposeSecrets: globalFrameConfig.serverApiKey else: ""
   var activeConnections = 0
   withLock connectionsState.lock:
@@ -489,7 +501,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "active_connections": activeConnections,
   }
   for key in storedFrameApi.keys:
-    if not result.hasKey(key):
+    if exposeSecrets or not result.hasKey(key):
       result[key] = copy(storedFrameApi[key])
 
 proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =

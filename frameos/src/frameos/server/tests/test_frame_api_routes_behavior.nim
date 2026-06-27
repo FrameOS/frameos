@@ -148,6 +148,8 @@ suite "frame api route behavior":
       check savedConfig["httpsProxy"]["serverCert"].getStr() == "cert"
       check savedConfig["errorBehavior"]["silentRetryForever"].getBool()
       check savedConfig["frameApi"]["name"].getStr() == "Standalone editor"
+      check globalFrameConfig.name == "Test Frame"
+      check globalFrameConfig.frameAdminAuth["pass"].getStr() == "secret"
 
       let savedScenes = parseJson(uncompress(readFile(scenesPath)))
       check savedScenes.kind == JArray
@@ -171,6 +173,23 @@ suite "frame api route behavior":
       check framePayload["error_behavior"]["mode"].getStr() == "silent_retry"
       check framePayload["error_behavior"]["silent_retry_forever"].getBool()
       check framePayload["buildroot"]["readonly"].getBool()
+
+      let skipReload = httpRequest(
+        server.port,
+        "POST",
+        "/api/frames/1?k=test-key",
+        headers = [("Cookie", refreshedCookie), ("Content-Type", "application/json")],
+        body = $(%*{
+          "name": "Standalone editor saved quietly",
+          "skip_runtime_reload": true,
+        }),
+      )
+      check skipReload.status == 200
+      let (quietReloadReceived, _) = eventChannel.tryRecv()
+      check not quietReloadReceived
+      let quietConfig = parseJson(readFile(configPath))
+      check quietConfig["name"].getStr() == "Standalone editor saved quietly"
+      check not quietConfig["frameApi"].hasKey("skip_runtime_reload")
       check framePayload["scenes"].len == 1
 
       drainEventChannel()

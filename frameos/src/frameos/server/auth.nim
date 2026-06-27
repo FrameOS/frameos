@@ -4,6 +4,7 @@ import std/[os, random, strutils, tables]
 import times
 import mummy
 import frameos/types
+from frameos/config import getConfigFilename
 import ./state
 
 const AUTH_HEADER* = "authorization"
@@ -66,13 +67,30 @@ proc getCookieValue*(request: Request, name: string): string =
       return parts[1]
   return ""
 
-template adminAuthUser(): string =
-  {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"user"}.getStr("")
+proc persistedFrameAdminAuth(): JsonNode {.gcsafe.} =
+  try:
+    let data = parseFile(getConfigFilename())
+    if data != nil and data.kind == JObject and data{"frameAdminAuth"} != nil and
+        data{"frameAdminAuth"}.kind == JObject:
+      return data["frameAdminAuth"]
+  except CatchableError:
+    discard
+  nil
 
-template adminAuthPass(): string =
+proc frameAdminAuthSnapshot*(): JsonNode {.gcsafe.} =
+  let persistedAuth = persistedFrameAdminAuth()
+  if persistedAuth != nil:
+    return persistedAuth
   {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
+    if globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
+      return globalFrameConfig.frameAdminAuth
+  %*{}
+
+proc adminAuthUser(): string {.gcsafe.} =
+  frameAdminAuthSnapshot(){"user"}.getStr("")
+
+proc adminAuthPass(): string {.gcsafe.} =
+  frameAdminAuthSnapshot(){"pass"}.getStr("")
 
 template frameAccessMode(): string =
   {.gcsafe.}:
@@ -82,15 +100,14 @@ template frameAccessKeyValue*(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccessKey
 
-template adminPanelEnabled*(): bool =
-  {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
-      adminAuthUser().len > 0 and
-      adminAuthPass().len > 0
+proc adminPanelEnabled*(): bool {.gcsafe.} =
+  let adminAuth = frameAdminAuthSnapshot()
+  adminAuth{"enabled"}.getBool(false) and
+    adminAuth{"user"}.getStr("").len > 0 and
+    adminAuth{"pass"}.getStr("").len > 0
 
-template adminAuthEnabled*(): bool =
-  {.gcsafe.}:
-    adminPanelEnabled()
+proc adminAuthEnabled*(): bool {.gcsafe.} =
+  adminPanelEnabled()
 
 proc getOrCreateAdminSessionSalt*(configPath: string): string =
   let envSecret = getEnv("FRAMEOS_ADMIN_SESSION_SALT")

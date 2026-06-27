@@ -12,6 +12,7 @@ import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { PlayIcon } from '@heroicons/react/24/solid'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -38,14 +39,17 @@ export function ExpandedScene({
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
   const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = fields.length
+  const frameAdminMode = isInFrameAdminMode()
 
   const currentState = states[sceneId] ?? {}
   const sceneIsUndeployed = isUndeployed ?? undeployedSceneIds.has(sceneId)
   const sceneIsUnsaved = isUnsaved ?? changedScenes.has(sceneId)
   const sceneHasChanges = sceneIsUnsaved || sceneIsUndeployed
-  const canPreviewUnsavedChanges = sceneHasChanges
+  const canPreviewUnsavedChanges = sceneHasChanges && !frameAdminMode
   const activateLabel =
-    sceneIsUndeployed && sceneId !== currentSceneId
+    frameAdminMode && sceneHasChanges
+      ? 'Save & activate scene'
+      : sceneIsUndeployed && sceneId !== currentSceneId
       ? 'Save changes & redeploy'
       : sceneId === currentSceneId
       ? 'Update active scene'
@@ -72,6 +76,14 @@ export function ExpandedScene({
   }
 
   const handleActivate = async () => {
+    if (frameAdminMode) {
+      if (sceneIsUnsaved) {
+        await frameLogic({ frameId }).asyncActions.saveFrame()
+      }
+      previewScene(sceneId, buildNextState())
+      return
+    }
+
     if (sceneHasChanges) {
       longRunningTasksModel.actions.startTask({
         frameId,

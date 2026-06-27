@@ -203,6 +203,83 @@ function WorkspaceChatDrawer({
   sceneId: string | null
   source?: 'templates' | null
 }): JSX.Element | null {
+  if (isInFrameAdminMode()) {
+    return <WorkspaceChatComingSoonDrawer frameId={frameId} source={source} />
+  }
+
+  return <WorkspaceChatDrawerContent frameId={frameId} nodeId={nodeId} sceneId={sceneId} source={source} />
+}
+
+function WorkspaceChatComingSoonDrawer({
+  frameId,
+  source,
+}: {
+  frameId: number
+  source?: 'templates' | null
+}): JSX.Element | null {
+  const { frames } = useValues(framesModel)
+  const { closeChatDrawer, openTemplateDrawer } = useActions(workspaceLogic)
+  const frame = frames[frameId]
+
+  if (!frame) {
+    return null
+  }
+
+  return (
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            {source === 'templates' ? (
+              <button
+                type="button"
+                title="Back to Add scene"
+                aria-label="Back to Add scene"
+                onClick={() => openTemplateDrawer(frameId)}
+                className="frameos-icon-button mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ArrowLeftIcon className="h-5 w-5" />
+              </button>
+            ) : null}
+            <div className="min-w-0">
+              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
+              <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
+                {frame.name || frameHost(frame)}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={closeChatDrawer}
+            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <XMarkIcon className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
+          <div className="max-w-xs space-y-2">
+            <div className="frameos-strong text-base font-semibold">Coming soon in on-frame admin mode</div>
+            <p className="frameos-muted text-sm leading-6">
+              AI chat only works from the FrameOS backend for now.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceChatDrawerContent({
+  frameId,
+  nodeId,
+  sceneId,
+  source,
+}: {
+  frameId: number
+  nodeId?: string | null
+  sceneId: string | null
+  source?: 'templates' | null
+}): JSX.Element | null {
   useMountedLogic(chatLogic({ frameId, sceneId }))
   useMountedLogic(workspaceChatDrawerLogic({ frameId, nodeId, sceneId }))
   const { frames } = useValues(framesModel)

@@ -18,6 +18,7 @@ type
     body*: string
 
 var recentLogsLockInitialized = false
+let missingConfigPath = getTempDir() / ("frameos-server-tests-missing-frame-" & $getCurrentProcessId() & ".json")
 
 proc serverThread(args: tuple[server: mummy.Server, port: Port]) {.thread.} =
   try:
@@ -78,6 +79,10 @@ proc portalAutoTimeoutDisabled(): bool {.gcsafe, nimcall.} =
   false
 
 proc configureServerState*(config: FrameConfig, hotspotActive = false) =
+  if not existsEnv("FRAMEOS_CONFIG"):
+    if fileExists(missingConfigPath):
+      removeFile(missingConfigPath)
+    putEnv("FRAMEOS_CONFIG", missingConfigPath)
   setPortalHooksForTest(
     runHook = portalRunHookForServerTests,
     sleepHook = portalSleepHookNoop,

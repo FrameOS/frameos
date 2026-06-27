@@ -7,6 +7,8 @@ import ../../types
 import ../state
 import ../auth
 
+let missingConfigPath = getTempDir() / ("frameos-auth-tests-missing-frame-" & $getCurrentProcessId() & ".json")
+
 proc configureAdmin(enabled: bool, user: string, pass: string) =
   globalFrameConfig = FrameConfig(
     frameAdminAuth: %*{
@@ -35,6 +37,9 @@ proc makeRequest(
 suite "Server auth helpers":
   setup:
     clearAdminSessions()
+    if fileExists(missingConfigPath):
+      removeFile(missingConfigPath)
+    putEnv("FRAMEOS_CONFIG", missingConfigPath)
 
   test "admin auth enabled requires full config":
     configureAdmin(true, "admin", "secret")
@@ -63,6 +68,29 @@ suite "Server auth helpers":
 
     check adminPanelEnabled()
     check adminAuthEnabled()
+
+  test "persisted admin auth is used if live runtime auth is missing":
+    let tempDir = getTempDir() / "frameos-auth-persisted-config"
+    createDir(tempDir)
+    let configPath = tempDir / "frame.json"
+    writeFile(configPath, $(%*{
+      "frameAdminAuth": {
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      },
+    }))
+    putEnv("FRAMEOS_CONFIG", configPath)
+
+    globalFrameConfig = FrameConfig(
+      frameAdminAuth: %*{},
+      frameAccess: "public",
+      frameAccessKey: "",
+    )
+
+    check adminPanelEnabled()
+    check adminAuthEnabled()
+    check validateAdminCredentials("admin", "secret")
 
   test "legacy auth toggle no longer bypasses admin credentials":
     globalFrameConfig = FrameConfig(
