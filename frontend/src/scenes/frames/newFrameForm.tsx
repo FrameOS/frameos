@@ -7,9 +7,9 @@ import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
-import { inHassioIngress } from '../../utils/inHassioIngress'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, EMBEDDED_ESP32_S3 } from '../../devices'
 import { settingsLogic } from '../settings/settingsLogic'
+import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 
 function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
   return {
@@ -143,14 +143,7 @@ export const newFrameForm = kea<newFrameFormType>([
           wifiPassword: '',
         },
         rememberWifi: true,
-        server_host:
-          typeof window !== 'undefined'
-            ? `${window.location.hostname}:${
-                inHassioIngress()
-                  ? '8989'
-                  : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
-              }`
-            : undefined,
+        server_host: defaultNewFrameServerHost(),
       } as NewFrameFormType,
       errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
@@ -243,6 +236,12 @@ export const newFrameForm = kea<newFrameFormType>([
       const network = values.newFrame.network ?? {}
       if (values.newFrame.install_method === 'sd_card' && !network.wifiSSID && !network.wifiPassword) {
         actions.setNewFrameValue('network', defaultWifiNetwork(savedSettings))
+      }
+      const configuredServerHost = defaultNewFrameServerHost(savedSettings)
+      const currentServerHost = values.newFrame.server_host ?? ''
+      const fallbackServerHost = defaultNewFrameServerHost() ?? ''
+      if (configuredServerHost && (!currentServerHost || currentServerHost === fallbackServerHost)) {
+        actions.setNewFrameValue('server_host', configuredServerHost)
       }
     },
   })),

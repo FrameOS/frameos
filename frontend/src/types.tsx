@@ -640,6 +640,8 @@ export interface FrameOSSettings {
     timezone?: string
     wifiSSID?: string
     wifiPassword?: string
+    backendHost?: string
+    backendPort?: string | number
   }
   homeAssistant?: {
     url?: string

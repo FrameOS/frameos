@@ -46,6 +46,8 @@ async def test_get_settings_dict_merges_defaults(db, default_project):
         "timezone": "Europe/Brussels",
         "wifiSSID": "FrameOS",
         "wifiPassword": "",
+        "backendHost": "",
+        "backendPort": "",
     }
 
 

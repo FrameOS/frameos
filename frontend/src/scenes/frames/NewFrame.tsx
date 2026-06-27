@@ -30,6 +30,7 @@ import { Switch } from '../../components/Switch'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
+import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -124,6 +125,7 @@ function setInstallMethodValues(
       mode: 'buildroot',
       platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
       frame_host: '',
+      server_host: defaultNewFrameServerHost(savedSettings),
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
@@ -134,15 +136,27 @@ function setInstallMethodValues(
       mode: 'embedded',
       platform: EMBEDDED_ESP32_S3,
       frame_host: '',
+      server_host: defaultNewFrameServerHost(savedSettings),
       device: 'waveshare.EPD_7in5_V2',
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
   }
   if (installMethod === 'script') {
-    return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
+    return {
+      install_method: installMethod,
+      mode: 'rpios',
+      platform: '',
+      frame_host: '',
+      server_host: defaultNewFrameServerHost(savedSettings),
+    }
   }
-  return { install_method: installMethod, mode: 'rpios', platform: '' }
+  return {
+    install_method: installMethod,
+    mode: 'rpios',
+    platform: '',
+    server_host: defaultNewFrameServerHost(savedSettings),
+  }
 }
 
 const WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_epaper_13_3e6'

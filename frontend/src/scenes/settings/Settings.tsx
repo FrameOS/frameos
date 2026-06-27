@@ -29,6 +29,7 @@ import { accountLogic } from './accountLogic'
 import versions from '../../../../versions.json'
 import { timezoneOptions } from '../../decorators/timezones'
 import { systemInfoLogic } from './systemInfoLogic'
+import { detectedBackendAddressParts } from '../../utils/backendAddress'
 
 type SettingsNavItem = readonly [string, string]
 type SettingsNavSection = {
@@ -309,6 +310,7 @@ export function Settings() {
     isTestingModalSandbox,
   } = useValues(settingsLogic)
   const { framesList } = useValues(framesModel)
+  const detectedBackendAddress = detectedBackendAddressParts()
   const {
     submitSettings,
     resetSettings,
@@ -489,6 +491,25 @@ export function Settings() {
                       tooltip="Prefilled when adding Buildroot SD card frames."
                     >
                       <TextInput type="password" autoComplete="new-password" />
+                    </Field>
+                    <Field
+                      name="backendHost"
+                      label="Default backend host"
+                      tooltip="Prefilled when adding frames. Leave blank to use the host detected from this browser."
+                    >
+                      <TextInput autoComplete="off" placeholder={detectedBackendAddress.host} />
+                    </Field>
+                    <Field
+                      name="backendPort"
+                      label="Default backend port"
+                      tooltip="Prefilled when adding frames. Leave blank to use the port detected from this browser."
+                    >
+                      <TextInput
+                        autoComplete="off"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder={detectedBackendAddress.port}
+                      />
                     </Field>
                   </Box>
                 </Group>
