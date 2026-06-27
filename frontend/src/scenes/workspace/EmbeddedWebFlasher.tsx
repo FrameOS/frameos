@@ -11,6 +11,7 @@ import {
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
 } from '../../models/embeddedUsbLogsModel'
+import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { workspaceLogic } from './workspaceLogic'
@@ -33,7 +34,9 @@ async function fetchFirmwareStatus(frameId: number): Promise<FirmwareStatus> {
   if (!response.ok) {
     throw new Error('Failed to fetch firmware status')
   }
-  return ((await response.json())?.firmware ?? {}) as FirmwareStatus
+  const firmware = ((await response.json())?.firmware ?? {}) as FirmwareStatus
+  framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
+  return firmware
 }
 
 function normalizeFlashSize(value: unknown): EspFlashSize {
@@ -62,6 +65,7 @@ async function ensureFirmwareReady(frameId: number, onStatus: (message: string) 
       throw new Error(detail)
     }
     firmware = ((await response.json())?.firmware ?? {}) as FirmwareStatus
+    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
 
     const deadline = Date.now() + FIRMWARE_POLL_TIMEOUT_MS
     while (firmware.status !== 'ready') {

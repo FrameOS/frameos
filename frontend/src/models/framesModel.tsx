@@ -15,7 +15,7 @@ import { projectApiPathFromCache } from '../utils/projectApi'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
-type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
+export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
 function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTransport }): string {
   const query = new URLSearchParams()
@@ -230,6 +230,7 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
     if (!firmware || !pendingEmbeddedFirmwareDownloads.has(frameId)) {
       return
     }
+    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
     if (firmware.status === 'ready') {
       pendingEmbeddedFirmwareDownloads.delete(frameId)
       stopEmbeddedFirmwareProgress(frameId)
@@ -304,6 +305,7 @@ export const framesModel = kea<framesModelType>([
     restartRemote: (id: number, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: number) => ({ id }),
     downloadEmbeddedFirmware: (id: number) => ({ id }),
+    updateEmbeddedFirmwareStatus: (id: number, firmware: EmbeddedFirmware) => ({ id, firmware }),
     applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
@@ -389,6 +391,20 @@ export const framesModel = kea<framesModelType>([
               ...frame,
               name,
             },
+          }
+        },
+        updateEmbeddedFirmwareStatus: (state, { id, firmware }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: sanitizeFrameForStore({
+              ...frame,
+              embedded: {
+                ...(frame.embedded ?? {}),
+                firmware,
+              },
+            }),
           }
         },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
@@ -695,6 +711,10 @@ export const framesModel = kea<framesModelType>([
           throw new Error(detail)
         }
         const data = await response.json()
+        const firmware = data?.firmware as EmbeddedFirmware | undefined
+        if (firmware) {
+          actions.updateEmbeddedFirmwareStatus(id, firmware)
+        }
         if (data?.firmware?.status === 'ready') {
           pendingEmbeddedFirmwareDownloads.delete(id)
           stopEmbeddedFirmwareProgress(id)

@@ -160,6 +160,7 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
   const ram = layout?.ram
   const partitions = flash?.partitions ?? []
   const flashBytes = flash?.flashBytes ?? firmware?.flashBytes ?? 0
+  const otaSupported = flash?.otaSupported ?? embeddedOtaSupported(frame)
   const psramBytes = ram?.psramBytes ?? 0
   const renderWorkingBytes = ram?.renderWorkingBytes ?? 0
   const renderSpareBytes = psramBytes > renderWorkingBytes ? psramBytes - renderWorkingBytes : 0
@@ -172,14 +173,15 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
     { label: 'Spare', bytes: renderSpareBytes, color: '#e2e8f0' },
   ].filter((segment) => segment.bytes > 0)
 
-  if (!flash && !ram) {
-    return null
-  }
-
   return (
     <div className="frame-tool-card space-y-5 rounded-[22px] p-4">
       <div>
         <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Firmware footprint</div>
+        {!flash && !ram ? (
+          <div className="frame-tool-muted mt-1 text-sm leading-5">
+            Waiting for firmware layout metadata from the backend.
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -189,7 +191,7 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
           detail={mergedBinaryBytes ? `flashed at ${flash?.flashOffset ?? '0x0'}` : 'measured after build'}
         />
         <FirmwareStat
-          label={flash?.otaSupported ? 'App / OTA image' : 'App image'}
+          label={otaSupported ? 'App / OTA image' : 'App image'}
           value={formatFirmwareBytes(appBinaryBytes)}
           detail={
             appBinaryBytes && partitions.find((partition) => partition.appSlot)
@@ -200,7 +202,7 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
         <FirmwareStat
           label="Flash profile"
           value={flash?.flashSize ?? embeddedFlashSize(frame)}
-          detail={flash?.otaSupported ? 'OTA A/B slots' : 'single app slot'}
+          detail={otaSupported ? 'OTA A/B slots' : 'single app slot'}
         />
       </div>
 
