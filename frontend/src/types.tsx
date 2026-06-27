@@ -810,6 +810,50 @@ export interface FrameEmbeddedConfig {
     otaSha256?: string
     otaElfSha256?: string
     otaSize?: number
+    appSize?: number
+    bootloaderSize?: number
+    partitionTableSize?: number
+    layout?: {
+      flash?: {
+        flashSize?: FrameEmbeddedFlashSize
+        flashBytes?: number
+        partitionTable?: string
+        otaSupported?: boolean
+        flashOffset?: string
+        mergedBinaryBytes?: number | null
+        appBinaryBytes?: number | null
+        otaBinaryBytes?: number | null
+        partitions?: {
+          name: string
+          type?: string
+          subtype?: string
+          offset: number
+          size: number
+          end?: number
+          appSlot?: boolean
+          usedBytes?: number | null
+        }[]
+      }
+      ram?: {
+        psramBytes?: number
+        panel?: string
+        width?: number
+        height?: number
+        pixelFormat?: number
+        pixelFormatName?: string
+        renderMode?: 'local' | 'remote'
+        rgbaBufferBytes?: number
+        packedBufferBytes?: number
+        renderReserveBytes?: number
+        renderWorkingBytes?: number
+        quickJsHeapLimitBytes?: number
+        previewSnapshotBytes?: number
+        previewSnapshotReserveBytes?: number
+        previewBmpBytes?: number
+        displayStateBytes?: number
+        httpResponseLimitBytes?: number
+      }
+    }
     queuedAt?: string
     startedAt?: string
     lastHeartbeatAt?: string

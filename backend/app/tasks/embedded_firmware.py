@@ -220,6 +220,9 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
 # FOS_RENDER_PSRAM_RESERVE in components/frameos_display/frameos_display.c.
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
 EMBEDDED_DEFAULT_PSRAM_BYTES = 8 * 1024 * 1024
+EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
+EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
+EMBEDDED_DISPLAY_STATE_BYTES = 80
 EMBEDDED_RENDER_LOCAL = 0
 EMBEDDED_RENDER_REMOTE = 1
 EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS = int(
@@ -557,6 +560,165 @@ def embedded_render_psram_bytes(width: int, height: int, pixel_format: int = FOS
     return rgba + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
 
+def _parse_embedded_size(value: str) -> int:
+    raw = value.strip()
+    if not raw:
+        return 0
+    if raw.lower().startswith("0x"):
+        return int(raw, 16)
+    suffix = raw[-1:].upper()
+    number = raw[:-1] if suffix in {"K", "M"} else raw
+    multiplier = 1024 if suffix == "K" else 1024 * 1024 if suffix == "M" else 1
+    return int(number, 10) * multiplier
+
+
+def _embedded_partition_table_rows(table_name: str) -> list[dict[str, Any]]:
+    table_path = EMBEDDED_PROJECT_DIR / table_name
+    rows: list[dict[str, Any]] = []
+    next_offset = 0
+    if not table_path.is_file():
+        return rows
+    for line in table_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = [part.strip() for part in stripped.split(",")]
+        if len(parts) < 5:
+            continue
+        name, partition_type, subtype, offset_raw, size_raw = parts[:5]
+        offset = _parse_embedded_size(offset_raw) if offset_raw else next_offset
+        size = _parse_embedded_size(size_raw)
+        rows.append({
+            "name": name,
+            "type": partition_type,
+            "subtype": subtype,
+            "offset": offset,
+            "size": size,
+            "end": offset + size,
+        })
+        next_offset = offset + size
+    return rows
+
+
+def _embedded_bmp_preview_bytes(width: int, height: int, pixel_format: int) -> int:
+    if width <= 0 or height <= 0:
+        return 0
+    bit_count = 1 if pixel_format == FOS_PIXEL_1BPP else 4
+    palette_entries = 2 if bit_count == 1 else 16
+    row_stride = (((width * bit_count) + 31) // 32) * 4
+    return 54 + palette_entries * 4 + row_stride * height
+
+
+def _pixel_format_name(pixel_format: int) -> str:
+    return {
+        FOS_PIXEL_1BPP: "1bpp black/white",
+        FOS_PIXEL_DUAL_1BPP_RED: "dual 1bpp black/red",
+        FOS_PIXEL_DUAL_1BPP_YELLOW: "dual 1bpp black/yellow",
+        FOS_PIXEL_2BPP_GRAY: "2bpp grayscale",
+        FOS_PIXEL_2BPP_BWYR: "2bpp black/white/yellow/red",
+        FOS_PIXEL_4BPP_7COLOR: "4bpp 7-color",
+        FOS_PIXEL_4BPP_SPECTRA6: "4bpp Spectra 6",
+        FOS_PIXEL_4BPP_GRAY: "4bpp grayscale",
+    }.get(pixel_format, f"format {pixel_format}")
+
+
+def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | None = None) -> dict[str, Any]:
+    flash_profile = embedded_flash_profile_for_frame(frame)
+    firmware = firmware or {}
+    app_size = firmware.get("appSize") or firmware.get("otaSize")
+    merged_size = firmware.get("size")
+    if not isinstance(app_size, int) or isinstance(app_size, bool):
+        app_size = None
+    if not isinstance(merged_size, int) or isinstance(merged_size, bool):
+        merged_size = None
+
+    partitions = [
+        {
+            "name": "bootloader",
+            "type": "system",
+            "subtype": "bootloader",
+            "offset": 0,
+            "size": 0x8000,
+            "end": 0x8000,
+            "usedBytes": firmware.get("bootloaderSize") if isinstance(firmware.get("bootloaderSize"), int) else None,
+        },
+        {
+            "name": "partition_table",
+            "type": "system",
+            "subtype": "partition_table",
+            "offset": 0x8000,
+            "size": 0x1000,
+            "end": 0x9000,
+            "usedBytes": firmware.get("partitionTableSize")
+            if isinstance(firmware.get("partitionTableSize"), int)
+            else None,
+        },
+    ]
+    app_slot_names = {"factory"} if not flash_profile["otaSupported"] else {"ota_0", "ota_1"}
+    active_app_slot = "factory" if not flash_profile["otaSupported"] else "ota_0"
+    for partition in _embedded_partition_table_rows(flash_profile["partitionTable"]):
+        if partition["name"] in app_slot_names:
+            partition = {
+                **partition,
+                "appSlot": True,
+                "usedBytes": app_size if partition["name"] == active_app_slot else None,
+            }
+        partitions.append(partition)
+
+    from app.drivers.devices import device_dimensions
+
+    panel = embedded_panel_for_frame(frame)
+    dims = device_dimensions(frame.device) or (0, 0)
+    width, height = dims
+    pixel_format = embedded_pixel_format_for_panel(panel)
+    rgba_bytes = width * height * 4 if width > 0 and height > 0 else 0
+    packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
+    render_mode = embedded_render_mode_for_frame(frame)
+    render_working_bytes = (
+        rgba_bytes + packed_bytes + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+        if render_mode == EMBEDDED_RENDER_LOCAL and panel != "none"
+        else 0
+    )
+    preview_bmp_bytes = _embedded_bmp_preview_bytes(width, height, pixel_format)
+    psram_bytes = embedded_module_psram_bytes(frame)
+    return {
+        "flash": {
+            "flashSize": flash_profile["flashSize"],
+            "flashBytes": flash_profile["flashBytes"],
+            "partitionTable": flash_profile["partitionTable"],
+            "otaSupported": flash_profile["otaSupported"],
+            "flashOffset": EMBEDDED_FLASH_OFFSET,
+            "mergedBinaryBytes": merged_size,
+            "appBinaryBytes": app_size,
+            "otaBinaryBytes": firmware.get("otaSize") if isinstance(firmware.get("otaSize"), int) else None,
+            "partitions": partitions,
+        },
+        "ram": {
+            "psramBytes": psram_bytes,
+            "panel": panel,
+            "width": width,
+            "height": height,
+            "pixelFormat": pixel_format,
+            "pixelFormatName": _pixel_format_name(pixel_format),
+            "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
+            "rgbaBufferBytes": rgba_bytes,
+            "packedBufferBytes": packed_bytes,
+            "renderReserveBytes": EMBEDDED_RENDER_PSRAM_RESERVE_BYTES,
+            "renderWorkingBytes": render_working_bytes,
+            "quickJsHeapLimitBytes": EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES,
+            "previewSnapshotBytes": packed_bytes,
+            "previewSnapshotReserveBytes": EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES,
+            "previewBmpBytes": preview_bmp_bytes,
+            "displayStateBytes": EMBEDDED_DISPLAY_STATE_BYTES,
+            "httpResponseLimitBytes": embedded_max_http_response_bytes_for_frame(frame),
+        },
+    }
+
+
+def with_embedded_firmware_layout(frame: Frame, firmware: dict[str, Any]) -> dict[str, Any]:
+    return {**firmware, "layout": embedded_firmware_layout_for_frame(frame, firmware)}
+
+
 def check_embedded_panel_fits_memory(frame: Frame) -> None:
     """Refuse a panel that can't be rendered on-device within the module PSRAM.
 
@@ -801,11 +963,11 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     if not isinstance(firmware, dict):
         return None
     if firmware.get("status") == "ready" and firmware.get("firmwareVersion") != EMBEDDED_FIRMWARE_VERSION:
-        return {
+        return with_embedded_firmware_layout(frame, {
             **firmware,
             "status": "stale",
             "error": "The generated firmware was built from an older firmware project version",
-        }
+        })
     if firmware.get("status") == "ready":
         try:
             firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
@@ -813,35 +975,41 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             firmware_flash_size = ""
         expected_flash_size = embedded_flash_size_for_frame(frame)
         if firmware_flash_size != expected_flash_size:
-            return {
+            return with_embedded_firmware_layout(frame, {
                 **firmware,
                 "status": "stale",
                 "error": "The generated firmware was built for a different ESP32 flash size",
-            }
+            })
         panel = firmware.get("panel")
         if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
-            return {
+            return with_embedded_firmware_layout(frame, {
                 **firmware,
                 "status": "stale",
                 "error": "The generated firmware was built for a different embedded panel",
-            }
+            })
         config_hash = firmware.get("configHash")
         expected_hash = embedded_firmware_config_hash(frame)
         if not isinstance(config_hash, str) or config_hash != expected_hash:
-            return {
+            return with_embedded_firmware_layout(frame, {
                 **firmware,
                 "status": "stale",
                 "error": "The generated firmware was built from older embedded frame settings",
-            }
+            })
     path = firmware.get("path")
     if firmware.get("status") == "ready":
         if not isinstance(path, str) or not Path(path).is_file():
-            return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
+            return with_embedded_firmware_layout(
+                frame,
+                {**firmware, "status": "missing", "error": "The generated firmware file is missing"},
+            )
         if firmware.get("otaSupported") is not False:
             ota_path = firmware.get("otaPath")
             if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-                return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
-    return firmware
+                return with_embedded_firmware_layout(
+                    frame,
+                    {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"},
+                )
+    return with_embedded_firmware_layout(frame, firmware)
 
 
 async def refresh_embedded_firmware_status(db: Session, redis: Redis, frame: Frame) -> dict[str, Any] | None:
@@ -1253,6 +1421,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
+        "appSize": ota_bin.stat().st_size,
+        "bootloaderSize": (build_dir / "bootloader" / "bootloader.bin").stat().st_size,
+        "partitionTableSize": (build_dir / "partition_table" / "partition-table.bin").stat().st_size,
         "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
@@ -1327,7 +1498,7 @@ async def _set_firmware_status(db: Session, redis: Redis, frame: Frame, firmware
     embedded = dict(frame.embedded or {})
     embedded["platform"] = normalize_embedded_platform(embedded.get("platform"))
     embedded["flashSize"] = embedded_flash_size_for_frame(frame)
-    embedded["firmware"] = firmware
+    embedded["firmware"] = with_embedded_firmware_layout(frame, firmware)
     frame.embedded = embedded
     await update_frame(db, redis, frame)
 

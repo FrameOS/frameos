@@ -131,6 +131,7 @@ from app.tasks.embedded_firmware import (
     refresh_embedded_firmware_status,
     request_or_queue_embedded_firmware_ota,
     start_embedded_firmware,
+    with_embedded_firmware_layout,
 )
 from app.tasks.buildroot_image import (
     buildroot_sd_image_no_build_environment_message,
@@ -1062,6 +1063,18 @@ def _frame_to_response_dict(
     frame: Frame, latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET
 ) -> dict[str, Any]:
     data = frame.to_dict()
+    if (frame.mode or "rpios") == "embedded":
+        try:
+            firmware = latest_embedded_firmware(frame) or with_embedded_firmware_layout(frame, {
+                "status": "idle",
+                "platform": normalize_embedded_platform((frame.embedded or {}).get("platform")),
+                "flashSize": embedded_flash_size_for_frame(frame),
+                "otaSupported": embedded_ota_supported_for_frame(frame),
+            })
+        except ValueError:
+            firmware = None
+        if firmware:
+            data["embedded"] = {**(data.get("embedded") or {}), "firmware": firmware}
     if latest_log_at is not _LATEST_LOG_AT_UNSET:
         data["last_log_at"] = (
             latest_log_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(latest_log_at, datetime) else None
@@ -2655,12 +2668,12 @@ async def api_frame_embedded_firmware_status(
         _bad_request(str(exc))
     return {
         "firmware": firmware
-        or {
+        or with_embedded_firmware_layout(frame, {
             "status": "idle",
             "platform": platform,
             "flashSize": flash_size,
             "otaSupported": ota_supported,
-        }
+        })
     }
 
 

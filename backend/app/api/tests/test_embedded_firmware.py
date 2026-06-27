@@ -22,6 +22,7 @@ from app.tasks.embedded_firmware import (
     embedded_hardware_preset_for_frame,
     embedded_hostname_for_frame,
     embedded_max_http_response_bytes_for_frame,
+    embedded_firmware_layout_for_frame,
     embedded_module_psram_bytes,
     embedded_ota_supported_for_frame,
     embedded_panel_for_frame,
@@ -146,19 +147,71 @@ def test_embedded_flash_size_profiles():
     assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
 
 
+def test_embedded_firmware_layout_tracks_flash_and_ram():
+    frame = Frame(
+        mode='embedded',
+        device='waveshare.EPD_13in3e',
+        embedded={'platform': 'esp32-s3', 'flashSize': '32MB'},
+        device_config={'psramMB': 16},
+    )
+
+    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000, 'size': 3_000_000})
+
+    assert layout['flash']['flashBytes'] == 32 * 1024 * 1024
+    assert layout['flash']['partitionTable'] == 'partitions_ota_32mb.csv'
+    ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
+    ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    assert ota_0['offset'] == 0x20000
+    assert ota_0['size'] == 0xEF0000
+    assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['usedBytes'] is None
+    assert layout['ram']['psramBytes'] == 16 * 1024 * 1024
+    assert layout['ram']['width'] == 1200
+    assert layout['ram']['height'] == 1600
+    assert layout['ram']['pixelFormat'] == FOS_PIXEL_4BPP_SPECTRA6
+    assert layout['ram']['rgbaBufferBytes'] == 1200 * 1600 * 4
+    assert layout['ram']['packedBufferBytes'] == 960_000
+    assert layout['ram']['renderWorkingBytes'] > layout['ram']['rgbaBufferBytes']
+
+
 @pytest.mark.asyncio
 async def test_firmware_status_idle(async_client):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200
-    assert response.json() == {
-        'firmware': {
-            'status': 'idle',
-            'platform': 'esp32-s3',
-            'flashSize': '8MB',
-            'otaSupported': True,
-        }
-    }
+    firmware = response.json()['firmware']
+    assert firmware['status'] == 'idle'
+    assert firmware['platform'] == 'esp32-s3'
+    assert firmware['flashSize'] == '8MB'
+    assert firmware['otaSupported'] is True
+    assert firmware['layout']['flash']['flashBytes'] == 8 * 1024 * 1024
+    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert [partition['name'] for partition in firmware['layout']['flash']['partitions']] == [
+        'bootloader',
+        'partition_table',
+        'nvs',
+        'otadata',
+        'phy_init',
+        'ota_0',
+        'ota_1',
+        'state',
+    ]
+    assert firmware['layout']['ram']['panel'] == 'EPD_7in5_V2'
+    assert firmware['layout']['ram']['rgbaBufferBytes'] > 0
+    assert firmware['layout']['ram']['packedBufferBytes'] > 0
+
+
+@pytest.mark.asyncio
+async def test_frame_get_embedded_includes_firmware_layout(async_client):
+    frame = await create_embedded_frame(async_client)
+
+    response = await async_client.get(f"/api/frames/{frame['id']}")
+
+    assert response.status_code == 200
+    firmware = response.json()['frame']['embedded']['firmware']
+    assert firmware['status'] == 'idle'
+    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert firmware['layout']['ram']['renderWorkingBytes'] > 0
 
 
 @pytest.mark.asyncio
