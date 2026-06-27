@@ -6,6 +6,7 @@ async def test_get_settings(async_client):
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
+    assert data["personal"]["favouriteTemplateIds"] == []
 
 
 @pytest.mark.asyncio
@@ -15,6 +16,18 @@ async def test_set_settings(async_client):
     assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
     updated = response.json()
     assert updated["some_setting"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_set_personal_favourite_templates(async_client):
+    payload = {"personal": {"favouriteTemplateIds": ["local:abc", "repository:https://repo.example/scenes.json:template:clock"]}}
+    response = await async_client.post('/api/settings', json=payload)
+    assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+    assert response.json()["personal"]["favouriteTemplateIds"] == payload["personal"]["favouriteTemplateIds"]
+
+    response = await async_client.get('/api/settings')
+    assert response.status_code == 200
+    assert response.json()["personal"]["favouriteTemplateIds"] == payload["personal"]["favouriteTemplateIds"]
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,21 @@
 import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
-import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
+import {
+  ArrowDownTrayIcon,
+  PencilSquareIcon,
+  TrashIcon,
+  ExclamationTriangleIcon,
+  StarIcon as StarSolidIcon,
+} from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { FolderPlusIcon, CloudArrowDownIcon, DocumentPlusIcon, CheckIcon, EyeIcon } from '@heroicons/react/24/outline'
+import {
+  FolderPlusIcon,
+  CloudArrowDownIcon,
+  DocumentPlusIcon,
+  CheckIcon,
+  EyeIcon,
+  StarIcon as StarOutlineIcon,
+} from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
@@ -31,6 +44,9 @@ interface TemplateProps {
   installedTemplatesByName: Record<string, boolean>
   templateDragData?: FrameosTemplateDragData
   compatibility?: CompatibilityResult
+  favourite?: boolean
+  favouriteId?: string
+  onToggleFavourite?: (favouriteId: string) => void
 }
 
 export function TemplateRow({
@@ -44,6 +60,9 @@ export function TemplateRow({
   installedTemplatesByName,
   templateDragData,
   compatibility,
+  favourite,
+  favouriteId,
+  onToggleFavourite,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
@@ -164,6 +183,23 @@ export function TemplateRow({
                   title={unsupported ? unsupportedReason : 'Preview this interpreted scene on the frame'}
                 >
                   <EyeIcon className="w-5 h-5" />
+                </Button>
+              ) : null}
+              {favouriteId && onToggleFavourite ? (
+                <Button
+                  className="!px-2 flex gap-1"
+                  size="small"
+                  color="secondary"
+                  aria-label={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+                  aria-pressed={favourite}
+                  title={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+                  onClick={() => onToggleFavourite(favouriteId)}
+                >
+                  {favourite ? (
+                    <StarSolidIcon className="h-5 w-5 text-amber-400" />
+                  ) : (
+                    <StarOutlineIcon className="h-5 w-5" />
+                  )}
                 </Button>
               ) : null}
               <DropdownMenu

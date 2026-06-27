@@ -671,6 +671,9 @@ export interface FrameOSSettings {
     backendEnableLlmAnalytics?: boolean
   }
   repositories?: RepositoryType[]
+  personal?: {
+    favouriteTemplateIds?: string[]
+  }
   ssh_keys?: {
     keys?: SSHKeyEntry[]
     default?: string

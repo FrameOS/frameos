@@ -19,6 +19,8 @@ import { TemplateType } from '../../../../types'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { templateFavouriteId } from './templateFavourites'
 
 interface TemplatesProps {
   openInstalledSceneDrawer?: boolean
@@ -67,7 +69,9 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
     isExpanded,
     search,
     installedTemplatesByName,
+    favouriteTemplateIds,
   } = useValues(templatesLogic({ frameId }))
+  const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
 
   return (
@@ -169,11 +173,15 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                 }))
                 .toSorted(sortCompatibleTemplates)
                 .map(({ template, index, compatibility }) => {
+                  const favouriteId = templateFavouriteId(template)
                   return (
                     <TemplateRow
                       key={template.id ?? -index}
                       template={template}
                       frameId={frameId}
+                      favourite={favouriteTemplateIds.has(favouriteId)}
+                      favouriteId={favouriteId}
+                      onToggleFavourite={togglePersonalFavouriteTemplate}
                       exportTemplate={exportTemplate}
                       removeTemplate={removeTemplate}
                       applyTemplate={(template: TemplateType) => {
@@ -251,11 +259,15 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                     }))
                     .toSorted(sortCompatibleTemplates)
                     .map(({ template, index, compatibility }) => {
+                      const favouriteId = templateFavouriteId(template, repository)
                       return (
                         <TemplateRow
                           key={template.id ?? -index}
                           template={template}
                           frameId={frameId}
+                          favourite={favouriteTemplateIds.has(favouriteId)}
+                          favouriteId={favouriteId}
+                          onToggleFavourite={togglePersonalFavouriteTemplate}
                           saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
                           applyTemplate={(template) => {
                             applyRemoteToFrame(

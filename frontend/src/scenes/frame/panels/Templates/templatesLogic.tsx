@@ -2,16 +2,29 @@ import { actions, kea, reducers, path, key, props, connect, listeners, selectors
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
+import { FrameScene, RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
+import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
 
 export interface TemplateLogicProps {
   frameId: number
 }
+
+function scenesForBulkTemplate(template: Partial<TemplateType>): FrameScene[] {
+  const scenes = template.scenes ?? []
+  if (scenes.length !== 1) {
+    return scenes
+  }
+  return [{ ...scenes[0], name: template.name || scenes[0].name }]
+}
+
 export const templatesLogic = kea<templatesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templatesLogic']),
   props({} as TemplateLogicProps),
@@ -19,11 +32,15 @@ export const templatesLogic = kea<templatesLogicType>([
   connect((props: TemplateLogicProps) => ({
     values: [
       frameLogic(props),
-      ['frameForm'],
+      ['frame', 'frameForm'],
       templatesModel,
       ['templates as allTemplates'],
       repositoriesModel,
       ['repositories as allRepositories'],
+      appsModel,
+      ['apps'],
+      settingsLogic,
+      ['settings'],
     ],
     actions: [
       templatesModel,
@@ -59,6 +76,9 @@ export const templatesLogic = kea<templatesLogicType>([
     hideAddRepository: true,
     setSearch: (search: string) => ({ search }),
     toggleExpanded: (url: string) => ({ url }),
+    applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
+      openDrawer: openDrawer ?? false,
+    }),
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -301,6 +321,53 @@ export const templatesLogic = kea<templatesLogicType>([
       (s) => [s.frameForm],
       (frameForm) => Object.fromEntries(frameForm?.scenes?.map((s) => [s.name, true]) || []),
     ],
+    favouriteTemplateIds: [
+      (s) => [s.settings],
+      (settings): Set<string> => new Set(settings.personal?.favouriteTemplateIds ?? []),
+    ],
+    favouriteTemplates: [
+      (s) => [s.allTemplates, s.allRepositories, s.favouriteTemplateIds, s.frame, s.frameForm, s.apps],
+      (
+        allTemplates,
+        allRepositories,
+        favouriteTemplateIds,
+        frame,
+        frameForm,
+        apps,
+      ): TemplateWithFavouriteId[] => {
+        const mode = frameForm?.mode ?? frame?.mode
+        const rows: TemplateWithFavouriteId[] = []
+        for (const template of allTemplates) {
+          const favouriteId = templateFavouriteId(template)
+          if (favouriteTemplateIds.has(favouriteId)) {
+            rows.push({
+              compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
+              favouriteId,
+              template,
+            })
+          }
+        }
+        for (const repository of allRepositories) {
+          for (const template of repository.templates ?? []) {
+            const favouriteId = templateFavouriteId(template, repository)
+            if (favouriteTemplateIds.has(favouriteId)) {
+              rows.push({
+                compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
+                favouriteId,
+                repository,
+                template,
+              })
+            }
+          }
+        }
+        return rows.toSorted((a, b) => a.template.name.localeCompare(b.template.name))
+      },
+    ],
+    installableFavouriteTemplates: [
+      (s) => [s.favouriteTemplates],
+      (favouriteTemplates): TemplateWithFavouriteId[] =>
+        favouriteTemplates.filter((template) => template.compatibility.supported),
+    ],
   }),
   listeners(({ actions, values }) => ({
     saveRemoteAsLocal: async ({ template, repository }) => {
@@ -354,6 +421,45 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.applyTemplateAndSave({ scenes }, openDrawer)
       } else {
         actions.applyTemplate({ scenes })
+      }
+    },
+    applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
+      const scenes: FrameScene[] = []
+      for (const row of values.installableFavouriteTemplates) {
+        if (!row.repository) {
+          scenes.push(...scenesForBulkTemplate(row.template))
+          continue
+        }
+
+        if (row.template.scenes?.length) {
+          scenes.push(...scenesForBulkTemplate(row.template))
+          continue
+        }
+
+        const templateWithZip = row.template as TemplateType & { zip?: string }
+        let zipPath = templateWithZip.zip
+        if (!zipPath) {
+          continue
+        }
+
+        if (zipPath.startsWith('./')) {
+          const repositoryPath = row.repository.url.replace(/\/[^/]+$/, '')
+          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+        }
+
+        const response = await apiFetch(`/api/templates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ format: 'scenes', url: zipPath }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to load favourite scene')
+        }
+        scenes.push(...scenesForBulkTemplate({ ...row.template, scenes: await response.json() }))
+      }
+
+      if (scenes.length) {
+        actions.applyTemplateAndSave({ scenes }, openDrawer)
       }
     },
     saveAsTemplate: () => {

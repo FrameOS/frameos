@@ -35,6 +35,9 @@ def default_settings() -> dict:
         },
         "buildEnvironment": {},
         "modalSandbox": {},
+        "personal": {
+            "favouriteTemplateIds": [],
+        },
     }
 
 
