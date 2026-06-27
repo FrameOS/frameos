@@ -1,5 +1,6 @@
+import checksums/sha2
 import json
-import std/[hashes, locks, os, random, strutils, tables]
+import std/[os, random, strutils, tables]
 import times
 import mummy
 import frameos/types
@@ -16,23 +17,10 @@ type
     Read
     Write
 
-  AdminSessionKey = array[64, char]
-  AdminSession = object
-    token: AdminSessionKey
-    expiresAt: float
-    credentialFingerprint: Hash
-  AdminSessionNode = ptr object
-    next: AdminSessionNode
-    value: AdminSession
-
-var globalAdminSessions: AdminSessionNode
-var globalAdminSessionsLock: Lock
-var adminSessionStoreInitialized = false
-
-proc ensureAdminSessionStoreInitialized() =
-  if not adminSessionStoreInitialized:
-    initLock(globalAdminSessionsLock)
-    adminSessionStoreInitialized = true
+  SignedAdminSession = object
+    expiresAt: int64
+    nonce: string
+    signature: string
 
 proc secureRandomBytes(byteCount: int): string =
   result = newString(max(byteCount, 0))
@@ -56,6 +44,11 @@ proc secureRandomToken(byteCount = 32): string =
   for value in bytes:
     result.add(toHex(ord(value), 2))
   result = result.toLowerAscii()
+
+proc sha256Hex(data: string): string =
+  var hasher = initSha_256()
+  hasher.update(data)
+  result = ($hasher.digest()).toLowerAscii()
 
 proc getHeaderValue(request: Request, name: string): string =
   for (headerName, value) in request.headers:
@@ -120,79 +113,45 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
     discard
   return generated
 
-proc adminSessionFingerprint(): Hash =
-  hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass())
+proc adminSessionCredentialFingerprint(): string =
+  sha256Hex(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass())
 
-proc tokenToKey(token: string, key: var AdminSessionKey): bool =
-  if token.len != key.len:
+proc adminSessionSignature(expiresAt: int64, nonce: string): string =
+  sha256Hex(adminSessionSalt() & ":" & adminSessionCredentialFingerprint() & ":" & $expiresAt & ":" & nonce)
+
+proc constantTimeEquals(first, second: string): bool =
+  if first.len != second.len:
     return false
-  for i in 0 ..< key.len:
-    key[i] = token[i]
-  true
+  var diff = 0
+  for i in 0 ..< first.len:
+    diff = diff or (ord(first[i]) xor ord(second[i]))
+  diff == 0
 
-proc freeAdminSessionsLocked() =
-  var current = globalAdminSessions
-  while current != nil:
-    let next = current.next
-    deallocShared(current)
-    current = next
-  globalAdminSessions = nil
+proc parseSignedAdminSession(token: string): SignedAdminSession =
+  let parts = token.split(".")
+  if parts.len != 4 or parts[0] != "v1":
+    raise newException(ValueError, "Invalid admin session token")
+  result.expiresAt = parseBiggestInt(parts[1]).int64
+  result.nonce = parts[2]
+  result.signature = parts[3]
+  if result.nonce.len == 0 or result.signature.len == 0:
+    raise newException(ValueError, "Invalid admin session token")
 
 proc clearAdminSessions*() =
-  ensureAdminSessionStoreInitialized()
-  withLock globalAdminSessionsLock:
-    freeAdminSessionsLocked()
+  # Admin sessions are signed, expiring cookies. Server startup still calls
+  # this for compatibility with the old in-memory session store, but there is
+  # no runtime session cache to clear anymore.
+  discard
 
 proc createAdminSession*(ttlSeconds = ADMIN_SESSION_TTL_SECONDS): string {.gcsafe.} =
-  ensureAdminSessionStoreInitialized()
-  let expiresAt = epochTime() + float(ttlSeconds)
-  let credentialFingerprint = adminSessionFingerprint()
-
-  while true:
-    let token = secureRandomToken()
-    var key: AdminSessionKey
-    if not tokenToKey(token, key):
-      continue
-    var inserted = false
-    withLock globalAdminSessionsLock:
-      var current = globalAdminSessions
-      while current != nil:
-        if current.value.token == key:
-          break
-        current = current.next
-
-      if current == nil:
-        let node = cast[AdminSessionNode](allocShared0(sizeof(current[])))
-        node.value = AdminSession(
-          token: key,
-          expiresAt: expiresAt,
-          credentialFingerprint: credentialFingerprint,
-        )
-        node.next = globalAdminSessions
-        globalAdminSessions = node
-        inserted = true
-    if inserted:
-      return token
+  let expiresAt = int64(epochTime() + float(ttlSeconds))
+  let nonce = secureRandomToken()
+  "v1." & $expiresAt & "." & nonce & "." & adminSessionSignature(expiresAt, nonce)
 
 proc invalidateAdminSessionToken(token: string) =
-  if token.len == 0:
-    return
-  ensureAdminSessionStoreInitialized()
-  var key: AdminSessionKey
-  if tokenToKey(token, key):
-    withLock globalAdminSessionsLock:
-      var previous: AdminSessionNode = nil
-      var current = globalAdminSessions
-      while current != nil:
-        if current.value.token == key:
-          if previous == nil:
-            globalAdminSessions = current.next
-          else:
-            previous.next = current.next
-          deallocShared(current)
-          break
-        previous = current
-        current = current.next
+  # Logout clears the browser cookie. Signed sessions remain valid until their
+  # embedded expiry if a client keeps an old cookie value.
+  discard
 
 proc invalidateAdminSession*(request: Request) =
   invalidateAdminSessionToken(getCookieValue(request, ADMIN_SESSION_COOKIE))
@@ -205,32 +164,16 @@ proc hasAdminSession*(request: Request): bool {.gcsafe.} =
   if token.len == 0:
     return false
 
-  ensureAdminSessionStoreInitialized()
-  var key: AdminSessionKey
-  if not tokenToKey(token, key):
+  let session =
+    try:
+      parseSignedAdminSession(token)
+    except ValueError:
+      return false
+
+  if session.expiresAt <= int64(epochTime()):
     return false
 
-  let now = epochTime()
-  let fingerprint = adminSessionFingerprint()
-  withLock globalAdminSessionsLock:
-    var previous: AdminSessionNode = nil
-    var current = globalAdminSessions
-    while current != nil:
-      let next = current.next
-      if current.value.expiresAt <= now or current.value.credentialFingerprint != fingerprint:
-        if previous == nil:
-          globalAdminSessions = next
-        else:
-          previous.next = next
-        deallocShared(current)
-        current = next
-        continue
-
-      if current.value.token == key:
-        return true
-
-      previous = current
-      current = next
+  constantTimeEquals(session.signature, adminSessionSignature(session.expiresAt, session.nonce))
 
 proc hasAuthenticatedAdminSession*(request: Request): bool {.gcsafe.} =
   hasAdminSession(request)
