@@ -4,12 +4,12 @@
       "assets_partition_size": "30M",
       "buildroot_apt_deps": "bc bison build-essential ca-certificates cpio curl file flex g++ gfortran genimage git dosfstools e2fsprogs libncurses-dev libssl-dev make mtools perl python3 rsync unzip wget xdg-utils xz-utils",
       "buildroot_version": "2025.02.13",
-      "created_at": "2026-06-25T09:04:05.091747+00:00",
+      "created_at": "2026-06-27T17:29:12.370948+00:00",
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",
       "frameos_partition_size": "30M",
-      "frameos_version": "2026.6.23",
-      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.23/raspberry-pi-zero-2-w-2026.6.23-743a4cc1117aa234.img.gz",
+      "frameos_version": "2026.6.25",
+      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.25/raspberry-pi-zero-2-w-2026.6.25-2629acf848bcea79.img.gz",
       "partitions": [
         {
           "size": 33554432,
@@ -29,9 +29,9 @@
         }
       ],
       "platform": "raspberry-pi-zero-2-w",
-      "sha256": "743a4cc1117aa2340db538d398d754f0087ec0eaa284aef9080958dfaa2b52d5",
+      "sha256": "2629acf848bcea79a611b86891a27fe49119199fa8754b4f54bcc1a66e53df6b",
       "size": 280658432,
-      "updated_at": "2026-06-25T10:16:04.341271+00:00"
+      "updated_at": "2026-06-27T17:29:19.532685+00:00"
     }
   ]
 }
