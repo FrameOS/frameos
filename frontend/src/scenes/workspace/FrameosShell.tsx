@@ -44,6 +44,7 @@ import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
@@ -333,7 +334,9 @@ export function FrameosShell({
     ? urls.frameControlScenes()
     : urls.scenes()
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : inFrameAdminMode ? urls.frameControl() : urls.frames()
-  const appsHref = lastAppsHref ?? urls.systemApps()
+  const appsHref = inFrameAdminMode
+    ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
+    : lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection

@@ -129,6 +129,10 @@ function appNodeOptionsForScenes(scenes: FrameScene[]): AppNodeOption[] {
   return scenes.flatMap((scene) => appNodeOptions(scene))
 }
 
+function frameAdminAppOptions(appOptions: AppNodeOption[]): AppNodeOption[] {
+  return appOptions.filter((app) => app.language === 'javascript')
+}
+
 function appOptionKey(app: AppNodeOption): string {
   return `${app.sceneId}::${app.nodeId}`
 }
@@ -150,6 +154,12 @@ function defaultApp(frame: FrameType | null): AppNodeOption | null {
   const scenes = frame?.scenes ?? []
   const defaultScene = scenes.find((scene) => scene.default) ?? scenes[0] ?? null
   return appNodeOptions(defaultScene)[0] ?? appNodeOptionsForScenes(scenes)[0] ?? null
+}
+
+function defaultAppFromOptions(frame: FrameType | null, appOptions: AppNodeOption[]): AppNodeOption | null {
+  const scenes = frame?.scenes ?? []
+  const defaultScene = scenes.find((scene) => scene.default) ?? scenes[0] ?? null
+  return (defaultScene ? appOptions.find((app) => app.sceneId === defaultScene.id) : null) ?? appOptions[0] ?? null
 }
 
 function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
@@ -292,21 +302,23 @@ function AppsSelector({
 
   return (
     <div className="space-y-4">
-      <SourceModeToggle
-        mode={sourceMode}
-        onChange={(nextMode) => {
-          if (nextMode === sourceMode) {
-            return
-          }
-          if (nextMode === 'system') {
-            pushSystemAppsUrl(selectedSystemApp?.keyword ?? systemApps[0]?.keyword ?? null)
-          } else if (frame) {
-            pushFrameAppsUrl(frame, selectedApp ?? defaultApp(frame))
-          } else {
-            router.actions.push(urls.apps())
-          }
-        }}
-      />
+      {!inFrameAdminMode ? (
+        <SourceModeToggle
+          mode={sourceMode}
+          onChange={(nextMode) => {
+            if (nextMode === sourceMode) {
+              return
+            }
+            if (nextMode === 'system') {
+              pushSystemAppsUrl(selectedSystemApp?.keyword ?? systemApps[0]?.keyword ?? null)
+            } else if (frame) {
+              pushFrameAppsUrl(frame, selectedApp ?? defaultApp(frame))
+            } else {
+              router.actions.push(urls.apps())
+            }
+          }}
+        />
+      ) : null}
       {sourceMode === 'frames' && frame && !inFrameAdminMode ? (
         <SelectionSelect
           label="Frame"
@@ -746,6 +758,8 @@ function AppsWorkspaceFrame({
   const { framesList } = useValues(framesModel)
   const { apps } = useValues(appsModel)
   const installedSystemApps = systemAppOptions(apps)
+  const inFrameAdminMode = isInFrameAdminMode()
+  const effectiveSourceMode: AppsSourceMode = inFrameAdminMode ? 'frames' : sourceMode
 
   if (!frame) {
     return (
@@ -756,19 +770,20 @@ function AppsWorkspaceFrame({
   }
 
   const appOptions = appNodeOptionsForScenes(scenes)
-  const routeSceneApps = routeSceneId ? appOptions.filter((app) => app.sceneId === routeSceneId) : []
-  const fallbackApp = defaultApp(frame)
+  const visibleAppOptions = inFrameAdminMode ? frameAdminAppOptions(appOptions) : appOptions
+  const routeSceneApps = routeSceneId ? visibleAppOptions.filter((app) => app.sceneId === routeSceneId) : []
+  const fallbackApp = defaultAppFromOptions(frame, visibleAppOptions)
   const selectedApp =
     (routeSceneId && routeNodeId
-      ? appOptions.find((app) => app.sceneId === routeSceneId && app.nodeId === routeNodeId)
+      ? visibleAppOptions.find((app) => app.sceneId === routeSceneId && app.nodeId === routeNodeId)
       : null) ??
-    (routeNodeId ? appOptions.find((app) => app.nodeId === routeNodeId) : null) ??
+    (routeNodeId ? visibleAppOptions.find((app) => app.nodeId === routeNodeId) : null) ??
     routeSceneApps[0] ??
     fallbackApp ??
     null
   const selectedScene = selectedApp
     ? scenes.find((scene) => scene.id === selectedApp.sceneId) ?? null
-    : routeSceneId
+    : routeSceneId && !inFrameAdminMode
     ? scenes.find((scene) => scene.id === routeSceneId) ?? null
     : null
   const selectedSystemApp =
@@ -782,32 +797,32 @@ function AppsWorkspaceFrame({
         <FrameosShell
           mode="apps"
           title="Apps"
-          browserTitle={sourceMode === 'frames' ? frame.name || frameHost(frame) : 'Apps'}
+          browserTitle={effectiveSourceMode === 'frames' ? frame.name || frameHost(frame) : 'Apps'}
           tree={
             <AppsSelector
-              sourceMode={sourceMode}
+              sourceMode={effectiveSourceMode}
               frame={frame}
               frames={framesList}
               selectedScene={selectedScene}
               selectedApp={selectedApp}
-              appOptions={appOptions}
+              appOptions={visibleAppOptions}
               selectedSystemApp={selectedSystemApp}
               systemApps={installedSystemApps}
             />
           }
           topBar={
-            sourceMode === 'system' ? (
+            effectiveSourceMode === 'system' ? (
               <SystemAppsTopBar app={selectedSystemApp} />
             ) : (
               <AppsTopBar frame={frame} scene={selectedScene} app={selectedApp} unsavedChanges={unsavedChanges} />
             )
           }
-          chatNodeId={sourceMode === 'frames' ? selectedApp?.nodeId ?? null : null}
-          showAiButton={sourceMode === 'frames'}
+          chatNodeId={effectiveSourceMode === 'frames' ? selectedApp?.nodeId ?? null : null}
+          showAiButton={effectiveSourceMode === 'frames'}
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={null}
         >
-          {sourceMode === 'system' ? (
+          {effectiveSourceMode === 'system' ? (
             <SystemAppEditorSurface app={selectedSystemApp} />
           ) : (
             <AppsEditorSurface frame={frame} scene={selectedScene} app={selectedApp} />
@@ -852,20 +867,25 @@ function AppsWorkspaceSystemOnly({ routeSystemAppKeyword }: { routeSystemAppKeyw
 }
 
 export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps): JSX.Element {
-  const sourceMode: AppsSourceMode = frameId === SYSTEM_APPS_ROUTE_TOKEN ? 'system' : 'frames'
-  const routeSystemAppKeyword = sourceMode === 'system' ? decodeRouteKeyword(sceneId) : null
+  const inFrameAdminMode = isInFrameAdminMode()
+  const routeSourceMode: AppsSourceMode = frameId === SYSTEM_APPS_ROUTE_TOKEN ? 'system' : 'frames'
+  const sourceMode: AppsSourceMode = inFrameAdminMode ? 'frames' : routeSourceMode
+  const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(sceneId) : null
+  const routeFrameId = routeSourceMode === 'frames' ? frameId ?? null : null
+  const routeSceneId = routeSourceMode === 'frames' ? sceneId ?? null : null
+  const routeNodeId = routeSourceMode === 'frames' ? nodeId ?? null : null
 
   useMountedLogic(
     appsWorkspaceLogic({
-      routeFrameId: frameId ?? null,
-      routeSceneId: sourceMode === 'frames' ? sceneId ?? null : null,
-      routeNodeId: sourceMode === 'frames' ? nodeId ?? null : null,
+      routeFrameId,
+      routeSceneId: sourceMode === 'frames' ? routeSceneId : null,
+      routeNodeId: sourceMode === 'frames' ? routeNodeId : null,
     })
   )
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, frames, framesList } = useValues(framesModel)
-  const routeFrameId = sourceMode === 'frames' ? parseRouteFrameId(frameId) : null
-  const routeFrame = routeFrameId ? frames[routeFrameId] ?? null : null
+  const parsedRouteFrameId = sourceMode === 'frames' ? parseRouteFrameId(routeFrameId) : null
+  const routeFrame = parsedRouteFrameId ? frames[parsedRouteFrameId] ?? null : null
   const firstFrame = routeFrame ?? selectedFrame ?? activeFramesList[0] ?? framesList[0] ?? null
 
   if (!firstFrame) {
@@ -891,8 +911,8 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
     <AppsWorkspaceFrame
       frameId={firstFrame.id}
       sourceMode={sourceMode}
-      routeSceneId={sourceMode === 'frames' ? sceneId ?? null : null}
-      routeNodeId={sourceMode === 'frames' ? nodeId ?? null : null}
+      routeSceneId={sourceMode === 'frames' ? routeSceneId : null}
+      routeNodeId={sourceMode === 'frames' ? routeNodeId : null}
       routeSystemAppKeyword={routeSystemAppKeyword}
     />
   )

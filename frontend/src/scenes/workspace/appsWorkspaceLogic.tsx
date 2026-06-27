@@ -1,4 +1,8 @@
 import { afterMount, kea, key, path, props } from 'kea'
+import { router } from 'kea-router'
+import { urls } from '../../urls'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { workspaceLogic } from './workspaceLogic'
 
@@ -32,6 +36,13 @@ export const appsWorkspaceLogic = kea<appsWorkspaceLogicType>([
   props({} as AppsWorkspaceLogicProps),
   key((props) => `${props.routeFrameId ?? 'none'}:${props.routeSceneId ?? 'none'}:${props.routeNodeId ?? 'none'}`),
   afterMount(({ props }) => {
+    if (props.routeFrameId === SYSTEM_APPS_ROUTE_TOKEN && isInFrameAdminMode()) {
+      const href = urls.apps(getFrameControlFrameId())
+      workspaceLogic.actions.rememberAppsHref(href)
+      router.actions.replace(href)
+      return
+    }
+
     const href = currentAppsHref()
     if (href) {
       workspaceLogic.actions.rememberAppsHref(href)

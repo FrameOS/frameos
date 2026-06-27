@@ -20,6 +20,7 @@ import { urls } from '../../urls'
 import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
 import { FrameDashboardLoadingSkeleton, FrameHomeTopBarLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import {
   isMobileWorkspaceViewport,
   requestNextFramesHomeScrollTop,
@@ -194,7 +195,9 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     ? urls.frameControlScenes()
     : urls.scenes()
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : inFrameAdminMode ? urls.frameControl() : urls.frames()
-  const appsHref = lastAppsHref ?? urls.systemApps()
+  const appsHref = inFrameAdminMode
+    ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
+    : lastAppsHref ?? urls.systemApps()
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
