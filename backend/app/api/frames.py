@@ -123,6 +123,8 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
+    embedded_flash_size_for_frame,
+    embedded_ota_supported_for_frame,
     embedded_toolchain_available,
     latest_embedded_firmware,
     normalize_embedded_platform,
@@ -2646,13 +2648,18 @@ async def api_frame_embedded_firmware_status(
 
     try:
         platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
+        firmware = await refresh_embedded_firmware_status(db, redis, frame)
+        flash_size = embedded_flash_size_for_frame(frame)
+        ota_supported = embedded_ota_supported_for_frame(frame)
     except ValueError as exc:
         _bad_request(str(exc))
     return {
-        "firmware": await refresh_embedded_firmware_status(db, redis, frame)
+        "firmware": firmware
         or {
             "status": "idle",
             "platform": platform,
+            "flashSize": flash_size,
+            "otaSupported": ota_supported,
         }
     }
 

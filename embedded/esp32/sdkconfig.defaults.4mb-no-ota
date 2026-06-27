@@ -1,0 +1,6 @@
+# 4MB modules do not have enough room for two FrameOS app slots plus state.
+# Build one factory app and disable OTA rollback checks.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set

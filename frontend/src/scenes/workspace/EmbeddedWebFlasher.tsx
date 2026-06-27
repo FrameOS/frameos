@@ -16,9 +16,11 @@ import { apiFetch } from '../../utils/apiFetch'
 import { workspaceLogic } from './workspaceLogic'
 
 type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
+type EspFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
 
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
+const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -34,8 +36,20 @@ async function fetchFirmwareStatus(frameId: number): Promise<FirmwareStatus> {
   return ((await response.json())?.firmware ?? {}) as FirmwareStatus
 }
 
-/** Make sure a fresh firmware image exists, building one if needed. Returns its download URL. */
-async function ensureFirmwareReady(frameId: number, onStatus: (message: string) => void): Promise<string> {
+function normalizeFlashSize(value: unknown): EspFlashSize {
+  if (typeof value !== 'string') {
+    return '8MB'
+  }
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, '')
+  return ESP_FLASH_SIZES.has(normalized as EspFlashSize) ? (normalized as EspFlashSize) : '8MB'
+}
+
+function firmwareFlashSize(frame: FrameType, firmware?: FirmwareStatus | null): EspFlashSize {
+  return normalizeFlashSize(firmware?.flashSize ?? frame.embedded?.flashSize ?? frame.embedded?.firmware?.flashSize)
+}
+
+/** Make sure a fresh firmware image exists, building one if needed. */
+async function ensureFirmwareReady(frameId: number, onStatus: (message: string) => void): Promise<FirmwareStatus> {
   let firmware = await fetchFirmwareStatus(frameId)
   if (firmware.status !== 'ready') {
     onStatus('Building firmware image')
@@ -61,7 +75,7 @@ async function ensureFirmwareReady(frameId: number, onStatus: (message: string) 
       firmware = await fetchFirmwareStatus(frameId)
     }
   }
-  return firmware.downloadUrl || `/api/frames/${frameId}/embedded/firmware/download`
+  return firmware
 }
 
 async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
@@ -86,7 +100,6 @@ export function EmbeddedWebFlasher({
   const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
-  const flashOffset = parseInt(frame.embedded?.firmware?.flashOffset || '0x0', 16) || 0
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
@@ -131,15 +144,19 @@ export function EmbeddedWebFlasher({
       setMessage(`Connected to ${chip}`)
 
       setPhase('preparing')
-      const downloadUrl = await ensureFirmwareReady(frame.id, setMessage)
+      const firmwareStatus = await ensureFirmwareReady(frame.id, setMessage)
+      const downloadUrl = firmwareStatus.downloadUrl || `/api/frames/${frame.id}/embedded/firmware/download`
+      const flashOffset =
+        parseInt(firmwareStatus.flashOffset || frame.embedded?.firmware?.flashOffset || '0x0', 16) || 0
+      const flashSize = firmwareFlashSize(frame, firmwareStatus)
       setMessage('Downloading firmware image')
       const firmware = await downloadFirmware(downloadUrl)
 
       setPhase('flashing')
-      setMessage(`Erasing flash and flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
+      setMessage(`Erasing ${flashSize} flash and flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
       await loader.writeFlash({
         fileArray: [{ data: firmware, address: flashOffset }],
-        flashSize: '8MB',
+        flashSize,
         flashMode: 'keep',
         flashFreq: 'keep',
         // Browser flashing is our "known good" provisioning path. Erase first so

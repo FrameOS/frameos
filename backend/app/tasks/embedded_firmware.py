@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,6 +102,37 @@ EMBEDDED_PANEL_FORMATS = {
 # Must mirror components/frameos_display/generate_selected_panel.py.
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
+EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
+EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
+    "4MB": {
+        "flashSize": "4MB",
+        "flashBytes": 4 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.4mb-no-ota"),
+        "partitionTable": "partitions_4mb.csv",
+        "otaSupported": False,
+    },
+    "8MB": {
+        "flashSize": "8MB",
+        "flashBytes": 8 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults",),
+        "partitionTable": "partitions.csv",
+        "otaSupported": True,
+    },
+    "16MB": {
+        "flashSize": "16MB",
+        "flashBytes": 16 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.16mb-ota"),
+        "partitionTable": "partitions_ota_16mb.csv",
+        "otaSupported": True,
+    },
+    "32MB": {
+        "flashSize": "32MB",
+        "flashBytes": 32 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.32mb-ota"),
+        "partitionTable": "partitions_ota_32mb.csv",
+        "otaSupported": True,
+    },
+}
 # Memory guardrail (M4): the on-device renderer composites into an RGBA pixie
 # buffer (4 B/px), packs it to the selected panel format, and needs headroom
 # for the Nim heap + QuickJS. Keep the reserve in sync with
@@ -132,6 +164,55 @@ def normalize_embedded_platform(platform: str | None) -> str:
     raise ValueError(f"Unsupported embedded platform: {value or '(empty)'}")
 
 
+def normalize_embedded_flash_size(value: object | None) -> str:
+    if value is None or value == "":
+        return EMBEDDED_DEFAULT_FLASH_SIZE
+    if isinstance(value, bool):
+        raise ValueError("Unsupported ESP32 flash size: boolean")
+    if isinstance(value, (int, float)):
+        normalized = f"{int(value)}MB"
+    else:
+        normalized = str(value).strip().upper().replace(" ", "")
+        if normalized.isdigit():
+            normalized = f"{normalized}MB"
+        elif normalized.endswith("M") and not normalized.endswith("MB"):
+            normalized = f"{normalized[:-1]}MB"
+    if normalized in EMBEDDED_FLASH_PROFILES:
+        return normalized
+    supported = ", ".join(EMBEDDED_FLASH_PROFILES)
+    raise ValueError(f"Unsupported ESP32 flash size: {value!r}. Supported sizes: {supported}.")
+
+
+def embedded_flash_size_for_frame(frame: Frame) -> str:
+    for source in (frame.embedded, frame.device_config):
+        if isinstance(source, dict):
+            for key in ("flashSize", "flash_size", "flashSizeMB", "flash_size_mb"):
+                if key in source:
+                    return normalize_embedded_flash_size(source.get(key))
+    return EMBEDDED_DEFAULT_FLASH_SIZE
+
+
+def embedded_flash_profile_for_frame(frame: Frame) -> dict[str, Any]:
+    return EMBEDDED_FLASH_PROFILES[embedded_flash_size_for_frame(frame)]
+
+
+def embedded_ota_supported_for_frame(frame: Frame) -> bool:
+    return bool(embedded_flash_profile_for_frame(frame)["otaSupported"])
+
+
+def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
+    return ";".join(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
+
+
+def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
+    profile = embedded_flash_profile_for_frame(frame)
+    return {
+        **EMBEDDED_REQUIRED_SDKCONFIG,
+        "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
+    }
+
+
 def embedded_artifact_dir() -> Path:
     return Path(
         os.environ.get("FRAMEOS_EMBEDDED_ARTIFACT_DIR")
@@ -159,18 +240,19 @@ def _read_sdkconfig_values(path: Path) -> dict[str, str]:
     return values
 
 
-def _missing_required_sdkconfig(path: Path) -> dict[str, str]:
+def _missing_required_sdkconfig(path: Path, required: dict[str, str] | None = None) -> dict[str, str]:
     values = _read_sdkconfig_values(path)
+    required_values = required or EMBEDDED_REQUIRED_SDKCONFIG
     return {
         key: value
-        for key, value in EMBEDDED_REQUIRED_SDKCONFIG.items()
+        for key, value in required_values.items()
         if values.get(key) != value
     }
 
 
-def _reset_stale_embedded_sdkconfig(build_dir: Path) -> dict[str, str]:
+def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | None = None) -> dict[str, str]:
     sdkconfig_path = EMBEDDED_PROJECT_DIR / "sdkconfig"
-    missing = _missing_required_sdkconfig(sdkconfig_path)
+    missing = _missing_required_sdkconfig(sdkconfig_path, required)
     if not missing or not sdkconfig_path.exists():
         return {}
     sdkconfig_path.unlink()
@@ -490,6 +572,7 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
 
     embedded = dict(frame.embedded or {})
     embedded["platform"] = normalized_platform
+    embedded["flashSize"] = embedded_flash_size_for_frame(frame)
     frame.embedded = embedded
 
     # The device authenticates its render/OTA pulls with the server API key
@@ -523,6 +606,17 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             "error": "The generated firmware was built from an older firmware project version",
         }
     if firmware.get("status") == "ready":
+        try:
+            firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
+        except ValueError:
+            firmware_flash_size = ""
+        expected_flash_size = embedded_flash_size_for_frame(frame)
+        if firmware_flash_size != expected_flash_size:
+            return {
+                **firmware,
+                "status": "stale",
+                "error": "The generated firmware was built for a different ESP32 flash size",
+            }
         panel = firmware.get("panel")
         if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
             return {
@@ -542,9 +636,10 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     if firmware.get("status") == "ready":
         if not isinstance(path, str) or not Path(path).is_file():
             return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
-        ota_path = firmware.get("otaPath")
-        if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-            return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
+        if firmware.get("otaSupported") is not False:
+            ota_path = firmware.get("otaPath")
+            if not isinstance(ota_path, str) or not Path(ota_path).is_file():
+                return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
     return firmware
 
 
@@ -595,6 +690,8 @@ async def start_embedded_firmware(
         "requestId": request_id,
         "queueJobId": queue_job_id,
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": embedded_flash_size_for_frame(frame),
+        "otaSupported": embedded_ota_supported_for_frame(frame),
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -667,6 +764,8 @@ async def request_embedded_firmware_ota(
     frame = get_fresh_frame(db, int(frame.id)) or frame
     firmware = latest_embedded_firmware(frame) or {}
     ota_path = firmware.get("otaPath")
+    if firmware.get("otaSupported") is False or not embedded_ota_supported_for_frame(frame):
+        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
     if firmware.get("status") != "ready":
         raise ValueError("No ready OTA firmware image for this frame")
     if not isinstance(ota_path, str) or not Path(ota_path).is_file():
@@ -714,6 +813,9 @@ async def request_or_queue_embedded_firmware_ota(
     *,
     force: bool = False,
 ) -> tuple[str, dict[str, Any], Any | None]:
+    if not embedded_ota_supported_for_frame(frame):
+        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
+
     firmware = await refresh_embedded_firmware_status(db, redis, frame) or {}
     if firmware.get("status") == "ready" and not force:
         payload = await request_embedded_firmware_ota(db, redis, frame)
@@ -792,17 +894,23 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     current = latest_embedded_firmware(frame) or {}
     started_at = _utc_now()
+    flash_profile = embedded_flash_profile_for_frame(frame)
+    sdkconfig_defaults = embedded_sdkconfig_defaults_for_frame(frame)
+    required_sdkconfig = embedded_required_sdkconfig_for_frame(frame)
     await _set_firmware_status(db, redis, frame, {
         **_preserved_queue_metadata(current),
         "status": "building",
         "requestId": request_id or current.get("requestId"),
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": flash_profile["flashSize"],
+        "otaSupported": flash_profile["otaSupported"],
         "startedAt": started_at,
         "lastHeartbeatAt": started_at,
     })
     selected_panel = embedded_panel_for_frame(frame)
     await log(db, redis, int(frame.id), "stdout",
-              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} (panel={selected_panel})")
+              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} "
+              f"(panel={selected_panel}, flash={flash_profile['flashSize']})")
 
     build_dir = EMBEDDED_PROJECT_DIR / "build"
     # export.sh refuses to run inside a foreign Python venv; scrub venv vars and
@@ -855,10 +963,11 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     # generated_config.h and a fresh nimcache require a CMake reconfigure: the
     # component globs nimcache/*.c at configure time.
     command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
-               'idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults reconfigure >/dev/null && idf.py build merge-bin')
+               f'idf.py -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
+               'reconfigure >/dev/null && idf.py build merge-bin')
 
     async with _build_lock:
-        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir)
+        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
         if reset_sdkconfig:
             reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
             await log(db, redis, int(frame.id), "stdout",
@@ -895,7 +1004,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         tail = "\n".join(output_tail[-20:])
         raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
 
-    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig")
+    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig", required_sdkconfig)
     if missing_sdkconfig:
         missing = ", ".join(f"{key}={value}" for key, value in sorted(missing_sdkconfig.items()))
         raise ValueError(f"ESP32 sdkconfig is missing required defaults after build: {missing}")
@@ -904,8 +1013,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     if not merged_bin.is_file():
         raise ValueError(f"Build succeeded but {merged_bin} was not produced")
 
-    # The OTA artifact is the bare app image (flashed by the device into the
-    # inactive ota_0/ota_1 slot), not the merged 0x0 flash image.
+    # The app artifact is the bare app image. OTA-capable profiles flash it
+    # into the inactive ota_0/ota_1 slot; 4MB builds keep it only for size/hash
+    # metadata because that partition table has a single factory app.
     ota_bin = build_dir / "frameos_esp32.bin"
     if not ota_bin.is_file():
         raise ValueError(f"Build succeeded but {ota_bin} was not produced")
@@ -920,15 +1030,20 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     shutil.copyfile(merged_bin, artifact_path)
     ota_filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}-ota.bin"
     ota_artifact_path = artifact_dir / ota_filename
-    shutil.copyfile(ota_bin, ota_artifact_path)
+    if flash_profile["otaSupported"]:
+        shutil.copyfile(ota_bin, ota_artifact_path)
 
     frame = get_fresh_frame(db, int(frame.id)) or frame
     current = latest_embedded_firmware(frame) or {}
-    await _set_firmware_status(db, redis, frame, {
+    ready_status = {
         **_preserved_queue_metadata(current),
         "status": "ready",
         "requestId": request_id or current.get("requestId"),
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": flash_profile["flashSize"],
+        "flashBytes": flash_profile["flashBytes"],
+        "partitionTable": flash_profile["partitionTable"],
+        "otaSupported": flash_profile["otaSupported"],
         "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
         "filename": filename,
         "path": str(artifact_path),
@@ -937,14 +1052,19 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
-        "otaPath": str(ota_artifact_path),
-        "otaSize": ota_artifact_path.stat().st_size,
-        "otaSha256": _sha256(ota_artifact_path),
         "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
         "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
-    })
+    }
+    if flash_profile["otaSupported"]:
+        ready_status = {
+            **ready_status,
+            "otaPath": str(ota_artifact_path),
+            "otaSize": ota_artifact_path.stat().st_size,
+            "otaSha256": _sha256(ota_artifact_path),
+        }
+    await _set_firmware_status(db, redis, frame, ready_status)
     await log(db, redis, int(frame.id), "stdout",
               f"ESP32-S3 firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
@@ -1005,6 +1125,7 @@ def _preserved_queue_metadata(firmware: dict[str, Any]) -> dict[str, Any]:
 async def _set_firmware_status(db: Session, redis: Redis, frame: Frame, firmware: dict[str, Any]) -> None:
     embedded = dict(frame.embedded or {})
     embedded["platform"] = normalize_embedded_platform(embedded.get("platform"))
+    embedded["flashSize"] = embedded_flash_size_for_frame(frame)
     embedded["firmware"] = firmware
     frame.embedded = embedded
     await update_frame(db, redis, frame)

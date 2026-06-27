@@ -2,6 +2,7 @@ import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
+export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode
@@ -755,11 +756,16 @@ export interface FrameRpiOSConfig {
 
 export interface FrameEmbeddedConfig {
   platform?: string
+  flashSize?: FrameEmbeddedFlashSize
   firmware?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     requestId?: string
     queueJobId?: string
     platform?: string
+    flashSize?: FrameEmbeddedFlashSize
+    flashBytes?: number
+    partitionTable?: string
+    otaSupported?: boolean
     filename?: string
     path?: string
     size?: number

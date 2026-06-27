@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.models.frame import Frame
 from app.tasks.embedded_firmware import (
+    EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_FIRMWARE_VERSION,
     EMBEDDED_RENDER_REMOTE,
@@ -15,17 +16,23 @@ from app.tasks.embedded_firmware import (
     _generated_config_header,
     check_embedded_panel_fits_memory,
     embedded_default_pins_for_frame,
+    embedded_flash_size_for_frame,
     embedded_firmware_config_hash,
     embedded_gpio_buttons_for_frame,
     embedded_hostname_for_frame,
     embedded_max_http_response_bytes_for_frame,
     embedded_module_psram_bytes,
+    embedded_ota_supported_for_frame,
     embedded_panel_for_frame,
     embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
+    embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
+    embedded_sdkconfig_defaults_for_frame,
     ensure_embedded_frame_defaults,
+    latest_embedded_firmware,
+    normalize_embedded_flash_size,
     request_pending_embedded_firmware_ota,
     _reset_stale_embedded_sdkconfig,
 )
@@ -57,6 +64,7 @@ async def test_new_embedded_frame(async_client):
     assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame['device_config']['pins']['cs'] == 3
     assert frame['device_config']['pins']['cs2'] == -1
+    assert frame['embedded']['flashSize'] == EMBEDDED_DEFAULT_FLASH_SIZE
 
 
 @pytest.mark.asyncio
@@ -103,6 +111,36 @@ async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     assert stored.device.startswith('waveshare.')
     assert stored.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert stored.device_config['pins']['rst'] == 5
+    assert stored.embedded['flashSize'] == '8MB'
+
+
+def test_embedded_flash_size_profiles():
+    assert normalize_embedded_flash_size(None) == '8MB'
+    assert normalize_embedded_flash_size('4mb') == '4MB'
+    assert normalize_embedded_flash_size('32 MB') == '32MB'
+    assert normalize_embedded_flash_size(16) == '16MB'
+    with pytest.raises(ValueError):
+        normalize_embedded_flash_size('2MB')
+
+    default_frame = Frame()
+    assert embedded_flash_size_for_frame(default_frame) == '8MB'
+    assert embedded_ota_supported_for_frame(default_frame) is True
+    assert embedded_sdkconfig_defaults_for_frame(default_frame) == 'sdkconfig.defaults'
+
+    device_config_frame = Frame(device_config={'flashSize': '4MB'})
+    ensure_embedded_frame_defaults(device_config_frame)
+    assert device_config_frame.embedded['flashSize'] == '4MB'
+
+    four_mb = Frame(embedded={'flashSize': '4MB'})
+    assert embedded_flash_size_for_frame(four_mb) == '4MB'
+    assert embedded_ota_supported_for_frame(four_mb) is False
+    assert embedded_sdkconfig_defaults_for_frame(four_mb) == 'sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota'
+    assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESPTOOLPY_FLASHSIZE'] == '"4MB"'
+
+    thirty_two_mb = Frame(embedded={'flashSize': '32MB'})
+    assert embedded_flash_size_for_frame(thirty_two_mb) == '32MB'
+    assert embedded_ota_supported_for_frame(thirty_two_mb) is True
+    assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
 
 
 @pytest.mark.asyncio
@@ -110,7 +148,14 @@ async def test_firmware_status_idle(async_client):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200
-    assert response.json() == {'firmware': {'status': 'idle', 'platform': 'esp32-s3'}}
+    assert response.json() == {
+        'firmware': {
+            'status': 'idle',
+            'platform': 'esp32-s3',
+            'flashSize': '8MB',
+            'otaSupported': True,
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -153,6 +198,8 @@ async def test_firmware_build_queues_job(async_client, db, redis):
     assert data['message'] == 'Firmware build started'
     assert data['firmware']['status'] == 'queued'
     assert data['firmware']['platform'] == 'esp32-s3'
+    assert data['firmware']['flashSize'] == '8MB'
+    assert data['firmware']['otaSupported'] is True
     assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
 
     stored = db.get(Frame, frame['id'])
@@ -244,6 +291,19 @@ async def test_firmware_ota_queues_build_when_artifact_not_ready(async_client):
     assert response.json()['message'] == 'OTA update queued'
     assert firmware['status'] == 'queued'
     assert firmware['otaUpdate']['status'] == 'queued'
+
+
+@pytest.mark.asyncio
+async def test_firmware_ota_rejects_4mb_flash_profile(async_client, db):
+    frame = await create_embedded_frame(async_client)
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {**stored.embedded, 'flashSize': '4MB'}
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+    assert response.status_code == 400
+    assert 'OTA updates are not available' in response.json()['detail']
 
 
 @pytest.mark.asyncio
@@ -562,6 +622,65 @@ def test_ready_firmware_is_stale_when_panel_changes(tmp_path):
     assert "different embedded panel" in firmware["error"]
 
 
+def test_ready_firmware_is_stale_when_flash_size_changes(tmp_path):
+    artifact = tmp_path / "frameos-esp32-s3.bin"
+    artifact.write_bytes(b"firmware-bytes")
+    frame = Frame(
+        id=53,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        embedded={"platform": "esp32-s3", "flashSize": "32MB"},
+    )
+    frame.embedded = {
+        **frame.embedded,
+        "firmware": {
+            "status": "ready",
+            "platform": "esp32-s3",
+            "flashSize": "8MB",
+            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+            "filename": "frameos-esp32-s3.bin",
+            "path": str(artifact),
+            "panel": "EPD_7in5_V2",
+            "configHash": embedded_firmware_config_hash(frame),
+        },
+    }
+    firmware = latest_embedded_firmware(frame)
+    assert firmware["status"] == "stale"
+    assert "different ESP32 flash size" in firmware["error"]
+
+
+def test_ready_4mb_firmware_does_not_require_ota_artifact(tmp_path):
+    artifact = tmp_path / "frameos-esp32-s3-4mb.bin"
+    artifact.write_bytes(b"firmware-bytes")
+    frame = Frame(
+        id=53,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        embedded={"platform": "esp32-s3", "flashSize": "4MB"},
+    )
+    frame.embedded = {
+        **frame.embedded,
+        "firmware": {
+            "status": "ready",
+            "platform": "esp32-s3",
+            "flashSize": "4MB",
+            "otaSupported": False,
+            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+            "filename": "frameos-esp32-s3-4mb.bin",
+            "path": str(artifact),
+            "panel": "EPD_7in5_V2",
+            "configHash": embedded_firmware_config_hash(frame),
+        },
+    }
+    firmware = latest_embedded_firmware(frame)
+    assert firmware["status"] == "ready"
+    assert firmware["otaSupported"] is False
+
+
 def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
     sdkconfig = tmp_path / "sdkconfig"
     sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
@@ -592,3 +711,29 @@ def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
     assert missing == {}
     assert sdkconfig.exists()
     assert build_dir.exists()
+
+
+def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
+    sdkconfig = tmp_path / "sdkconfig"
+    sdkconfig.write_text(
+        '\n'.join([
+            'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
+            'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
+            'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
+            '',
+        ]),
+        encoding="utf-8",
+    )
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    required = embedded_required_sdkconfig_for_frame(Frame(embedded={"flashSize": "32MB"}))
+    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
+        missing = _reset_stale_embedded_sdkconfig(build_dir, required)
+
+    assert missing == {
+        "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": '"partitions_ota_32mb.csv"',
+    }
+    assert not sdkconfig.exists()
+    assert not build_dir.exists()

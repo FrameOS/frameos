@@ -51,6 +51,22 @@ interface DeployPlanProgressStep {
   state: 'done' | 'current' | 'pending' | 'error'
 }
 
+function embeddedFlashSize(frame: FrameType): '4MB' | '8MB' | '16MB' | '32MB' {
+  const raw = frame.embedded?.firmware?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
+  const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
+  return normalized === '4MB' || normalized === '8MB' || normalized === '16MB' || normalized === '32MB'
+    ? normalized
+    : '8MB'
+}
+
+function embeddedOtaSupported(frame: FrameType): boolean {
+  const firmwareSupport = frame.embedded?.firmware?.otaSupported
+  if (typeof firmwareSupport === 'boolean') {
+    return firmwareSupport
+  }
+  return embeddedFlashSize(frame) !== '4MB'
+}
+
 function parseDeployPlanLogTimestamp(timestamp?: string | null): number {
   if (!timestamp) {
     return NaN
@@ -583,7 +599,9 @@ function DeployTransportToggle({
   const selectedRemoteDisconnected = selectedTransport === 'remote' && !remoteConnected
   const selectedConnectionUnavailableTitle = 'FrameOS Remote is not connected. Select SSH or wait for it to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
-  const remoteUpgradeTitle = remoteUpgradeNotice ? `FrameOS Remote ${remoteUpgradeLabel(remoteUpgradeNotice)}` : undefined
+  const remoteUpgradeTitle = remoteUpgradeNotice
+    ? `FrameOS Remote ${remoteUpgradeLabel(remoteUpgradeNotice)}`
+    : undefined
 
   return (
     <section className="mb-4">
@@ -1167,12 +1185,14 @@ function EmbeddedFirmwareSection({
   const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  const flashSize = embeddedFlashSize(frame)
+  const otaSupported = embeddedOtaSupported(frame)
   const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash ${
+  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'
-  const otaBuilding = building && !browserFlashBusy
+  const otaBuilding = otaSupported && building && !browserFlashBusy
 
   const copyFlashCommand = (): void => {
     copy(flashCommand)
@@ -1189,8 +1209,8 @@ function EmbeddedFirmwareSection({
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The firmware
-          runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+          Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The
+          firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
         </div>
         {firmware?.status ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
@@ -1211,13 +1231,15 @@ function EmbeddedFirmwareSection({
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
             <div className="frame-tool-muted mt-1 text-sm leading-5">
-              Build the latest app image, then ask the frame to pull it from this backend and reboot.
+              {otaSupported
+                ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
+                : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
             </div>
           </div>
           <button
             type="button"
             onClick={onOtaUpdate}
-            disabled={browserFlashBusy}
+            disabled={browserFlashBusy || !otaSupported}
             className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
             {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}

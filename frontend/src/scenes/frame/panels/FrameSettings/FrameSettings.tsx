@@ -40,7 +40,13 @@ import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/2
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { FrameErrorBehaviorMode, FrameMountpointConfig, FrameType, Palette } from '../../../../types'
+import {
+  FrameEmbeddedFlashSize,
+  FrameErrorBehaviorMode,
+  FrameMountpointConfig,
+  FrameType,
+  Palette,
+} from '../../../../types'
 import { A } from 'kea-router'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -158,6 +164,12 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
 
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
 const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
+const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
+  { value: '4MB', label: '4MB (no OTA)' },
+  { value: '8MB', label: '8MB' },
+  { value: '16MB', label: '16MB' },
+  { value: '32MB', label: '32MB' },
+]
 
 type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pins']>
 type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
@@ -657,7 +669,13 @@ export function FrameSettings({
                     if (nextMode === 'embedded') {
                       const nextValues: Partial<FrameType> = {}
                       if (!frameForm.embedded?.platform) {
-                        nextValues.embedded = { ...(frameForm.embedded ?? {}), platform: EMBEDDED_ESP32_S3 }
+                        nextValues.embedded = {
+                          ...(frameForm.embedded ?? {}),
+                          platform: EMBEDDED_ESP32_S3,
+                          flashSize: frameForm.embedded?.flashSize ?? '8MB',
+                        }
+                      } else if (!frameForm.embedded?.flashSize) {
+                        nextValues.embedded = { ...(frameForm.embedded ?? {}), flashSize: '8MB' }
                       }
                       if (
                         !frameForm.max_http_response_bytes ||
@@ -816,6 +834,20 @@ export function FrameSettings({
               <Group name="embedded">
                 <Field name="platform" label="Platform">
                   <Select name="embedded.platform" options={embeddedPlatforms} />
+                </Field>
+                <Field
+                  name="flashSize"
+                  label="Flash size"
+                  tooltip="ESP32 module flash size. 4MB builds use a single app slot and cannot update over the air."
+                >
+                  {({ value, onChange }) => (
+                    <Select
+                      name="embedded.flashSize"
+                      value={(value as FrameEmbeddedFlashSize | undefined) ?? '8MB'}
+                      options={ESP32_FLASH_SIZE_OPTIONS}
+                      onChange={(nextFlashSize) => onChange(nextFlashSize as FrameEmbeddedFlashSize)}
+                    />
+                  )}
                 </Field>
               </Group>
               <Group name="device_config">

@@ -159,6 +159,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'error_behavior',
   'palette',
   'buildroot',
+  'embedded',
   'rpios',
 ]
 
@@ -173,6 +174,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   max_http_response_bytes: '2026.6.4',
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
+  embedded: '2026.6.26',
 }
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
@@ -252,6 +254,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   error_behavior: 'Global error handling',
   palette: 'Palette',
   buildroot: 'Buildroot settings',
+  embedded: 'Embedded settings',
   rpios: 'Raspberry Pi OS settings',
 }
 
@@ -1040,6 +1043,23 @@ function normalizeEdge(edge: any): any {
   }
 }
 
+function sanitizeEdgesForNodes(edges: DiagramEdge[], nodes: DiagramNode[]): DiagramEdge[] {
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  let changed = false
+  const sanitizedEdges = edges.filter((edge) => {
+    const valid =
+      typeof edge.source === 'string' &&
+      typeof edge.target === 'string' &&
+      nodeIds.has(edge.source) &&
+      nodeIds.has(edge.target)
+    if (!valid) {
+      changed = true
+    }
+    return valid
+  })
+  return changed ? sanitizedEdges : edges
+}
+
 function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
@@ -1345,7 +1365,10 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
           position: { x: 0, y: 0 },
         }
   )
-  const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
+  const edges = sanitizeEdgesForNodes(
+    (scene.edges ?? []).map((edge) => normalizeEdge(edge)),
+    normalizedNodes
+  )
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   const arranged = shouldArrange ? arrangeSceneGraph(normalizedNodes, edges) : { nodes: normalizedNodes, edges }
   return {
