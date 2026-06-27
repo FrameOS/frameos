@@ -350,11 +350,11 @@ def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | 
 
 def embedded_pixie_path() -> Path | None:
     configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    candidates = [Path(configured)] if configured else []
-    candidates.append(REPO_ROOT.parent / "pixie")
-    for candidate in candidates:
-        if (candidate / "src" / "pixie").is_dir():
-            return candidate.resolve()
+    if not configured:
+        return None
+    candidate = Path(configured)
+    if (candidate / "src" / "pixie").is_dir():
+        return candidate.resolve()
     return None
 
 
@@ -1126,7 +1126,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     pixie_path = embedded_pixie_path()
     if pixie_path is not None:
         env["FRAMEOS_PIXIE_PATH"] = str(pixie_path)
-        await log(db, redis, int(frame.id), "stdout", f"Using embedded Pixie checkout at {pixie_path}")
+        await log(db, redis, int(frame.id), "stdout", f"Using explicit Pixie override at {pixie_path}")
 
     # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi)
     wifi_ssid, wifi_password = embedded_wifi_credentials(frame)

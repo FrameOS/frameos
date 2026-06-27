@@ -27,6 +27,7 @@ from app.tasks.embedded_firmware import (
     embedded_panel_for_frame,
     embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
+    embedded_pixie_path,
     embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
@@ -889,3 +890,13 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
     }
     assert not sdkconfig.exists()
     assert not build_dir.exists()
+
+
+def test_embedded_pixie_path_requires_explicit_override(tmp_path, monkeypatch):
+    monkeypatch.delenv("FRAMEOS_PIXIE_PATH", raising=False)
+    assert embedded_pixie_path() is None
+
+    pixie = tmp_path / "pixie"
+    (pixie / "src" / "pixie").mkdir(parents=True)
+    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(pixie))
+    assert embedded_pixie_path() == pixie.resolve()
