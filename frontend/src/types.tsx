@@ -3,7 +3,10 @@ import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
-export type FrameEmbeddedHardwarePreset = 'custom' | 'waveshare_esp32_s3_epaper_13_3e6'
+export type FrameEmbeddedHardwarePreset =
+  | 'custom'
+  | 'waveshare_esp32_s3_photopainter'
+  | 'waveshare_esp32_s3_epaper_13_3e6'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode

@@ -200,6 +200,9 @@ const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
 const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
   'waveshare_esp32_s3_epaper_13_3e6'
 const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
+const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
+  'waveshare_esp32_s3_photopainter'
+const ESP32_WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
 
 const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
@@ -215,6 +218,17 @@ const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
 const ESP32_XIAO_13IN3E_PIN_LAYOUT: Esp32PinLayout = {
   ...ESP32_XIAO_PIN_LAYOUT,
   cs2: 8,
+}
+
+const ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 12,
+  dc: 8,
+  cs: 9,
+  cs2: -1,
+  busy: 13,
+  sck: 10,
+  mosi: 11,
+  pwr: -1,
 }
 
 const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
@@ -258,11 +272,28 @@ const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
 
 const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
   { value: 'custom', label: 'Custom ESP32-S3 board' },
+  { value: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 PhotoPainter' },
   { value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 ePaper 13.3E6' },
 ]
 
 function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
-  return value === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET ? ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET : 'custom'
+  if (value === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
+    return ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
+  }
+  if (value === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+  }
+  return 'custom'
+}
+
+function esp32WavesharePhotopainterSdCardAssets(): Esp32SdCardAssets {
+  return {
+    enabled: true,
+    preset: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
+    pins: { ...ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT },
+    maxFrequencyKHz: 20000,
+    mountPath: '/srv/assets',
+  }
 }
 
 function esp32Waveshare13in3e6SdCardAssets(): Esp32SdCardAssets {
@@ -275,12 +306,41 @@ function esp32Waveshare13in3e6SdCardAssets(): Esp32SdCardAssets {
   }
 }
 
+function esp32HardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+  device: string
+  flashSize: FrameEmbeddedFlashSize
+  psramMB: number
+  pins: Esp32PinLayout
+  sdCardAssets: Esp32SdCardAssets
+} | null {
+  if (hardwarePreset === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
+    return {
+      device: ESP32_WAVESHARE_PHOTOPAINTER_DEVICE,
+      flashSize: '16MB',
+      psramMB: 8,
+      pins: { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT },
+      sdCardAssets: esp32WavesharePhotopainterSdCardAssets(),
+    }
+  }
+  if (hardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return {
+      device: ESP32_WAVESHARE_13IN3E6_DEVICE,
+      flashSize: '32MB',
+      psramMB: 16,
+      pins: { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
+      sdCardAssets: esp32Waveshare13in3e6SdCardAssets(),
+    }
+  }
+  return null
+}
+
 function esp32RecommendedPinLayout(
   device?: string,
   hardwarePreset?: FrameEmbeddedHardwarePreset | string
 ): Esp32PinLayout {
-  if (hardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
+  const presetConfig = esp32HardwarePresetConfig(normalizeEsp32HardwarePreset(hardwarePreset))
+  if (presetConfig) {
+    return { ...presetConfig.pins }
   }
   return device === ESP32_WAVESHARE_13IN3E6_DEVICE
     ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
@@ -390,6 +450,9 @@ function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): bo
 }
 
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
+  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT)) {
+    return 'waveshare-photopainter'
+  }
   if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT)) {
     return 'waveshare-13in3e6'
   }
@@ -405,10 +468,14 @@ function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
 function esp32PinLayoutPresetOptions(device?: string): Option[] {
   const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
   const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
+  const photopainter = { value: 'waveshare-photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' }
   const waveshare13in3e6 = { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6' }
+  if (device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE) {
+    return [photopainter, xiao, xiao13in3e, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+  }
   return device === ESP32_WAVESHARE_13IN3E6_DEVICE
-    ? [waveshare13in3e6, xiao13in3e, xiao, { value: 'custom', label: 'Custom' }]
-    : [xiao, xiao13in3e, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+    ? [waveshare13in3e6, xiao13in3e, xiao, photopainter, { value: 'custom', label: 'Custom' }]
+    : [xiao, xiao13in3e, photopainter, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
 }
 
 function esp32PinLayoutForPreset(
@@ -421,6 +488,9 @@ function esp32PinLayoutForPreset(
   }
   if (preset === 'xiao-13in3e') {
     return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
+  }
+  if (preset === 'waveshare-photopainter') {
+    return { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT }
   }
   if (preset === 'waveshare-13in3e6') {
     return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
@@ -488,20 +558,24 @@ export function FrameSettings({
       setEsp32HardwarePresetCustom()
       return
     }
+    const presetConfig = esp32HardwarePresetConfig(hardwarePreset)
+    if (!presetConfig) {
+      return
+    }
     const nextValues: Partial<FrameType> = {
-      device: ESP32_WAVESHARE_13IN3E6_DEVICE,
+      device: presetConfig.device,
       embedded: {
         ...(frameForm.embedded ?? {}),
         platform: EMBEDDED_ESP32_S3,
-        flashSize: '32MB',
+        flashSize: presetConfig.flashSize,
         hardwarePreset,
       },
       device_config: {
         ...(frameForm.device_config ?? {}),
         hardwarePreset,
-        psramMB: 16,
-        pins: { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
-        sdCardAssets: esp32Waveshare13in3e6SdCardAssets(),
+        psramMB: presetConfig.psramMB,
+        pins: { ...presetConfig.pins },
+        sdCardAssets: presetConfig.sdCardAssets,
       },
     }
     if (
@@ -929,9 +1003,9 @@ export function FrameSettings({
                   onChange(nextDevice)
                   if (isEmbeddedMode) {
                     const currentPins = frameForm.device_config?.pins
+                    const currentPresetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
                     const nextHardwarePreset =
-                      embeddedHardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET &&
-                      nextDevice !== ESP32_WAVESHARE_13IN3E6_DEVICE
+                      currentPresetConfig && nextDevice !== currentPresetConfig.device
                         ? 'custom'
                         : embeddedHardwarePreset
                     const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice, embeddedHardwarePreset)
@@ -1141,7 +1215,8 @@ export function FrameSettings({
                       options={ESP32_FLASH_SIZE_OPTIONS}
                       onChange={(nextFlashSize) => {
                         const flashSize = nextFlashSize as FrameEmbeddedFlashSize
-                        if (embeddedHardwarePreset !== 'custom' && flashSize !== '32MB') {
+                        const presetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
+                        if (presetConfig && flashSize !== presetConfig.flashSize) {
                           setEsp32HardwarePresetCustom({
                             embedded: { ...(frameForm.embedded ?? {}), flashSize },
                           })
@@ -1173,6 +1248,10 @@ export function FrameSettings({
                           value={preset}
                           options={esp32PinLayoutPresetOptions(frameForm.device)}
                           onChange={(nextPreset) => {
+                            if (nextPreset === 'waveshare-photopainter') {
+                              setEsp32HardwarePreset(ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET)
+                              return
+                            }
                             if (nextPreset === 'waveshare-13in3e6') {
                               setEsp32HardwarePreset(ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET)
                               return
@@ -1274,7 +1353,7 @@ export function FrameSettings({
                                 }
                                 if (
                                   embeddedHardwarePreset !== 'custom' &&
-                                  nextPreset !== ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+                                  nextPreset !== embeddedHardwarePreset
                                 ) {
                                   setEsp32HardwarePresetCustom({
                                     device_config: {

@@ -61,6 +61,19 @@ EMBEDDED_DEFAULT_PINS = {
     "pwr": -1,
 }
 EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
+# Waveshare ESP32-S3 PhotoPainter schematic pinout:
+# EPD_DC=GPIO8, EPD_CS=GPIO9, EPD_SCK=GPIO10, EPD_DIN=GPIO11,
+# EPD_RST=GPIO12, EPD_BUSY=GPIO13.
+EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS = {
+    "rst": 12,
+    "dc": 8,
+    "cs": 9,
+    "cs2": -1,
+    "busy": 13,
+    "sck": 10,
+    "mosi": 11,
+    "pwr": -1,
+}
 # Waveshare ESP32-S3 ePaper 13.3E6 schematic pinout:
 # CSB_M=GPIO1, CSB_S=GPIO4, SDA=GPIO5, SCL=GPIO6, D/C=GPIO7,
 # BUSY_N=GPIO8, RST_N=GPIO10, EPD_PWR=GPIO16.
@@ -102,6 +115,19 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
+    "waveshare_esp32_s3_photopainter": {
+        "device": "waveshare.EPD_7in3e",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "waveshare_esp32_s3_photopainter",
+            "pins": EMBEDDED_SD_CARD_ASSETS_PRESET_PINS["waveshare_esp32_s3_photopainter"],
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+            "mountPath": "/srv/assets",
+        },
+    },
     "waveshare_esp32_s3_epaper_13_3e6": {
         "device": "waveshare.EPD_13in3e",
         "flashSize": "32MB",

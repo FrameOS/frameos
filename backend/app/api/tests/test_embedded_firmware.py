@@ -532,6 +532,56 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 2" in header
 
 
+def test_embedded_hardware_preset_for_waveshare_photopainter():
+    frame = Frame(
+        id=8,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+    )
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_hardware_preset_for_frame(frame) == "waveshare_esp32_s3_photopainter"
+    assert frame.device == "waveshare.EPD_7in3e"
+    assert frame.embedded["flashSize"] == "16MB"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert frame.device_config["psramMB"] == 8
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 12,
+        "dc": 8,
+        "cs": 9,
+        "cs2": -1,
+        "busy": 13,
+        "sck": 10,
+        "mosi": 11,
+        "pwr": -1,
+    }
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_photopainter",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
+        "maxFrequencyKHz": 20_000,
+    }
+    check_embedded_panel_fits_memory(frame)
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in3e"' in header
+    assert "#define FRAMEOS_DEFAULT_PIN_RST 12" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_DC 8" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS 9" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 -1" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 13" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_SCK 10" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 11" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_PWR -1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
+
+
 def test_large_spectra_panel_can_use_thin_client_on_8mb():
     frame = Frame(device="waveshare.EPD_13in3e", device_config={"renderMode": "remote"})
     assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
