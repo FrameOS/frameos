@@ -47,18 +47,12 @@ if [[ "$NEEDS_NIMBLE_SETUP" == "1" ]]; then
     (cd "$FRAMEOS_DIR" && nimble setup --silent)
 fi
 
-if [[ -z "${FRAMEOS_PIXIE_PATH:-}" ]]; then
-    LOCAL_PIXIE_PATH="$(cd "$REPO_ROOT/.." && pwd)/pixie"
-    if [[ -d "$LOCAL_PIXIE_PATH/src/pixie" ]]; then
-        export FRAMEOS_PIXIE_PATH="$LOCAL_PIXIE_PATH"
-    fi
-fi
 if [[ -n "${FRAMEOS_PIXIE_PATH:-}" ]]; then
     if [[ ! -d "$FRAMEOS_PIXIE_PATH/src/pixie" ]]; then
         echo "FRAMEOS_PIXIE_PATH must point to a pixie checkout with src/pixie/" >&2
         exit 1
     fi
-    echo "using FRAMEOS_PIXIE_PATH=$FRAMEOS_PIXIE_PATH"
+    echo "using explicit FRAMEOS_PIXIE_PATH=$FRAMEOS_PIXIE_PATH"
 fi
 
 echo "generating FrameOS app loaders"

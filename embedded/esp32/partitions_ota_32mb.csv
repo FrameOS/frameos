@@ -1,0 +1,8 @@
+# FrameOS ESP32-S3 partition table (32MB flash, OTA A/B)
+# Name,    Type, SubType,  Offset,   Size,      Flags
+nvs,       data, nvs,      0x9000,   24K,
+otadata,   data, ota,      0xf000,   8K,
+phy_init,  data, phy,      0x11000,  4K,
+ota_0,     app,  ota_0,    0x20000,  0xEF0000,
+ota_1,     app,  ota_1,    ,         0xEF0000,
+state,     data, spiffs,   ,         2M,

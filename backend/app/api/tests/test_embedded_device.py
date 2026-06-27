@@ -233,6 +233,35 @@ async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, 
 
 
 @pytest.mark.asyncio
+async def test_ota_manifest_404_for_ready_4mb_no_ota_build(async_client, no_auth_client, db, tmp_path):
+    frame = await device_frame(async_client, db)
+    firmware_file = tmp_path / 'frameos-4mb.bin'
+    firmware_file.write_bytes(b'\xe9firmware-bytes')
+
+    embedded = dict(frame.embedded or {})
+    embedded['flashSize'] = '4MB'
+    embedded['firmware'] = {
+        'status': 'ready',
+        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+        'flashSize': '4MB',
+        'otaSupported': False,
+        'path': str(firmware_file),
+        'panel': embedded_panel_for_frame(frame),
+        'configHash': embedded_firmware_config_hash(frame),
+    }
+    frame.embedded = embedded
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
+    assert response.status_code == 404
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_generated_config_uses_frame_network_wifi(async_client, db):
     from app.tasks.embedded_firmware import _generated_config_header, embedded_wifi_credentials
 

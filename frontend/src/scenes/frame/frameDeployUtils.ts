@@ -363,7 +363,15 @@ function mountpointsSummary(frame?: Partial<FrameType> | null): string | null {
 }
 
 export function normalizeFrameosVersion(version: unknown): string | null {
-  return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
+  if (typeof version !== 'string') {
+    return null
+  }
+  const trimmed = version.trim()
+  if (!trimmed) {
+    return null
+  }
+  const releaseMatch = trimmed.match(/v?(\d+\.\d+\.\d+)/)
+  return releaseMatch ? releaseMatch[1] : trimmed.split('+')[0]
 }
 
 export function frameosGitHubReleaseUrl(version: unknown): string {

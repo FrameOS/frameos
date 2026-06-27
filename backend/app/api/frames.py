@@ -123,12 +123,15 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_auth
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
+    embedded_flash_size_for_frame,
+    embedded_ota_supported_for_frame,
     embedded_toolchain_available,
     latest_embedded_firmware,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
     request_or_queue_embedded_firmware_ota,
     start_embedded_firmware,
+    with_embedded_firmware_layout,
 )
 from app.tasks.buildroot_image import (
     buildroot_sd_image_no_build_environment_message,
@@ -577,6 +580,106 @@ async def _release_frame_image_refresh_lock(redis: Redis, lock_key: str, lock_to
         current = current.decode("utf-8", errors="ignore")
     if current == lock_token:
         await redis.delete(lock_key)
+
+
+async def _store_frame_image(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    body: bytes,
+    *,
+    scene_id: str | None = None,
+    publish_rendered: bool = True,
+) -> dict[str, Any]:
+    cache_key = _frame_image_cache_key(frame.id)
+    await redis.set(cache_key, body, ex=86400 * 30)
+
+    stored_scene_id = scene_id
+    width = height = None
+    if stored_scene_id:
+        stored_scene_id = _scene_image_scene_id_for_frame(frame, stored_scene_id)
+
+    if stored_scene_id:
+        from app.models.scene_image import SceneImage
+        from app.api.scene_images import _generate_thumbnail
+
+        def _decode_and_thumbnail():
+            image_width = image_height = None
+            try:
+                from PIL import Image
+
+                img = Image.open(io.BytesIO(body))
+                image_width, image_height = img.width, img.height
+            except Exception:
+                pass
+            thumb, t_width, t_height = _generate_thumbnail(body)
+            return image_width, image_height, thumb, t_width, t_height
+
+        width, height, thumb, t_width, t_height = await asyncio.get_running_loop().run_in_executor(
+            None, _decode_and_thumbnail
+        )
+
+        now = datetime.utcnow()
+        img_row = (
+            db.query(SceneImage)
+            .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id=stored_scene_id)
+            .first()
+        )
+        if img_row:
+            img_row.image = body
+            img_row.timestamp = now
+            img_row.width = width
+            img_row.height = height
+            img_row.thumb_image = thumb
+            img_row.thumb_width = t_width
+            img_row.thumb_height = t_height
+        else:
+            img_row = SceneImage(
+                project_id=frame.project_id,
+                frame_id=frame.id,
+                scene_id=stored_scene_id,
+                image=body,
+                timestamp=now,
+                width=width,
+                height=height,
+                thumb_image=thumb,
+                thumb_width=t_width,
+                thumb_height=t_height,
+            )
+            db.add(img_row)
+        db.commit()
+
+        await publish_message(
+            redis,
+            "new_scene_image",
+            {
+                "project_id": frame.project_id,
+                "frameId": frame.id,
+                "sceneId": stored_scene_id,
+                "timestamp": now.isoformat(),
+                "width": width,
+                "height": height,
+            },
+        )
+
+    if publish_rendered:
+        await publish_message(
+            redis,
+            "frame_rendered",
+            {
+                "project_id": frame.project_id,
+                "frameId": frame.id,
+                "sceneId": stored_scene_id,
+                "width": width,
+                "height": height,
+            },
+        )
+
+    return {
+        "sceneId": stored_scene_id,
+        "width": width,
+        "height": height,
+    }
 
 
 def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1060,6 +1163,18 @@ def _frame_to_response_dict(
     frame: Frame, latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET
 ) -> dict[str, Any]:
     data = frame.to_dict()
+    if (frame.mode or "rpios") == "embedded":
+        try:
+            firmware = latest_embedded_firmware(frame) or with_embedded_firmware_layout(frame, {
+                "status": "idle",
+                "platform": normalize_embedded_platform((frame.embedded or {}).get("platform")),
+                "flashSize": embedded_flash_size_for_frame(frame),
+                "otaSupported": embedded_ota_supported_for_frame(frame),
+            })
+        except ValueError:
+            firmware = None
+        if firmware:
+            data["embedded"] = {**(data.get("embedded") or {}), "firmware": firmware}
     if latest_log_at is not _LATEST_LOG_AT_UNSET:
         data["last_log_at"] = (
             latest_log_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(latest_log_at, datetime) else None
@@ -1840,81 +1955,12 @@ async def api_frame_get_image(
                 body = await asyncio.get_running_loop().run_in_executor(
                     None, _coerce_frame_image_to_png, body, headers
                 )
-                await redis.set(cache_key, body, ex=86400 * 30)
                 scene_id = headers.get("x-scene-id")
                 if not scene_id:
                     encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
                     if encoded_scene_id:
                         scene_id = encoded_scene_id.decode("utf-8")
-                if scene_id:
-                    scene_id = _scene_image_scene_id_for_frame(frame, scene_id)
-                if scene_id:
-                    from app.models.scene_image import SceneImage
-                    from app.api.scene_images import _generate_thumbnail
-
-                    # Decoding and thumbnailing a full frame image is CPU-bound
-                    # PIL work; keep it off the event loop.
-                    def _decode_and_thumbnail():
-                        # dimensions (best‑effort – don’t crash if Pillow missing)
-                        width = height = None
-                        try:
-                            from PIL import Image
-
-                            img = Image.open(io.BytesIO(body))
-                            width, height = img.width, img.height
-                        except Exception:
-                            pass
-                        thumb, t_width, t_height = _generate_thumbnail(body)
-                        return width, height, thumb, t_width, t_height
-
-                    width, height, thumb, t_width, t_height = await asyncio.get_running_loop().run_in_executor(
-                        None, _decode_and_thumbnail
-                    )
-
-                    # upsert into SceneImage
-                    now = datetime.utcnow()
-                    img_row = (
-                        db.query(SceneImage)
-                        .filter_by(project_id=frame.project_id, frame_id=id, scene_id=scene_id)
-                        .first()
-                    )
-                    if img_row:
-                        img_row.image = body
-                        img_row.timestamp = now
-                        img_row.width = width
-                        img_row.height = height
-                        img_row.thumb_image = thumb
-                        img_row.thumb_width = t_width
-                        img_row.thumb_height = t_height
-                    else:
-                        img_row = SceneImage(
-                            project_id=frame.project_id,
-                            frame_id=id,
-                            scene_id=scene_id,
-                            image=body,
-                            timestamp=now,
-                            width=width,
-                            height=height,
-                            thumb_image=thumb,
-                            thumb_width=t_width,
-                            thumb_height=t_height,
-                        )
-                        db.add(img_row)
-                    db.commit()
-
-                if scene_id:
-                    await publish_message(
-                        redis,
-                        "new_scene_image",
-                        {
-                            "project_id": frame.project_id,
-                            "frameId": id,
-                            "sceneId": scene_id,
-                            "timestamp": now.isoformat(),
-                            "width": width,
-                            "height": height,
-                        },
-                    )
+                await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
 
                 return Response(content=body, media_type="image/png")
             else:
@@ -1966,6 +2012,34 @@ async def api_frame_get_image(
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
+
+
+@api_project.post("/frames/{id:int}/image")
+async def api_frame_upload_image(
+    id: int,
+    request: Request,
+    scene_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id) or _not_found()
+    body = await request.body()
+    if not body:
+        _bad_request("Missing image payload")
+
+    headers = {"content-type": request.headers.get("content-type", "")}
+    try:
+        image_body = await asyncio.get_running_loop().run_in_executor(
+            None, _coerce_frame_image_to_png, body, headers
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
+
+    image_info = await _store_frame_image(db, redis, frame, image_body, scene_id=scene_id)
+    return {
+        "message": "Frame image updated",
+        **image_info,
+    }
 
 
 @api_project.get("/frames/{id:int}/scene_source/{scene}")
@@ -2646,14 +2720,19 @@ async def api_frame_embedded_firmware_status(
 
     try:
         platform = normalize_embedded_platform((frame.embedded or {}).get("platform"))
+        firmware = await refresh_embedded_firmware_status(db, redis, frame)
+        flash_size = embedded_flash_size_for_frame(frame)
+        ota_supported = embedded_ota_supported_for_frame(frame)
     except ValueError as exc:
         _bad_request(str(exc))
     return {
-        "firmware": await refresh_embedded_firmware_status(db, redis, frame)
-        or {
+        "firmware": firmware
+        or with_embedded_firmware_layout(frame, {
             "status": "idle",
             "platform": platform,
-        }
+            "flashSize": flash_size,
+            "otaSupported": ota_supported,
+        })
     }
 
 
@@ -2869,6 +2948,42 @@ async def api_frame_fast_deploy_event(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_project.post("/frames/{id:int}/embedded/usb_deploy_complete")
+async def api_frame_embedded_usb_deploy_complete(
+    id: int,
+    task_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id) or _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("USB deploy completion is only available for embedded frames")
+
+    snapshot = frame.to_dict()
+    snapshot.pop("last_successful_deploy", None)
+    snapshot.pop("last_successful_deploy_at", None)
+    frame.status = "starting"
+    frame.last_successful_deploy = snapshot
+    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    await update_frame(db, redis, frame)
+    await log(
+        db,
+        redis,
+        id,
+        "stdinfo",
+        "Embedded USB fast deploy complete; reload queued",
+    )
+    if task_id:
+        await log(
+            db,
+            redis,
+            id,
+            "stdout",
+            f"[frameos-task:{_task_id_param(task_id)}] deploy completed fast",
+        )
+    return {"message": "Success", "frame": frame.to_dict()}
+
+
 @api_project.post("/frames/{id:int}/set_next_scene")
 async def api_frame_set_next_scene(
     id: int,
@@ -3059,6 +3174,8 @@ async def api_frame_new(
         )
         if data.device_config is not None:
             frame.device_config = dict(data.device_config)
+        if data.embedded is not None:
+            frame.embedded = dict(data.embedded)
 
         if data.ssh_keys is not None:
             frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))

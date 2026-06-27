@@ -38,7 +38,7 @@ function sortCompatibleApps(a: CompatibleAppRow, b: CompatibleAppRow): number {
 }
 
 export function Apps() {
-  const { frameId, mode } = useValues(frameLogic)
+  const { frameId, mode, frameForm } = useValues(frameLogic)
   const logic = appsLogic({ frameId })
   const { appsByCategory, search, visibleSceneApps, rawSceneApps, sceneAppUsageCounts } = useValues(logic)
   const { setSearch, deleteUnusedSceneApp } = useActions(logic)
@@ -53,7 +53,7 @@ export function Apps() {
     app: AppConfig,
     usageCount?: number,
     sources?: Record<string, string> | null,
-    compatibility: CompatibilityResult = appCompatibilityForFrame(mode, keyword, app, sources)
+    compatibility: CompatibilityResult = appCompatibilityForFrame(mode, keyword, app, sources, frameForm)
   ) => {
     const tag = appTag(app)
     const isUnusedSceneApp = usageCount === 0
@@ -140,7 +140,7 @@ export function Apps() {
                 app,
                 sources,
                 usageCount: sceneAppUsageCounts[keyword] ?? 0,
-                compatibility: appCompatibilityForFrame(mode, keyword, app, sources),
+                compatibility: appCompatibilityForFrame(mode, keyword, app, sources, frameForm),
               }
             })
             .toSorted(sortCompatibleApps)
@@ -156,7 +156,7 @@ export function Apps() {
             .map(([keyword, app]) => ({
               keyword,
               app,
-              compatibility: appCompatibilityForFrame(mode, keyword, app),
+              compatibility: appCompatibilityForFrame(mode, keyword, app, undefined, frameForm),
             }))
             .toSorted(sortCompatibleApps)
             .map(({ keyword, app, compatibility }) => renderApp(keyword, app, undefined, undefined, compatibility))}

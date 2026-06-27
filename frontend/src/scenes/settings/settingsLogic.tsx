@@ -15,12 +15,15 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
   const buildEnvironmentProvider =
     settings.buildEnvironment?.provider ||
     (settings.modalSandbox?.enabled ? 'modal' : settings.buildHost?.enabled ? 'buildHost' : 'docker')
+  const personalSettings = isSettingsObject(settings.personal) ? settings.personal : {}
   return {
     ...settings,
     defaults: {
       timezone: guessBrowserTimezone(),
       wifiSSID: '',
       wifiPassword: '',
+      backendHost: '',
+      backendPort: '',
       ...(settings.defaults ?? {}),
     },
     homeAssistant: settings.homeAssistant ?? {},
@@ -28,6 +31,10 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     github: settings.github ?? {},
     openAI: settings.openAI ?? {},
     posthog: settings.posthog ?? {},
+    personal: {
+      ...personalSettings,
+      favouriteTemplateIds: normalizeFavouriteTemplateIds(settings.personal?.favouriteTemplateIds),
+    },
     repositories: settings.repositories ?? [],
     ssh_keys: normalizeSshKeys(settings.ssh_keys),
     unsplash: settings.unsplash ?? {},
@@ -38,6 +45,17 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     buildHost: settings.buildHost ?? {},
     modalSandbox: settings.modalSandbox ?? {},
   }
+}
+
+function isSettingsObject(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function normalizeFavouriteTemplateIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return Array.from(new Set(value.filter((id): id is string => typeof id === 'string' && id.trim() !== '')))
 }
 
 export interface CustomFont {
@@ -57,6 +75,8 @@ export const settingsLogic = kea<settingsLogicType>([
     setSshKeyExpandedIds: (ids: string[]) => ({ ids }),
     setSshKeyExpanded: (id: string, expanded: boolean) => ({ id, expanded }),
     toggleSshKeyExpanded: (id: string) => ({ id }),
+    setPersonalFavouriteTemplateIds: (templateIds: string[]) => ({ templateIds }),
+    togglePersonalFavouriteTemplate: (templateId: string) => ({ templateId }),
     toggleOpenAiModelOverrides: true,
     newBuildHostKey: true,
     testBuildHost: true,
@@ -268,6 +288,43 @@ export const settingsLogic = kea<settingsLogicType>([
         keys.filter((key) => key.id !== id)
       )
       actions.setSshKeyExpanded(id, false)
+    },
+    setPersonalFavouriteTemplateIds: async ({ templateIds }) => {
+      const previousPersonal = values.savedSettings.personal ?? { favouriteTemplateIds: [] }
+      const favouriteTemplateIds = normalizeFavouriteTemplateIds(templateIds)
+      const personal = {
+        ...previousPersonal,
+        ...(values.settings.personal ?? {}),
+        favouriteTemplateIds,
+      }
+      actions.setSettingsValue(['personal', 'favouriteTemplateIds'] as any, favouriteTemplateIds)
+      actions.updateSavedSettings({ personal })
+
+      try {
+        const response = await apiFetch(`/api/settings`, {
+          method: 'POST',
+          body: JSON.stringify({ personal }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update personal favourites')
+        }
+        const updatedSettings = setDefaultSettings(await response.json())
+        actions.updateSavedSettings(updatedSettings)
+        actions.setSettingsValue(['personal'] as any, updatedSettings.personal)
+      } catch (error) {
+        console.error(error)
+        actions.setSettingsValue(['personal'] as any, previousPersonal)
+        actions.updateSavedSettings({ personal: previousPersonal })
+      }
+    },
+    togglePersonalFavouriteTemplate: async ({ templateId }) => {
+      const favouriteTemplateIds = normalizeFavouriteTemplateIds(values.settings.personal?.favouriteTemplateIds)
+      actions.setPersonalFavouriteTemplateIds(
+        favouriteTemplateIds.includes(templateId)
+          ? favouriteTemplateIds.filter((id) => id !== templateId)
+          : [...favouriteTemplateIds, templateId]
+      )
     },
     newBuildHostKey: async () => {
       if (values.savedSettings.buildHost?.sshKey) {

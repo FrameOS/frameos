@@ -35,6 +35,16 @@ static void load_defaults(void)
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
     strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
     strlcpy(s_config.tls_server_key, FRAMEOS_DEFAULT_TLS_SERVER_KEY, sizeof(s_config.tls_server_key));
+    s_config.admin_auth_enabled = FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE;
+    strlcpy(s_config.admin_user, FRAMEOS_DEFAULT_ADMIN_AUTH_USER, sizeof(s_config.admin_user));
+    strlcpy(s_config.admin_pass, FRAMEOS_DEFAULT_ADMIN_AUTH_PASS, sizeof(s_config.admin_pass));
+    strlcpy(s_config.assets_path, FRAMEOS_DEFAULT_ASSETS_PATH, sizeof(s_config.assets_path));
+    s_config.assets_sd.enabled = FRAMEOS_DEFAULT_ASSETS_SD_ENABLE;
+    s_config.assets_sd.cs = FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS;
+    s_config.assets_sd.sck = FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK;
+    s_config.assets_sd.miso = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO;
+    s_config.assets_sd.mosi = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI;
+    s_config.assets_sd.max_freq_khz = FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ;
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
@@ -94,6 +104,9 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "api_key", s_config.api_key, sizeof(s_config.api_key));
     nvs_get_string(nvs, "hostname", s_config.hostname, sizeof(s_config.hostname));
     nvs_get_string(nvs, "panel", s_config.panel, sizeof(s_config.panel));
+    nvs_get_string(nvs, "assets_path", s_config.assets_path, sizeof(s_config.assets_path));
+    nvs_get_string(nvs, "admin_user", s_config.admin_user, sizeof(s_config.admin_user));
+    nvs_get_string(nvs, "admin_pass", s_config.admin_pass, sizeof(s_config.admin_pass));
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
     size_t gpio_buttons_len = sizeof(gpio_buttons);
     esp_err_t buttons_err = nvs_get_str(nvs, "gpio_buttons", gpio_buttons, &gpio_buttons_len);
@@ -111,10 +124,17 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
+    if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
+    int8_t i8;
+    if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
+    if (nvs_get_i8(nvs, "sd_cs", &i8) == ESP_OK) s_config.assets_sd.cs = i8;
+    if (nvs_get_i8(nvs, "sd_sck", &i8) == ESP_OK) s_config.assets_sd.sck = i8;
+    if (nvs_get_i8(nvs, "sd_miso", &i8) == ESP_OK) s_config.assets_sd.miso = i8;
+    if (nvs_get_i8(nvs, "sd_mosi", &i8) == ESP_OK) s_config.assets_sd.mosi = i8;
+    if (nvs_get_u32(nvs, "sd_freq", &u32) == ESP_OK) s_config.assets_sd.max_freq_khz = u32;
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
-    int8_t i8;
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     char pins[FOS_STR_LEN] = "";
@@ -122,11 +142,13 @@ esp_err_t fos_config_init(void)
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u buttons=%u wifi=%s backend=%s",
+    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
              (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
              s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
+             (s_config.admin_auth_enabled && s_config.admin_user[0] && s_config.admin_pass[0]) ? "on" : "off",
+             s_config.assets_sd.enabled ? "on" : "off",
              (unsigned)s_config.gpio_button_count,
              s_config.wifi_ssid[0] ? s_config.wifi_ssid : "(unset)",
              s_config.backend_url[0] ? s_config.backend_url : "(unset)");
@@ -145,13 +167,23 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "api_key", s_config.api_key);
     nvs_set_str(nvs, "hostname", s_config.hostname);
     nvs_set_str(nvs, "panel", s_config.panel);
+    nvs_set_str(nvs, "assets_path", s_config.assets_path);
+    nvs_set_str(nvs, "admin_user", s_config.admin_user);
+    nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
+    nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
+    nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
+    nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);
+    nvs_set_i8(nvs, "sd_sck", s_config.assets_sd.sck);
+    nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso);
+    nvs_set_i8(nvs, "sd_mosi", s_config.assets_sd.mosi);
+    nvs_set_u32(nvs, "sd_freq", s_config.assets_sd.max_freq_khz);
     nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
     nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);
     nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);
@@ -214,6 +246,32 @@ void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len)
 {
     snprintf(out, out_len, "rst=%d,dc=%d,cs=%d,cs2=%d,busy=%d,sck=%d,mosi=%d,pwr=%d",
              pins->rst, pins->dc, pins->cs, pins->cs2, pins->busy, pins->sck, pins->mosi, pins->pwr);
+}
+
+esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config_t *assets_sd)
+{
+    char buf[FOS_STR_LEN];
+    strlcpy(buf, spec, sizeof(buf));
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq) return ESP_ERR_INVALID_ARG;
+        *eq = '\0';
+        int value = atoi(eq + 1);
+        if (value < -1 || value > 48) return ESP_ERR_INVALID_ARG;
+        if (strcmp(tok, "cs") == 0) assets_sd->cs = value;
+        else if (strcmp(tok, "sck") == 0) assets_sd->sck = value;
+        else if (strcmp(tok, "miso") == 0) assets_sd->miso = value;
+        else if (strcmp(tok, "mosi") == 0) assets_sd->mosi = value;
+        else return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, char *out, size_t out_len)
+{
+    snprintf(out, out_len, "cs=%d,sck=%d,miso=%d,mosi=%d",
+             assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
 }
 
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)

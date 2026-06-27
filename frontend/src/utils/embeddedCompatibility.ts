@@ -10,7 +10,6 @@ const supported: CompatibilityResult = { supported: true }
 
 const embeddedUnavailableApps: Record<string, string> = {
   'data/chromiumScreenshot': 'Requires Playwright/Chromium and child processes.',
-  'data/localImage': 'Requires local assets or mounted files, which ESP32 frames do not support yet.',
   'data/rstpSnapshot': 'Requires FFmpeg and child processes.',
 }
 
@@ -22,6 +21,10 @@ function unsupported(reason: string): CompatibilityResult {
 
 function isEmbeddedMode(mode?: FrameType['mode'] | null): boolean {
   return mode === 'embedded'
+}
+
+function hasEmbeddedSdCardAssets(frame?: Partial<FrameType> | null): boolean {
+  return frame?.device_config?.sdCardAssets?.enabled === true
 }
 
 function configFromSources(sources?: Record<string, string> | null): Partial<AppConfig> | null {
@@ -41,10 +44,15 @@ export function appCompatibilityForFrame(
   mode: FrameType['mode'] | undefined | null,
   keyword: string,
   app?: Partial<AppConfig> | null,
-  sources?: Record<string, string> | null
+  sources?: Record<string, string> | null,
+  frame?: Partial<FrameType> | null
 ): CompatibilityResult {
   if (!isEmbeddedMode(mode)) {
     return supported
+  }
+
+  if (keyword === 'data/localImage' && !hasEmbeddedSdCardAssets(frame)) {
+    return unsupported('Requires SD card assets mounted at /srv/assets.')
   }
 
   if (embeddedUnavailableApps[keyword]) {
@@ -100,7 +108,8 @@ function sceneAppForKeyword(scene: FrameScene, keyword: string): SceneApp | null
 export function templateCompatibilityForFrame(
   mode: FrameType['mode'] | undefined | null,
   template: TemplateType,
-  apps: Record<string, AppConfig>
+  apps: Record<string, AppConfig>,
+  frame?: Partial<FrameType> | null
 ): CompatibilityResult {
   if (!isEmbeddedMode(mode)) {
     return supported
@@ -144,7 +153,7 @@ export function templateCompatibilityForFrame(
         return unsupported(`"${scene.name || 'Untitled scene'}" uses unknown app "${keyword}".`)
       }
 
-      const compatibility = appCompatibilityForFrame(mode, keyword, app, sources)
+      const compatibility = appCompatibilityForFrame(mode, keyword, app, sources, frame)
       if (!compatibility.supported) {
         const appName = app?.name || keyword
         return unsupported(`"${scene.name || 'Untitled scene'}" uses ${appName}: ${compatibility.reason}`)

@@ -159,6 +159,97 @@ async def test_process_log_bootup_does_not_override_stored_timezone(mock_pub, db
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_embedded_bootup_records_boot_and_marks_generated_firmware_deployed(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "EmbeddedBootFrame", "frame53.local", "server_host")
+    frame.mode = "embedded"
+    frame.embedded = {
+        "platform": "esp32-s3",
+        "firmware": {
+            "status": "ready",
+            "completedAt": "2026-06-27T13:22:00+00:00",
+            "panel": "EPD_7in3e",
+        },
+    }
+    frame.last_successful_deploy = {"frameos_version": "2026.6.15"}
+    frame.last_successful_deploy_at = datetime(2026, 6, 13, 23, 41, 55)
+    db.add(frame)
+    db.commit()
+
+    boot_time = datetime(2026, 6, 27, 13, 23, 17)
+    await process_log(
+        db,
+        redis,
+        frame,
+        [
+            boot_time.replace(tzinfo=timezone.utc).timestamp(),
+            {
+                "event": "bootup",
+                "source": "esp32",
+                "ip": "10.8.0.232",
+                "width": 800,
+                "height": 480,
+                "pixelFormat": 7,
+                "mode": "embedded",
+                "renderMode": "local",
+                "version": "v2026.6.26-6-gdf4b4945-dirty",
+                "panel": "EPD_7in3e",
+                "wifi": "connected",
+            },
+        ],
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.frame_host == "10.8.0.232"
+    assert updated.last_successful_deploy_at == boot_time
+    assert updated.last_successful_deploy["frameos_version"] == "2026.6.26"
+    assert updated.last_successful_deploy["frame_host"] == "10.8.0.232"
+    assert updated.embedded["lastBoot"]["ip"] == "10.8.0.232"
+    assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.6.26"
+    assert updated.embedded["lastBoot"]["panel"] == "EPD_7in3e"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_embedded_bootup_does_not_mark_future_firmware_deployed(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "EmbeddedBootFrame", "frame53.local", "server_host")
+    frame.mode = "embedded"
+    frame.embedded = {
+        "platform": "esp32-s3",
+        "firmware": {
+            "status": "ready",
+            "completedAt": "2026-06-27T13:34:00+00:00",
+            "panel": "EPD_13in3e",
+        },
+    }
+    frame.last_successful_deploy = {"frameos_version": "2026.6.15"}
+    frame.last_successful_deploy_at = datetime(2026, 6, 13, 23, 41, 55)
+    db.add(frame)
+    db.commit()
+
+    boot_time = datetime(2026, 6, 27, 13, 23, 17)
+    await process_log(
+        db,
+        redis,
+        frame,
+        [
+            boot_time.replace(tzinfo=timezone.utc).timestamp(),
+            {
+                "event": "bootup",
+                "source": "esp32",
+                "ip": "10.8.0.232",
+                "version": "v2026.6.26-6-gdf4b4945-dirty",
+            },
+        ],
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.6.26"
+    assert updated.last_successful_deploy == {"frameos_version": "2026.6.15"}
+    assert updated.last_successful_deploy_at == datetime(2026, 6, 13, 23, 41, 55)
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup_marks_matching_buildroot_sd_image_deployed(mock_pub, db, redis):
     frame = await new_frame(db, redis, "BuildrootBootFrame", "frame53.local", "server_host")
     frame.mode = "buildroot"

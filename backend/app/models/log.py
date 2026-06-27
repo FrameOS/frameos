@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import timezone, datetime
 from copy import deepcopy
 from ipaddress import ip_address
@@ -21,6 +22,92 @@ PRUNE_CHECK_EVERY = 100
 FRAME_ACTIVITY_LOG_TYPES = ("webhook",)
 
 _inserts_since_prune_check: dict[int, int] = {}
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _aware_utc(parsed)
+
+
+def _frameos_version_from_boot(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"v?(\d+\.\d+\.\d+)", value)
+    return match.group(1) if match else None
+
+
+def _embedded_firmware_completed_at(frame: Frame) -> datetime | None:
+    embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
+    firmware = embedded.get("firmware")
+    if not isinstance(firmware, dict):
+        return None
+    return _parse_iso_datetime(firmware.get("completedAt"))
+
+
+def _should_mark_embedded_boot_deployed(frame: Frame, boot_timestamp: datetime) -> bool:
+    if (frame.mode or "rpios") != "embedded":
+        return False
+
+    firmware_completed_at = _embedded_firmware_completed_at(frame)
+    if firmware_completed_at is None:
+        return False
+
+    booted_at = _aware_utc(boot_timestamp)
+    if firmware_completed_at > booted_at:
+        return False
+
+    last_deploy_at = _aware_utc(frame.last_successful_deploy_at) if frame.last_successful_deploy_at else None
+    return last_deploy_at is None or firmware_completed_at > last_deploy_at
+
+
+def _embedded_boot_metadata(log: dict, boot_timestamp: datetime, ip: str | None = None) -> dict[str, Any]:
+    boot_ip = log.get("ip") or ip
+    if isinstance(boot_ip, str):
+        try:
+            ip_address(boot_ip)
+        except ValueError:
+            boot_ip = None
+    else:
+        boot_ip = None
+
+    raw_version = log.get("version")
+    metadata: dict[str, Any] = {
+        "at": _aware_utc(boot_timestamp).isoformat(),
+        "source": log.get("source") or "embedded",
+    }
+    frameos_version = _frameos_version_from_boot(raw_version)
+    if isinstance(raw_version, str) and raw_version:
+        metadata["version"] = raw_version
+    if frameos_version:
+        metadata["frameosVersion"] = frameos_version
+    if boot_ip:
+        metadata["ip"] = boot_ip
+    for key in ("width", "height", "pixelFormat", "mode", "renderMode", "panel", "wifi"):
+        value = log.get(key)
+        if value is not None:
+            metadata[key] = value
+    return metadata
+
+
+def _embedded_boot_deploy_snapshot(frame: Frame, boot_metadata: dict[str, Any]) -> dict[str, Any]:
+    snapshot = frame.to_dict()
+    snapshot.pop("last_successful_deploy", None)
+    snapshot.pop("last_successful_deploy_at", None)
+    frameos_version = boot_metadata.get("frameosVersion")
+    if isinstance(frameos_version, str) and frameos_version:
+        snapshot["frameos_version"] = frameos_version
+    return snapshot
 
 
 def is_frame_activity_log(type: str, _line: str) -> bool:
@@ -159,6 +246,8 @@ async def process_log(
     if event == 'render:done':
         changes['status'] = 'ready'
     marked_buildroot_sd_image_booted = False
+    mark_embedded_boot_deployed = False
+    embedded_boot_metadata: dict[str, Any] | None = None
     if event == 'bootup':
         from app.tasks.buildroot_deploy_state import (
             buildroot_sd_image_deploy_snapshot,
@@ -166,6 +255,12 @@ async def process_log(
         )
 
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
+        if (frame.mode or "rpios") == "embedded":
+            embedded_boot_metadata = _embedded_boot_metadata(log, timestamp, ip=ip)
+            embedded = dict(frame.embedded or {})
+            embedded["lastBoot"] = embedded_boot_metadata
+            changes["embedded"] = embedded
+            mark_embedded_boot_deployed = _should_mark_embedded_boot_deployed(frame, timestamp)
         if frame.status != 'ready':
             changes['status'] = 'ready'
         boot_ip = log.get("ip") or ip
@@ -197,6 +292,9 @@ async def process_log(
             setattr(frame, key, value)
         if marked_buildroot_sd_image_booted and isinstance(frame.last_successful_deploy, dict):
             frame.last_successful_deploy = buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"])
+        if mark_embedded_boot_deployed and embedded_boot_metadata is not None:
+            frame.last_successful_deploy = _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata)
+            frame.last_successful_deploy_at = timestamp
         await update_frame(db, redis, frame)
 
     if event == 'metrics':

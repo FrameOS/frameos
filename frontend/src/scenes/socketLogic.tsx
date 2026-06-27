@@ -76,6 +76,9 @@ export const socketLogic = kea<socketLogicType>([
             case 'new_scene_image':
               actions.newSceneImage(data.data.frameId, data.data.sceneId, data.data.width, data.data.height)
               break
+            case 'frame_rendered':
+              actions.frameRendered(data.data.frameId)
+              break
             case 'update_settings':
               actions.updateSettings(data.data)
               break

@@ -104,6 +104,7 @@ function addJavaScriptCatalogAppOptions(
   options: OptionWithType[],
   apps: Record<string, AppConfig>,
   mode: FrameType['mode'] | undefined | null,
+  frame: Partial<FrameType> | null | undefined,
   filter?: (app: AppConfig) => boolean,
   optionKeyword?: string
 ): void {
@@ -112,7 +113,7 @@ function addJavaScriptCatalogAppOptions(
     if (!app || (filter && !filter(app))) {
       continue
     }
-    const compatibility = appCompatibilityForFrame(mode, keyword, app)
+    const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frame)
     options.push({
       label: javascriptCatalogAppLabel(keyword, app),
       value: `app/${keyword}`,
@@ -299,7 +300,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword: 'clipboard',
           })
           options.push({ label: INLINE_CODE_OPTION_LABEL, value: 'code', type: 'string', keyword: 'code' })
-          addJavaScriptCatalogAppOptions(options, effectiveApps, mode)
+          addJavaScriptCatalogAppOptions(options, effectiveApps, mode, frameForm)
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,
@@ -321,7 +322,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               continue
             }
             if (isRunnableApp(app)) {
-              const compatibility = appCompatibilityForFrame(mode, keyword, app)
+              const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
@@ -358,12 +359,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(effectiveApps, newNodeHandleDataType)
-            addJavaScriptCatalogAppOptions(options, appsForType, mode, undefined, key)
+            addJavaScriptCatalogAppOptions(options, appsForType, mode, frameForm, undefined, key)
             for (const [keyword, app] of Object.entries(appsForType)) {
               if (isJavaScriptCatalogApp(keyword)) {
                 continue
               }
-              const compatibility = appCompatibilityForFrame(mode, keyword, app)
+              const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
               options.push({
                 label: appLabel(app, 'App'),
                 value: `app/${keyword}`,
@@ -395,6 +396,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               options,
               effectiveApps,
               mode,
+              frameForm,
               (app) => !!app.output && app.output.length > 0,
               key
             )
@@ -403,7 +405,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 continue
               }
               if (app.output && app.output.length > 0) {
-                const compatibility = appCompatibilityForFrame(mode, keyword, app)
+                const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
                 options.push({
                   label: appLabel(app, 'App'),
                   value: `app/${keyword}`,
@@ -429,13 +431,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
-          addJavaScriptCatalogAppOptions(options, effectiveApps, mode, isRunnableApp)
+          addJavaScriptCatalogAppOptions(options, effectiveApps, mode, frameForm, isRunnableApp)
           for (const [keyword, app] of Object.entries(effectiveApps)) {
             if (isJavaScriptCatalogApp(keyword)) {
               continue
             }
             if (isRunnableApp(app)) {
-              const compatibility = appCompatibilityForFrame(mode, keyword, app)
+              const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,

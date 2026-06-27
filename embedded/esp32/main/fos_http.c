@@ -16,8 +16,10 @@
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "mbedtls/base64.h"
 
 #include "cJSON.h"
+#include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
@@ -30,8 +32,9 @@ static const char *TAG = "fos_http";
 
 #define FOS_HTTPS_MAX_OPEN_SOCKETS 1
 #define FOS_HTTPS_BACKLOG_CONN 1
-#define FOS_HTTPS_MIN_INTERNAL_FREE (96 * 1024)
-#define FOS_HTTPS_MIN_INTERNAL_BLOCK (24 * 1024)
+#define FOS_HTTPS_WARN_INTERNAL_FREE (96 * 1024)
+#define FOS_HTTPS_MIN_INTERNAL_FREE (48 * 1024)
+#define FOS_HTTPS_MIN_INTERNAL_BLOCK (40 * 1024)
 
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
@@ -55,9 +58,15 @@ static bool https_heap_ready(void)
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free_internal < FOS_HTTPS_MIN_INTERNAL_FREE ||
         largest_internal < FOS_HTTPS_MIN_INTERNAL_BLOCK) {
-        ESP_LOGW(TAG, "https server skipped: internal=%u largest=%u",
-                 (unsigned)free_internal, (unsigned)largest_internal);
+        ESP_LOGW(TAG, "https server skipped: internal=%u largest=%u min_internal=%u min_largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal,
+                 (unsigned)FOS_HTTPS_MIN_INTERNAL_FREE,
+                 (unsigned)FOS_HTTPS_MIN_INTERNAL_BLOCK);
         return false;
+    }
+    if (free_internal < FOS_HTTPS_WARN_INTERNAL_FREE) {
+        ESP_LOGW(TAG, "starting https server with low internal heap: internal=%u largest=%u",
+                 (unsigned)free_internal, (unsigned)largest_internal);
     }
     return true;
 }
@@ -228,7 +237,82 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     return ESP_OK;
 }
 
-static esp_err_t store_uploaded_scenes_payload(const char *body, size_t len)
+static bool request_auth_header(httpd_req_t *req, char *out, size_t out_len)
+{
+    size_t len = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (!len || len >= out_len) return false;
+    return httpd_req_get_hdr_value_str(req, "Authorization", out, out_len) == ESP_OK;
+}
+
+static bool admin_auth_configured(const fos_config_t *config)
+{
+    return config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0];
+}
+
+static bool request_bearer_matches(httpd_req_t *req, const fos_config_t *config)
+{
+    if (!config->api_key[0]) return false;
+    char auth[FOS_STR_LEN + 16];
+    if (!request_auth_header(req, auth, sizeof(auth))) return false;
+    const char *prefix = "Bearer ";
+    size_t prefix_len = strlen(prefix);
+    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, config->api_key) == 0;
+}
+
+static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
+{
+    if (!admin_auth_configured(config)) return false;
+
+    char auth[384];
+    if (!request_auth_header(req, auth, sizeof(auth))) return false;
+
+    char raw[FOS_STR_LEN * 2 + 2];
+    snprintf(raw, sizeof(raw), "%s:%s", config->admin_user, config->admin_pass);
+
+    unsigned char encoded[384];
+    size_t encoded_len = 0;
+    int rc = mbedtls_base64_encode(
+        encoded,
+        sizeof(encoded) - 1,
+        &encoded_len,
+        (const unsigned char *)raw,
+        strlen(raw));
+    if (rc != 0 || encoded_len >= sizeof(encoded)) return false;
+    encoded[encoded_len] = '\0';
+
+    const char *prefix = "Basic ";
+    size_t prefix_len = strlen(prefix);
+    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, (const char *)encoded) == 0;
+}
+
+static esp_err_t require_protected_access(httpd_req_t *req)
+{
+    if (s_portal_mode) return ESP_OK;
+
+    fos_config_t *config = fos_config();
+    if (request_bearer_matches(req, config) || request_basic_matches(req, config)) {
+        return ESP_OK;
+    }
+
+    if (!admin_auth_configured(config)) {
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_send_err(
+            req,
+            HTTPD_403_FORBIDDEN,
+            "FrameOS setup is locked because admin credentials are not configured. "
+            "Connect through the FrameOS hotspot, or set frame admin auth in the backend and redeploy.");
+    }
+
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
+    return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
+}
+
+#define REQUIRE_PROTECTED_ACCESS() do { \
+        esp_err_t auth_err = require_protected_access(req); \
+        if (auth_err != ESP_OK) return auth_err; \
+    } while (0)
+
+esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
 {
     const char *payload = body;
     size_t payload_len = len;
@@ -336,6 +420,7 @@ static const char *SETUP_PAGE_HEAD =
     ".preview,.panel{margin:1.6rem 0;padding-top:1rem;border-top:1px solid #ddd}"
     ".preview img{display:block;max-width:100%;height:auto;border:1px solid #ddd;background:#fff}"
     ".muted{color:#666;font-size:.9rem}"
+    ".warn{background:#fff8dc;border:1px solid #e5c25a;padding:.7rem;margin:.9rem 0}"
     ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}"
     ".metric{background:#f6f6f6;border:1px solid #ddd;padding:.5rem}.metric b{display:block}"
     "code{background:#eee;padding:0 .3rem}</style></head><body>"
@@ -343,11 +428,15 @@ static const char *SETUP_PAGE_HEAD =
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     fos_config_t *config = fos_config();
     char field[64];
     char pins[FOS_STR_LEN];
+    char sd_pins[FOS_STR_LEN];
     char option_label[192];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
+    fos_config_format_assets_sd_pins(&config->assets_sd, sd_pins, sizeof(sd_pins));
 
     httpd_resp_set_type(req, "text/html");
     if (httpd_resp_sendstr_chunk(req, SETUP_PAGE_HEAD) != ESP_OK) return ESP_FAIL;
@@ -391,6 +480,27 @@ static esp_err_t root_get_handler(httpd_req_t *req)
                    " autocomplete='off' placeholder='Leave blank to keep current key'") != ESP_OK) {
         return ESP_FAIL;
     }
+
+    bool has_admin_auth = admin_auth_configured(config);
+    if (!has_admin_auth) {
+        if (sendstr(req, "<p class='warn'>Set an admin username and password before joining normal Wi-Fi. Without them, setup and control routes stay locked outside hotspot mode.</p>") != ESP_OK) {
+            return ESP_FAIL;
+        }
+    }
+    if (sendstr(req, "<label for='admin_auth'>Setup/control protection</label><select id='admin_auth' name='admin_auth'>") != ESP_OK) return ESP_FAIL;
+    bool protect_setup = config->admin_auth_enabled || !has_admin_auth;
+    if (send_option(req, "1", "Enabled with admin username/password", protect_setup) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Disabled (locked outside hotspot unless backend token is used)", !protect_setup) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "Admin username", "admin_user", "text",
+                   config->admin_user[0] ? config->admin_user : "admin", " autocomplete='username'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (send_input(req, "Admin password", "admin_pass", "password", "",
+                   " autocomplete='new-password' placeholder='Leave blank to keep current password'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->frame_id);
     if (send_input(req, "Frame ID", "frame_id", "number", field, " min='0'") != ESP_OK) return ESP_FAIL;
 
@@ -432,6 +542,21 @@ static esp_err_t root_get_handler(httpd_req_t *req)
                    " placeholder='rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'") != ESP_OK) {
         return ESP_FAIL;
     }
+    if (send_input(req, "Assets path", "assets_path", "text", config->assets_path,
+                   " placeholder='/srv/assets'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (sendstr(req, "<label for='assets_sd_enable'>SD card assets</label><select id='assets_sd_enable' name='assets_sd_enable'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Enabled (mount FAT32 card at assets path)", config->assets_sd.enabled) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Disabled", !config->assets_sd.enabled) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "SD card pins", "assets_sd_pins", "text", sd_pins,
+                   " placeholder='cs=38,sck=39,miso=40,mosi=41'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    snprintf(field, sizeof(field), "%lu", (unsigned long)config->assets_sd.max_freq_khz);
+    if (send_input(req, "SD max frequency (kHz)", "assets_sd_freq", "number", field,
+                   " min='400' max='40000'") != ESP_OK) return ESP_FAIL;
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
         "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
@@ -449,7 +574,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "`<div class='metric'><b>Board</b>${b.target||'ESP32-S3'}</div>`+"
         "`<div class='metric'><b>Flash</b>${Math.round((st.flashBytes||0)/1024)}K: ${fl}</div>`+"
         "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
-        "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`;"
+        "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`+"
+        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`;"
         "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
         "function refreshPreview(){const img=document.getElementById('preview');img.src='/image?t='+Date.now();}"
         "function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;"
@@ -463,7 +589,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
-static esp_err_t status_get_handler(httpd_req_t *req)
+char *fos_http_status_json(void)
 {
     fos_config_t *config = fos_config();
     const esp_app_desc_t *app = esp_app_get_description();
@@ -472,7 +598,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     elf_sha[0] = '\0';
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     char pins[FOS_STR_LEN];
+    char sd_pins[FOS_STR_LEN];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
+    fos_config_format_assets_sd_pins(&config->assets_sd, sd_pins, sizeof(sd_pins));
     int preview_width = 0, preview_height = 0;
     fos_pixel_format_t preview_format = FOS_PIXEL_1BPP;
     size_t preview_len = 0;
@@ -497,14 +625,16 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char *ip = json_escape_dup(fos_wifi_ip());
     char *panel = json_escape_dup(config->panel);
     char *pins_json = json_escape_dup(pins);
+    char *sd_pins_json = json_escape_dup(sd_pins);
+    char *assets_path = json_escape_dup(config->assets_path);
     char *backend = json_escape_dup(config->backend_url);
     char *ssid = json_escape_dup(config->wifi_ssid);
     char *nim_info = json_escape_dup(frameos_nim_info());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
-        !panel || !pins_json || !backend || !ssid || !nim_info) {
+        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-        free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
-        return httpd_resp_send_500(req);
+        free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        return NULL;
     }
 
     char *json = NULL;
@@ -516,13 +646,16 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
+        "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
+        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu},"
         "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
         "\"resumable\":true,\"bootRequestSupported\":true,"
         "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
-        "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u},"
+        "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
+        "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\"},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
@@ -537,6 +670,10 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
         (unsigned)storage.ota_slot_bytes, (unsigned)storage.ota_bytes,
         (unsigned)storage.state_bytes,
+        assets_path, config->assets_sd.enabled ? "true" : "false",
+        fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
+        (unsigned long)config->assets_sd.max_freq_khz,
+        (unsigned long long)fos_assets_sd_capacity_bytes(),
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
@@ -545,6 +682,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
+        fos_client_last_refresh_skipped() ? "true" : "false",
+        fos_client_snapshot_mode(),
         nim_info, scene_json,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
@@ -554,12 +693,24 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         config->wake_schedule ? "true" : "false",
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-    free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
+    free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
     if (len < 0 || !json) {
+        free(json);
+        return NULL;
+    }
+    return json;
+}
+
+static esp_err_t status_get_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+
+    char *json = fos_http_status_json();
+    if (!json) {
         return httpd_resp_send_500(req);
     }
     httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_send(req, json, len);
+    esp_err_t err = httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
     free(json);
     return err;
 }
@@ -695,25 +846,29 @@ static uint8_t preview_palette_index(const uint8_t *buf, int width, int height,
     }
 }
 
-static esp_err_t preview_bmp_handler(httpd_req_t *req)
+esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene_id, size_t scene_id_len)
 {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!out || !out_len) return ESP_ERR_INVALID_ARG;
+
     int width = 0, height = 0;
     fos_pixel_format_t format = FOS_PIXEL_1BPP;
     size_t packed_len = 0;
     if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL)) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
     if (width <= 0 || height <= 0 || packed_len == 0) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
 
     uint8_t *packed = heap_caps_malloc(packed_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!packed) packed = malloc(packed_len);
-    if (!packed) return httpd_resp_send_500(req);
+    if (!packed) return ESP_ERR_NO_MEM;
     esp_err_t err = fos_client_snapshot_copy(packed, packed_len, &width, &height, &format, NULL, NULL);
     if (err != ESP_OK) {
         free(packed);
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
 
     uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
@@ -724,32 +879,31 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
         free(packed);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
+        return ESP_ERR_INVALID_SIZE;
     }
-
-    uint8_t header[54] = {0};
-    header[0] = 'B'; header[1] = 'M';
-    put_u32le(&header[2], (uint32_t)(54u + palette_bytes + pixel_bytes));
-    put_u32le(&header[10], (uint32_t)(54u + palette_bytes));
-    put_u32le(&header[14], 40);
-    put_u32le(&header[18], (uint32_t)width);
-    put_u32le(&header[22], (uint32_t)height);
-    put_u16le(&header[26], 1);
-    put_u16le(&header[28], bit_count);
-    put_u32le(&header[34], (uint32_t)pixel_bytes);
-    put_u32le(&header[46], (uint32_t)palette_entries);
-    put_u32le(&header[50], (uint32_t)palette_entries);
-
-    const size_t rows_per_chunk = 16;
-    uint8_t *rows = heap_caps_calloc(rows_per_chunk, row_stride, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!rows) rows = calloc(rows_per_chunk, row_stride);
-    if (!rows) {
+    size_t bmp_len = 54u + palette_bytes + pixel_bytes;
+    uint8_t *bmp = heap_caps_malloc(bmp_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!bmp) bmp = malloc(bmp_len);
+    if (!bmp) {
         free(packed);
-        return httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
     }
+    memset(bmp, 0, bmp_len);
 
-    uint8_t palette[64];
-    memset(palette, 255, sizeof(palette));
+    bmp[0] = 'B'; bmp[1] = 'M';
+    put_u32le(&bmp[2], (uint32_t)bmp_len);
+    put_u32le(&bmp[10], (uint32_t)(54u + palette_bytes));
+    put_u32le(&bmp[14], 40);
+    put_u32le(&bmp[18], (uint32_t)width);
+    put_u32le(&bmp[22], (uint32_t)height);
+    put_u16le(&bmp[26], 1);
+    put_u16le(&bmp[28], bit_count);
+    put_u32le(&bmp[34], (uint32_t)pixel_bytes);
+    put_u32le(&bmp[46], (uint32_t)palette_entries);
+    put_u32le(&bmp[50], (uint32_t)palette_entries);
+
+    uint8_t *palette = bmp + 54u;
+    memset(palette, 255, palette_bytes);
     size_t colors = 0;
     const uint8_t *rgb = preview_palette(format, &colors);
     for (size_t i = 0; i < palette_entries; i++) {
@@ -760,20 +914,13 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
         palette[i * 4u + 3u] = 0;
     }
 
-    httpd_resp_set_type(req, "image/bmp");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    char scene_id[128];
-    current_scene_id(scene_id, sizeof(scene_id));
-    if (scene_id[0]) {
-        httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
+    if (scene_id && scene_id_len > 0) {
+        current_scene_id(scene_id, scene_id_len);
     }
-    err = httpd_resp_send_chunk(req, (const char *)header, sizeof(header));
-    if (err == ESP_OK) {
-        err = httpd_resp_send_chunk(req, (const char *)palette, palette_bytes);
-    }
-    size_t pending_rows = 0;
-    for (int y = height - 1; err == ESP_OK && y >= 0; y--) {
-        uint8_t *row = rows + pending_rows * row_stride;
+    uint8_t *pixels = bmp + 54u + palette_bytes;
+    size_t row_index = 0;
+    for (int y = height - 1; y >= 0; y--) {
+        uint8_t *row = pixels + row_index * row_stride;
         memset(row, 0, row_stride);
         for (int x = 0; x < width; x++) {
             uint8_t index = preview_palette_index(packed, width, height, format, x, y);
@@ -785,21 +932,47 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
                 row[(size_t)x >> 1] |= (index & 0x0F) << 4;
             }
         }
-        pending_rows++;
-        if (pending_rows == rows_per_chunk || y == 0) {
-            err = httpd_resp_send_chunk(req, (const char *)rows, row_stride * pending_rows);
-            pending_rows = 0;
-        }
+        row_index++;
     }
 
-    free(rows);
     free(packed);
-    if (err != ESP_OK) return err;
-    return httpd_resp_send_chunk(req, NULL, 0);
+    *out = bmp;
+    *out_len = bmp_len;
+    return ESP_OK;
+}
+
+static esp_err_t preview_bmp_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+
+    uint8_t *bmp = NULL;
+    size_t bmp_len = 0;
+    char scene_id[128];
+    scene_id[0] = '\0';
+    esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
+    if (err == ESP_ERR_NOT_FOUND) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+    }
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "image/bmp");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (scene_id[0]) {
+        httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
+    }
+    err = httpd_resp_send(req, (const char *)bmp, bmp_len);
+    free(bmp);
+    return err;
 }
 
 static esp_err_t setup_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 2048) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -819,6 +992,21 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
 
     fos_config_t *config = fos_config();
     char value[FOS_URL_LEN];
+    bool next_admin_auth_enabled = config->admin_auth_enabled;
+    char next_admin_user[FOS_STR_LEN];
+    char next_admin_pass[FOS_STR_LEN];
+    strlcpy(next_admin_user, config->admin_user, sizeof(next_admin_user));
+    strlcpy(next_admin_pass, config->admin_pass, sizeof(next_admin_pass));
+    if (form_value(body, "admin_auth", value, sizeof(value))) next_admin_auth_enabled = atoi(value) != 0;
+    if (form_value(body, "admin_user", value, sizeof(value))) strlcpy(next_admin_user, value, sizeof(next_admin_user));
+    if (form_value(body, "admin_pass", value, sizeof(value)) && value[0]) {
+        strlcpy(next_admin_pass, value, sizeof(next_admin_pass));
+    }
+    if (next_admin_auth_enabled && (!next_admin_user[0] || !next_admin_pass[0])) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "admin username and password required");
+    }
+
     if (form_value(body, "ssid", value, sizeof(value))) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));
     if (form_value(body, "pass", value, sizeof(value)) && value[0]) {
         strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
@@ -832,12 +1020,22 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "api_key", value, sizeof(value)) && value[0]) {
         strlcpy(config->api_key, value, sizeof(config->api_key));
     }
+    config->admin_auth_enabled = next_admin_auth_enabled;
+    strlcpy(config->admin_user, next_admin_user, sizeof(config->admin_user));
+    strlcpy(config->admin_pass, next_admin_pass, sizeof(config->admin_pass));
     if (form_value(body, "frame_id", value, sizeof(value))) config->frame_id = strtoul(value, NULL, 10);
     if (form_value(body, "panel", value, sizeof(value))) strlcpy(config->panel, value, sizeof(config->panel));
     if (form_value(body, "render_mode", value, sizeof(value))) config->render_mode = atoi(value) ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     if (form_value(body, "server_send_logs", value, sizeof(value))) config->server_send_logs = atoi(value) != 0;
     if (form_value(body, "interval", value, sizeof(value)) && atoi(value) >= 5) config->interval_sec = atoi(value);
     if (form_value(body, "pins", value, sizeof(value))) fos_config_parse_pins(value, &config->pins);
+    if (form_value(body, "assets_path", value, sizeof(value))) strlcpy(config->assets_path, value, sizeof(config->assets_path));
+    if (form_value(body, "assets_sd_enable", value, sizeof(value))) config->assets_sd.enabled = atoi(value) != 0;
+    if (form_value(body, "assets_sd_pins", value, sizeof(value))) fos_config_parse_assets_sd_pins(value, &config->assets_sd);
+    if (form_value(body, "assets_sd_freq", value, sizeof(value))) {
+        uint32_t freq = strtoul(value, NULL, 10);
+        if (freq >= 400 && freq <= 40000) config->assets_sd.max_freq_khz = freq;
+    }
     free(body);
 
     esp_err_t err = fos_config_save();
@@ -854,6 +1052,8 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
 
 static esp_err_t action_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     fos_action_cb cb = (fos_action_cb)req->user_ctx;
     if (!cb) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "action not available");
@@ -866,6 +1066,8 @@ static esp_err_t action_handler(httpd_req_t *req)
 
 static esp_err_t scenes_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_info_json();
     if (!json || !json[0]) {
         json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
@@ -876,6 +1078,8 @@ static esp_err_t scenes_get_handler(httpd_req_t *req)
 
 static esp_err_t scene_state_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_state_json();
     if (!json || !json[0]) {
         json = "{}";
@@ -886,6 +1090,8 @@ static esp_err_t scene_state_get_handler(httpd_req_t *req)
 
 static esp_err_t state_alias_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *state_json = frameos_nim_scene_state_json();
     if (!state_json || !state_json[0]) state_json = "{}";
     char scene_id[128];
@@ -905,6 +1111,8 @@ static esp_err_t state_alias_get_handler(httpd_req_t *req)
 
 static esp_err_t states_alias_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *state_json = frameos_nim_scene_state_json();
     if (!state_json || !state_json[0]) state_json = "{}";
     char scene_id[128];
@@ -930,6 +1138,8 @@ static esp_err_t states_alias_get_handler(httpd_req_t *req)
 
 static esp_err_t uploaded_scenes_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     const char *json = frameos_nim_scene_info_json();
     if (!json || !json[0]) {
         json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
@@ -951,12 +1161,16 @@ static esp_err_t ping_get_handler(httpd_req_t *req)
 
 static esp_err_t api_apps_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, "{\"apps\":[]}", HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t frame_api_ping_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req,
         "{\"ok\":true,\"mode\":\"http\",\"target\":\"frame\","
@@ -995,16 +1209,22 @@ static esp_err_t frame_api_frame_payload(httpd_req_t *req, bool list)
 
 static esp_err_t frames_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     return frame_api_frame_payload(req, true);
 }
 
 static esp_err_t frame_detail_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     return frame_api_frame_payload(req, false);
 }
 
 static esp_err_t reload_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     log_http_command(req, "reload", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();
@@ -1069,7 +1289,7 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
         fos_scenes_request_sync();
         if (s_render_cb) s_render_cb();
     } else if (strcmp(event_name, "uploadScenes") == 0) {
-        ok = store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
+        ok = fos_http_store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
         if (ok && s_render_cb) s_render_cb();
     } else if (strcmp(event_name, "setCurrentScene") == 0) {
         char scene_id[128];
@@ -1096,6 +1316,8 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
 
 static esp_err_t event_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char path[256];
     if (!copy_request_path(req, path, sizeof(path))) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "URI too long");
@@ -1132,6 +1354,8 @@ static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 
 static esp_err_t frame_api_get_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char suffix[160];
     if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
@@ -1161,6 +1385,8 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
 
 static esp_err_t frame_api_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     char suffix[160];
     if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
@@ -1181,6 +1407,8 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
 
 static esp_err_t scene_select_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 512) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -1219,6 +1447,8 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
  * touching the backend. */
 static esp_err_t scenes_post_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     int total = req->content_len;
     if (total <= 0 || total > 512 * 1024) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
@@ -1238,7 +1468,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     body[total] = '\0';
 
     log_http_command(req, "uploadScenes", (size_t)total);
-    esp_err_t err = store_uploaded_scenes_payload(body, total);
+    esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
@@ -1251,6 +1481,8 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
 /* Force a backend scenes sync on the next render pass. */
 static esp_err_t scenes_sync_handler(httpd_req_t *req)
 {
+    REQUIRE_PROTECTED_ACCESS();
+
     log_http_command(req, "scenes_sync", 0);
     fos_scenes_request_sync();
     if (s_render_cb) s_render_cb();

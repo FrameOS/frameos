@@ -22,7 +22,6 @@ import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
-import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
@@ -1272,9 +1271,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(logsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
-  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
-    frameLogic(frameLogicProps)
-  )
+  const { frame, scenes, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
@@ -1408,15 +1405,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             'frame-workspace-main pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4',
             activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
-          rightPanel={
-            deployPlanModalOpen ? (
-              <FrameDeployPlanDrawer frame={frame} />
-            ) : templateDrawerFrameId ? (
-              <TemplateDrawer />
-            ) : sceneControlSelection ? (
-              <SceneControlPanel />
-            ) : null
-          }
+          rightPanel={templateDrawerFrameId ? <TemplateDrawer /> : sceneControlSelection ? <SceneControlPanel /> : null}
         >
           <div className={toolUsesPageScroll ? undefined : 'h-full'}>
             <div

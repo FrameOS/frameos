@@ -8,8 +8,9 @@ client fetching backend-rendered bitmaps.
 
 Reference hardware: ESP32-S3 module with 8MB flash and 8MB+ octal PSRAM.
 The default 8MB profile supports OTA updates with two 3520K app slots and a
-1M SPIFFS state partition for scenes/user data. Production 16MB modules can
-use the optional OTA profile with two 7872K app slots and 512K state.
+1M SPIFFS state partition for scenes/user data. FrameOS also ships explicit
+4MB, 16MB, and 32MB profiles. The 4MB profile has no OTA support because it
+uses a single app slot to leave room for the firmware and state partition.
 
 ## Layout
 
@@ -30,8 +31,10 @@ components/
                           configure time and wrapped from generated metadata
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
                           builds a stub when nimcache/ is absent
+partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
-partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (7872K each) + state
+partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (7872K each) + 512K state
+partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (15296K each) + 2M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 ```
 
@@ -71,6 +74,7 @@ serves and the browser flasher writes):
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash 0x0 merged-binary.bin
+# Use --flash_size 4MB, 16MB, or 32MB when building one of those profiles.
 ```
 
 CI uses the same full-image path, including Nim runtime generation, ESP-IDF
@@ -163,17 +167,24 @@ flash for scenes and other user data. The current size-tuned firmware fits in
 either OTA slot, so devices can update through `esp_https_ota` instead of only
 USB/browser flashing the merged image.
 
-For production 16MB flash, build with the optional larger OTA defaults:
+For other flash sizes, append the matching defaults file:
 
 ```bash
+SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota" \
+  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.16mb-ota" \
+  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+
+SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
   FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
 ```
 
-That profile boots new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
+OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
 the app marks itself valid once the network is up, otherwise the next reset rolls
 back to the previous slot. The device polls `/api/frames/{id}/embedded/ota/manifest`
-daily (or on `ota`) and applies new builds via `esp_https_ota`.
+daily (or on `ota`) and applies new builds via `esp_https_ota`. The 4MB profile
+has no OTA partition, so firmware updates must be flashed over USB.
 
 ## Adding a panel
 

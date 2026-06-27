@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.models.frame import Frame
 from app.tasks.embedded_firmware import (
+    EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     EMBEDDED_FIRMWARE_VERSION,
     EMBEDDED_RENDER_REMOTE,
@@ -15,17 +16,27 @@ from app.tasks.embedded_firmware import (
     _generated_config_header,
     check_embedded_panel_fits_memory,
     embedded_default_pins_for_frame,
+    embedded_flash_size_for_frame,
     embedded_firmware_config_hash,
     embedded_gpio_buttons_for_frame,
+    embedded_hardware_preset_for_frame,
     embedded_hostname_for_frame,
     embedded_max_http_response_bytes_for_frame,
+    embedded_firmware_layout_for_frame,
     embedded_module_psram_bytes,
+    embedded_ota_supported_for_frame,
     embedded_panel_for_frame,
     embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
+    embedded_pixie_path,
+    embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
+    embedded_sdkconfig_defaults_for_frame,
+    embedded_sd_card_assets_for_frame,
     ensure_embedded_frame_defaults,
+    latest_embedded_firmware,
+    normalize_embedded_flash_size,
     request_pending_embedded_firmware_ota,
     _reset_stale_embedded_sdkconfig,
 )
@@ -57,6 +68,10 @@ async def test_new_embedded_frame(async_client):
     assert frame['max_http_response_bytes'] == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame['device_config']['pins']['cs'] == 3
     assert frame['device_config']['pins']['cs2'] == -1
+    assert frame['embedded']['flashSize'] == EMBEDDED_DEFAULT_FLASH_SIZE
+    assert frame['frame_admin_auth']['enabled'] is True
+    assert frame['frame_admin_auth']['user'] == 'admin'
+    assert frame['frame_admin_auth']['pass']
 
 
 @pytest.mark.asyncio
@@ -103,6 +118,63 @@ async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     assert stored.device.startswith('waveshare.')
     assert stored.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert stored.device_config['pins']['rst'] == 5
+    assert stored.embedded['flashSize'] == '8MB'
+
+
+def test_embedded_flash_size_profiles():
+    assert normalize_embedded_flash_size(None) == '8MB'
+    assert normalize_embedded_flash_size('4mb') == '4MB'
+    assert normalize_embedded_flash_size('32 MB') == '32MB'
+    assert normalize_embedded_flash_size(16) == '16MB'
+    with pytest.raises(ValueError):
+        normalize_embedded_flash_size('2MB')
+
+    default_frame = Frame()
+    assert embedded_flash_size_for_frame(default_frame) == '8MB'
+    assert embedded_ota_supported_for_frame(default_frame) is True
+    assert embedded_sdkconfig_defaults_for_frame(default_frame) == 'sdkconfig.defaults'
+
+    device_config_frame = Frame(device_config={'flashSize': '4MB'})
+    ensure_embedded_frame_defaults(device_config_frame)
+    assert device_config_frame.embedded['flashSize'] == '4MB'
+
+    four_mb = Frame(embedded={'flashSize': '4MB'})
+    assert embedded_flash_size_for_frame(four_mb) == '4MB'
+    assert embedded_ota_supported_for_frame(four_mb) is False
+    assert embedded_sdkconfig_defaults_for_frame(four_mb) == 'sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota'
+    assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESPTOOLPY_FLASHSIZE'] == '"4MB"'
+
+    thirty_two_mb = Frame(embedded={'flashSize': '32MB'})
+    assert embedded_flash_size_for_frame(thirty_two_mb) == '32MB'
+    assert embedded_ota_supported_for_frame(thirty_two_mb) is True
+    assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
+
+
+def test_embedded_firmware_layout_tracks_flash_and_ram():
+    frame = Frame(
+        mode='embedded',
+        device='waveshare.EPD_13in3e',
+        embedded={'platform': 'esp32-s3', 'flashSize': '32MB'},
+        device_config={'psramMB': 16},
+    )
+
+    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000, 'size': 3_000_000})
+
+    assert layout['flash']['flashBytes'] == 32 * 1024 * 1024
+    assert layout['flash']['partitionTable'] == 'partitions_ota_32mb.csv'
+    ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
+    ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    assert ota_0['offset'] == 0x20000
+    assert ota_0['size'] == 0xEF0000
+    assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['usedBytes'] is None
+    assert layout['ram']['psramBytes'] == 16 * 1024 * 1024
+    assert layout['ram']['width'] == 1200
+    assert layout['ram']['height'] == 1600
+    assert layout['ram']['pixelFormat'] == FOS_PIXEL_4BPP_SPECTRA6
+    assert layout['ram']['rgbaBufferBytes'] == 1200 * 1600 * 4
+    assert layout['ram']['packedBufferBytes'] == 960_000
+    assert layout['ram']['renderWorkingBytes'] > layout['ram']['rgbaBufferBytes']
 
 
 @pytest.mark.asyncio
@@ -110,7 +182,39 @@ async def test_firmware_status_idle(async_client):
     frame = await create_embedded_frame(async_client)
     response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
     assert response.status_code == 200
-    assert response.json() == {'firmware': {'status': 'idle', 'platform': 'esp32-s3'}}
+    firmware = response.json()['firmware']
+    assert firmware['status'] == 'idle'
+    assert firmware['platform'] == 'esp32-s3'
+    assert firmware['flashSize'] == '8MB'
+    assert firmware['otaSupported'] is True
+    assert firmware['layout']['flash']['flashBytes'] == 8 * 1024 * 1024
+    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert [partition['name'] for partition in firmware['layout']['flash']['partitions']] == [
+        'bootloader',
+        'partition_table',
+        'nvs',
+        'otadata',
+        'phy_init',
+        'ota_0',
+        'ota_1',
+        'state',
+    ]
+    assert firmware['layout']['ram']['panel'] == 'EPD_7in5_V2'
+    assert firmware['layout']['ram']['rgbaBufferBytes'] > 0
+    assert firmware['layout']['ram']['packedBufferBytes'] > 0
+
+
+@pytest.mark.asyncio
+async def test_frame_get_embedded_includes_firmware_layout(async_client):
+    frame = await create_embedded_frame(async_client)
+
+    response = await async_client.get(f"/api/frames/{frame['id']}")
+
+    assert response.status_code == 200
+    firmware = response.json()['frame']['embedded']['firmware']
+    assert firmware['status'] == 'idle'
+    assert firmware['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert firmware['layout']['ram']['renderWorkingBytes'] > 0
 
 
 @pytest.mark.asyncio
@@ -153,6 +257,10 @@ async def test_firmware_build_queues_job(async_client, db, redis):
     assert data['message'] == 'Firmware build started'
     assert data['firmware']['status'] == 'queued'
     assert data['firmware']['platform'] == 'esp32-s3'
+    assert data['firmware']['flashSize'] == '8MB'
+    assert data['firmware']['otaSupported'] is True
+    assert data['firmware']['layout']['flash']['partitionTable'] == 'partitions.csv'
+    assert data['firmware']['layout']['ram']['renderWorkingBytes'] > 0
     assert data['firmware']['queueJobId'].startswith(f"embedded_firmware:{frame['id']}:")
 
     stored = db.get(Frame, frame['id'])
@@ -244,6 +352,19 @@ async def test_firmware_ota_queues_build_when_artifact_not_ready(async_client):
     assert response.json()['message'] == 'OTA update queued'
     assert firmware['status'] == 'queued'
     assert firmware['otaUpdate']['status'] == 'queued'
+
+
+@pytest.mark.asyncio
+async def test_firmware_ota_rejects_4mb_flash_profile(async_client, db):
+    frame = await create_embedded_frame(async_client)
+    stored = db.get(Frame, frame['id'])
+    stored.embedded = {**stored.embedded, 'flashSize': '4MB'}
+    db.add(stored)
+    db.commit()
+
+    response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+    assert response.status_code == 400
+    assert 'OTA updates are not available' in response.json()['detail']
 
 
 @pytest.mark.asyncio
@@ -405,10 +526,20 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
     assert frame.max_http_response_bytes == EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     assert frame.device_config["pins"]["cs2"] == 8
     assert embedded_default_pins_for_frame(frame)["cs2"] == 8
+    assert frame.frame_admin_auth["enabled"] is True
+    assert frame.frame_admin_auth["user"] == "admin"
+    assert frame.frame_admin_auth["pass"]
 
     custom_port = Frame(device="waveshare.EPD_7in5_V2", frame_port=8081)
     ensure_embedded_frame_defaults(custom_port)
     assert custom_port.frame_port == 8081
+
+    disabled_admin = Frame(
+        device="waveshare.EPD_7in5_V2",
+        frame_admin_auth={"enabled": False, "user": "", "pass": ""},
+    )
+    ensure_embedded_frame_defaults(disabled_admin)
+    assert disabled_admin.frame_admin_auth == {"enabled": False, "user": "", "pass": ""}
 
     custom = Frame(
         device="waveshare.EPD_7in5_V2",
@@ -418,6 +549,106 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
     assert embedded_max_http_response_bytes_for_frame(custom) == 3 * 1024 * 1024
     assert embedded_pins_for_frame(custom)["rst"] == 12
     assert embedded_pins_for_frame(custom)["sck"] == 11
+
+
+def test_embedded_hardware_preset_for_waveshare_13in3e6():
+    frame = Frame(
+        id=7,
+        device_config={"hardwarePreset": "waveshare_esp32_s3_epaper_13_3e6"},
+    )
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_hardware_preset_for_frame(frame) == "waveshare_esp32_s3_epaper_13_3e6"
+    assert frame.device == "waveshare.EPD_13in3e"
+    assert frame.embedded["flashSize"] == "32MB"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert embedded_module_psram_bytes(frame) == 16 * 1024 * 1024
+    assert frame.device_config["psramMB"] == 16
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 10,
+        "dc": 7,
+        "cs": 1,
+        "cs2": 4,
+        "busy": 8,
+        "sck": 6,
+        "mosi": 5,
+        "pwr": 16,
+    }
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_epaper_13_3e6",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 3, "sck": 44, "miso": 43, "mosi": 2},
+        "maxFrequencyKHz": 20_000,
+    }
+    check_embedded_panel_fits_memory(frame)
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_13in3e"' in header
+    assert "#define FRAMEOS_DEFAULT_PIN_RST 10" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_DC 7" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS 1" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 4" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 8" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_SCK 6" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 5" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_PWR 16" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 3" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 44" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 43" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 2" in header
+
+
+def test_embedded_hardware_preset_for_waveshare_photopainter():
+    frame = Frame(
+        id=8,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+    )
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_hardware_preset_for_frame(frame) == "waveshare_esp32_s3_photopainter"
+    assert frame.device == "waveshare.EPD_7in3e"
+    assert frame.embedded["flashSize"] == "16MB"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert frame.device_config["psramMB"] == 8
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 12,
+        "dc": 8,
+        "cs": 9,
+        "cs2": -1,
+        "busy": 13,
+        "sck": 10,
+        "mosi": 11,
+        "pwr": -1,
+    }
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_photopainter",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
+        "maxFrequencyKHz": 20_000,
+    }
+    check_embedded_panel_fits_memory(frame)
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in3e"' in header
+    assert "#define FRAMEOS_DEFAULT_PIN_RST 12" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_DC 8" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS 9" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 -1" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 13" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_SCK 10" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 11" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_PWR -1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
 
 
 def test_large_spectra_panel_can_use_thin_client_on_8mb():
@@ -458,6 +689,56 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_TLS_PORT 8443" in header
 
 
+def test_generated_config_bakes_photo_painter_sd_card_assets():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        device_config={
+            "sdCardAssets": {
+                "enabled": True,
+                "preset": "waveshare_esp32_s3_photopainter",
+            },
+        },
+    )
+
+    config = embedded_sd_card_assets_for_frame(frame)
+    assert config == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_photopainter",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
+        "maxFrequencyKHz": 20_000,
+    }
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_ASSETS_PATH "/srv/assets"' in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ 20000" in header
+
+
+def test_sd_card_assets_require_all_custom_pins():
+    frame = Frame(
+        device="waveshare.EPD_7in5_V2",
+        device_config={
+            "sdCardAssets": {
+                "enabled": True,
+                "pins": {"cs": 10, "sck": 11, "miso": 12},
+            },
+        },
+    )
+
+    config = embedded_sd_card_assets_for_frame(frame)
+    assert config["enabled"] is False
+    assert config["pins"] == {"cs": 10, "sck": 11, "miso": 12, "mosi": -1}
+
+
 def test_generated_config_bakes_tls_settings():
     frame = Frame(
         id=7,
@@ -480,6 +761,22 @@ def test_generated_config_bakes_tls_settings():
     assert "#define FRAMEOS_DEFAULT_TLS_PORT 9443" in header
     assert 'FRAMEOS_DEFAULT_TLS_SERVER_CERT "-----BEGIN CERTIFICATE-----\\nserver\\n-----END CERTIFICATE-----\\n"' in header
     assert 'FRAMEOS_DEFAULT_TLS_SERVER_KEY "-----BEGIN RSA PRIVATE KEY-----\\nkey\\n-----END RSA PRIVATE KEY-----\\n"' in header
+
+
+def test_generated_config_bakes_admin_auth():
+    frame = Frame(
+        id=9,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        frame_admin_auth={"enabled": True, "user": "admin", "pass": "secret"},
+    )
+    header = _generated_config_header(frame)
+
+    assert "#define FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE 1" in header
+    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER "admin"' in header
+    assert '#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS "secret"' in header
 
 
 def test_generated_config_bakes_hostname_from_frame_host():
@@ -562,6 +859,65 @@ def test_ready_firmware_is_stale_when_panel_changes(tmp_path):
     assert "different embedded panel" in firmware["error"]
 
 
+def test_ready_firmware_is_stale_when_flash_size_changes(tmp_path):
+    artifact = tmp_path / "frameos-esp32-s3.bin"
+    artifact.write_bytes(b"firmware-bytes")
+    frame = Frame(
+        id=53,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        embedded={"platform": "esp32-s3", "flashSize": "32MB"},
+    )
+    frame.embedded = {
+        **frame.embedded,
+        "firmware": {
+            "status": "ready",
+            "platform": "esp32-s3",
+            "flashSize": "8MB",
+            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+            "filename": "frameos-esp32-s3.bin",
+            "path": str(artifact),
+            "panel": "EPD_7in5_V2",
+            "configHash": embedded_firmware_config_hash(frame),
+        },
+    }
+    firmware = latest_embedded_firmware(frame)
+    assert firmware["status"] == "stale"
+    assert "different ESP32 flash size" in firmware["error"]
+
+
+def test_ready_4mb_firmware_does_not_require_ota_artifact(tmp_path):
+    artifact = tmp_path / "frameos-esp32-s3-4mb.bin"
+    artifact.write_bytes(b"firmware-bytes")
+    frame = Frame(
+        id=53,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        embedded={"platform": "esp32-s3", "flashSize": "4MB"},
+    )
+    frame.embedded = {
+        **frame.embedded,
+        "firmware": {
+            "status": "ready",
+            "platform": "esp32-s3",
+            "flashSize": "4MB",
+            "otaSupported": False,
+            "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
+            "filename": "frameos-esp32-s3-4mb.bin",
+            "path": str(artifact),
+            "panel": "EPD_7in5_V2",
+            "configHash": embedded_firmware_config_hash(frame),
+        },
+    }
+    firmware = latest_embedded_firmware(frame)
+    assert firmware["status"] == "ready"
+    assert firmware["otaSupported"] is False
+
+
 def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
     sdkconfig = tmp_path / "sdkconfig"
     sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
@@ -592,3 +948,39 @@ def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
     assert missing == {}
     assert sdkconfig.exists()
     assert build_dir.exists()
+
+
+def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
+    sdkconfig = tmp_path / "sdkconfig"
+    sdkconfig.write_text(
+        '\n'.join([
+            'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
+            'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
+            'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
+            '',
+        ]),
+        encoding="utf-8",
+    )
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    required = embedded_required_sdkconfig_for_frame(Frame(embedded={"flashSize": "32MB"}))
+    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
+        missing = _reset_stale_embedded_sdkconfig(build_dir, required)
+
+    assert missing == {
+        "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": '"partitions_ota_32mb.csv"',
+    }
+    assert not sdkconfig.exists()
+    assert not build_dir.exists()
+
+
+def test_embedded_pixie_path_requires_explicit_override(tmp_path, monkeypatch):
+    monkeypatch.delenv("FRAMEOS_PIXIE_PATH", raising=False)
+    assert embedded_pixie_path() is None
+
+    pixie = tmp_path / "pixie"
+    (pixie / "src" / "pixie").mkdir(parents=True)
+    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(pixie))
+    assert embedded_pixie_path() == pixie.resolve()

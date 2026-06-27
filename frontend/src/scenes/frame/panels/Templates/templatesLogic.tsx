@@ -6,12 +6,17 @@ import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
+import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
 
 export interface TemplateLogicProps {
   frameId: number
 }
+
 export const templatesLogic = kea<templatesLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templatesLogic']),
   props({} as TemplateLogicProps),
@@ -19,11 +24,15 @@ export const templatesLogic = kea<templatesLogicType>([
   connect((props: TemplateLogicProps) => ({
     values: [
       frameLogic(props),
-      ['frameForm'],
+      ['frame', 'frameForm'],
       templatesModel,
       ['templates as allTemplates'],
       repositoriesModel,
       ['repositories as allRepositories'],
+      appsModel,
+      ['apps'],
+      settingsLogic,
+      ['settings'],
     ],
     actions: [
       templatesModel,
@@ -59,6 +68,9 @@ export const templatesLogic = kea<templatesLogicType>([
     hideAddRepository: true,
     setSearch: (search: string) => ({ search }),
     toggleExpanded: (url: string) => ({ url }),
+    applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
+      openDrawer: openDrawer ?? false,
+    }),
   }),
   forms(({ actions, values, props }) => ({
     templateForm: {
@@ -301,6 +313,53 @@ export const templatesLogic = kea<templatesLogicType>([
       (s) => [s.frameForm],
       (frameForm) => Object.fromEntries(frameForm?.scenes?.map((s) => [s.name, true]) || []),
     ],
+    favouriteTemplateIds: [
+      (s) => [s.settings],
+      (settings): Set<string> => new Set(settings.personal?.favouriteTemplateIds ?? []),
+    ],
+    favouriteTemplates: [
+      (s) => [s.allTemplates, s.allRepositories, s.favouriteTemplateIds, s.frame, s.frameForm, s.apps],
+      (
+        allTemplates,
+        allRepositories,
+        favouriteTemplateIds,
+        frame,
+        frameForm,
+        apps,
+      ): TemplateWithFavouriteId[] => {
+        const mode = frameForm?.mode ?? frame?.mode
+        const rows: TemplateWithFavouriteId[] = []
+        for (const template of allTemplates) {
+          const favouriteId = templateFavouriteId(template)
+          if (favouriteTemplateIds.has(favouriteId)) {
+            rows.push({
+              compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
+              favouriteId,
+              template,
+            })
+          }
+        }
+        for (const repository of allRepositories) {
+          for (const template of repository.templates ?? []) {
+            const favouriteId = templateFavouriteId(template, repository)
+            if (favouriteTemplateIds.has(favouriteId)) {
+              rows.push({
+                compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
+                favouriteId,
+                repository,
+                template,
+              })
+            }
+          }
+        }
+        return rows.toSorted((a, b) => a.template.name.localeCompare(b.template.name))
+      },
+    ],
+    installableFavouriteTemplates: [
+      (s) => [s.favouriteTemplates],
+      (favouriteTemplates): TemplateWithFavouriteId[] =>
+        favouriteTemplates.filter((template) => template.compatibility.supported),
+    ],
   }),
   listeners(({ actions, values }) => ({
     saveRemoteAsLocal: async ({ template, repository }) => {
@@ -349,11 +408,50 @@ export const templatesLogic = kea<templatesLogicType>([
       if (!response.ok) {
         throw new Error('Failed to update frame')
       }
-      const scenes = await response.json()
+      const loadedTemplate = { ...template, scenes: await response.json() }
       if (persistOnInstall) {
-        actions.applyTemplateAndSave({ scenes }, openDrawer)
+        actions.applyTemplateAndSave(loadedTemplate, openDrawer)
       } else {
-        actions.applyTemplate({ scenes })
+        actions.applyTemplate(loadedTemplate)
+      }
+    },
+    applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
+      const templates: Partial<TemplateType>[] = []
+      for (const row of values.installableFavouriteTemplates) {
+        if (!row.repository) {
+          templates.push(row.template)
+          continue
+        }
+
+        if (row.template.scenes?.length) {
+          templates.push(row.template)
+          continue
+        }
+
+        const templateWithZip = row.template as TemplateType & { zip?: string }
+        let zipPath = templateWithZip.zip
+        if (!zipPath) {
+          continue
+        }
+
+        if (zipPath.startsWith('./')) {
+          const repositoryPath = row.repository.url.replace(/\/[^/]+$/, '')
+          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+        }
+
+        const response = await apiFetch(`/api/templates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ format: 'scenes', url: zipPath }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to load favourite scene')
+        }
+        templates.push({ ...row.template, scenes: await response.json() })
+      }
+
+      if (templates.length) {
+        actions.applyTemplateAndSave({ __templateBatch: templates } as Partial<TemplateType>, openDrawer)
       }
     },
     saveAsTemplate: () => {

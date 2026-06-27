@@ -15,6 +15,7 @@ WEBSOCKET_BROADCAST_TIMEOUT = get_env_float("WEBSOCKET_BROADCAST_TIMEOUT", 2.0)
 PROJECT_SCOPED_EVENTS = {
     "ai_scene_log",
     "delete_frame",
+    "frame_rendered",
     "new_frame",
     "new_log",
     "new_metrics",

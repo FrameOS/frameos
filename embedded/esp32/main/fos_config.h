@@ -19,6 +19,7 @@
 #define FOS_GPIO_BUTTONS_MAX 8
 #define FOS_GPIO_BUTTON_LABEL_LEN 32
 #define FOS_GPIO_BUTTONS_SPEC_LEN 384
+#define FOS_ASSETS_PATH_LEN 128
 
 typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
@@ -42,6 +43,15 @@ typedef struct {
 } fos_gpio_button_t;
 
 typedef struct {
+    bool enabled;
+    int8_t cs;
+    int8_t sck;
+    int8_t miso;
+    int8_t mosi;
+    uint32_t max_freq_khz;
+} fos_assets_sd_config_t;
+
+typedef struct {
     char wifi_ssid[FOS_STR_LEN];
     char wifi_pass[FOS_STR_LEN];
     char backend_url[FOS_URL_LEN]; /* e.g. http://192.168.1.10:8989 */
@@ -57,6 +67,11 @@ typedef struct {
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
     char tls_server_cert[FOS_TLS_PEM_LEN];
     char tls_server_key[FOS_TLS_PEM_LEN];
+    bool admin_auth_enabled;       /* protect setup/control routes outside hotspot mode */
+    char admin_user[FOS_STR_LEN];
+    char admin_pass[FOS_STR_LEN];
+    char assets_path[FOS_ASSETS_PATH_LEN]; /* VFS mount point for local assets, default /srv/assets */
+    fos_assets_sd_config_t assets_sd;
     bool deep_sleep;               /* deep sleep between refreshes */
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
@@ -75,6 +90,9 @@ bool fos_config_wifi_ready(void);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);
+/* "cs=38,sck=39,miso=40,mosi=41" (any subset) */
+esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config_t *assets_sd);
+void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, char *out, size_t out_len);
 /* "5:A\n6:B" */
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config);
 void fos_config_format_gpio_buttons(const fos_config_t *config, char *out, size_t out_len);

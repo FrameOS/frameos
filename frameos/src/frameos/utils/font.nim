@@ -9,6 +9,7 @@ when defined(frameosEmbedded):
   import zippy
 
 const defaultFont = "Ubuntu-Regular.ttf" # compiled into the binary by nimassets
+const emojiFallbackFont = "NotoColorEmoji.ttf"
 var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 
 var typefaceLock: Lock
@@ -35,9 +36,44 @@ proc getDefaultTypeface*(): Typeface =
         typefaces[defaultFont] = parseTtf(readEmbeddedFont("assets/compiled/fonts/" & defaultFont))
   return typefaces[defaultFont]
 
+proc hasFallbackTypeface(typeface, fallback: Typeface): bool =
+  for existing in typeface.fallbacks:
+    if existing == fallback:
+      return true
+  false
+
+proc getEmojiFallbackTypeface(assetsPath: string): Typeface =
+  when defined(frameosEmbedded):
+    return nil
+  else:
+    if assetsPath.len == 0:
+      return nil
+
+    let fontPath = assetsPath / "fonts" / emojiFallbackFont
+    if not fileExists(fontPath):
+      return nil
+
+    let cacheKey = "emoji:" & normalizedPath(fontPath)
+    if not typefaces.hasKey(cacheKey):
+      withLock typefaceLock:
+        if not typefaces.hasKey(cacheKey):
+          typefaces[cacheKey] = parseTtf(readFile(fontPath))
+    return typefaces[cacheKey]
+
+proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
+  result = typeface
+  when not defined(frameosEmbedded):
+    let fallback = getEmojiFallbackTypeface(assetsPath)
+    if fallback == nil or typeface.hasFallbackTypeface(fallback):
+      return
+
+    withLock typefaceLock:
+      if not typeface.hasFallbackTypeface(fallback):
+        typeface.fallbacks.add(fallback)
+
 proc getTypeface*(font: string, assetsPath: string): Typeface =
   if font.len == 0 or font == defaultFont:
-    return getDefaultTypeface()
+    return getDefaultTypeface().withEmojiFallback(assetsPath)
   when defined(frameosEmbedded):
     # Custom scene font names often come from desktop/web renders. On embedded
     # targets, reuse the parsed default typeface to avoid repeated TTF parsing
@@ -52,13 +88,13 @@ proc getTypeface*(font: string, assetsPath: string): Typeface =
     # typeface lock because getDefaultTypeface uses the same lock.
     let fontPath = assetsPath & "/fonts/" & font
     if not fileExists(fontPath):
-      return getDefaultTypeface()
+      return getDefaultTypeface().withEmojiFallback(assetsPath)
 
     if not typefaces.hasKey(font):
       withLock typefaceLock:
         if not typefaces.hasKey(font):
           typefaces[font] = parseTtf(readFile(fontPath))
-    return typefaces[font]
+    return typefaces[font].withEmojiFallback(assetsPath)
 
 proc newFont*(typeface: Typeface, size: float, color: Color): Font =
   result = newFont(typeface)

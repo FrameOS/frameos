@@ -2,6 +2,11 @@ import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
+export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
+export type FrameEmbeddedHardwarePreset =
+  | 'custom'
+  | 'waveshare_esp32_s3_photopainter'
+  | 'waveshare_esp32_s3_epaper_13_3e6'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode
@@ -67,6 +72,7 @@ export interface FrameType {
     uploadHeaders?: { name: string; value: string }[]
     psramMB?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    hardwarePreset?: FrameEmbeddedHardwarePreset
     pins?: {
       rst?: number
       dc?: number
@@ -77,6 +83,18 @@ export interface FrameType {
       sclk?: number
       mosi?: number
       pwr?: number
+    }
+    sdCardAssets?: {
+      enabled?: boolean
+      preset?: 'custom' | 'waveshare_esp32_s3_photopainter' | 'waveshare_esp32_s3_epaper_13_3e6'
+      pins?: {
+        cs?: number
+        sck?: number
+        miso?: number
+        mosi?: number
+      }
+      maxFrequencyKHz?: number
+      mountPath?: string
     }
   }
   color?: string
@@ -167,6 +185,7 @@ export interface NewFrameFormType {
   frame_host?: string | null
   device?: string | null
   device_config?: FrameType['device_config']
+  embedded?: FrameEmbeddedConfig
   timezone?: string | null
   server_host?: string | null
   ssh_pass?: string | null
@@ -621,6 +640,8 @@ export interface FrameOSSettings {
     timezone?: string
     wifiSSID?: string
     wifiPassword?: string
+    backendHost?: string
+    backendPort?: string | number
   }
   homeAssistant?: {
     url?: string
@@ -650,6 +671,9 @@ export interface FrameOSSettings {
     backendEnableLlmAnalytics?: boolean
   }
   repositories?: RepositoryType[]
+  personal?: {
+    favouriteTemplateIds?: string[]
+  }
   ssh_keys?: {
     keys?: SSHKeyEntry[]
     default?: string
@@ -755,11 +779,31 @@ export interface FrameRpiOSConfig {
 
 export interface FrameEmbeddedConfig {
   platform?: string
+  flashSize?: FrameEmbeddedFlashSize
+  hardwarePreset?: FrameEmbeddedHardwarePreset
+  lastBoot?: {
+    at?: string
+    source?: string
+    version?: string
+    frameosVersion?: string
+    ip?: string
+    width?: number
+    height?: number
+    pixelFormat?: number
+    mode?: string
+    renderMode?: string
+    panel?: string
+    wifi?: string
+  }
   firmware?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     requestId?: string
     queueJobId?: string
     platform?: string
+    flashSize?: FrameEmbeddedFlashSize
+    flashBytes?: number
+    partitionTable?: string
+    otaSupported?: boolean
     filename?: string
     path?: string
     size?: number
@@ -771,6 +815,50 @@ export interface FrameEmbeddedConfig {
     otaSha256?: string
     otaElfSha256?: string
     otaSize?: number
+    appSize?: number
+    bootloaderSize?: number
+    partitionTableSize?: number
+    layout?: {
+      flash?: {
+        flashSize?: FrameEmbeddedFlashSize
+        flashBytes?: number
+        partitionTable?: string
+        otaSupported?: boolean
+        flashOffset?: string
+        mergedBinaryBytes?: number | null
+        appBinaryBytes?: number | null
+        otaBinaryBytes?: number | null
+        partitions?: {
+          name: string
+          type?: string
+          subtype?: string
+          offset: number
+          size: number
+          end?: number
+          appSlot?: boolean
+          usedBytes?: number | null
+        }[]
+      }
+      ram?: {
+        psramBytes?: number
+        panel?: string
+        width?: number
+        height?: number
+        pixelFormat?: number
+        pixelFormatName?: string
+        renderMode?: 'local' | 'remote'
+        rgbaBufferBytes?: number
+        packedBufferBytes?: number
+        renderReserveBytes?: number
+        renderWorkingBytes?: number
+        quickJsHeapLimitBytes?: number
+        previewSnapshotBytes?: number
+        previewSnapshotReserveBytes?: number
+        previewBmpBytes?: number
+        displayStateBytes?: number
+        httpResponseLimitBytes?: number
+      }
+    }
     queuedAt?: string
     startedAt?: string
     lastHeartbeatAt?: string

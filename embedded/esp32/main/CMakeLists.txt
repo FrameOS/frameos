@@ -11,6 +11,7 @@ idf_component_register(
         "fos_console.c"
         "fos_scenes.c"
         "fos_battery.c"
+        "fos_assets_sd.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -26,9 +27,12 @@ idf_component_register(
         app_update
         spi_flash
         json
+        mbedtls
         console
         driver
         spiffs
+        fatfs
+        sdmmc
         frameos_display
         frameos_nim
 )

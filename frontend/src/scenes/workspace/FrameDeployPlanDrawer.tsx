@@ -51,6 +51,276 @@ interface DeployPlanProgressStep {
   state: 'done' | 'current' | 'pending' | 'error'
 }
 
+function embeddedFlashSize(frame: FrameType): '4MB' | '8MB' | '16MB' | '32MB' {
+  const raw = frame.embedded?.firmware?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
+  const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
+  return normalized === '4MB' || normalized === '8MB' || normalized === '16MB' || normalized === '32MB'
+    ? normalized
+    : '8MB'
+}
+
+function embeddedOtaSupported(frame: FrameType): boolean {
+  const firmwareSupport = frame.embedded?.firmware?.otaSupported
+  if (typeof firmwareSupport === 'boolean') {
+    return firmwareSupport
+  }
+  return embeddedFlashSize(frame) !== '4MB'
+}
+
+type EmbeddedFirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
+type EmbeddedFirmwareLayout = NonNullable<EmbeddedFirmwareStatus['layout']>
+type EmbeddedFlashPartition = NonNullable<NonNullable<EmbeddedFirmwareLayout['flash']>['partitions']>[number]
+
+function formatFirmwareBytes(bytes?: number | null): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) {
+    return 'not built'
+  }
+  if (bytes === 0) {
+    return '0 B'
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  const mib = bytes / (1024 * 1024)
+  if (mib >= 1) {
+    return `${mib >= 10 ? mib.toFixed(1) : mib.toFixed(2)} MB`
+  }
+  return `${Math.round(bytes / 1024)} KB`
+}
+
+function formatFirmwareAddress(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '-'
+  }
+  return `0x${Math.max(0, Math.round(value)).toString(16).toUpperCase().padStart(6, '0')}`
+}
+
+function percentOf(value: number | null | undefined, total: number | null | undefined): number {
+  if (
+    typeof value !== 'number' ||
+    typeof total !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isFinite(total) ||
+    total <= 0
+  ) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, (value / total) * 100))
+}
+
+function formatPercent(value: number | null | undefined, total: number | null | undefined): string {
+  const percent = percentOf(value, total)
+  return percent < 1 && percent > 0 ? '<1%' : `${Math.round(percent)}%`
+}
+
+function partitionColor(partition: EmbeddedFlashPartition, index: number): string {
+  if (partition.name === 'bootloader' || partition.name === 'partition_table') {
+    return '#64748b'
+  }
+  if (partition.type === 'data' && partition.subtype === 'nvs') {
+    return '#0f766e'
+  }
+  if (partition.type === 'data' && partition.subtype === 'ota') {
+    return '#7c3aed'
+  }
+  if (partition.type === 'data' && partition.subtype === 'phy') {
+    return '#0369a1'
+  }
+  if (partition.type === 'data') {
+    return '#b45309'
+  }
+  if (partition.appSlot) {
+    return partition.name === 'ota_1' ? '#2563eb' : '#16a34a'
+  }
+  return ['#16a34a', '#2563eb', '#b45309', '#7c3aed'][index % 4]
+}
+
+function FirmwareStat({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: ReactNode
+  detail?: ReactNode
+}): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-semibold text-[color:var(--tool-strong)]">{value}</div>
+      {detail ? <div className="frame-tool-muted mt-0.5 truncate text-xs">{detail}</div> : null}
+    </div>
+  )
+}
+
+function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.Element | null {
+  const firmware = frame.embedded?.firmware
+  const layout = firmware?.layout
+  const flash = layout?.flash
+  const ram = layout?.ram
+  const partitions = flash?.partitions ?? []
+  const flashBytes = flash?.flashBytes ?? firmware?.flashBytes ?? 0
+  const otaSupported = flash?.otaSupported ?? embeddedOtaSupported(frame)
+  const psramBytes = ram?.psramBytes ?? 0
+  const renderWorkingBytes = ram?.renderWorkingBytes ?? 0
+  const renderSpareBytes = psramBytes > renderWorkingBytes ? psramBytes - renderWorkingBytes : 0
+  const appBinaryBytes = flash?.appBinaryBytes ?? firmware?.appSize ?? firmware?.otaSize ?? null
+  const mergedBinaryBytes = flash?.mergedBinaryBytes ?? firmware?.size ?? null
+  const ramSegments = [
+    { label: 'RGBA render', bytes: ram?.rgbaBufferBytes ?? 0, color: '#2563eb' },
+    { label: 'Packed panel', bytes: ram?.packedBufferBytes ?? 0, color: '#16a34a' },
+    { label: 'Reserve', bytes: ram?.renderReserveBytes ?? 0, color: '#b45309' },
+    { label: 'Spare', bytes: renderSpareBytes, color: '#e2e8f0' },
+  ].filter((segment) => segment.bytes > 0)
+
+  return (
+    <div className="frame-tool-card space-y-5 rounded-[22px] p-4">
+      <div>
+        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Firmware footprint</div>
+        {!flash && !ram ? (
+          <div className="frame-tool-muted mt-1 text-sm leading-5">
+            Waiting for firmware layout metadata from the backend.
+          </div>
+        ) : null}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <FirmwareStat
+          label="Merged image"
+          value={formatFirmwareBytes(mergedBinaryBytes)}
+          detail={mergedBinaryBytes ? `flashed at ${flash?.flashOffset ?? '0x0'}` : 'measured after build'}
+        />
+        <FirmwareStat
+          label={otaSupported ? 'App / OTA image' : 'App image'}
+          value={formatFirmwareBytes(appBinaryBytes)}
+          detail={
+            appBinaryBytes && partitions.find((partition) => partition.appSlot)
+              ? `${formatPercent(appBinaryBytes, partitions.find((partition) => partition.appSlot)?.size)} of app slot`
+              : 'measured after build'
+          }
+        />
+        <FirmwareStat
+          label="Flash profile"
+          value={flash?.flashSize ?? embeddedFlashSize(frame)}
+          detail={otaSupported ? 'OTA A/B slots' : 'single app slot'}
+        />
+      </div>
+
+      {partitions.length > 0 && flashBytes > 0 ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+              Flash partitions
+            </div>
+            <div className="frame-tool-muted truncate text-xs">
+              {flash?.partitionTable} · {formatFirmwareBytes(flashBytes)}
+            </div>
+          </div>
+          <div className="frameos-inset flex h-9 overflow-hidden rounded-lg border">
+            {partitions.map((partition, index) => {
+              const width = percentOf(partition.size, flashBytes)
+              return (
+                <div
+                  key={`${partition.name}-${partition.offset}`}
+                  title={`${partition.name}: ${formatFirmwareAddress(partition.offset)} - ${formatFirmwareBytes(
+                    partition.size
+                  )}`}
+                  className="relative min-w-[2px] border-r border-white/60 last:border-r-0"
+                  style={{ width: `${width}%`, backgroundColor: partitionColor(partition, index) }}
+                >
+                  {width >= 9 ? (
+                    <span className="absolute inset-x-1 top-1/2 -translate-y-1/2 truncate text-center text-[10px] font-semibold text-white">
+                      {partition.name}
+                    </span>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 gap-y-1 text-xs">
+            <div className="frame-tool-muted font-semibold">Partition</div>
+            <div className="frame-tool-muted text-right font-semibold">Offset</div>
+            <div className="frame-tool-muted text-right font-semibold">Size</div>
+            <div className="frame-tool-muted text-right font-semibold">Used</div>
+            {partitions.map((partition, index) => (
+              <div key={`${partition.name}-${partition.offset}-row`} className="contents">
+                <div className="min-w-0 truncate text-[color:var(--tool-strong)]">
+                  <span
+                    className="mr-2 inline-block h-2.5 w-2.5 rounded-sm"
+                    style={{ backgroundColor: partitionColor(partition, index) }}
+                  />
+                  {partition.name}
+                </div>
+                <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareAddress(partition.offset)}</div>
+                <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareBytes(partition.size)}</div>
+                <div className="text-right text-[color:var(--tool-strong)]">
+                  {partition.usedBytes ? formatFirmwareBytes(partition.usedBytes) : '-'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {ram ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+              PSRAM buffers
+            </div>
+            <div className="frame-tool-muted truncate text-xs">
+              {ram.panel ?? frame.device} · {ram.width || '?'}x{ram.height || '?'} · {ram.pixelFormatName}
+            </div>
+          </div>
+          {psramBytes > 0 && ramSegments.length > 0 ? (
+            <div className="frameos-inset flex h-9 overflow-hidden rounded-lg border">
+              {ramSegments.map((segment) => (
+                <div
+                  key={segment.label}
+                  title={`${segment.label}: ${formatFirmwareBytes(segment.bytes)}`}
+                  className={clsx(
+                    'relative min-w-[2px] border-r border-white/60 last:border-r-0',
+                    segment.label === 'Spare' ? 'text-slate-700' : 'text-white'
+                  )}
+                  style={{ width: `${percentOf(segment.bytes, psramBytes)}%`, backgroundColor: segment.color }}
+                >
+                  {percentOf(segment.bytes, psramBytes) >= 10 ? (
+                    <span className="absolute inset-x-1 top-1/2 -translate-y-1/2 truncate text-center text-[10px] font-semibold">
+                      {segment.label}
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FirmwareStat
+              label="Render working set"
+              value={formatFirmwareBytes(renderWorkingBytes)}
+              detail={`${formatPercent(renderWorkingBytes, psramBytes)} of ${formatFirmwareBytes(psramBytes)} PSRAM`}
+            />
+            <FirmwareStat
+              label="Packed snapshot"
+              value={formatFirmwareBytes(ram.previewSnapshotBytes)}
+              detail={`kept only with ${formatFirmwareBytes(ram.previewSnapshotReserveBytes)} spare`}
+            />
+            <FirmwareStat
+              label="HTTP / USB BMP"
+              value={formatFirmwareBytes(ram.previewBmpBytes)}
+              detail="allocated only while serving image preview"
+            />
+            <FirmwareStat
+              label="Scene JS heap cap"
+              value={formatFirmwareBytes(ram.quickJsHeapLimitBytes)}
+              detail={`hash state is ${formatFirmwareBytes(ram.displayStateBytes)}`}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function parseDeployPlanLogTimestamp(timestamp?: string | null): number {
   if (!timestamp) {
     return NaN
@@ -583,7 +853,9 @@ function DeployTransportToggle({
   const selectedRemoteDisconnected = selectedTransport === 'remote' && !remoteConnected
   const selectedConnectionUnavailableTitle = 'FrameOS Remote is not connected. Select SSH or wait for it to connect.'
   const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
-  const remoteUpgradeTitle = remoteUpgradeNotice ? `FrameOS Remote ${remoteUpgradeLabel(remoteUpgradeNotice)}` : undefined
+  const remoteUpgradeTitle = remoteUpgradeNotice
+    ? `FrameOS Remote ${remoteUpgradeLabel(remoteUpgradeNotice)}`
+    : undefined
 
   return (
     <section className="mb-4">
@@ -1167,12 +1439,14 @@ function EmbeddedFirmwareSection({
   const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  const flashSize = embeddedFlashSize(frame)
+  const otaSupported = embeddedOtaSupported(frame)
   const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8MB write_flash ${
+  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'
-  const otaBuilding = building && !browserFlashBusy
+  const otaBuilding = otaSupported && building && !browserFlashBusy
 
   const copyFlashCommand = (): void => {
     copy(flashCommand)
@@ -1189,20 +1463,32 @@ function EmbeddedFirmwareSection({
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The firmware
-          runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+          Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The
+          firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
         </div>
         {firmware?.status ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
             Status: {firmware.status}
           </div>
         ) : null}
-        {firmware?.error ? <div className="mt-2 text-sm font-semibold text-red-500">{firmware.error}</div> : null}
+        {firmware?.error ? (
+          <div
+            className={clsx(
+              'mt-2 text-sm font-semibold',
+              firmware.status === 'stale' || firmware.status === 'missing' ? 'text-amber-600' : 'text-red-500'
+            )}
+          >
+            {firmware.error}
+            {firmware.status === 'stale' || firmware.status === 'missing'
+              ? ' It will be rebuilt automatically before flashing or downloading.'
+              : null}
+          </div>
+        ) : null}
       </div>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
-          demand, so the first flash can take a minute.
+          demand, so the first flash can take a few minutes.
         </div>
         <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
       </div>
@@ -1211,13 +1497,15 @@ function EmbeddedFirmwareSection({
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
             <div className="frame-tool-muted mt-1 text-sm leading-5">
-              Build the latest app image, then ask the frame to pull it from this backend and reboot.
+              {otaSupported
+                ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
+                : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
             </div>
           </div>
           <button
             type="button"
             onClick={onOtaUpdate}
-            disabled={browserFlashBusy}
+            disabled={browserFlashBusy || !otaSupported}
             className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
             {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
@@ -1252,6 +1540,7 @@ function EmbeddedFirmwareSection({
           </button>
         </div>
       </div>
+      <FirmwareFootprintVisualization frame={frame} />
     </section>
   )
 }
@@ -1278,10 +1567,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     restartRemote,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
-    setDeployDrawerView,
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
-  const { closeFrameChangeDrawer } = useActions(workspaceLogic)
+  const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const { applyEmbeddedFirmwareOta, cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } =
     useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
@@ -1318,7 +1606,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     hideDeployPlanModal()
     closeFrameChangeDrawer()
   }
-  const showMainDeployView = (): void => setDeployDrawerView('main')
+  const showDeployDrawerView = (view: DeployDrawerView): void => {
+    openFrameChangeDrawer(frame.id, 'deploy', view)
+  }
+  const showMainDeployView = (): void => showDeployDrawerView('main')
   const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
     (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
   )
@@ -1392,7 +1683,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
-              {!isEmbeddedFrame ? <AlternativesSection onSelect={setDeployDrawerView} /> : null}
+              {!isEmbeddedFrame ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">
                   <FrameBootstrapAction frame={frame} />
@@ -1465,6 +1756,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     </section>
                   ) : null}
                   <DeployBuildOptionsSection frame={frame} frameForm={frameForm} />
+                  {isEmbeddedFrame ? <FirmwareFootprintVisualization frame={frame} /> : null}
                 </div>
               )}
             </>
@@ -1511,7 +1803,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {isEmbeddedFrame ? (
                 <button
                   type="button"
-                  onClick={() => setDeployDrawerView('embedded')}
+                  onClick={() => showDeployDrawerView('embedded')}
                   className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   Firmware

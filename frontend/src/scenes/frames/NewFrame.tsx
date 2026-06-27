@@ -19,7 +19,7 @@ import {
   rpiOSPlatforms,
 } from '../../devices'
 import { newFrameForm } from './newFrameForm'
-import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
+import { FrameEmbeddedHardwarePreset, FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
 import { normalizedTimezone } from '../../utils/timezone'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -30,6 +30,7 @@ import { Switch } from '../../components/Switch'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
+import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -124,6 +125,7 @@ function setInstallMethodValues(
       mode: 'buildroot',
       platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
       frame_host: '',
+      server_host: defaultNewFrameServerHost(savedSettings),
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
@@ -134,15 +136,114 @@ function setInstallMethodValues(
       mode: 'embedded',
       platform: EMBEDDED_ESP32_S3,
       frame_host: '',
-      device: 'waveshare.EPD_7in5_V2',
+      server_host: defaultNewFrameServerHost(savedSettings),
+      device: '',
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
   }
   if (installMethod === 'script') {
-    return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
+    return {
+      install_method: installMethod,
+      mode: 'rpios',
+      platform: '',
+      frame_host: '',
+      server_host: defaultNewFrameServerHost(savedSettings),
+    }
   }
-  return { install_method: installMethod, mode: 'rpios', platform: '' }
+  return {
+    install_method: installMethod,
+    mode: 'rpios',
+    platform: '',
+    server_host: defaultNewFrameServerHost(savedSettings),
+  }
+}
+
+const WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_epaper_13_3e6'
+const WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
+const WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_photopainter'
+const WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
+const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 12,
+  dc: 8,
+  cs: 9,
+  cs2: -1,
+  busy: 13,
+  sck: 10,
+  mosi: 11,
+  pwr: -1,
+}
+const WAVESHARE_13IN3E6_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 10,
+  dc: 7,
+  cs: 1,
+  cs2: 4,
+  busy: 8,
+  sck: 6,
+  mosi: 5,
+  pwr: 16,
+}
+const WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
+  mountPath: '/srv/assets',
+  pins: { cs: 38, sck: 39, miso: 40, mosi: 41 },
+  maxFrequencyKHz: 20000,
+}
+const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: WAVESHARE_13IN3E6_HARDWARE_PRESET,
+  mountPath: '/srv/assets',
+  pins: { cs: 3, sck: 44, miso: 43, mosi: 2 },
+  maxFrequencyKHz: 20000,
+}
+
+function normalizeEmbeddedHardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  if (value === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
+    return WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
+  }
+  if (value === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return WAVESHARE_13IN3E6_HARDWARE_PRESET
+  }
+  return 'custom'
+}
+
+function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+  device: string
+  flashSize: NonNullable<NonNullable<NewFrameFormType['embedded']>['flashSize']>
+  psramMB: number
+  pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
+  sdCardAssets: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
+} | null {
+  if (hardwarePreset === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
+    return {
+      device: WAVESHARE_PHOTOPAINTER_DEVICE,
+      flashSize: '16MB',
+      psramMB: 8,
+      pins: { ...WAVESHARE_PHOTOPAINTER_PINS },
+      sdCardAssets: {
+        ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
+        pins: { ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS.pins },
+      },
+    }
+  }
+  if (hardwarePreset === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return {
+      device: WAVESHARE_13IN3E6_DEVICE,
+      flashSize: '32MB',
+      psramMB: 16,
+      pins: { ...WAVESHARE_13IN3E6_PINS },
+      sdCardAssets: {
+        ...WAVESHARE_13IN3E6_SD_CARD_ASSETS,
+        pins: { ...WAVESHARE_13IN3E6_SD_CARD_ASSETS.pins },
+      },
+    }
+  }
+  return null
 }
 
 function renderDeviceOptions(): JSX.Element[] {
@@ -341,6 +442,54 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
   const rootPassword = newFrame.ssh_pass ?? ''
+  const embeddedHardwarePreset = normalizeEmbeddedHardwarePreset(
+    newFrame.embedded?.hardwarePreset ?? newFrame.device_config?.hardwarePreset
+  )
+
+  const setEmbeddedHardwarePreset = (hardwarePreset: FrameEmbeddedHardwarePreset): void => {
+    if (hardwarePreset === 'custom') {
+      setNewFrameValues({
+        embedded: { ...(newFrame.embedded ?? {}), hardwarePreset: 'custom' },
+        device_config: { ...(newFrame.device_config ?? {}), hardwarePreset: 'custom' },
+      })
+      return
+    }
+    const presetConfig = embeddedHardwarePresetConfig(hardwarePreset)
+    if (!presetConfig) {
+      return
+    }
+
+    setNewFrameValues({
+      platform: EMBEDDED_ESP32_S3,
+      device: presetConfig.device,
+      embedded: {
+        ...(newFrame.embedded ?? {}),
+        platform: EMBEDDED_ESP32_S3,
+        flashSize: presetConfig.flashSize,
+        hardwarePreset,
+      },
+      device_config: {
+        ...(newFrame.device_config ?? {}),
+        hardwarePreset,
+        psramMB: presetConfig.psramMB,
+        pins: { ...presetConfig.pins },
+        sdCardAssets: presetConfig.sdCardAssets,
+      },
+    })
+  }
+
+  const setEmbeddedDevice = (device: string): void => {
+    const presetConfig = embeddedHardwarePresetConfig(embeddedHardwarePreset)
+    if (presetConfig && device !== presetConfig.device) {
+      setNewFrameValues({
+        device,
+        embedded: { ...(newFrame.embedded ?? {}), hardwarePreset: 'custom' },
+        device_config: { ...(newFrame.device_config ?? {}), hardwarePreset: 'custom' },
+      })
+    } else {
+      setNewFrameValue('device', device)
+    }
+  }
 
   const cancel = () => {
     setFile(null)
@@ -731,12 +880,27 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderPlatformOptions('embedded')}
             </select>
           </FormField>
-          <FormField label="Display panel">
+          <FormField label="Hardware preset">
             <select
               className={selectClassName()}
-              value={newFrame.device ?? 'waveshare.EPD_7in5_V2'}
-              onChange={(event) => setNewFrameValue('device', event.target.value)}
+              value={embeddedHardwarePreset}
+              onChange={(event) => setEmbeddedHardwarePreset(normalizeEmbeddedHardwarePreset(event.target.value))}
             >
+              <option value="custom">Custom ESP32-S3 board</option>
+              <option value={WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET}>Waveshare ESP32-S3 PhotoPainter</option>
+              <option value={WAVESHARE_13IN3E6_HARDWARE_PRESET}>Waveshare ESP32-S3 ePaper 13.3E6</option>
+            </select>
+          </FormField>
+          <FormField label="Display panel" error={newFrameErrors.device}>
+            <select
+              className={selectClassName()}
+              value={newFrame.device ?? ''}
+              onChange={(event) => setEmbeddedDevice(event.target.value)}
+              required
+            >
+              <option value="" disabled>
+                Select display panel
+              </option>
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>

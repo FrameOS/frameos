@@ -12,9 +12,10 @@ import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
+import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
-type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
+export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
 function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTransport }): string {
   const query = new URLSearchParams()
@@ -102,6 +103,12 @@ const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setIn
 const pendingEmbeddedFirmwareDownloads = new Set<number>()
 const embeddedFirmwareStatusPollsInFlight = new Set<number>()
 const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
+const embeddedFirmwareRecoveryAttempts = new Map<number, number>()
+const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
+const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
+const embeddedUsbImageRefreshesInFlight = new Set<number>()
+const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
+const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
@@ -110,6 +117,127 @@ async function responseErrorDetail(response: Response, fallback: string): Promis
   } catch (error) {
     return fallback
   }
+}
+
+function mergeEmbeddedFirmwareStatus(
+  current: EmbeddedFirmware | undefined,
+  firmware: EmbeddedFirmware
+): EmbeddedFirmware {
+  if (!current) {
+    return firmware
+  }
+  return {
+    ...firmware,
+    layout: firmware.layout ?? current.layout,
+  }
+}
+
+async function requestEmbeddedFirmwareBuild(frameId: number, force = false): Promise<EmbeddedFirmware | null> {
+  const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    throw new Error(await responseErrorDetail(response, 'Failed to start firmware build'))
+  }
+  const data = await response.json()
+  return (data?.firmware as EmbeddedFirmware | undefined) ?? null
+}
+
+async function recoverEmbeddedFirmwareBuild(frameId: number, status: EmbeddedFirmware): Promise<boolean> {
+  if (status.status !== 'stale' && status.status !== 'missing') {
+    return false
+  }
+  const attempts = embeddedFirmwareRecoveryAttempts.get(frameId) ?? 0
+  if (attempts >= EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT) {
+    return false
+  }
+  embeddedFirmwareRecoveryAttempts.set(frameId, attempts + 1)
+  longRunningTasksModel.actions.updateTaskProgress({
+    frameId,
+    kind: 'embeddedFirmware',
+    progressCurrent: null,
+    progressTotal: null,
+    detail: status.status === 'stale' ? 'Rebuilding firmware from current settings' : 'Rebuilding missing firmware image',
+  })
+  const firmware = await requestEmbeddedFirmwareBuild(frameId, true)
+  if (firmware) {
+    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
+  }
+  return true
+}
+
+function usbLogLineIndicatesImageReady(line: string): boolean {
+  const normalized = line.toLowerCase()
+  return (
+    normalized.includes('render:done') ||
+    /render #\d+ done\b/.test(normalized) ||
+    normalized.includes('display refresh skipped: packed image unchanged') ||
+    normalized.includes('driver:waveshare:debug action="sleep:done"') ||
+    normalized.includes("driver:waveshare:debug action='sleep:done'") ||
+    normalized.includes('driver:waveshare:debug action="turnondisplay:done"') ||
+    normalized.includes("driver:waveshare:debug action='turnondisplay:done'")
+  )
+}
+
+function embeddedUsbImageSceneId(metadata?: string): string | null {
+  const match = metadata?.match(/(?:^|\s)scene=([^\s]*)/)
+  const sceneId = match?.[1]?.trim()
+  return sceneId || null
+}
+
+async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
+  if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbApiCanUse(frameId)) {
+    return
+  }
+  embeddedUsbImageRefreshesInFlight.add(frameId)
+  try {
+    const result = await runEmbeddedUsbApiCommand(frameId, 'image', {
+      timeoutMs: EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS,
+    })
+    if (!result.bytes?.byteLength) {
+      throw new Error('USB image command returned no image bytes')
+    }
+    const sceneId = embeddedUsbImageSceneId(result.metadata)
+    const query = sceneId ? `?scene_id=${encodeURIComponent(sceneId)}` : ''
+    const imageBuffer = result.bytes.buffer.slice(
+      result.bytes.byteOffset,
+      result.bytes.byteOffset + result.bytes.byteLength
+    ) as ArrayBuffer
+    const response = await apiFetch(`/api/frames/${frameId}/image${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/bmp' },
+      body: new Blob([imageBuffer], { type: 'image/bmp' }),
+    })
+    if (!response.ok) {
+      throw new Error(await responseErrorDetail(response, 'Failed to update frame image from USB'))
+    }
+    entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, 'image')
+    if (sceneId) {
+      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
+    }
+    socketLogic.actions.frameRendered(frameId)
+  } catch (error) {
+    console.warn('Failed to update frame image over USB', error)
+  } finally {
+    embeddedUsbImageRefreshesInFlight.delete(frameId)
+  }
+}
+
+function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
+  if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
+    return
+  }
+  const existingTimer = embeddedUsbImageRefreshTimers.get(frameId)
+  if (existingTimer !== undefined) {
+    window.clearTimeout(existingTimer)
+  }
+  embeddedUsbImageRefreshTimers.set(
+    frameId,
+    window.setTimeout(() => {
+      embeddedUsbImageRefreshTimers.delete(frameId)
+      void refreshEmbeddedUsbFrameImage(frameId)
+    }, EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS)
+  )
 }
 
 function sdCardImageProgressDetail(startedAt: number): string {
@@ -229,8 +357,10 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
     if (!firmware || !pendingEmbeddedFirmwareDownloads.has(frameId)) {
       return
     }
+    framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
     if (firmware.status === 'ready') {
       pendingEmbeddedFirmwareDownloads.delete(frameId)
+      embeddedFirmwareRecoveryAttempts.delete(frameId)
       stopEmbeddedFirmwareProgress(frameId)
       startBrowserDownload(firmware.downloadUrl || downloadUrl || `/api/frames/${frameId}/embedded/firmware/download`)
       framesModel.actions.loadFrame(frameId)
@@ -240,8 +370,22 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
         status: 'success',
         detail: 'Firmware image ready',
       })
-    } else if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
+    } else if (firmware.status === 'missing' || firmware.status === 'stale') {
+      if (await recoverEmbeddedFirmwareBuild(frameId, firmware)) {
+        return
+      }
       pendingEmbeddedFirmwareDownloads.delete(frameId)
+      embeddedFirmwareRecoveryAttempts.delete(frameId)
+      stopEmbeddedFirmwareProgress(frameId)
+      framesModel.actions.loadFrame(frameId)
+      longRunningTasksModel.actions.taskFailed({
+        frameId,
+        kind: 'embeddedFirmware',
+        detail: firmware.error || 'Firmware image needs to be rebuilt',
+      })
+    } else if (firmware.status === 'error') {
+      pendingEmbeddedFirmwareDownloads.delete(frameId)
+      embeddedFirmwareRecoveryAttempts.delete(frameId)
       stopEmbeddedFirmwareProgress(frameId)
       framesModel.actions.loadFrame(frameId)
       longRunningTasksModel.actions.taskFailed({
@@ -303,6 +447,7 @@ export const framesModel = kea<framesModelType>([
     restartRemote: (id: number, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: number) => ({ id }),
     downloadEmbeddedFirmware: (id: number) => ({ id }),
+    updateEmbeddedFirmwareStatus: (id: number, firmware: EmbeddedFirmware) => ({ id, firmware }),
     applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
@@ -390,13 +535,39 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
+        updateEmbeddedFirmwareStatus: (state, { id, firmware }) => {
+          const frame = state[id]
+          if (!frame) return state
+          const currentFirmware = frame.embedded?.firmware
+          return {
+            ...state,
+            [id]: sanitizeFrameForStore({
+              ...frame,
+              embedded: {
+                ...(frame.embedded ?? {}),
+                firmware: mergeEmbeddedFirmwareStatus(currentFirmware, firmware),
+              },
+            }),
+          }
+        },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
         }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: sanitizeFrameForStore({ ...(state[frame.id] ?? {}), ...frame }),
+          [frame.id]: sanitizeFrameForStore({
+            ...(state[frame.id] ?? {}),
+            ...frame,
+            embedded:
+              frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
+                ? {
+                    ...(state[frame.id]?.embedded ?? {}),
+                    ...frame.embedded,
+                    firmware: mergeEmbeddedFirmwareStatus(state[frame.id]?.embedded?.firmware, frame.embedded.firmware),
+                  }
+                : frame.embedded ?? state[frame.id]?.embedded,
+          }),
         }),
         [socketLogic.actionTypes.newLog]: (state, { log }) => {
           const frame = state[log.frame_id]
@@ -469,9 +640,14 @@ export const framesModel = kea<framesModelType>([
         detail: 'Render request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
-        if (!response.ok) {
-          throw new Error('Failed to send render event')
+        const frame = values.frames[id]
+        if ((frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
+          await runEmbeddedUsbApiCommand(id, 'render', { timeoutMs: 10000 })
+        } else {
+          const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+          if (!response.ok) {
+            throw new Error('Failed to send render event')
+          }
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
@@ -492,11 +668,48 @@ export const framesModel = kea<framesModelType>([
         detail: 'Deploy request sent',
       })
       try {
-        const response = fastDeploy
-          ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-          : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-        if (!response.ok) {
-          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
+        const frame = values.frames[id]
+        if (fastDeploy && (frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
+          const frameResponse = await apiFetch(`/api/frames/${id}`)
+          if (!frameResponse.ok) {
+            throw new Error('Failed to fetch frame before USB deploy')
+          }
+          const currentFrame = (await frameResponse.json())?.frame as FrameType
+          const scenesPayload = JSON.stringify(currentFrame.scenes ?? [])
+          longRunningTasksModel.actions.updateTaskProgress({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            progressCurrent: null,
+            progressTotal: null,
+            detail: 'Uploading scenes over USB',
+          })
+          await runEmbeddedUsbApiCommand(id, 'upload-scenes', {
+            payload: scenesPayload,
+            timeoutMs: 45000,
+          })
+          const completeResponse = await apiFetch(
+            `/api/frames/${id}/embedded/usb_deploy_complete${taskIdQuery(taskId)}`,
+            { method: 'POST' }
+          )
+          if (!completeResponse.ok) {
+            throw new Error('USB deploy completed, but backend deploy state update failed')
+          }
+          actions.loadFrame(id)
+          longRunningTasksModel.actions.finishTask({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            status: 'success',
+            detail: 'Fast deploy completed over USB',
+          })
+        } else {
+          const response = fastDeploy
+            ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+            : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+          if (!response.ok) {
+            throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
+          }
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
@@ -625,37 +838,35 @@ export const framesModel = kea<framesModelType>([
     },
     downloadEmbeddedFirmware: async ({ id }) => {
       const frame = values.frames[id]
-      const firmware = frame?.embedded?.firmware
-      const downloadUrl = firmware?.downloadUrl || `/api/frames/${id}/embedded/firmware/download`
+      const currentFirmware = frame?.embedded?.firmware
+      const downloadUrl = currentFirmware?.downloadUrl || `/api/frames/${id}/embedded/firmware/download`
 
       pendingEmbeddedFirmwareDownloads.add(id)
+      embeddedFirmwareRecoveryAttempts.delete(id)
       startEmbeddedFirmwareProgress(id)
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'embeddedFirmware',
         title: 'Building firmware image',
         detail:
-          firmware?.status === 'building' || firmware?.status === 'queued'
+          currentFirmware?.status === 'building' || currentFirmware?.status === 'queued'
             ? 'Checking firmware build status'
             : 'Firmware build started',
       })
 
       try {
-        const response = await apiFetch(`/api/frames/${id}/embedded/firmware`, {
-          method: 'POST',
-        })
-        if (!response.ok) {
-          let detail = 'Failed to start firmware build'
-          try {
-            detail = (await response.json())?.detail || detail
-          } catch (error) {}
-          throw new Error(detail)
+        const nextFirmware = await requestEmbeddedFirmwareBuild(
+          id,
+          currentFirmware?.status === 'stale' || currentFirmware?.status === 'missing'
+        )
+        if (nextFirmware) {
+          actions.updateEmbeddedFirmwareStatus(id, nextFirmware)
         }
-        const data = await response.json()
-        if (data?.firmware?.status === 'ready') {
+        if (nextFirmware?.status === 'ready') {
           pendingEmbeddedFirmwareDownloads.delete(id)
+          embeddedFirmwareRecoveryAttempts.delete(id)
           stopEmbeddedFirmwareProgress(id)
-          startBrowserDownload(data.firmware.downloadUrl || downloadUrl)
+          startBrowserDownload(nextFirmware.downloadUrl || downloadUrl)
           longRunningTasksModel.actions.finishTask({
             frameId: id,
             kind: 'embeddedFirmware',
@@ -667,6 +878,7 @@ export const framesModel = kea<framesModelType>([
         void pollEmbeddedFirmwareStatus(id, downloadUrl)
       } catch (error) {
         pendingEmbeddedFirmwareDownloads.delete(id)
+        embeddedFirmwareRecoveryAttempts.delete(id)
         stopEmbeddedFirmwareProgress(id)
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
@@ -754,13 +966,41 @@ export const framesModel = kea<framesModelType>([
             detail: 'Firmware image ready',
           })
         } else if (firmware.status === 'error' || firmware.status === 'missing' || firmware.status === 'stale') {
-          pendingEmbeddedFirmwareDownloads.delete(frame.id)
-          stopEmbeddedFirmwareProgress(frame.id)
-          longRunningTasksModel.actions.taskFailed({
-            frameId: frame.id,
-            kind: 'embeddedFirmware',
-            detail: firmware.error || 'Firmware build failed',
-          })
+          if (firmware.status === 'missing' || firmware.status === 'stale') {
+            void recoverEmbeddedFirmwareBuild(frame.id, firmware)
+              .then((recovered) => {
+                if (recovered) {
+                  return
+                }
+                pendingEmbeddedFirmwareDownloads.delete(frame.id)
+                embeddedFirmwareRecoveryAttempts.delete(frame.id)
+                stopEmbeddedFirmwareProgress(frame.id)
+                longRunningTasksModel.actions.taskFailed({
+                  frameId: frame.id,
+                  kind: 'embeddedFirmware',
+                  detail: firmware.error || 'Firmware image needs to be rebuilt',
+                })
+              })
+              .catch((error) => {
+                pendingEmbeddedFirmwareDownloads.delete(frame.id)
+                embeddedFirmwareRecoveryAttempts.delete(frame.id)
+                stopEmbeddedFirmwareProgress(frame.id)
+                longRunningTasksModel.actions.taskFailed({
+                  frameId: frame.id,
+                  kind: 'embeddedFirmware',
+                  detail: error instanceof Error ? error.message : firmware.error || 'Firmware build failed',
+                })
+              })
+          } else {
+            pendingEmbeddedFirmwareDownloads.delete(frame.id)
+            embeddedFirmwareRecoveryAttempts.delete(frame.id)
+            stopEmbeddedFirmwareProgress(frame.id)
+            longRunningTasksModel.actions.taskFailed({
+              frameId: frame.id,
+              kind: 'embeddedFirmware',
+              detail: firmware.error || 'Firmware build failed',
+            })
+          }
         }
       }
     },
@@ -822,6 +1062,11 @@ export const framesModel = kea<framesModelType>([
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
           entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
+      }
+    },
+    [embeddedUsbLogsModel.actionTypes.appendUsbLog]: ({ log }) => {
+      if (log.type === 'usb' && usbLogLineIndicatesImageReady(log.line)) {
+        scheduleEmbeddedUsbFrameImageRefresh(log.frame_id)
       }
     },
   })),

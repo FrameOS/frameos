@@ -10,6 +10,7 @@ import type { controlLogicType } from './controlLogicType'
 import { socketLogic } from '../../../socketLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 
 export interface ControlLogicProps {
   frameId: number
@@ -143,15 +144,27 @@ export const controlLogic = kea<controlLogicType>([
         detail: scene?.name || sceneId,
       })
       try {
-        const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sceneId }),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to send scene activation event')
+        if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
+          await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
+          actions.currentSceneChanged(sceneId)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'activate',
+            sceneId,
+            status: 'success',
+            detail: scene?.name || sceneId,
+          })
+        } else {
+          const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sceneId }),
+          })
+          if (!response.ok) {
+            throw new Error('Failed to send scene activation event')
+          }
+          await response.text()
         }
-        await response.text()
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,

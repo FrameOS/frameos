@@ -1,6 +1,12 @@
-import std/[os, unittest]
+import std/[os, unicode, unittest]
 import pixie
 import ../font
+
+when not defined(frameosEmbedded):
+  proc copiedAssetsRoot(): string =
+    normalizedPath(
+      currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "assets" / "copied"
+    )
 
 suite "font helpers":
   test "getAvailableFonts returns sorted ttf filenames with empty option":
@@ -31,6 +37,19 @@ suite "font helpers":
   test "missing font falls back to default typeface":
     let tf = getTypeface("this-font-does-not-exist.ttf", getTempDir())
     check tf != nil
+
+  when not defined(frameosEmbedded):
+    test "default typeface uses Noto Color Emoji from assets path as fallback":
+      let assetsRoot = copiedAssetsRoot()
+      check fileExists(assetsRoot / "fonts" / "NotoColorEmoji.ttf")
+
+      let
+        tf = getTypeface("", assetsRoot)
+        emojiTypeface = tf.fallbackTypeface(Rune(0x1F600))
+
+      check emojiTypeface != nil
+      check emojiTypeface != tf
+      check emojiTypeface.hasColorGlyph(Rune(0x1F600))
 
   test "cloneFontWithColor keeps size and updates color":
     let original = newFont(getDefaultTypeface(), 19, parseHtmlColor("#112233"))

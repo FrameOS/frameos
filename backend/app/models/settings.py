@@ -30,9 +30,14 @@ def default_settings() -> dict:
             "timezone": guess_system_timezone(),
             "wifiSSID": "",
             "wifiPassword": "",
+            "backendHost": "",
+            "backendPort": "",
         },
         "buildEnvironment": {},
         "modalSandbox": {},
+        "personal": {
+            "favouriteTemplateIds": [],
+        },
     }
 
 

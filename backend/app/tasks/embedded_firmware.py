@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,7 +34,13 @@ from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
-from app.models.frame import DEFAULT_MAX_HTTP_RESPONSE_BYTES, Frame, normalize_https_proxy, update_frame
+from app.models.frame import (
+    DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+    Frame,
+    normalize_frame_admin_auth,
+    normalize_https_proxy,
+    update_frame,
+)
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
 from app.utils.frame_http import _fetch_frame_http_bytes
@@ -45,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 25  # Pull-side OTA checks from the ESP32 render loop
+EMBEDDED_FIRMWARE_VERSION = 26  # Optional SD-card assets mount at /srv/assets
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -60,6 +67,87 @@ EMBEDDED_DEFAULT_PINS = {
     "pwr": -1,
 }
 EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
+# Waveshare ESP32-S3 PhotoPainter schematic pinout:
+# EPD_DC=GPIO8, EPD_CS=GPIO9, EPD_SCK=GPIO10, EPD_DIN=GPIO11,
+# EPD_RST=GPIO12, EPD_BUSY=GPIO13.
+EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS = {
+    "rst": 12,
+    "dc": 8,
+    "cs": 9,
+    "cs2": -1,
+    "busy": 13,
+    "sck": 10,
+    "mosi": 11,
+    "pwr": -1,
+}
+# Waveshare ESP32-S3 ePaper 13.3E6 schematic pinout:
+# CSB_M=GPIO1, CSB_S=GPIO4, SDA=GPIO5, SCL=GPIO6, D/C=GPIO7,
+# BUSY_N=GPIO8, RST_N=GPIO10, EPD_PWR=GPIO16.
+EMBEDDED_WAVESHARE_13IN3E6_PINS = {
+    "rst": 10,
+    "dc": 7,
+    "cs": 1,
+    "cs2": 4,
+    "busy": 8,
+    "sck": 6,
+    "mosi": 5,
+    "pwr": 16,
+}
+EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
+EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
+    "cs": -1,
+    "sck": -1,
+    "miso": -1,
+    "mosi": -1,
+}
+# Waveshare ESP32-S3 PhotoPainter TF socket, from the vendor schematic:
+# TF pin 2 (DAT3/CS)=GPIO38, pin 5 (CLK)=GPIO39, pin 7 (DAT0/MISO)=GPIO40,
+# pin 3 (CMD/MOSI)=GPIO41.
+# Waveshare ESP32-S3 ePaper 13.3E6 TF socket: SD_CS=GPIO3,
+# SD_CLK=GPIO44, SD_MISO=GPIO43, SD_MOSI=GPIO2.
+EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
+    "waveshare_esp32_s3_photopainter": {
+        "cs": 38,
+        "sck": 39,
+        "miso": 40,
+        "mosi": 41,
+    },
+    "waveshare_esp32_s3_epaper_13_3e6": {
+        "cs": 3,
+        "sck": 44,
+        "miso": 43,
+        "mosi": 2,
+    },
+}
+EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
+EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
+    "waveshare_esp32_s3_photopainter": {
+        "device": "waveshare.EPD_7in3e",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "waveshare_esp32_s3_photopainter",
+            "pins": EMBEDDED_SD_CARD_ASSETS_PRESET_PINS["waveshare_esp32_s3_photopainter"],
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+            "mountPath": "/srv/assets",
+        },
+    },
+    "waveshare_esp32_s3_epaper_13_3e6": {
+        "device": "waveshare.EPD_13in3e",
+        "flashSize": "32MB",
+        "psramMB": 16,
+        "pins": EMBEDDED_WAVESHARE_13IN3E6_PINS,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "waveshare_esp32_s3_epaper_13_3e6",
+            "pins": EMBEDDED_SD_CARD_ASSETS_PRESET_PINS["waveshare_esp32_s3_epaper_13_3e6"],
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+            "mountPath": "/srv/assets",
+        },
+    },
+}
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1
@@ -101,12 +189,46 @@ EMBEDDED_PANEL_FORMATS = {
 # Must mirror components/frameos_display/generate_selected_panel.py.
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
+EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
+EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
+    "4MB": {
+        "flashSize": "4MB",
+        "flashBytes": 4 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.4mb-no-ota"),
+        "partitionTable": "partitions_4mb.csv",
+        "otaSupported": False,
+    },
+    "8MB": {
+        "flashSize": "8MB",
+        "flashBytes": 8 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults",),
+        "partitionTable": "partitions.csv",
+        "otaSupported": True,
+    },
+    "16MB": {
+        "flashSize": "16MB",
+        "flashBytes": 16 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.16mb-ota"),
+        "partitionTable": "partitions_ota_16mb.csv",
+        "otaSupported": True,
+    },
+    "32MB": {
+        "flashSize": "32MB",
+        "flashBytes": 32 * 1024 * 1024,
+        "sdkconfigDefaults": ("sdkconfig.defaults", "sdkconfig.defaults.32mb-ota"),
+        "partitionTable": "partitions_ota_32mb.csv",
+        "otaSupported": True,
+    },
+}
 # Memory guardrail (M4): the on-device renderer composites into an RGBA pixie
 # buffer (4 B/px), packs it to the selected panel format, and needs headroom
 # for the Nim heap + QuickJS. Keep the reserve in sync with
 # FOS_RENDER_PSRAM_RESERVE in components/frameos_display/frameos_display.c.
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
 EMBEDDED_DEFAULT_PSRAM_BYTES = 8 * 1024 * 1024
+EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
+EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
+EMBEDDED_DISPLAY_STATE_BYTES = 80
 EMBEDDED_RENDER_LOCAL = 0
 EMBEDDED_RENDER_REMOTE = 1
 EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS = int(
@@ -130,6 +252,58 @@ def normalize_embedded_platform(platform: str | None) -> str:
     if value == SUPPORTED_EMBEDDED_PLATFORM or value in EMBEDDED_PLATFORM_ALIASES:
         return SUPPORTED_EMBEDDED_PLATFORM
     raise ValueError(f"Unsupported embedded platform: {value or '(empty)'}")
+
+
+def normalize_embedded_flash_size(value: object | None) -> str:
+    if value is None or value == "":
+        return EMBEDDED_DEFAULT_FLASH_SIZE
+    if isinstance(value, bool):
+        raise ValueError("Unsupported ESP32 flash size: boolean")
+    if isinstance(value, (int, float)):
+        normalized = f"{int(value)}MB"
+    else:
+        normalized = str(value).strip().upper().replace(" ", "")
+        if normalized.isdigit():
+            normalized = f"{normalized}MB"
+        elif normalized.endswith("M") and not normalized.endswith("MB"):
+            normalized = f"{normalized[:-1]}MB"
+    if normalized in EMBEDDED_FLASH_PROFILES:
+        return normalized
+    supported = ", ".join(EMBEDDED_FLASH_PROFILES)
+    raise ValueError(f"Unsupported ESP32 flash size: {value!r}. Supported sizes: {supported}.")
+
+
+def embedded_flash_size_for_frame(frame: Frame) -> str:
+    for source in (frame.embedded, frame.device_config):
+        if isinstance(source, dict):
+            for key in ("flashSize", "flash_size", "flashSizeMB", "flash_size_mb"):
+                if key in source:
+                    return normalize_embedded_flash_size(source.get(key))
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return normalize_embedded_flash_size(EMBEDDED_HARDWARE_PRESETS[preset_key]["flashSize"])
+    return EMBEDDED_DEFAULT_FLASH_SIZE
+
+
+def embedded_flash_profile_for_frame(frame: Frame) -> dict[str, Any]:
+    return EMBEDDED_FLASH_PROFILES[embedded_flash_size_for_frame(frame)]
+
+
+def embedded_ota_supported_for_frame(frame: Frame) -> bool:
+    return bool(embedded_flash_profile_for_frame(frame)["otaSupported"])
+
+
+def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
+    return ";".join(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
+
+
+def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
+    profile = embedded_flash_profile_for_frame(frame)
+    return {
+        **EMBEDDED_REQUIRED_SDKCONFIG,
+        "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
+    }
 
 
 def embedded_artifact_dir() -> Path:
@@ -159,18 +333,19 @@ def _read_sdkconfig_values(path: Path) -> dict[str, str]:
     return values
 
 
-def _missing_required_sdkconfig(path: Path) -> dict[str, str]:
+def _missing_required_sdkconfig(path: Path, required: dict[str, str] | None = None) -> dict[str, str]:
     values = _read_sdkconfig_values(path)
+    required_values = required or EMBEDDED_REQUIRED_SDKCONFIG
     return {
         key: value
-        for key, value in EMBEDDED_REQUIRED_SDKCONFIG.items()
+        for key, value in required_values.items()
         if values.get(key) != value
     }
 
 
-def _reset_stale_embedded_sdkconfig(build_dir: Path) -> dict[str, str]:
+def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | None = None) -> dict[str, str]:
     sdkconfig_path = EMBEDDED_PROJECT_DIR / "sdkconfig"
-    missing = _missing_required_sdkconfig(sdkconfig_path)
+    missing = _missing_required_sdkconfig(sdkconfig_path, required)
     if not missing or not sdkconfig_path.exists():
         return {}
     sdkconfig_path.unlink()
@@ -184,16 +359,23 @@ def _reset_stale_embedded_sdkconfig(build_dir: Path) -> dict[str, str]:
 
 def embedded_pixie_path() -> Path | None:
     configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    candidates = [Path(configured)] if configured else []
-    candidates.append(REPO_ROOT.parent / "pixie")
-    for candidate in candidates:
-        if (candidate / "src" / "pixie").is_dir():
-            return candidate.resolve()
+    if not configured:
+        return None
+    candidate = Path(configured)
+    if (candidate / "src" / "pixie").is_dir():
+        return candidate.resolve()
     return None
 
 
 def embedded_panel_for_frame(frame: Frame) -> str:
     """Map the frame's device string to a firmware panel name."""
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key and not frame.device:
+        frame_device = str(EMBEDDED_HARDWARE_PRESETS[preset_key]["device"])
+        if frame_device.startswith("waveshare."):
+            panel = frame_device.split(".", 1)[1]
+            if panel in EMBEDDED_SUPPORTED_PANELS:
+                return panel
     device = str(frame.device or "")
     if device.startswith("waveshare."):
         panel = device.split(".", 1)[1]
@@ -210,6 +392,9 @@ def embedded_module_psram_bytes(frame: Frame) -> int:
             mb = source.get("psramMB", source.get("psram_mb"))
             if isinstance(mb, (int, float)) and not isinstance(mb, bool) and mb > 0:
                 return int(mb * 1024 * 1024)
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return int(EMBEDDED_HARDWARE_PRESETS[preset_key]["psramMB"] * 1024 * 1024)
     return EMBEDDED_DEFAULT_PSRAM_BYTES
 
 
@@ -234,6 +419,50 @@ def embedded_device_config(frame: Frame) -> dict[str, Any]:
     return frame.device_config if isinstance(frame.device_config, dict) else {}
 
 
+def normalize_embedded_hardware_preset(value: object | None) -> str:
+    normalized = str(value or "").strip().replace("-", "_").replace(".", "_").lower()
+    if normalized in {"", "custom", "none"}:
+        return ""
+    if normalized in EMBEDDED_HARDWARE_PRESETS:
+        return normalized
+    supported = ", ".join(["custom", *EMBEDDED_HARDWARE_PRESETS])
+    raise ValueError(f"Unsupported ESP32 hardware preset: {value!r}. Supported presets: {supported}.")
+
+
+def embedded_hardware_preset_for_frame(frame: Frame) -> str:
+    for source in (frame.embedded, frame.device_config):
+        if isinstance(source, dict):
+            for key in ("hardwarePreset", "hardware_preset", "boardPreset", "board_preset"):
+                if key in source:
+                    return normalize_embedded_hardware_preset(source.get(key))
+    return ""
+
+
+def apply_embedded_hardware_preset(frame: Frame) -> str:
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if not preset_key:
+        return ""
+    preset = EMBEDDED_HARDWARE_PRESETS[preset_key]
+
+    frame.device = preset["device"]
+
+    embedded = dict(frame.embedded or {})
+    embedded["hardwarePreset"] = preset_key
+    embedded["flashSize"] = preset["flashSize"]
+    frame.embedded = embedded
+
+    device_config = dict(embedded_device_config(frame))
+    device_config["hardwarePreset"] = preset_key
+    device_config["psramMB"] = preset["psramMB"]
+    device_config["pins"] = dict(preset["pins"])
+    device_config["sdCardAssets"] = {
+        **preset["sdCardAssets"],
+        "pins": dict(preset["sdCardAssets"]["pins"]),
+    }
+    frame.device_config = device_config
+    return preset_key
+
+
 def embedded_max_http_response_bytes_for_frame(frame: Frame) -> int:
     value = getattr(frame, "max_http_response_bytes", None)
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -250,6 +479,9 @@ def embedded_default_pins_for_panel(panel: str) -> dict[str, int]:
 
 
 def embedded_default_pins_for_frame(frame: Frame) -> dict[str, int]:
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return dict(EMBEDDED_HARDWARE_PRESETS[preset_key]["pins"])
     return embedded_default_pins_for_panel(embedded_panel_for_frame(frame))
 
 
@@ -265,6 +497,50 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
         if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
             pins[key] = raw_value
     return pins
+
+
+def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
+    device_config = embedded_device_config(frame)
+    raw = device_config.get("sdCardAssets", device_config.get("sd_card_assets"))
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if not isinstance(raw, dict) and preset_key:
+        raw = EMBEDDED_HARDWARE_PRESETS[preset_key]["sdCardAssets"]
+    if not isinstance(raw, dict):
+        raw = {}
+
+    preset = str(raw.get("preset") or "custom").strip() or "custom"
+    normalized_preset = preset.replace("-", "_").lower()
+    pins = dict(
+        EMBEDDED_SD_CARD_ASSETS_PRESET_PINS.get(
+            normalized_preset,
+            EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS,
+        )
+    )
+
+    raw_pins = raw.get("pins")
+    if not isinstance(raw_pins, dict):
+        raw_pins = raw
+    for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS:
+        raw_value = raw_pins.get(key)
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+            pins[key] = raw_value
+
+    raw_frequency = raw.get("maxFrequencyKHz", raw.get("max_frequency_khz"))
+    max_frequency_khz = EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ
+    if isinstance(raw_frequency, (int, float)) and not isinstance(raw_frequency, bool):
+        max_frequency_khz = int(max(400, min(40_000, raw_frequency)))
+
+    enabled = raw.get("enabled") is True
+    if enabled and any(pins[key] < 0 for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS):
+        enabled = False
+
+    return {
+        "enabled": enabled,
+        "preset": normalized_preset if normalized_preset in EMBEDDED_SD_CARD_ASSETS_PRESET_PINS else "custom",
+        "mountPath": "/srv/assets",
+        "pins": pins,
+        "maxFrequencyKHz": max_frequency_khz,
+    }
 
 
 def embedded_pixel_format_for_panel(panel: str) -> int:
@@ -288,6 +564,165 @@ def embedded_render_psram_bytes(width: int, height: int, pixel_format: int = FOS
     rgba = width * height * 4
     packed = embedded_buffer_size(width, height, pixel_format)
     return rgba + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+
+
+def _parse_embedded_size(value: str) -> int:
+    raw = value.strip()
+    if not raw:
+        return 0
+    if raw.lower().startswith("0x"):
+        return int(raw, 16)
+    suffix = raw[-1:].upper()
+    number = raw[:-1] if suffix in {"K", "M"} else raw
+    multiplier = 1024 if suffix == "K" else 1024 * 1024 if suffix == "M" else 1
+    return int(number, 10) * multiplier
+
+
+def _embedded_partition_table_rows(table_name: str) -> list[dict[str, Any]]:
+    table_path = EMBEDDED_PROJECT_DIR / table_name
+    rows: list[dict[str, Any]] = []
+    next_offset = 0
+    if not table_path.is_file():
+        return rows
+    for line in table_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = [part.strip() for part in stripped.split(",")]
+        if len(parts) < 5:
+            continue
+        name, partition_type, subtype, offset_raw, size_raw = parts[:5]
+        offset = _parse_embedded_size(offset_raw) if offset_raw else next_offset
+        size = _parse_embedded_size(size_raw)
+        rows.append({
+            "name": name,
+            "type": partition_type,
+            "subtype": subtype,
+            "offset": offset,
+            "size": size,
+            "end": offset + size,
+        })
+        next_offset = offset + size
+    return rows
+
+
+def _embedded_bmp_preview_bytes(width: int, height: int, pixel_format: int) -> int:
+    if width <= 0 or height <= 0:
+        return 0
+    bit_count = 1 if pixel_format == FOS_PIXEL_1BPP else 4
+    palette_entries = 2 if bit_count == 1 else 16
+    row_stride = (((width * bit_count) + 31) // 32) * 4
+    return 54 + palette_entries * 4 + row_stride * height
+
+
+def _pixel_format_name(pixel_format: int) -> str:
+    return {
+        FOS_PIXEL_1BPP: "1bpp black/white",
+        FOS_PIXEL_DUAL_1BPP_RED: "dual 1bpp black/red",
+        FOS_PIXEL_DUAL_1BPP_YELLOW: "dual 1bpp black/yellow",
+        FOS_PIXEL_2BPP_GRAY: "2bpp grayscale",
+        FOS_PIXEL_2BPP_BWYR: "2bpp black/white/yellow/red",
+        FOS_PIXEL_4BPP_7COLOR: "4bpp 7-color",
+        FOS_PIXEL_4BPP_SPECTRA6: "4bpp Spectra 6",
+        FOS_PIXEL_4BPP_GRAY: "4bpp grayscale",
+    }.get(pixel_format, f"format {pixel_format}")
+
+
+def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | None = None) -> dict[str, Any]:
+    flash_profile = embedded_flash_profile_for_frame(frame)
+    firmware = firmware or {}
+    app_size = firmware.get("appSize") or firmware.get("otaSize")
+    merged_size = firmware.get("size")
+    if not isinstance(app_size, int) or isinstance(app_size, bool):
+        app_size = None
+    if not isinstance(merged_size, int) or isinstance(merged_size, bool):
+        merged_size = None
+
+    partitions = [
+        {
+            "name": "bootloader",
+            "type": "system",
+            "subtype": "bootloader",
+            "offset": 0,
+            "size": 0x8000,
+            "end": 0x8000,
+            "usedBytes": firmware.get("bootloaderSize") if isinstance(firmware.get("bootloaderSize"), int) else None,
+        },
+        {
+            "name": "partition_table",
+            "type": "system",
+            "subtype": "partition_table",
+            "offset": 0x8000,
+            "size": 0x1000,
+            "end": 0x9000,
+            "usedBytes": firmware.get("partitionTableSize")
+            if isinstance(firmware.get("partitionTableSize"), int)
+            else None,
+        },
+    ]
+    app_slot_names = {"factory"} if not flash_profile["otaSupported"] else {"ota_0", "ota_1"}
+    active_app_slot = "factory" if not flash_profile["otaSupported"] else "ota_0"
+    for partition in _embedded_partition_table_rows(flash_profile["partitionTable"]):
+        if partition["name"] in app_slot_names:
+            partition = {
+                **partition,
+                "appSlot": True,
+                "usedBytes": app_size if partition["name"] == active_app_slot else None,
+            }
+        partitions.append(partition)
+
+    from app.drivers.devices import device_dimensions
+
+    panel = embedded_panel_for_frame(frame)
+    dims = device_dimensions(frame.device) or (0, 0)
+    width, height = dims
+    pixel_format = embedded_pixel_format_for_panel(panel)
+    rgba_bytes = width * height * 4 if width > 0 and height > 0 else 0
+    packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
+    render_mode = embedded_render_mode_for_frame(frame)
+    render_working_bytes = (
+        rgba_bytes + packed_bytes + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+        if render_mode == EMBEDDED_RENDER_LOCAL and panel != "none"
+        else 0
+    )
+    preview_bmp_bytes = _embedded_bmp_preview_bytes(width, height, pixel_format)
+    psram_bytes = embedded_module_psram_bytes(frame)
+    return {
+        "flash": {
+            "flashSize": flash_profile["flashSize"],
+            "flashBytes": flash_profile["flashBytes"],
+            "partitionTable": flash_profile["partitionTable"],
+            "otaSupported": flash_profile["otaSupported"],
+            "flashOffset": EMBEDDED_FLASH_OFFSET,
+            "mergedBinaryBytes": merged_size,
+            "appBinaryBytes": app_size,
+            "otaBinaryBytes": firmware.get("otaSize") if isinstance(firmware.get("otaSize"), int) else None,
+            "partitions": partitions,
+        },
+        "ram": {
+            "psramBytes": psram_bytes,
+            "panel": panel,
+            "width": width,
+            "height": height,
+            "pixelFormat": pixel_format,
+            "pixelFormatName": _pixel_format_name(pixel_format),
+            "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
+            "rgbaBufferBytes": rgba_bytes,
+            "packedBufferBytes": packed_bytes,
+            "renderReserveBytes": EMBEDDED_RENDER_PSRAM_RESERVE_BYTES,
+            "renderWorkingBytes": render_working_bytes,
+            "quickJsHeapLimitBytes": EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES,
+            "previewSnapshotBytes": packed_bytes,
+            "previewSnapshotReserveBytes": EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES,
+            "previewBmpBytes": preview_bmp_bytes,
+            "displayStateBytes": EMBEDDED_DISPLAY_STATE_BYTES,
+            "httpResponseLimitBytes": embedded_max_http_response_bytes_for_frame(frame),
+        },
+    }
+
+
+def with_embedded_firmware_layout(frame: Frame, firmware: dict[str, Any]) -> dict[str, Any]:
+    return {**firmware, "layout": embedded_firmware_layout_for_frame(frame, firmware)}
 
 
 def check_embedded_panel_fits_memory(frame: Frame) -> None:
@@ -414,6 +849,8 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     https_proxy = normalize_https_proxy(frame.https_proxy)
     tls_certs = https_proxy.get("certs", {})
     tls_port = https_proxy.get("port") or 8443
+    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    admin_auth_enabled = admin_auth["enabled"] and bool(admin_auth["user"]) and bool(admin_auth["pass"])
 
     lines = [
         "/* Generated by the FrameOS backend for this frame — do not edit. */",
@@ -434,12 +871,27 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_TLS_PORT {int(tls_port)}",
         f"#define FRAMEOS_DEFAULT_TLS_SERVER_CERT {c_str(tls_certs.get('server', ''))}",
         f"#define FRAMEOS_DEFAULT_TLS_SERVER_KEY {c_str(tls_certs.get('server_key', ''))}",
+        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_ENABLE {1 if admin_auth_enabled else 0}",
+        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER {c_str(admin_auth['user'] if admin_auth_enabled else '')}",
+        f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS {c_str(admin_auth['pass'] if admin_auth_enabled else '')}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_PATH {c_str('/srv/assets')}",
     ]
     pins = embedded_pins_for_frame(frame)
     mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
                "sck": "SCK", "mosi": "MOSI", "pwr": "PWR"}
     for key, macro in mapping.items():
         lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {pins[key]}")
+
+    sd_card_assets = embedded_sd_card_assets_for_frame(frame)
+    sd_pins = sd_card_assets["pins"]
+    lines.extend([
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE {1 if sd_card_assets['enabled'] else 0}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS {sd_pins['cs']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK {sd_pins['sck']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO {sd_pins['miso']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI {sd_pins['mosi']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ {sd_card_assets['maxFrequencyKHz']}",
+    ])
 
     # Optional power-management settings (M4). Absent → firmware defaults
     # (no deep sleep, no battery pin); all still overridable from the device.
@@ -472,6 +924,7 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     )
 
     frame.mode = "embedded"
+    apply_embedded_hardware_preset(frame)
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     if not frame.frame_port or frame.frame_port == 8787:
@@ -488,8 +941,21 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     frame.agent = agent
     frame.log_to_file = None
 
+    raw_admin_auth = frame.frame_admin_auth if isinstance(frame.frame_admin_auth, dict) else {}
+    admin_auth = normalize_frame_admin_auth(raw_admin_auth)
+    should_generate_admin_auth = not raw_admin_auth or (
+        admin_auth["enabled"] and (not admin_auth["user"] or not admin_auth["pass"])
+    )
+    if should_generate_admin_auth:
+        frame.frame_admin_auth = {
+            "enabled": True,
+            "user": admin_auth["user"] or "admin",
+            "pass": admin_auth["pass"] or secure_token(24),
+        }
+
     embedded = dict(frame.embedded or {})
     embedded["platform"] = normalized_platform
+    embedded["flashSize"] = embedded_flash_size_for_frame(frame)
     frame.embedded = embedded
 
     # The device authenticates its render/OTA pulls with the server API key
@@ -502,6 +968,9 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
 
     device_config = dict(embedded_device_config(frame))
     device_config["pins"] = embedded_pins_for_frame(frame)
+    if "sdCardAssets" in device_config or "sd_card_assets" in device_config:
+        device_config.pop("sd_card_assets", None)
+        device_config["sdCardAssets"] = embedded_sd_card_assets_for_frame(frame)
     frame.device_config = device_config
 
 
@@ -517,35 +986,53 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     if not isinstance(firmware, dict):
         return None
     if firmware.get("status") == "ready" and firmware.get("firmwareVersion") != EMBEDDED_FIRMWARE_VERSION:
-        return {
+        return with_embedded_firmware_layout(frame, {
             **firmware,
             "status": "stale",
             "error": "The generated firmware was built from an older firmware project version",
-        }
+        })
     if firmware.get("status") == "ready":
+        try:
+            firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
+        except ValueError:
+            firmware_flash_size = ""
+        expected_flash_size = embedded_flash_size_for_frame(frame)
+        if firmware_flash_size != expected_flash_size:
+            return with_embedded_firmware_layout(frame, {
+                **firmware,
+                "status": "stale",
+                "error": "The generated firmware was built for a different ESP32 flash size",
+            })
         panel = firmware.get("panel")
         if isinstance(panel, str) and panel != embedded_panel_for_frame(frame):
-            return {
+            return with_embedded_firmware_layout(frame, {
                 **firmware,
                 "status": "stale",
                 "error": "The generated firmware was built for a different embedded panel",
-            }
+            })
         config_hash = firmware.get("configHash")
         expected_hash = embedded_firmware_config_hash(frame)
         if not isinstance(config_hash, str) or config_hash != expected_hash:
-            return {
+            return with_embedded_firmware_layout(frame, {
                 **firmware,
                 "status": "stale",
                 "error": "The generated firmware was built from older embedded frame settings",
-            }
+            })
     path = firmware.get("path")
     if firmware.get("status") == "ready":
         if not isinstance(path, str) or not Path(path).is_file():
-            return {**firmware, "status": "missing", "error": "The generated firmware file is missing"}
-        ota_path = firmware.get("otaPath")
-        if not isinstance(ota_path, str) or not Path(ota_path).is_file():
-            return {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"}
-    return firmware
+            return with_embedded_firmware_layout(
+                frame,
+                {**firmware, "status": "missing", "error": "The generated firmware file is missing"},
+            )
+        if firmware.get("otaSupported") is not False:
+            ota_path = firmware.get("otaPath")
+            if not isinstance(ota_path, str) or not Path(ota_path).is_file():
+                return with_embedded_firmware_layout(
+                    frame,
+                    {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"},
+                )
+    return with_embedded_firmware_layout(frame, firmware)
 
 
 async def refresh_embedded_firmware_status(db: Session, redis: Redis, frame: Frame) -> dict[str, Any] | None:
@@ -595,6 +1082,8 @@ async def start_embedded_firmware(
         "requestId": request_id,
         "queueJobId": queue_job_id,
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": embedded_flash_size_for_frame(frame),
+        "otaSupported": embedded_ota_supported_for_frame(frame),
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -667,6 +1156,8 @@ async def request_embedded_firmware_ota(
     frame = get_fresh_frame(db, int(frame.id)) or frame
     firmware = latest_embedded_firmware(frame) or {}
     ota_path = firmware.get("otaPath")
+    if firmware.get("otaSupported") is False or not embedded_ota_supported_for_frame(frame):
+        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
     if firmware.get("status") != "ready":
         raise ValueError("No ready OTA firmware image for this frame")
     if not isinstance(ota_path, str) or not Path(ota_path).is_file():
@@ -714,6 +1205,9 @@ async def request_or_queue_embedded_firmware_ota(
     *,
     force: bool = False,
 ) -> tuple[str, dict[str, Any], Any | None]:
+    if not embedded_ota_supported_for_frame(frame):
+        raise ValueError("OTA updates are not available for the selected ESP32 flash size")
+
     firmware = await refresh_embedded_firmware_status(db, redis, frame) or {}
     if firmware.get("status") == "ready" and not force:
         payload = await request_embedded_firmware_ota(db, redis, frame)
@@ -792,17 +1286,23 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     current = latest_embedded_firmware(frame) or {}
     started_at = _utc_now()
+    flash_profile = embedded_flash_profile_for_frame(frame)
+    sdkconfig_defaults = embedded_sdkconfig_defaults_for_frame(frame)
+    required_sdkconfig = embedded_required_sdkconfig_for_frame(frame)
     await _set_firmware_status(db, redis, frame, {
         **_preserved_queue_metadata(current),
         "status": "building",
         "requestId": request_id or current.get("requestId"),
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": flash_profile["flashSize"],
+        "otaSupported": flash_profile["otaSupported"],
         "startedAt": started_at,
         "lastHeartbeatAt": started_at,
     })
     selected_panel = embedded_panel_for_frame(frame)
     await log(db, redis, int(frame.id), "stdout",
-              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} (panel={selected_panel})")
+              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} "
+              f"(panel={selected_panel}, flash={flash_profile['flashSize']})")
 
     build_dir = EMBEDDED_PROJECT_DIR / "build"
     # export.sh refuses to run inside a foreign Python venv; scrub venv vars and
@@ -817,7 +1317,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     pixie_path = embedded_pixie_path()
     if pixie_path is not None:
         env["FRAMEOS_PIXIE_PATH"] = str(pixie_path)
-        await log(db, redis, int(frame.id), "stdout", f"Using embedded Pixie checkout at {pixie_path}")
+        await log(db, redis, int(frame.id), "stdout", f"Using explicit Pixie override at {pixie_path}")
 
     # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi)
     wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
@@ -855,10 +1355,11 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     # generated_config.h and a fresh nimcache require a CMake reconfigure: the
     # component globs nimcache/*.c at configure time.
     command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
-               'idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults reconfigure >/dev/null && idf.py build merge-bin')
+               f'idf.py -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
+               'reconfigure >/dev/null && idf.py build merge-bin')
 
     async with _build_lock:
-        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir)
+        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
         if reset_sdkconfig:
             reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
             await log(db, redis, int(frame.id), "stdout",
@@ -895,7 +1396,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         tail = "\n".join(output_tail[-20:])
         raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
 
-    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig")
+    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig", required_sdkconfig)
     if missing_sdkconfig:
         missing = ", ".join(f"{key}={value}" for key, value in sorted(missing_sdkconfig.items()))
         raise ValueError(f"ESP32 sdkconfig is missing required defaults after build: {missing}")
@@ -904,8 +1405,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     if not merged_bin.is_file():
         raise ValueError(f"Build succeeded but {merged_bin} was not produced")
 
-    # The OTA artifact is the bare app image (flashed by the device into the
-    # inactive ota_0/ota_1 slot), not the merged 0x0 flash image.
+    # The app artifact is the bare app image. OTA-capable profiles flash it
+    # into the inactive ota_0/ota_1 slot; 4MB builds keep it only for size/hash
+    # metadata because that partition table has a single factory app.
     ota_bin = build_dir / "frameos_esp32.bin"
     if not ota_bin.is_file():
         raise ValueError(f"Build succeeded but {ota_bin} was not produced")
@@ -920,15 +1422,20 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     shutil.copyfile(merged_bin, artifact_path)
     ota_filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}-ota.bin"
     ota_artifact_path = artifact_dir / ota_filename
-    shutil.copyfile(ota_bin, ota_artifact_path)
+    if flash_profile["otaSupported"]:
+        shutil.copyfile(ota_bin, ota_artifact_path)
 
     frame = get_fresh_frame(db, int(frame.id)) or frame
     current = latest_embedded_firmware(frame) or {}
-    await _set_firmware_status(db, redis, frame, {
+    ready_status = {
         **_preserved_queue_metadata(current),
         "status": "ready",
         "requestId": request_id or current.get("requestId"),
         "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "flashSize": flash_profile["flashSize"],
+        "flashBytes": flash_profile["flashBytes"],
+        "partitionTable": flash_profile["partitionTable"],
+        "otaSupported": flash_profile["otaSupported"],
         "firmwareVersion": EMBEDDED_FIRMWARE_VERSION,
         "filename": filename,
         "path": str(artifact_path),
@@ -937,14 +1444,22 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
-        "otaPath": str(ota_artifact_path),
-        "otaSize": ota_artifact_path.stat().st_size,
-        "otaSha256": _sha256(ota_artifact_path),
+        "appSize": ota_bin.stat().st_size,
+        "bootloaderSize": (build_dir / "bootloader" / "bootloader.bin").stat().st_size,
+        "partitionTableSize": (build_dir / "partition_table" / "partition-table.bin").stat().st_size,
         "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
         "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
-    })
+    }
+    if flash_profile["otaSupported"]:
+        ready_status = {
+            **ready_status,
+            "otaPath": str(ota_artifact_path),
+            "otaSize": ota_artifact_path.stat().st_size,
+            "otaSha256": _sha256(ota_artifact_path),
+        }
+    await _set_firmware_status(db, redis, frame, ready_status)
     await log(db, redis, int(frame.id), "stdout",
               f"ESP32-S3 firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
@@ -1005,7 +1520,8 @@ def _preserved_queue_metadata(firmware: dict[str, Any]) -> dict[str, Any]:
 async def _set_firmware_status(db: Session, redis: Redis, frame: Frame, firmware: dict[str, Any]) -> None:
     embedded = dict(frame.embedded or {})
     embedded["platform"] = normalize_embedded_platform(embedded.get("platform"))
-    embedded["firmware"] = firmware
+    embedded["flashSize"] = embedded_flash_size_for_frame(frame)
+    embedded["firmware"] = with_embedded_firmware_layout(frame, firmware)
     frame.embedded = embedded
     await update_frame(db, redis, frame)
 

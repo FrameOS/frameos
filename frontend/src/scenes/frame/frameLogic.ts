@@ -72,6 +72,8 @@ export interface FrameLogicProps {
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
 
+type TemplateBatchPayload = Partial<TemplateType> & { __templateBatch?: Partial<TemplateType>[] }
+
 function isRemoteDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
 }
@@ -159,6 +161,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'error_behavior',
   'palette',
   'buildroot',
+  'embedded',
   'rpios',
 ]
 
@@ -173,6 +176,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   max_http_response_bytes: '2026.6.4',
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
+  embedded: '2026.6.26',
 }
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
@@ -252,6 +256,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   error_behavior: 'Global error handling',
   palette: 'Palette',
   buildroot: 'Buildroot settings',
+  embedded: 'Embedded settings',
   rpios: 'Raspberry Pi OS settings',
 }
 
@@ -406,6 +411,22 @@ function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVer
   return introducedVersion ? isFrameosVersionBefore(previousFrameosVersion, introducedVersion) : false
 }
 
+function frameosVersionRequiresDeploy(previousFrameosVersion: string | null): boolean {
+  if (!previousFrameosVersion) {
+    return true
+  }
+  if (previousFrameosVersion === CURRENT_FRAMEOS_VERSION) {
+    return false
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(previousFrameosVersion)) {
+    return true
+  }
+  if (isFrameosVersionBefore(previousFrameosVersion, CURRENT_FRAMEOS_VERSION)) {
+    return true
+  }
+  return false
+}
+
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
   return FRAME_KEYS
 }
@@ -541,7 +562,7 @@ function computeChangeDetails(
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [], mode)
 
-  if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
+  if (includeFrameosVersion && frameosVersionRequiresDeploy(previousFrameosVersion)) {
     details.push({
       label: `FrameOS ${previousFrameosVersion ?? 'unreported'} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
@@ -899,6 +920,11 @@ function buildScenesFromTemplate(template: Partial<TemplateType>, frame: Partial
   return newScenes
 }
 
+function templatesFromPayload(template: Partial<TemplateType>): Partial<TemplateType>[] {
+  const batch = (template as TemplateBatchPayload).__templateBatch
+  return Array.isArray(batch) ? batch : [template]
+}
+
 async function saveTemplateSceneImages(
   frameId: number,
   template: Partial<TemplateType>,
@@ -1038,6 +1064,23 @@ function normalizeEdge(edge: any): any {
     ...edge,
     type: normalizedType,
   }
+}
+
+function sanitizeEdgesForNodes(edges: DiagramEdge[], nodes: DiagramNode[]): DiagramEdge[] {
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  let changed = false
+  const sanitizedEdges = edges.filter((edge) => {
+    const valid =
+      typeof edge.source === 'string' &&
+      typeof edge.target === 'string' &&
+      nodeIds.has(edge.source) &&
+      nodeIds.has(edge.target)
+    if (!valid) {
+      changed = true
+    }
+    return valid
+  })
+  return changed ? sanitizedEdges : edges
 }
 
 function hasValidPosition(node: DiagramNode): boolean {
@@ -1345,7 +1388,10 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
           position: { x: 0, y: 0 },
         }
   )
-  const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
+  const edges = sanitizeEdgesForNodes(
+    (scene.edges ?? []).map((edge) => normalizeEdge(edge)),
+    normalizedNodes
+  )
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   const arranged = shouldArrange ? arrangeSceneGraph(normalizedNodes, edges) : { nodes: normalizedNodes, edges }
   return {
@@ -1846,104 +1892,17 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ asyncActions, actions, values, props }) => ({
-    saveFrame: () => actions.submitFrameForm(),
-    submitFrameFormSuccess: () => {
-      framesModel.actions.loadFrame(props.frameId)
-    },
-    saveAndDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-      if (frameForm !== values.frameForm) {
-        actions.setFrameFormValues({ agent: frameForm.agent })
-        await saveFrameForm(frameForm, props.frameId, values.nextAction)
-        framesModel.actions.loadFrame(props.frameId)
-      } else {
-        await asyncActions.submitFrameForm()
-      }
-      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
-    },
-    saveAndFastDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-      if (frameForm !== values.frameForm) {
-        actions.setFrameFormValues({ agent: frameForm.agent })
-        await saveFrameForm(frameForm, props.frameId, values.nextAction)
-        framesModel.actions.loadFrame(props.frameId)
-      } else {
-        await asyncActions.submitFrameForm()
-      }
-      framesModel.actions.deployFrame(props.frameId, true)
-    },
-    saveAndFullDeployFrame: async () => {
-      const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-      if (frameForm !== values.frameForm) {
-        actions.setFrameFormValues({ agent: frameForm.agent })
-        await saveFrameForm(frameForm, props.frameId, values.nextAction)
-        framesModel.actions.loadFrame(props.frameId)
-      } else {
-        await asyncActions.submitFrameForm()
-      }
-      framesModel.actions.deployFrame(props.frameId, false)
-    },
-    renderFrame: () => framesModel.actions.renderFrame(props.frameId),
-    restartFrame: () => framesModel.actions.restartFrame(props.frameId),
-    rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
-    stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () => {
-      framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
-    },
-    fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
-    fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployRemote: ({ recompile, transport }) => framesModel.actions.deployRemote(props.frameId, recompile, transport),
-    restartRemote: ({ transport }) => framesModel.actions.restartRemote(props.frameId, transport),
-    setDeployWithAgent: ({ deployWithAgent }) => {
-      framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
-    },
-    updateScene: ({ sceneId, scene }) => {
-      const { frameForm } = values
-      const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
-      const scenes = hasScene
-        ? frameForm.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frameForm) : s))
-        : [...(frameForm.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frameForm)]
-      actions.setFrameFormValues({ scenes })
-    },
-    updateNodeData: ({ sceneId, nodeId, nodeData }) => {
-      const { frame, frameForm } = values
-      const scenes = frameForm.scenes ?? frame.scenes
-      const scene = scenes?.find(({ id }) => id === sceneId)
-      const currentNode = scene?.nodes?.find(({ id }) => id === nodeId)
-      if (currentNode) {
-        actions.setFrameFormValues({
-          scenes: scenes?.map((s) =>
-            s.id === sceneId
-              ? {
-                  ...s,
-                  nodes: s.nodes?.map((n) =>
-                    n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), ...nodeData } } : n
-                  ),
-                }
-              : s
-          ),
-        })
-      } else {
-        console.error(`Node ${nodeId} not found in scene ${sceneId}`)
-      }
-    },
-    applyTemplate: async ({ template }) => {
-      if ('scenes' in template) {
-        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-        const oldScenes = frameForm.scenes || []
-        const newScenes = buildScenesFromTemplate(template, frameForm)
-        actions.setFrameFormValues({
-          scenes: [...oldScenes, ...newScenes],
-        })
-
-        await saveTemplateSceneImages(props.frameId, template, newScenes)
-      }
-    },
-    applyTemplateAndSave: async ({ template, openDrawer }) => {
+  listeners(({ asyncActions, actions, values, props }) => {
+    const appendTemplatesAndSave = async (templates: Partial<TemplateType>[], openDrawer: boolean): Promise<void> => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
       const oldScenes = frameForm.scenes || []
-      const newScenes = buildScenesFromTemplate(template, frameForm)
+      const sceneGroups = templates
+        .map((template) => ({
+          scenes: buildScenesFromTemplate(template, frameForm),
+          template,
+        }))
+        .filter(({ scenes }) => scenes.length > 0)
+      const newScenes = sceneGroups.flatMap(({ scenes }) => scenes)
       if (!newScenes.length) {
         return
       }
@@ -1956,43 +1915,144 @@ export const frameLogic = kea<frameLogicType>([
       if (openDrawer) {
         openSceneControlDrawer(props.frameId, newScenes[0].id)
       }
-      await saveTemplateSceneImages(props.frameId, template, newScenes)
-    },
-    createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
-      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-      const scene = buildBlankScene(frameForm, name)
-      const scenes = [...(frameForm.scenes ?? []), scene]
-      const nextFrameForm = { ...frameForm, scenes }
-      actions.setFrameFormValues({ scenes })
-      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
-      framesModel.actions.loadFrame(props.frameId)
-      if (openEditor) {
-        router.actions.push(urls.scenes(props.frameId, scene.id))
-      } else if (openDrawer) {
-        openSceneControlDrawer(props.frameId, scene.id)
-      }
-    },
-    deleteSceneAndSave: async ({ sceneId }) => {
-      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-      const scenes = frameForm.scenes ?? []
-      if (!scenes.some((scene) => scene.id === sceneId)) {
-        return
-      }
+      await Promise.all(
+        sceneGroups.map(({ template, scenes }) => saveTemplateSceneImages(props.frameId, template, scenes))
+      )
+    }
 
-      const nextScenes = scenes.filter((scene) => scene.id !== sceneId)
-      const nextFrameForm = { ...frameForm, scenes: nextScenes }
-      actions.setFrameFormValues({ scenes: nextScenes })
-      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
-      framesModel.actions.loadFrame(props.frameId)
-    },
-    sendEvent: async ({ event, payload }) => {
-      await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-    },
-  })),
+    return {
+      saveFrame: () => actions.submitFrameForm(),
+      submitFrameFormSuccess: () => {
+        framesModel.actions.loadFrame(props.frameId)
+      },
+      saveAndDeployFrame: async () => {
+        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
+        if (frameForm !== values.frameForm) {
+          actions.setFrameFormValues({ agent: frameForm.agent })
+          await saveFrameForm(frameForm, props.frameId, values.nextAction)
+          framesModel.actions.loadFrame(props.frameId)
+        } else {
+          await asyncActions.submitFrameForm()
+        }
+        framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
+      },
+      saveAndFastDeployFrame: async () => {
+        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
+        if (frameForm !== values.frameForm) {
+          actions.setFrameFormValues({ agent: frameForm.agent })
+          await saveFrameForm(frameForm, props.frameId, values.nextAction)
+          framesModel.actions.loadFrame(props.frameId)
+        } else {
+          await asyncActions.submitFrameForm()
+        }
+        framesModel.actions.deployFrame(props.frameId, true)
+      },
+      saveAndFullDeployFrame: async () => {
+        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
+        if (frameForm !== values.frameForm) {
+          actions.setFrameFormValues({ agent: frameForm.agent })
+          await saveFrameForm(frameForm, props.frameId, values.nextAction)
+          framesModel.actions.loadFrame(props.frameId)
+        } else {
+          await asyncActions.submitFrameForm()
+        }
+        framesModel.actions.deployFrame(props.frameId, false)
+      },
+      renderFrame: () => framesModel.actions.renderFrame(props.frameId),
+      restartFrame: () => framesModel.actions.restartFrame(props.frameId),
+      rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
+      stopFrame: () => framesModel.actions.stopFrame(props.frameId),
+      deployFrame: () => {
+        framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
+      },
+      fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
+      fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
+      deployRemote: ({ recompile, transport }) => framesModel.actions.deployRemote(props.frameId, recompile, transport),
+      restartRemote: ({ transport }) => framesModel.actions.restartRemote(props.frameId, transport),
+      setDeployWithAgent: ({ deployWithAgent }) => {
+        framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
+      },
+      updateScene: ({ sceneId, scene }) => {
+        const { frameForm } = values
+        const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
+        const scenes = hasScene
+          ? frameForm.scenes?.map((s) => (s.id === sceneId ? sanitizeScene({ ...s, ...scene }, frameForm) : s))
+          : [...(frameForm.scenes ?? []), sanitizeScene({ ...scene, id: sceneId }, frameForm)]
+        actions.setFrameFormValues({ scenes })
+      },
+      updateNodeData: ({ sceneId, nodeId, nodeData }) => {
+        const { frame, frameForm } = values
+        const scenes = frameForm.scenes ?? frame.scenes
+        const scene = scenes?.find(({ id }) => id === sceneId)
+        const currentNode = scene?.nodes?.find(({ id }) => id === nodeId)
+        if (currentNode) {
+          actions.setFrameFormValues({
+            scenes: scenes?.map((s) =>
+              s.id === sceneId
+                ? {
+                    ...s,
+                    nodes: s.nodes?.map((n) =>
+                      n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), ...nodeData } } : n
+                    ),
+                  }
+                : s
+            ),
+          })
+        } else {
+          console.error(`Node ${nodeId} not found in scene ${sceneId}`)
+        }
+      },
+      applyTemplate: async ({ template }) => {
+        if ('scenes' in template) {
+          const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+          const oldScenes = frameForm.scenes || []
+          const newScenes = buildScenesFromTemplate(template, frameForm)
+          actions.setFrameFormValues({
+            scenes: [...oldScenes, ...newScenes],
+          })
+
+          await saveTemplateSceneImages(props.frameId, template, newScenes)
+        }
+      },
+      applyTemplateAndSave: async ({ template, openDrawer }) => {
+        await appendTemplatesAndSave(templatesFromPayload(template), openDrawer)
+      },
+      createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
+        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+        const scene = buildBlankScene(frameForm, name)
+        const scenes = [...(frameForm.scenes ?? []), scene]
+        const nextFrameForm = { ...frameForm, scenes }
+        actions.setFrameFormValues({ scenes })
+        await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+        framesModel.actions.loadFrame(props.frameId)
+        if (openEditor) {
+          router.actions.push(urls.scenes(props.frameId, scene.id))
+        } else if (openDrawer) {
+          openSceneControlDrawer(props.frameId, scene.id)
+        }
+      },
+      deleteSceneAndSave: async ({ sceneId }) => {
+        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+        const scenes = frameForm.scenes ?? []
+        if (!scenes.some((scene) => scene.id === sceneId)) {
+          return
+        }
+
+        const nextScenes = scenes.filter((scene) => scene.id !== sceneId)
+        const nextFrameForm = { ...frameForm, scenes: nextScenes }
+        actions.setFrameFormValues({ scenes: nextScenes })
+        await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+        framesModel.actions.loadFrame(props.frameId)
+      },
+      sendEvent: async ({ event, payload }) => {
+        await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      },
+    }
+  }),
   afterMount(({ actions, values, cache, props }) => {
     const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {

@@ -13,6 +13,7 @@ import {
   RocketLaunchIcon,
   SparklesIcon,
   Squares2X2Icon,
+  StarIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
@@ -43,6 +44,7 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
+import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
@@ -449,6 +451,8 @@ export function TemplateDrawer(): JSX.Element | null {
   const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { frames } = useValues(framesModel)
   const { closeTemplateDrawer } = useActions(workspaceLogic)
+  const splitLogic = splitScreenLayoutLogic({ frameId: templateDrawerFrameId ?? 0 })
+  const { editingSceneId, generatorOpen } = useValues(splitLogic)
 
   if (!templateDrawerFrameId) {
     return null
@@ -460,8 +464,6 @@ export function TemplateDrawer(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
-  const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
-  const { editingSceneId, generatorOpen } = useValues(splitLogic)
   const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : 'Add scene'
 
   return (
@@ -510,7 +512,11 @@ export function TemplateDrawer(): JSX.Element | null {
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
+  const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
   const hasScenes = (frame.scenes?.length ?? 0) > 0
+  const favouriteTemplateCount = favouriteTemplates.length
+  const installableFavouriteTemplateCount = installableFavouriteTemplates.length
 
   return (
     <div className="mb-4 grid gap-3">
@@ -569,6 +575,32 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
         </span>
       </button>
+      {favouriteTemplateCount > 0 ? (
+        <button
+          type="button"
+          disabled={installableFavouriteTemplateCount === 0}
+          title={
+            installableFavouriteTemplateCount === 0
+              ? 'No personal favourites are supported by this frame'
+              : 'Add all personal favourites to this frame'
+          }
+          onClick={() => applyFavouriteTemplatesToFrame(false)}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-white/80 disabled:hover:shadow-sm"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+            <StarIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Add all starred scenes</span>
+            <span className="frameos-muted block truncate text-xs">
+              Personal favourites saved for this user
+              {installableFavouriteTemplateCount !== favouriteTemplateCount
+                ? `, ${installableFavouriteTemplateCount} supported here`
+                : ''}
+            </span>
+          </span>
+        </button>
+      ) : null}
     </div>
   )
 }

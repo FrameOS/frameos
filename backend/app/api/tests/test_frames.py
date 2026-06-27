@@ -287,6 +287,70 @@ async def test_api_frame_cancel_deploy_and_force_deploy(async_client, db, redis,
 
 
 @pytest.mark.asyncio
+async def test_api_frame_embedded_usb_deploy_complete_marks_snapshot(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="UsbDeployFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
+    frame.mode = "embedded"
+    frame.status = "deploying"
+    frame.scenes = [
+        {
+            "id": "scene-1",
+            "name": "Scene 1",
+            "settings": {},
+            "nodes": [],
+            "edges": [],
+        }
+    ]
+    frame.last_successful_deploy = {"stale": True}
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(
+        f"/api/frames/{frame.id}/embedded/usb_deploy_complete?task_id=usb_task.1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["frame"]
+    assert payload["status"] == "starting"
+    assert payload["last_successful_deploy"]["id"] == frame.id
+    assert payload["last_successful_deploy"]["mode"] == "embedded"
+    assert payload["last_successful_deploy"]["scenes"] == frame.scenes
+    assert "last_successful_deploy" not in payload["last_successful_deploy"]
+    assert "last_successful_deploy_at" not in payload["last_successful_deploy"]
+    assert payload["last_successful_deploy_at"] is not None
+
+    logs = db.query(Log).filter_by(frame_id=frame.id).order_by(Log.id).all()
+    assert [(entry.type, entry.line) for entry in logs[-2:]] == [
+        ("stdinfo", "Embedded USB fast deploy complete; reload queued"),
+        ("stdout", "[frameos-task:usb_task.1] deploy completed fast"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_embedded_usb_deploy_complete_rejects_non_embedded(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="NotEmbeddedFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
+
+    response = await async_client.post(f"/api/frames/{frame.id}/embedded/usb_deploy_complete")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "USB deploy completion is only available for embedded frames"
+
+
+@pytest.mark.asyncio
 async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
     frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
     frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)
@@ -1348,6 +1412,91 @@ async def test_api_frame_new_buildroot_defaults(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_embedded_waveshare_13in3e6_preset(async_client):
+    payload = {
+        "mode": "embedded",
+        "name": "WaveshareFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "esp32-s3",
+        "embedded": {"hardwarePreset": "waveshare_esp32_s3_epaper_13_3e6"},
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'embedded'
+    assert frame['frame_port'] == 80
+    assert frame['device'] == 'waveshare.EPD_13in3e'
+    assert frame['embedded']['platform'] == 'esp32-s3'
+    assert frame['embedded']['hardwarePreset'] == 'waveshare_esp32_s3_epaper_13_3e6'
+    assert frame['embedded']['flashSize'] == '32MB'
+    assert frame['device_config']['hardwarePreset'] == 'waveshare_esp32_s3_epaper_13_3e6'
+    assert frame['device_config']['psramMB'] == 16
+    assert frame['device_config']['pins'] == {
+        'rst': 10,
+        'dc': 7,
+        'cs': 1,
+        'cs2': 4,
+        'busy': 8,
+        'sck': 6,
+        'mosi': 5,
+        'pwr': 16,
+    }
+    assert frame['device_config']['sdCardAssets'] == {
+        'enabled': True,
+        'preset': 'waveshare_esp32_s3_epaper_13_3e6',
+        'mountPath': '/srv/assets',
+        'pins': {'cs': 3, 'sck': 44, 'miso': 43, 'mosi': 2},
+        'maxFrequencyKHz': 20000,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_embedded_waveshare_photopainter_preset(async_client):
+    payload = {
+        "mode": "embedded",
+        "name": "PhotoPainter",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "esp32-s3",
+        "embedded": {"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'embedded'
+    assert frame['device'] == 'waveshare.EPD_7in3e'
+    assert frame['embedded']['platform'] == 'esp32-s3'
+    assert frame['embedded']['hardwarePreset'] == 'waveshare_esp32_s3_photopainter'
+    assert frame['embedded']['flashSize'] == '16MB'
+    assert frame['device_config']['hardwarePreset'] == 'waveshare_esp32_s3_photopainter'
+    assert frame['device_config']['psramMB'] == 8
+    assert frame['device_config']['pins'] == {
+        'rst': 12,
+        'dc': 8,
+        'cs': 9,
+        'cs2': -1,
+        'busy': 13,
+        'sck': 10,
+        'mosi': 11,
+        'pwr': -1,
+    }
+    assert frame['device_config']['sdCardAssets'] == {
+        'enabled': True,
+        'preset': 'waveshare_esp32_s3_photopainter',
+        'mountPath': '/srv/assets',
+        'pins': {'cs': 38, 'sck': 39, 'miso': 40, 'mosi': 41},
+        'maxFrequencyKHz': 20000,
+    }
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_buildroot_accepts_root_password_and_ssh_keys(async_client):
     payload = {
         "mode": "buildroot",
@@ -2211,6 +2360,44 @@ async def test_api_frame_get_image_no_scene_id(async_client, db, redis):
         response = await async_client.get(f'/api/frames/{frame.id}/image')
     assert response.status_code == 200
     assert response.content == fake_png
+
+
+@pytest.mark.asyncio
+async def test_api_frame_upload_image_updates_cache_and_scene(async_client, db, redis):
+    frame = await new_frame(db, redis, 'UsbImageFrame', 'example.com', 'localhost')
+    frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    image = Image.new('RGB', (4, 3), (255, 255, 255))
+    png_buffer = io.BytesIO()
+    image.save(png_buffer, format='PNG')
+    png = png_buffer.getvalue()
+
+    with patch('app.api.frames.publish_message', new_callable=AsyncMock) as publish:
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/image?scene_id=scene-1',
+            content=png,
+            headers={'Content-Type': 'image/png'},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()['message'] == 'Frame image updated'
+    assert response.json()['sceneId'] == 'scene-1'
+    assert await redis.get(frames_api._frame_image_cache_key(frame.id)) == png
+
+    stored_scene_image = (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='scene-1')
+        .first()
+    )
+    assert stored_scene_image is not None
+    assert stored_scene_image.image == png
+    assert stored_scene_image.width == 4
+    assert stored_scene_image.height == 3
+
+    published_events = [call.args[1] for call in publish.await_args_list]
+    assert published_events == ['new_scene_image', 'frame_rendered']
 
 
 @pytest.mark.asyncio

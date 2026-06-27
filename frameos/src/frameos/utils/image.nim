@@ -207,7 +207,7 @@ when defined(frameosEmbedded):
           target.scaleAndDrawImage(decodeImageWithFallback(copyImageBuffer(data, len)), "cover")
           return target
         raise newException(PixieError,
-          &"Direct on-device JPEG scaling requires the embedded Pixie checkout; fetched {len div 1024}K")
+          &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {len div 1024}K")
     decodeImageWithFallback(data, len)
 
   proc decodeImageWithFallback*(data: var string, target: Image): Image =
@@ -224,7 +224,7 @@ when defined(frameosEmbedded):
           target.scaleAndDrawImage(decodeImageWithFallback(data), "cover")
           return target
         raise newException(PixieError,
-          &"Direct on-device JPEG scaling requires the embedded Pixie checkout; fetched {data.len div 1024}K")
+          &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {data.len div 1024}K")
     decodeImageWithFallback(data)
 
   proc httpErrorDetail(response: BoundedHttpBufferResponse): string =
