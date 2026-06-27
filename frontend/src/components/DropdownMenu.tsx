@@ -25,6 +25,8 @@ export interface DropdownMenuProps {
   buttonColor?: ButtonProps['color']
   horizontal?: boolean
   buttonAdornment?: React.ReactNode
+  buttonContent?: React.ReactNode
+  buttonTitle?: string
 }
 
 export function DropdownMenu({
@@ -33,6 +35,8 @@ export function DropdownMenu({
   horizontal = true,
   buttonColor: _buttonColor,
   buttonAdornment,
+  buttonContent,
+  buttonTitle,
 }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
@@ -69,6 +73,7 @@ export function DropdownMenu({
           <Menu.Button
             ref={setReferenceElement}
             type="button"
+            title={buttonTitle}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             className={clsx(
@@ -77,7 +82,9 @@ export function DropdownMenu({
               className
             )}
           >
-            {isLoading ? (
+            {buttonContent ? (
+              buttonContent
+            ) : isLoading ? (
               <Spinner color="white" className="w-5 h-5" />
             ) : horizontal ? (
               <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />

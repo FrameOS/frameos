@@ -53,14 +53,16 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   const headers: HeadersInit = options.headers || {}
 
   if (typeof input === 'string') {
-    try {
-      input = await projectApiPath(input)
-    } catch (error) {
-      if (!inHassioIngress() && !frameControlMode) {
-        clearCachedProjectId()
-        return routeToAuthStatus(await firstUserStatus())
+    if (!frameControlMode) {
+      try {
+        input = await projectApiPath(input)
+      } catch (error) {
+        if (!inHassioIngress()) {
+          clearCachedProjectId()
+          return routeToAuthStatus(await firstUserStatus())
+        }
+        throw error
       }
-      throw error
     }
     if (getBasePath() && input.startsWith('/')) {
       input = getBasePath() + input

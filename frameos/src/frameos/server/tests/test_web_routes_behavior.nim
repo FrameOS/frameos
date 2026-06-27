@@ -90,7 +90,22 @@ suite "web route behavior":
       "/",
       headers = [("Cookie", adminCookie)],
     )
-    check frameRootWithAdminSession.status == 401
+    check frameRootWithAdminSession.status == 302
+    check frameRootWithAdminSession.header("location") == "/admin"
+
+    for path in ["/frames/1?tool=settings", "/scenes/1/demo", "/apps/1/demo/node-1"]:
+      let adminDeepLink = httpRequest(
+        server.port,
+        "GET",
+        path,
+        headers = [("Cookie", adminCookie)],
+      )
+      check adminDeepLink.status == 200
+      check adminDeepLink.body.contains("frameAdminMode: true")
+
+    let adminDeepLinkNoSession = httpRequest(server.port, "GET", "/frames/1?tool=settings")
+    check adminDeepLinkNoSession.status == 302
+    check adminDeepLinkNoSession.header("location") == "/login"
 
     let controlWithAdminSession = httpRequest(
       server.port,

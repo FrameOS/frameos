@@ -2,7 +2,7 @@ import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
-import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
+import { isInFrameAdminMode } from '../utils/frameAdmin'
 import { FrameosLogo } from './FrameosLogo'
 
 interface HeaderProps {
@@ -14,7 +14,7 @@ interface HeaderProps {
 
 export function Header({ title, version, right, buttons }: HeaderProps) {
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? frameAdminPath() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControlScenes() : urls.frames()
 
   return (
     <span

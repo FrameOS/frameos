@@ -1178,32 +1178,161 @@ static esp_err_t frame_api_ping_get_handler(httpd_req_t *req)
         HTTPD_RESP_USE_STRLEN);
 }
 
-static esp_err_t frame_api_frame_payload(httpd_req_t *req, bool list)
+static esp_err_t send_cjson_response(httpd_req_t *req, cJSON *root)
 {
-    fos_config_t *config = fos_config();
-    char *panel = json_escape_dup(config->panel);
-    char *ip = json_escape_dup(fos_wifi_ip());
-    if (!panel || !ip) {
-        free(panel); free(ip);
+    char *json = cJSON_PrintUnformatted(root);
+    if (!json) {
         return httpd_resp_send_500(req);
     }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    cJSON_free(json);
+    return err;
+}
+
+static cJSON *frame_api_stored_scenes_json(void)
+{
+    size_t len = 0;
+    char *stored = fos_scenes_json_copy(&len);
+    cJSON *scenes = stored ? cJSON_Parse(stored) : NULL;
+    free(stored);
+    if (!cJSON_IsArray(scenes)) {
+        cJSON_Delete(scenes);
+        scenes = cJSON_CreateArray();
+    }
+    return scenes;
+}
+
+static cJSON *frame_api_frame_json(void)
+{
+    fos_config_t *config = fos_config();
+    cJSON *frame = cJSON_CreateObject();
+    if (!frame) return NULL;
+
+    char fallback_name[32];
+    snprintf(fallback_name, sizeof(fallback_name), "frame %lu", (unsigned long)config->frame_id);
+    char device[160];
+    snprintf(device, sizeof(device), "waveshare.%s", config->panel[0] ? config->panel : "none");
     int width = fos_display_present() ? fos_display_width() : 800;
     int height = fos_display_present() ? fos_display_height() : 480;
-    char *json = NULL;
-    const char *prefix = list ? "{\"frames\":[" : "{\"frame\":";
-    const char *suffix = list ? "]}" : "}";
-    int len = asprintf(&json,
-        "%s{\"id\":%lu,\"name\":\"frame %lu\",\"mode\":\"embedded\","
-        "\"frame_host\":\"%s\",\"frame_port\":80,\"device\":\"waveshare.%s\","
-        "\"width\":%d,\"height\":%d,\"status\":\"online\","
-        "\"server_send_logs\":%s}%s",
-        prefix, (unsigned long)config->frame_id, (unsigned long)config->frame_id,
-        ip, panel, width, height, config->server_send_logs ? "true" : "false", suffix);
-    free(panel); free(ip);
-    if (len < 0 || !json) return httpd_resp_send_500(req);
-    httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_send(req, json, len);
-    free(json);
+
+    cJSON_AddNumberToObject(frame, "id", config->frame_id);
+    cJSON_AddNumberToObject(frame, "project_id", 0);
+    cJSON_AddStringToObject(frame, "name", config->hostname[0] ? config->hostname : fallback_name);
+    cJSON_AddStringToObject(frame, "mode", "embedded");
+    cJSON_AddStringToObject(frame, "frame_host", fos_wifi_ip());
+    cJSON_AddNumberToObject(frame, "frame_port", 80);
+    cJSON_AddStringToObject(frame, "frame_access_key", "");
+    cJSON_AddStringToObject(frame, "frame_access", "private");
+
+    cJSON *admin = cJSON_CreateObject();
+    cJSON_AddBoolToObject(admin, "enabled", config->admin_auth_enabled);
+    cJSON_AddStringToObject(admin, "user", config->admin_user);
+    cJSON_AddStringToObject(admin, "pass", config->admin_pass);
+    cJSON_AddItemToObject(frame, "frame_admin_auth", admin);
+
+    cJSON *https = cJSON_CreateObject();
+    cJSON_AddBoolToObject(https, "enable", config->tls_enable);
+    cJSON_AddNumberToObject(https, "port", config->tls_port ? config->tls_port : 8443);
+    cJSON_AddBoolToObject(https, "expose_only_port", true);
+    cJSON *certs = cJSON_CreateObject();
+    cJSON_AddStringToObject(certs, "server", config->tls_server_cert);
+    cJSON_AddStringToObject(certs, "server_key", config->tls_server_key);
+    cJSON_AddStringToObject(certs, "client_ca", "");
+    cJSON_AddItemToObject(https, "certs", certs);
+    cJSON_AddNullToObject(https, "server_cert_not_valid_after");
+    cJSON_AddNullToObject(https, "client_ca_cert_not_valid_after");
+    cJSON_AddItemToObject(frame, "https_proxy", https);
+
+    cJSON_AddStringToObject(frame, "ssh_user", "");
+    cJSON_AddStringToObject(frame, "ssh_pass", "");
+    cJSON_AddNumberToObject(frame, "ssh_port", 22);
+    cJSON_AddItemToObject(frame, "ssh_keys", cJSON_CreateArray());
+    cJSON_AddStringToObject(frame, "server_host", config->backend_url);
+    cJSON_AddNumberToObject(frame, "server_port", 0);
+    cJSON_AddStringToObject(frame, "server_api_key", config->api_key);
+    cJSON_AddBoolToObject(frame, "server_send_logs", config->server_send_logs);
+    cJSON_AddStringToObject(frame, "status", "online");
+    cJSON_AddBoolToObject(frame, "archived", false);
+    cJSON_AddNullToObject(frame, "version");
+    cJSON_AddNumberToObject(frame, "width", width);
+    cJSON_AddNumberToObject(frame, "height", height);
+    cJSON_AddStringToObject(frame, "device", device);
+
+    cJSON *device_config = cJSON_CreateObject();
+    cJSON_AddStringToObject(device_config, "renderMode",
+                            config->render_mode == FOS_RENDER_REMOTE ? "remote" : "local");
+    cJSON_AddItemToObject(frame, "device_config", device_config);
+
+    cJSON_AddNullToObject(frame, "color");
+    cJSON_AddNullToObject(frame, "timezone");
+    cJSON_AddNullToObject(frame, "timezone_updater");
+    cJSON_AddNumberToObject(frame, "interval", config->interval_sec);
+    cJSON_AddNumberToObject(frame, "metrics_interval", 60);
+    cJSON_AddNumberToObject(frame, "max_http_response_bytes", config->max_http_response_bytes);
+    cJSON_AddStringToObject(frame, "scaling_mode", "contain");
+    cJSON_AddStringToObject(frame, "image_engine", "");
+    cJSON_AddNumberToObject(frame, "rotate", 0);
+    cJSON_AddStringToObject(frame, "flip", "");
+    cJSON_AddStringToObject(frame, "background_color", "#000000");
+    cJSON_AddItemToObject(frame, "scenes", frame_api_stored_scenes_json());
+    cJSON_AddBoolToObject(frame, "debug", false);
+    cJSON_AddNullToObject(frame, "last_log_at");
+    cJSON_AddStringToObject(frame, "log_to_file", "");
+    cJSON_AddStringToObject(frame, "assets_path", config->assets_path);
+    cJSON_AddBoolToObject(frame, "save_assets", false);
+    cJSON_AddStringToObject(frame, "upload_fonts", "");
+    cJSON_AddNullToObject(frame, "reboot");
+
+    cJSON *schedule = cJSON_CreateObject();
+    cJSON_AddItemToObject(schedule, "events", cJSON_CreateArray());
+    cJSON_AddItemToObject(frame, "schedule", schedule);
+
+    cJSON *buttons = cJSON_CreateArray();
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        cJSON *button = cJSON_CreateObject();
+        cJSON_AddNumberToObject(button, "pin", config->gpio_buttons[i].pin);
+        cJSON_AddStringToObject(button, "label", config->gpio_buttons[i].label);
+        cJSON_AddItemToArray(buttons, button);
+    }
+    cJSON_AddItemToObject(frame, "gpio_buttons", buttons);
+
+    cJSON *network = cJSON_CreateObject();
+    cJSON_AddStringToObject(network, "wifiSSID", config->wifi_ssid);
+    cJSON_AddStringToObject(network, "wifiPassword", config->wifi_pass);
+    cJSON_AddItemToObject(frame, "network", network);
+
+    cJSON_AddItemToObject(frame, "agent", cJSON_CreateObject());
+    cJSON_AddItemToObject(frame, "mountpoints", cJSON_CreateObject());
+    cJSON_AddItemToObject(frame, "error_behavior", cJSON_CreateObject());
+    cJSON_AddItemToObject(frame, "palette", cJSON_CreateObject());
+    cJSON_AddNullToObject(frame, "buildroot");
+    cJSON_AddItemToObject(frame, "embedded", cJSON_CreateObject());
+    cJSON_AddNullToObject(frame, "rpios");
+    cJSON_AddItemToObject(frame, "terminal_history", cJSON_CreateArray());
+    cJSON_AddNullToObject(frame, "last_successful_deploy");
+    cJSON_AddNullToObject(frame, "last_successful_deploy_at");
+    return frame;
+}
+
+static esp_err_t frame_api_frame_payload(httpd_req_t *req, bool list)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return httpd_resp_send_500(req);
+    cJSON *frame = frame_api_frame_json();
+    if (!frame) {
+        cJSON_Delete(root);
+        return httpd_resp_send_500(req);
+    }
+    if (list) {
+        cJSON *frames = cJSON_CreateArray();
+        cJSON_AddItemToArray(frames, frame);
+        cJSON_AddItemToObject(root, "frames", frames);
+    } else {
+        cJSON_AddItemToObject(root, "frame", frame);
+    }
+    esp_err_t err = send_cjson_response(req, root);
+    cJSON_Delete(root);
     return err;
 }
 
@@ -1219,6 +1348,170 @@ static esp_err_t frame_detail_get_handler(httpd_req_t *req)
     REQUIRE_PROTECTED_ACCESS();
 
     return frame_api_frame_payload(req, false);
+}
+
+static bool json_bool_item(const cJSON *item, bool fallback)
+{
+    if (cJSON_IsBool(item)) return cJSON_IsTrue(item);
+    if (cJSON_IsNumber(item)) return item->valueint != 0;
+    return fallback;
+}
+
+static bool json_copy_string_item(const cJSON *object, const char *key, char *out, size_t out_len)
+{
+    const cJSON *item = cJSON_GetObjectItem(object, key);
+    if (!cJSON_IsString(item) || !item->valuestring) return false;
+    strlcpy(out, item->valuestring, out_len);
+    return true;
+}
+
+static bool json_u32_item(const cJSON *object, const char *key, uint32_t *out)
+{
+    const cJSON *item = cJSON_GetObjectItem(object, key);
+    if (!cJSON_IsNumber(item) || item->valuedouble < 0) return false;
+    *out = (uint32_t)item->valuedouble;
+    return true;
+}
+
+static void update_backend_url_from_frame_payload(fos_config_t *config, const cJSON *root)
+{
+    const cJSON *server_host = cJSON_GetObjectItem(root, "server_host");
+    if (!cJSON_IsString(server_host) || !server_host->valuestring || !server_host->valuestring[0]) return;
+
+    if (strstr(server_host->valuestring, "://")) {
+        strlcpy(config->backend_url, server_host->valuestring, sizeof(config->backend_url));
+        return;
+    }
+
+    uint32_t port = 8989;
+    json_u32_item(root, "server_port", &port);
+    snprintf(config->backend_url, sizeof(config->backend_url), "http://%s:%lu",
+             server_host->valuestring, (unsigned long)port);
+}
+
+static esp_err_t frame_update_post_handler(httpd_req_t *req)
+{
+    char *body = NULL;
+    esp_err_t read_err = read_request_body(req, 512 * 1024, true, &body);
+    if (read_err == ESP_ERR_INVALID_SIZE) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    if (read_err != ESP_OK) return httpd_resp_send_500(req);
+
+    cJSON *root = body && body[0] ? cJSON_Parse(body) : cJSON_CreateObject();
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid json");
+    }
+
+    fos_config_t *config = fos_config();
+    uint32_t value = 0;
+    if (json_u32_item(root, "interval", &value) && value >= 5) config->interval_sec = value;
+    if (json_u32_item(root, "max_http_response_bytes", &value) && value >= 1024) {
+        config->max_http_response_bytes = value;
+    }
+    json_copy_string_item(root, "server_api_key", config->api_key, sizeof(config->api_key));
+    update_backend_url_from_frame_payload(config, root);
+
+    const cJSON *send_logs = cJSON_GetObjectItem(root, "server_send_logs");
+    if (send_logs != NULL) config->server_send_logs = json_bool_item(send_logs, config->server_send_logs);
+
+    const cJSON *network = cJSON_GetObjectItem(root, "network");
+    if (cJSON_IsObject(network)) {
+        json_copy_string_item(network, "wifiSSID", config->wifi_ssid, sizeof(config->wifi_ssid));
+        json_copy_string_item(network, "wifiPassword", config->wifi_pass, sizeof(config->wifi_pass));
+    }
+
+    const cJSON *device_config = cJSON_GetObjectItem(root, "device_config");
+    if (cJSON_IsObject(device_config)) {
+        const cJSON *render_mode = cJSON_GetObjectItem(device_config, "renderMode");
+        if (cJSON_IsString(render_mode) && render_mode->valuestring) {
+            config->render_mode = strcmp(render_mode->valuestring, "remote") == 0 ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
+        }
+    }
+
+    const cJSON *admin = cJSON_GetObjectItem(root, "frame_admin_auth");
+    if (cJSON_IsObject(admin)) {
+        bool next_enabled = config->admin_auth_enabled;
+        const cJSON *enabled = cJSON_GetObjectItem(admin, "enabled");
+        if (enabled != NULL) next_enabled = json_bool_item(enabled, next_enabled);
+        char next_user[FOS_STR_LEN];
+        char next_pass[FOS_STR_LEN];
+        strlcpy(next_user, config->admin_user, sizeof(next_user));
+        strlcpy(next_pass, config->admin_pass, sizeof(next_pass));
+        json_copy_string_item(admin, "user", next_user, sizeof(next_user));
+        json_copy_string_item(admin, "pass", next_pass, sizeof(next_pass));
+        if (next_enabled && (!next_user[0] || !next_pass[0])) {
+            cJSON_Delete(root);
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "admin username and password required");
+        }
+        config->admin_auth_enabled = next_enabled;
+        strlcpy(config->admin_user, next_user, sizeof(config->admin_user));
+        strlcpy(config->admin_pass, next_pass, sizeof(config->admin_pass));
+    }
+
+    const cJSON *https = cJSON_GetObjectItem(root, "https_proxy");
+    if (cJSON_IsObject(https)) {
+        const cJSON *enabled = cJSON_GetObjectItem(https, "enable");
+        if (enabled != NULL) config->tls_enable = json_bool_item(enabled, config->tls_enable);
+        if (json_u32_item(https, "port", &value) && value >= 1 && value <= 65535) {
+            config->tls_port = (uint16_t)value;
+        }
+        const cJSON *certs = cJSON_GetObjectItem(https, "certs");
+        if (cJSON_IsObject(certs)) {
+            json_copy_string_item(certs, "server", config->tls_server_cert, sizeof(config->tls_server_cert));
+            json_copy_string_item(certs, "server_key", config->tls_server_key, sizeof(config->tls_server_key));
+        }
+    }
+
+    bool scenes_updated = false;
+    const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
+    if (cJSON_IsArray(scenes)) {
+        char *scenes_json = cJSON_PrintUnformatted((cJSON *)scenes);
+        if (!scenes_json) {
+            cJSON_Delete(root);
+            free(body);
+            return httpd_resp_send_500(req);
+        }
+        esp_err_t scenes_err = fos_scenes_set_json(scenes_json, strlen(scenes_json));
+        cJSON_free(scenes_json);
+        if (scenes_err != ESP_OK) {
+            cJSON_Delete(root);
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store scenes failed");
+        }
+        scenes_updated = true;
+    }
+
+    esp_err_t save_err = fos_config_save();
+    if (save_err != ESP_OK) {
+        cJSON_Delete(root);
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
+    }
+
+    const cJSON *next_action = cJSON_GetObjectItem(root, "next_action");
+    bool render = scenes_updated || (cJSON_IsString(next_action) && strcmp(next_action->valuestring, "render") == 0);
+    log_http_command(req, "frameUpdate", strlen(body ? body : ""));
+    cJSON_Delete(root);
+    free(body);
+
+    if (render && s_render_cb) s_render_cb();
+
+    cJSON *response = cJSON_CreateObject();
+    if (!response) return httpd_resp_send_500(req);
+    cJSON_AddStringToObject(response, "message", "Frame updated successfully");
+    cJSON *frame = frame_api_frame_json();
+    if (!frame) {
+        cJSON_Delete(response);
+        return httpd_resp_send_500(req);
+    }
+    cJSON_AddItemToObject(response, "frame", frame);
+    esp_err_t err = send_cjson_response(req, response);
+    cJSON_Delete(response);
+    return err;
 }
 
 static esp_err_t reload_post_handler(httpd_req_t *req)
@@ -1391,8 +1684,11 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
     if (!frame_api_suffix(req, suffix, sizeof(suffix))) {
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     }
+    if (strcmp(suffix, "/") == 0) return frame_update_post_handler(req);
     if (strcmp(suffix, "/reload") == 0) return reload_post_handler(req);
-    if (strcmp(suffix, "/uploadScenes") == 0 || strcmp(suffix, "/uploaded_scenes") == 0) {
+    if (strcmp(suffix, "/uploadScenes") == 0 ||
+        strcmp(suffix, "/upload_scenes") == 0 ||
+        strcmp(suffix, "/uploaded_scenes") == 0) {
         return scenes_post_handler(req);
     }
     const char *event_prefix = "/event/";

@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS</title>
     <link rel="stylesheet" href="static/main.css" />
+    <script>
+      window.FRAMEOS_APP_CONFIG = {
+        ...(window.FRAMEOS_APP_CONFIG || {}),
+        frameAdminMode: /*$frameAdminMode*/ false,
+      }
+    </script>
   </head>
   <body data-scaling-mode="/*$scalingMode*/contain">
     <div id="root"></div>

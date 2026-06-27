@@ -20,6 +20,13 @@ proc baseConfig(assetsPath = ""): FrameConfig =
     frameAccess: "private",
     frameAccessKey: "test-key",
     frameAdminAuth: %*{},
+    httpsProxy: HttpsProxyConfig(
+      enable: true,
+      port: 9443,
+      exposeOnlyPort: true,
+      serverCert: "server-cert",
+      serverKey: "server-key",
+    ),
     serverHost: "localhost",
     serverPort: 8989,
     serverApiKey: "api",
@@ -32,10 +39,20 @@ proc baseConfig(assetsPath = ""): FrameConfig =
     metricsInterval: 60,
     assetsPath: assetsPath,
     saveAssets: %*(false),
+    timeZone: "Europe/Brussels",
+    timeZoneUpdates: TimeZoneUpdatesConfig(enabled: false, hour: 4, url: "https://example.test/tz.json.gz"),
     network: NetworkConfig(networkCheck: false),
     mountpoints: MountpointsConfig(enabled: true, items: @[
       MountpointConfig(enabled: true, source: "//nas/photos", target: "/mnt/photos", username: "frame", password: "secret")
     ]),
+    errorBehavior: ErrorBehaviorConfig(
+      mode: "silent_retry",
+      retrySeconds: 30,
+      silentRetrySeconds: 15,
+      silentRetryForever: true,
+      silentWindowMinutes: 7,
+      showErrorRetrySeconds: 20,
+    ),
   )
 
 suite "Server API helpers":
@@ -83,12 +100,19 @@ suite "Server API helpers":
     check payload{"frame_access_key"}.getStr() == ""
     check payload{"server_api_key"}.getStr() == ""
     check payload{"frame_admin_auth"}{"enabled"}.getBool() == false
+    check payload{"https_proxy"}{"port"}.getInt() == 9443
+    check payload{"https_proxy"}{"certs"}{"server"}.getStr() == ""
+    check payload{"timezone"}.getStr() == "Europe/Brussels"
+    check payload{"timezone_updater"}{"enabled"}.getBool() == false
+    check payload{"error_behavior"}{"mode"}.getStr() == "silent_retry"
+    check payload{"error_behavior"}{"silent_retry_forever"}.getBool() == true
     check payload{"mountpoints"}{"enabled"}.getBool() == true
     check payload{"mountpoints"}{"items"}[0]{"password"}.getStr() == ""
 
     let privilegedPayload = frameApiPayload(state, exposeSecrets = true)
     check privilegedPayload{"frame_access_key"}.getStr() == globalFrameConfig.frameAccessKey
     check privilegedPayload{"server_api_key"}.getStr() == globalFrameConfig.serverApiKey
+    check privilegedPayload{"https_proxy"}{"certs"}{"server"}.getStr() == "server-cert"
     check privilegedPayload{"mountpoints"}{"items"}[0]{"password"}.getStr() == "secret"
 
     putEnv("FRAMEOS_SCENES_JSON", tempRoot / "invalid-scenes.json")

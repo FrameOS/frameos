@@ -20,7 +20,7 @@ suite "Server routes composition":
     let router = buildRouter(publicState, adminState)
 
     check router.notFoundHandler != nil
-    check router.routes.len == 45
+    check router.routes.len == 62
 
     var getCount = 0
     var postCount = 0
@@ -33,11 +33,15 @@ suite "Server routes composition":
       elif "httpMethod: \"POST\"" in debug:
         inc postCount
 
-    check getCount == 32
-    check postCount == 13
+    check getCount == 44
+    check postCount == 18
 
     # Key paths from public, frame API, and admin surfaces should all be present.
     check routeDump.anyIt("\"ping\"" in it)
     check routeDump.anyIt("\"states\"" in it)
     check routeDump.anyIt("\"api\"" in it and "\"admin\"" in it and "\"session\"" in it)
     check routeDump.anyIt("\"api\"" in it and "\"frames\"" in it and "\"event\"" in it)
+
+  test "not found logging suppresses stale frontend asset paths":
+    check not shouldLogRouteNotFound("/img/logo-2/logo-white-colors.svg")
+    check shouldLogRouteNotFound("/missing")

@@ -20,6 +20,8 @@ proc shouldLogHttpRequest*(path: string): bool =
     return false
   if path.startsWith("/static/"):
     return false
+  if path.startsWith("/img/"):
+    return false
   if path.startsWith("/api/frames/") and path.endsWith("/logs"):
     return false
   if path.startsWith("/api/frames/") and "/scene_images/" in path:

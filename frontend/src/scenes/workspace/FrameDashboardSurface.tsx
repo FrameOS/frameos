@@ -26,7 +26,8 @@ import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { FrameImageOverlayControls } from './FrameImageOverlayControls'
-import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { DeployToFrameIcon, FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import {
@@ -39,6 +40,7 @@ import {
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 const uploadedScenePrefix = 'uploaded/'
 const livePreviewSceneId = '__live_preview__'
@@ -57,6 +59,7 @@ const sceneToolButtons = [
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const
+const frameAdminUnsupportedSceneToolPanels = new Set(['terminal', 'ping'])
 
 interface FrameDashboardSurfaceProps {
   frame: FrameType
@@ -279,11 +282,21 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
 function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const healthy = frameIsHealthy(frame)
   const connected = (frame.active_connections ?? 0) > 0
+  const inFrameAdminMode = isInFrameAdminMode()
 
   return (
     <div className="frame-dashboard-header mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="group flex min-w-[14rem] flex-1 items-center gap-3">
-        <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
+        {inFrameAdminMode ? (
+          <FrameLocalDeployMenu
+            frameId={frame.id}
+            buttonTitle="Frame actions"
+            buttonClassName="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 !px-0 !py-0 text-slate-700 shadow-sm transition"
+            buttonContent={<DeployToFrameIcon className="h-7 w-7" />}
+          />
+        ) : (
+          <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
+        )}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <A
@@ -495,6 +508,9 @@ function FrameScenesBlock({
   const { openSceneControl } = useActions(workspaceLogic)
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const visibleSceneToolButtons = isInFrameAdminMode()
+    ? sceneToolButtons.filter(({ panel }) => !frameAdminUnsupportedSceneToolPanels.has(panel))
+    : sceneToolButtons
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneListDragData(event.dataTransfer)) {
@@ -529,7 +545,7 @@ function FrameScenesBlock({
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {sceneToolButtons.map(({ label, panel, icon: Icon }) => (
+        {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
           <A
             key={panel}
             href={urls.frame(frame.id, panel)}

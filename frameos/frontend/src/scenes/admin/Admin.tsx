@@ -1,19 +1,27 @@
 import { useMountedLogic, useValues } from 'kea'
+import type { ReactNode } from 'react'
 
 import { appsModel } from '../../../../../frontend/src/models/appsModel'
 import { entityImagesModel } from '../../../../../frontend/src/models/entityImagesModel'
 import { framesModel } from '../../../../../frontend/src/models/framesModel'
 import { Frame } from '../../../../../frontend/src/scenes/frame/Frame'
+import { AppsWorkspace } from '../../../../../frontend/src/scenes/workspace/AppsWorkspace'
+import { SceneWorkspace } from '../../../../../frontend/src/scenes/workspace/SceneWorkspace'
 import { socketLogic } from '../../../../../frontend/src/scenes/socketLogic'
 import { adminLogic } from './adminLogic'
 
 interface AdminProps {
   id?: string
+  frameId?: string
+  sceneId?: string
+  nodeId?: string
 }
 
-const resolveFrameId = (id?: string) => {
-  if (id && id.trim()) {
-    return id
+const resolveFrameId = (...ids: Array<string | undefined>) => {
+  for (const id of ids) {
+    if (id && id.trim()) {
+      return id
+    }
   }
   if (typeof window !== 'undefined') {
     const configFrameId = (window as any).FRAMEOS_APP_CONFIG?.frameId
@@ -27,9 +35,7 @@ const resolveFrameId = (id?: string) => {
   return '1'
 }
 
-export default function Admin({ id }: AdminProps) {
-  const resolvedFrameId = resolveFrameId(id)
-
+function AdminGate({ children }: { children: ReactNode }) {
   useMountedLogic(adminLogic)
   useMountedLogic(socketLogic)
   useMountedLogic(appsModel)
@@ -50,8 +56,34 @@ export default function Admin({ id }: AdminProps) {
   }
 
   if (framesLoaded) {
-    return <Frame id={resolvedFrameId} />
+    return <>{children}</>
   }
 
   return <div>Loading...</div>
+}
+
+export default function Admin({ id, frameId }: AdminProps) {
+  const resolvedFrameId = resolveFrameId(id, frameId)
+
+  return (
+    <AdminGate>
+      <Frame id={resolvedFrameId} />
+    </AdminGate>
+  )
+}
+
+export function AdminScene({ frameId, sceneId }: AdminProps) {
+  return (
+    <AdminGate>
+      <SceneWorkspace frameId={resolveFrameId(frameId)} sceneId={sceneId} />
+    </AdminGate>
+  )
+}
+
+export function AdminApps({ frameId, sceneId, nodeId }: AdminProps) {
+  return (
+    <AdminGate>
+      <AppsWorkspace frameId={frameId} sceneId={sceneId} nodeId={nodeId} />
+    </AdminGate>
+  )
 }

@@ -28,3 +28,8 @@ suite "server common route helpers":
 
     globalFrameConfig = FrameConfig(scalingMode: "unknown")
     check "contain" in frameWebHtml()
+
+  test "frameWebHtml injects frame admin mode":
+    globalFrameConfig = FrameConfig()
+    check "frameAdminMode: false" in frameWebHtml()
+    check "frameAdminMode: true" in frameWebHtml(frameAdminMode = true)

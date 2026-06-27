@@ -26,6 +26,9 @@ esp_err_t fos_scenes_sync(bool force);
  * it pending. Safe from any task; trigger a render to apply. */
 esp_err_t fos_scenes_set_json(const char *json, size_t len);
 
+/* Copy the persisted scenes JSON array. Caller owns the returned buffer. */
+char *fos_scenes_json_copy(size_t *out_len);
+
 /* Ask the render task to force a backend sync on its next pass. */
 void fos_scenes_request_sync(void);
 

@@ -465,6 +465,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
+          of "restart":
+            self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
+            quit(QuitSuccess)
           of "uploadScenes":
             let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
             if mainSceneId.isNone:

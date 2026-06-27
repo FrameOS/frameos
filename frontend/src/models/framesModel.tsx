@@ -736,7 +736,10 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to restart frame')
+      }
     },
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
