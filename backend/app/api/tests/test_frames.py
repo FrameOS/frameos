@@ -2363,6 +2363,44 @@ async def test_api_frame_get_image_no_scene_id(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_upload_image_updates_cache_and_scene(async_client, db, redis):
+    frame = await new_frame(db, redis, 'UsbImageFrame', 'example.com', 'localhost')
+    frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    image = Image.new('RGB', (4, 3), (255, 255, 255))
+    png_buffer = io.BytesIO()
+    image.save(png_buffer, format='PNG')
+    png = png_buffer.getvalue()
+
+    with patch('app.api.frames.publish_message', new_callable=AsyncMock) as publish:
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/image?scene_id=scene-1',
+            content=png,
+            headers={'Content-Type': 'image/png'},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()['message'] == 'Frame image updated'
+    assert response.json()['sceneId'] == 'scene-1'
+    assert await redis.get(frames_api._frame_image_cache_key(frame.id)) == png
+
+    stored_scene_image = (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='scene-1')
+        .first()
+    )
+    assert stored_scene_image is not None
+    assert stored_scene_image.image == png
+    assert stored_scene_image.width == 4
+    assert stored_scene_image.height == 3
+
+    published_events = [call.args[1] for call in publish.await_args_list]
+    assert published_events == ['new_scene_image', 'frame_rendered']
+
+
+@pytest.mark.asyncio
 async def test_api_frame_generate_tls_material_includes_validity_dates(async_client, db, redis):
     frame = await new_frame(db, redis, 'TlsFrame', 'localhost', 'localhost')
 

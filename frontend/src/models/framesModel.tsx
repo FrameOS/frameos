@@ -12,7 +12,7 @@ import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
+import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -105,6 +105,10 @@ const embeddedFirmwareStatusPollsInFlight = new Set<number>()
 const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
 const embeddedFirmwareRecoveryAttempts = new Map<number, number>()
 const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
+const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
+const embeddedUsbImageRefreshesInFlight = new Set<number>()
+const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
+const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
@@ -160,6 +164,80 @@ async function recoverEmbeddedFirmwareBuild(frameId: number, status: EmbeddedFir
     framesModel.actions.updateEmbeddedFirmwareStatus(frameId, firmware)
   }
   return true
+}
+
+function usbLogLineIndicatesImageReady(line: string): boolean {
+  const normalized = line.toLowerCase()
+  return (
+    normalized.includes('render:done') ||
+    /render #\d+ done\b/.test(normalized) ||
+    normalized.includes('display refresh skipped: packed image unchanged') ||
+    normalized.includes('driver:waveshare:debug action="sleep:done"') ||
+    normalized.includes("driver:waveshare:debug action='sleep:done'") ||
+    normalized.includes('driver:waveshare:debug action="turnondisplay:done"') ||
+    normalized.includes("driver:waveshare:debug action='turnondisplay:done'")
+  )
+}
+
+function embeddedUsbImageSceneId(metadata?: string): string | null {
+  const match = metadata?.match(/(?:^|\s)scene=([^\s]*)/)
+  const sceneId = match?.[1]?.trim()
+  return sceneId || null
+}
+
+async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
+  if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbApiCanUse(frameId)) {
+    return
+  }
+  embeddedUsbImageRefreshesInFlight.add(frameId)
+  try {
+    const result = await runEmbeddedUsbApiCommand(frameId, 'image', {
+      timeoutMs: EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS,
+    })
+    if (!result.bytes?.byteLength) {
+      throw new Error('USB image command returned no image bytes')
+    }
+    const sceneId = embeddedUsbImageSceneId(result.metadata)
+    const query = sceneId ? `?scene_id=${encodeURIComponent(sceneId)}` : ''
+    const imageBuffer = result.bytes.buffer.slice(
+      result.bytes.byteOffset,
+      result.bytes.byteOffset + result.bytes.byteLength
+    ) as ArrayBuffer
+    const response = await apiFetch(`/api/frames/${frameId}/image${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/bmp' },
+      body: new Blob([imageBuffer], { type: 'image/bmp' }),
+    })
+    if (!response.ok) {
+      throw new Error(await responseErrorDetail(response, 'Failed to update frame image from USB'))
+    }
+    entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, 'image')
+    if (sceneId) {
+      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
+    }
+    socketLogic.actions.frameRendered(frameId)
+  } catch (error) {
+    console.warn('Failed to update frame image over USB', error)
+  } finally {
+    embeddedUsbImageRefreshesInFlight.delete(frameId)
+  }
+}
+
+function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
+  if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
+    return
+  }
+  const existingTimer = embeddedUsbImageRefreshTimers.get(frameId)
+  if (existingTimer !== undefined) {
+    window.clearTimeout(existingTimer)
+  }
+  embeddedUsbImageRefreshTimers.set(
+    frameId,
+    window.setTimeout(() => {
+      embeddedUsbImageRefreshTimers.delete(frameId)
+      void refreshEmbeddedUsbFrameImage(frameId)
+    }, EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS)
+  )
 }
 
 function sdCardImageProgressDetail(startedAt: number): string {
@@ -984,6 +1062,11 @@ export const framesModel = kea<framesModelType>([
         if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
           entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
+      }
+    },
+    [embeddedUsbLogsModel.actionTypes.appendUsbLog]: ({ log }) => {
+      if (log.type === 'usb' && usbLogLineIndicatesImageReady(log.line)) {
+        scheduleEmbeddedUsbFrameImageRefresh(log.frame_id)
       }
     },
   })),

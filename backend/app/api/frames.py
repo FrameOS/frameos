@@ -582,6 +582,106 @@ async def _release_frame_image_refresh_lock(redis: Redis, lock_key: str, lock_to
         await redis.delete(lock_key)
 
 
+async def _store_frame_image(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    body: bytes,
+    *,
+    scene_id: str | None = None,
+    publish_rendered: bool = True,
+) -> dict[str, Any]:
+    cache_key = _frame_image_cache_key(frame.id)
+    await redis.set(cache_key, body, ex=86400 * 30)
+
+    stored_scene_id = scene_id
+    width = height = None
+    if stored_scene_id:
+        stored_scene_id = _scene_image_scene_id_for_frame(frame, stored_scene_id)
+
+    if stored_scene_id:
+        from app.models.scene_image import SceneImage
+        from app.api.scene_images import _generate_thumbnail
+
+        def _decode_and_thumbnail():
+            image_width = image_height = None
+            try:
+                from PIL import Image
+
+                img = Image.open(io.BytesIO(body))
+                image_width, image_height = img.width, img.height
+            except Exception:
+                pass
+            thumb, t_width, t_height = _generate_thumbnail(body)
+            return image_width, image_height, thumb, t_width, t_height
+
+        width, height, thumb, t_width, t_height = await asyncio.get_running_loop().run_in_executor(
+            None, _decode_and_thumbnail
+        )
+
+        now = datetime.utcnow()
+        img_row = (
+            db.query(SceneImage)
+            .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id=stored_scene_id)
+            .first()
+        )
+        if img_row:
+            img_row.image = body
+            img_row.timestamp = now
+            img_row.width = width
+            img_row.height = height
+            img_row.thumb_image = thumb
+            img_row.thumb_width = t_width
+            img_row.thumb_height = t_height
+        else:
+            img_row = SceneImage(
+                project_id=frame.project_id,
+                frame_id=frame.id,
+                scene_id=stored_scene_id,
+                image=body,
+                timestamp=now,
+                width=width,
+                height=height,
+                thumb_image=thumb,
+                thumb_width=t_width,
+                thumb_height=t_height,
+            )
+            db.add(img_row)
+        db.commit()
+
+        await publish_message(
+            redis,
+            "new_scene_image",
+            {
+                "project_id": frame.project_id,
+                "frameId": frame.id,
+                "sceneId": stored_scene_id,
+                "timestamp": now.isoformat(),
+                "width": width,
+                "height": height,
+            },
+        )
+
+    if publish_rendered:
+        await publish_message(
+            redis,
+            "frame_rendered",
+            {
+                "project_id": frame.project_id,
+                "frameId": frame.id,
+                "sceneId": stored_scene_id,
+                "width": width,
+                "height": height,
+            },
+        )
+
+    return {
+        "sceneId": stored_scene_id,
+        "width": width,
+        "height": height,
+    }
+
+
 def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if isinstance(body, (bytes, bytearray)):
         try:
@@ -1855,81 +1955,12 @@ async def api_frame_get_image(
                 body = await asyncio.get_running_loop().run_in_executor(
                     None, _coerce_frame_image_to_png, body, headers
                 )
-                await redis.set(cache_key, body, ex=86400 * 30)
                 scene_id = headers.get("x-scene-id")
                 if not scene_id:
                     encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
                     if encoded_scene_id:
                         scene_id = encoded_scene_id.decode("utf-8")
-                if scene_id:
-                    scene_id = _scene_image_scene_id_for_frame(frame, scene_id)
-                if scene_id:
-                    from app.models.scene_image import SceneImage
-                    from app.api.scene_images import _generate_thumbnail
-
-                    # Decoding and thumbnailing a full frame image is CPU-bound
-                    # PIL work; keep it off the event loop.
-                    def _decode_and_thumbnail():
-                        # dimensions (best‑effort – don’t crash if Pillow missing)
-                        width = height = None
-                        try:
-                            from PIL import Image
-
-                            img = Image.open(io.BytesIO(body))
-                            width, height = img.width, img.height
-                        except Exception:
-                            pass
-                        thumb, t_width, t_height = _generate_thumbnail(body)
-                        return width, height, thumb, t_width, t_height
-
-                    width, height, thumb, t_width, t_height = await asyncio.get_running_loop().run_in_executor(
-                        None, _decode_and_thumbnail
-                    )
-
-                    # upsert into SceneImage
-                    now = datetime.utcnow()
-                    img_row = (
-                        db.query(SceneImage)
-                        .filter_by(project_id=frame.project_id, frame_id=id, scene_id=scene_id)
-                        .first()
-                    )
-                    if img_row:
-                        img_row.image = body
-                        img_row.timestamp = now
-                        img_row.width = width
-                        img_row.height = height
-                        img_row.thumb_image = thumb
-                        img_row.thumb_width = t_width
-                        img_row.thumb_height = t_height
-                    else:
-                        img_row = SceneImage(
-                            project_id=frame.project_id,
-                            frame_id=id,
-                            scene_id=scene_id,
-                            image=body,
-                            timestamp=now,
-                            width=width,
-                            height=height,
-                            thumb_image=thumb,
-                            thumb_width=t_width,
-                            thumb_height=t_height,
-                        )
-                        db.add(img_row)
-                    db.commit()
-
-                if scene_id:
-                    await publish_message(
-                        redis,
-                        "new_scene_image",
-                        {
-                            "project_id": frame.project_id,
-                            "frameId": id,
-                            "sceneId": scene_id,
-                            "timestamp": now.isoformat(),
-                            "width": width,
-                            "height": height,
-                        },
-                    )
+                await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
 
                 return Response(content=body, media_type="image/png")
             else:
@@ -1981,6 +2012,34 @@ async def api_frame_get_image(
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
                     await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
+
+
+@api_project.post("/frames/{id:int}/image")
+async def api_frame_upload_image(
+    id: int,
+    request: Request,
+    scene_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id) or _not_found()
+    body = await request.body()
+    if not body:
+        _bad_request("Missing image payload")
+
+    headers = {"content-type": request.headers.get("content-type", "")}
+    try:
+        image_body = await asyncio.get_running_loop().run_in_executor(
+            None, _coerce_frame_image_to_png, body, headers
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not an image: {exc}")
+
+    image_info = await _store_frame_image(db, redis, frame, image_body, scene_id=scene_id)
+    return {
+        "message": "Frame image updated",
+        **image_info,
+    }
 
 
 @api_project.get("/frames/{id:int}/scene_source/{scene}")
