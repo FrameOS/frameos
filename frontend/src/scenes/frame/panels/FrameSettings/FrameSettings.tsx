@@ -1055,6 +1055,36 @@ export function FrameSettings({
               </Group>
             </div>
           ) : null}
+          <Field name="rotate" label="Rotation">
+            {({ value, onChange }) => (
+              <Select
+                value={value || '0'}
+                onChange={(v) => onChange(parseInt(v))}
+                name="rotate"
+                options={[
+                  { value: 0, label: '0 degrees' },
+                  { value: 90, label: '90 degrees' },
+                  { value: 180, label: '180 degrees' },
+                  { value: 270, label: '270 degrees' },
+                ]}
+              />
+            )}
+          </Field>
+          <Field name="flip" label="Flip">
+            {({ value, onChange }) => (
+              <Select
+                value={value || ''}
+                onChange={(v) => onChange(v)}
+                name="flip"
+                options={[
+                  { value: '', label: '-' },
+                  { value: 'horizontal', label: 'horizontal' },
+                  { value: 'vertical', label: 'vertical' },
+                  { value: 'both', label: 'both' },
+                ]}
+              />
+            )}
+          </Field>
           {isBuildrootMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
@@ -1335,36 +1365,6 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null} */}
-          <Field name="rotate" label="Rotation">
-            {({ value, onChange }) => (
-              <Select
-                value={value || '0'}
-                onChange={(v) => onChange(parseInt(v))}
-                name="rotate"
-                options={[
-                  { value: 0, label: '0 degrees' },
-                  { value: 90, label: '90 degrees' },
-                  { value: 180, label: '180 degrees' },
-                  { value: 270, label: '270 degrees' },
-                ]}
-              />
-            )}
-          </Field>
-          <Field name="flip" label="Flip">
-            {({ value, onChange }) => (
-              <Select
-                value={value || ''}
-                onChange={(v) => onChange(v)}
-                name="flip"
-                options={[
-                  { value: '', label: '-' },
-                  { value: 'horizontal', label: 'horizontal' },
-                  { value: 'vertical', label: 'vertical' },
-                  { value: 'both', label: 'both' },
-                ]}
-              />
-            )}
-          </Field>
           {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
             <Group name="rpios">
               <Field
