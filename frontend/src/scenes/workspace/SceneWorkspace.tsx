@@ -47,6 +47,7 @@ import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragDa
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -128,6 +129,7 @@ function SceneSelector({
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
   const frameGroups = groupFramesByStatus(frames)
+  const inFrameAdminMode = isInFrameAdminMode()
 
   const handleSceneListDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -158,22 +160,32 @@ function SceneSelector({
           <div>
             <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
             <div className="flex items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <select
-                  value={frame.id}
-                  onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-                  className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-                >
-                  {frameGroups.map((group) => (
-                    <optgroup key={group.key} label={group.label}>
-                      {group.frames.map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name || frameHost(candidate)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+              <div
+                className={clsx(
+                  'relative min-w-0 flex-1',
+                  inFrameAdminMode &&
+                    'frameos-form-control rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800'
+                )}
+              >
+                {inFrameAdminMode ? (
+                  <div className="truncate">{frame.name || frameHost(frame)}</div>
+                ) : (
+                  <select
+                    value={frame.id}
+                    onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+                    className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    {frameGroups.map((group) => (
+                      <optgroup key={group.key} label={group.label}>
+                        {group.frames.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name || frameHost(candidate)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                )}
                 <FrameMetricAlertIndicator
                   frame={frame}
                   containerClassName="absolute right-7 top-1/2 -translate-y-1/2"

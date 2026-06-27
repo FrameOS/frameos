@@ -33,6 +33,7 @@ import {
   normalizeSceneApps,
 } from '../../utils/sceneApps'
 import { systemAppSourceLogic } from './systemAppSourceLogic'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -287,6 +288,7 @@ function AppsSelector({
   systemApps: SystemAppOption[]
 }): JSX.Element {
   const frameGroups = groupFramesByStatus(frames)
+  const inFrameAdminMode = isInFrameAdminMode()
 
   return (
     <div className="space-y-4">
@@ -306,33 +308,48 @@ function AppsSelector({
         }}
       />
       {sourceMode === 'frames' && frame ? (
-        <SelectionSelect
-          label="Frame"
-          value={frame.id}
-          action={
-            <FrameActionsMenu
-              frame={frame}
-              className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            />
-          }
-          onChange={(value) => {
-            const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
-            if (!nextFrame) {
-              return
+        inFrameAdminMode ? (
+          <div>
+            <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+            <div className="flex items-center gap-2">
+              <div className="frameos-form-control min-w-0 flex-1 truncate rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+                {frame.name || frameHost(frame)}
+              </div>
+              <FrameActionsMenu
+                frame={frame}
+                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              />
+            </div>
+          </div>
+        ) : (
+          <SelectionSelect
+            label="Frame"
+            value={frame.id}
+            action={
+              <FrameActionsMenu
+                frame={frame}
+                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              />
             }
-            pushFrameAppsUrl(nextFrame, defaultApp(nextFrame))
-          }}
-        >
-          {frameGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.frames.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name || frameHost(candidate)}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </SelectionSelect>
+            onChange={(value) => {
+              const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
+              if (!nextFrame) {
+                return
+              }
+              pushFrameAppsUrl(nextFrame, defaultApp(nextFrame))
+            }}
+          >
+            {frameGroups.map((group) => (
+              <optgroup key={group.key} label={group.label}>
+                {group.frames.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name || frameHost(candidate)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </SelectionSelect>
+        )
       ) : null}
       {sourceMode === 'system' ? (
         <>
