@@ -19,6 +19,7 @@ from app.tasks.embedded_firmware import (
     embedded_flash_size_for_frame,
     embedded_firmware_config_hash,
     embedded_gpio_buttons_for_frame,
+    embedded_hardware_preset_for_frame,
     embedded_hostname_for_frame,
     embedded_max_http_response_bytes_for_frame,
     embedded_module_psram_bytes,
@@ -479,6 +480,56 @@ def test_embedded_defaults_choose_response_limit_and_pin_layout():
     assert embedded_max_http_response_bytes_for_frame(custom) == 3 * 1024 * 1024
     assert embedded_pins_for_frame(custom)["rst"] == 12
     assert embedded_pins_for_frame(custom)["sck"] == 11
+
+
+def test_embedded_hardware_preset_for_waveshare_13in3e6():
+    frame = Frame(
+        id=7,
+        device_config={"hardwarePreset": "waveshare_esp32_s3_epaper_13_3e6"},
+    )
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_hardware_preset_for_frame(frame) == "waveshare_esp32_s3_epaper_13_3e6"
+    assert frame.device == "waveshare.EPD_13in3e"
+    assert frame.embedded["flashSize"] == "32MB"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert embedded_module_psram_bytes(frame) == 16 * 1024 * 1024
+    assert frame.device_config["psramMB"] == 16
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 10,
+        "dc": 7,
+        "cs": 1,
+        "cs2": 4,
+        "busy": 8,
+        "sck": 6,
+        "mosi": 5,
+        "pwr": 16,
+    }
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_epaper_13_3e6",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 3, "sck": 44, "miso": 43, "mosi": 2},
+        "maxFrequencyKHz": 20_000,
+    }
+    check_embedded_panel_fits_memory(frame)
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_PANEL "EPD_13in3e"' in header
+    assert "#define FRAMEOS_DEFAULT_PIN_RST 10" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_DC 7" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS 1" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 4" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 8" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_SCK 6" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 5" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_PWR 16" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 3" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 44" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 43" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 2" in header
 
 
 def test_large_spectra_panel_can_use_thin_client_on_8mb():

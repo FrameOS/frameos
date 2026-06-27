@@ -42,6 +42,7 @@ import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import {
   FrameEmbeddedFlashSize,
+  FrameEmbeddedHardwarePreset,
   FrameErrorBehaviorMode,
   FrameMountpointConfig,
   FrameType,
@@ -179,7 +180,7 @@ type Esp32SdCardPinKey = 'cs' | 'sck' | 'miso' | 'mosi'
 type Esp32SdCardPinLayout = Record<Esp32SdCardPinKey, number>
 type NormalizedEsp32SdCardAssets = {
   enabled: boolean
-  preset: 'custom' | 'waveshare_esp32_s3_photopainter'
+  preset: 'custom' | 'waveshare_esp32_s3_photopainter' | 'waveshare_esp32_s3_epaper_13_3e6'
   pins: Esp32SdCardPinLayout
   maxFrequencyKHz: number
   mountPath: string
@@ -196,6 +197,10 @@ const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
   { key: 'pwr', label: 'PWR' },
 ]
 
+const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
+  'waveshare_esp32_s3_epaper_13_3e6'
+const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
+
 const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
   dc: 4,
@@ -210,6 +215,17 @@ const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
 const ESP32_XIAO_13IN3E_PIN_LAYOUT: Esp32PinLayout = {
   ...ESP32_XIAO_PIN_LAYOUT,
   cs2: 8,
+}
+
+const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 10,
+  dc: 7,
+  cs: 1,
+  cs2: 4,
+  busy: 8,
+  sck: 6,
+  mosi: 5,
+  pwr: 16,
 }
 
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
@@ -233,8 +249,42 @@ const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   mosi: 41,
 }
 
-function esp32RecommendedPinLayout(device?: string): Esp32PinLayout {
-  return device === 'waveshare.EPD_13in3e' ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
+const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 3,
+  sck: 44,
+  miso: 43,
+  mosi: 2,
+}
+
+const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
+  { value: 'custom', label: 'Custom ESP32-S3 board' },
+  { value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 ePaper 13.3E6' },
+]
+
+function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  return value === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET ? ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET : 'custom'
+}
+
+function esp32Waveshare13in3e6SdCardAssets(): Esp32SdCardAssets {
+  return {
+    enabled: true,
+    preset: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+    pins: { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT },
+    maxFrequencyKHz: 20000,
+    mountPath: '/srv/assets',
+  }
+}
+
+function esp32RecommendedPinLayout(
+  device?: string,
+  hardwarePreset?: FrameEmbeddedHardwarePreset | string
+): Esp32PinLayout {
+  if (hardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
+  }
+  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
+    ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
+    : { ...ESP32_XIAO_PIN_LAYOUT }
 }
 
 function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
@@ -265,10 +315,15 @@ function normalizeEsp32SdCardPinLayout(
 
 function normalizeEsp32SdCardAssets(value: Esp32SdCardAssets | undefined): NormalizedEsp32SdCardAssets {
   const preset =
-    value?.preset === 'waveshare_esp32_s3_photopainter' ? 'waveshare_esp32_s3_photopainter' : 'custom'
+    value?.preset === 'waveshare_esp32_s3_photopainter' ||
+    value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+      ? value.preset
+      : 'custom'
   const presetPins =
     preset === 'waveshare_esp32_s3_photopainter'
       ? ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT
+      : preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+      ? ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT
       : ESP32_SD_CARD_EMPTY_PIN_LAYOUT
   return {
     enabled: value?.enabled === true,
@@ -287,8 +342,14 @@ function esp32SdCardPresetValue(config: NormalizedEsp32SdCardAssets): string {
   if (config.preset === 'waveshare_esp32_s3_photopainter') {
     return 'waveshare_esp32_s3_photopainter'
   }
+  if (config.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+  }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT)) {
     return 'waveshare_esp32_s3_photopainter'
+  }
+  if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT)) {
+    return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
   }
   return 'custom'
 }
@@ -297,11 +358,18 @@ function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
   if (preset === 'waveshare_esp32_s3_photopainter') {
     return { ...ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT }
   }
+  if (preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
+    return { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT }
+  }
   return { ...ESP32_SD_CARD_EMPTY_PIN_LAYOUT }
 }
 
-function normalizeEsp32PinLayout(value: Esp32Pins | undefined, device?: string): Esp32PinLayout {
-  const recommended = esp32RecommendedPinLayout(device)
+function normalizeEsp32PinLayout(
+  value: Esp32Pins | undefined,
+  device?: string,
+  hardwarePreset?: FrameEmbeddedHardwarePreset | string
+): Esp32PinLayout {
+  const recommended = esp32RecommendedPinLayout(device, hardwarePreset)
   if (!value || typeof value !== 'object') {
     return recommended
   }
@@ -322,6 +390,9 @@ function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): bo
 }
 
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
+  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT)) {
+    return 'waveshare-13in3e6'
+  }
   if (esp32PinLayoutsEqual(pins, ESP32_XIAO_PIN_LAYOUT)) {
     return 'xiao'
   }
@@ -334,20 +405,28 @@ function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
 function esp32PinLayoutPresetOptions(device?: string): Option[] {
   const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
   const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
-  return device === 'waveshare.EPD_13in3e'
-    ? [xiao13in3e, xiao, { value: 'custom', label: 'Custom' }]
-    : [xiao, xiao13in3e, { value: 'custom', label: 'Custom' }]
+  const waveshare13in3e6 = { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6' }
+  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
+    ? [waveshare13in3e6, xiao13in3e, xiao, { value: 'custom', label: 'Custom' }]
+    : [xiao, xiao13in3e, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
 }
 
-function esp32PinLayoutForPreset(preset: string, device?: string): Esp32PinLayout | null {
+function esp32PinLayoutForPreset(
+  preset: string,
+  device?: string,
+  hardwarePreset?: FrameEmbeddedHardwarePreset | string
+): Esp32PinLayout | null {
   if (preset === 'xiao') {
     return { ...ESP32_XIAO_PIN_LAYOUT }
   }
   if (preset === 'xiao-13in3e') {
     return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
   }
+  if (preset === 'waveshare-13in3e6') {
+    return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
+  }
   if (preset === 'recommended') {
-    return esp32RecommendedPinLayout(device)
+    return esp32RecommendedPinLayout(device, hardwarePreset)
   }
   return null
 }
@@ -381,6 +460,58 @@ export function FrameSettings({
   const { savedSettings } = useValues(settingsLogic)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()
+  const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
+    frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
+  )
+  const setEsp32HardwarePresetCustom = (
+    patch: Partial<Pick<FrameType, 'device' | 'device_config' | 'embedded'>> = {}
+  ) => {
+    const nextValues: Partial<FrameType> = {
+      embedded: {
+        ...(frameForm.embedded ?? {}),
+        ...(patch.embedded ?? {}),
+        hardwarePreset: 'custom',
+      },
+      device_config: {
+        ...(frameForm.device_config ?? {}),
+        ...(patch.device_config ?? {}),
+        hardwarePreset: 'custom',
+      },
+    }
+    if (patch.device !== undefined) {
+      nextValues.device = patch.device
+    }
+    setFrameFormValues(nextValues)
+  }
+  const setEsp32HardwarePreset = (hardwarePreset: FrameEmbeddedHardwarePreset) => {
+    if (hardwarePreset === 'custom') {
+      setEsp32HardwarePresetCustom()
+      return
+    }
+    const nextValues: Partial<FrameType> = {
+      device: ESP32_WAVESHARE_13IN3E6_DEVICE,
+      embedded: {
+        ...(frameForm.embedded ?? {}),
+        platform: EMBEDDED_ESP32_S3,
+        flashSize: '32MB',
+        hardwarePreset,
+      },
+      device_config: {
+        ...(frameForm.device_config ?? {}),
+        hardwarePreset,
+        psramMB: 16,
+        pins: { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
+        sdCardAssets: esp32Waveshare13in3e6SdCardAssets(),
+      },
+    }
+    if (
+      !frameForm.max_http_response_bytes ||
+      frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    ) {
+      nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    }
+    setFrameFormValues(nextValues)
+  }
 
   const palette = withCustomPalette[frame.device || '']
   const inkyAutoButtonDevice = [
@@ -772,7 +903,11 @@ export function FrameSettings({
                       }
                       nextValues.device_config = {
                         ...(frameForm.device_config ?? {}),
-                        pins: normalizeEsp32PinLayout(frameForm.device_config?.pins, frameForm.device),
+                        pins: normalizeEsp32PinLayout(
+                          frameForm.device_config?.pins,
+                          frameForm.device,
+                          embeddedHardwarePreset
+                        ),
                       }
                       setFrameFormValues({
                         ...nextValues,
@@ -794,13 +929,41 @@ export function FrameSettings({
                   onChange(nextDevice)
                   if (isEmbeddedMode) {
                     const currentPins = frameForm.device_config?.pins
-                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice)
-                    if (!currentPins || esp32PinLayoutsEqual(previousPins, esp32RecommendedPinLayout(previousDevice))) {
+                    const nextHardwarePreset =
+                      embeddedHardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET &&
+                      nextDevice !== ESP32_WAVESHARE_13IN3E6_DEVICE
+                        ? 'custom'
+                        : embeddedHardwarePreset
+                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice, embeddedHardwarePreset)
+                    const nextDeviceConfig: NonNullable<FrameType['device_config']> = {
+                      ...(frameForm.device_config ?? {}),
+                    }
+                    const nextValues: Partial<FrameType> = {}
+                    let shouldUpdateDeviceConfig = false
+                    if (
+                      !currentPins ||
+                      esp32PinLayoutsEqual(
+                        previousPins,
+                        esp32RecommendedPinLayout(previousDevice, embeddedHardwarePreset)
+                      )
+                    ) {
+                      nextDeviceConfig.pins = esp32RecommendedPinLayout(nextDevice, nextHardwarePreset)
+                      shouldUpdateDeviceConfig = true
+                    }
+                    if (nextHardwarePreset === 'custom' && embeddedHardwarePreset !== 'custom') {
+                      nextValues.embedded = {
+                        ...(frameForm.embedded ?? {}),
+                        hardwarePreset: 'custom',
+                      }
+                      nextDeviceConfig.hardwarePreset = 'custom'
+                      shouldUpdateDeviceConfig = true
+                    }
+                    if (shouldUpdateDeviceConfig) {
+                      nextValues.device_config = nextDeviceConfig
+                    }
+                    if (Object.keys(nextValues).length > 0) {
                       setFrameFormValues({
-                        device_config: {
-                          ...(frameForm.device_config ?? {}),
-                          pins: esp32RecommendedPinLayout(nextDevice),
-                        },
+                        ...nextValues,
                       })
                     }
                   }
@@ -923,6 +1086,20 @@ export function FrameSettings({
                   <Select name="embedded.platform" options={embeddedPlatforms} />
                 </Field>
                 <Field
+                  name="hardwarePreset"
+                  label="Hardware preset"
+                  tooltip="Board presets apply flash, PSRAM, display GPIO, and SD-card asset wiring together."
+                >
+                  {({ value }) => (
+                    <Select
+                      name="embedded.hardwarePreset"
+                      value={normalizeEsp32HardwarePreset(value ?? frameForm.device_config?.hardwarePreset)}
+                      options={ESP32_HARDWARE_PRESET_OPTIONS}
+                      onChange={(nextPreset) => setEsp32HardwarePreset(normalizeEsp32HardwarePreset(nextPreset))}
+                    />
+                  )}
+                </Field>
+                <Field
                   name="flashSize"
                   label="Flash size"
                   tooltip="ESP32 module flash size. 4MB builds use a single app slot and cannot update over the air."
@@ -932,7 +1109,16 @@ export function FrameSettings({
                       name="embedded.flashSize"
                       value={(value as FrameEmbeddedFlashSize | undefined) ?? '8MB'}
                       options={ESP32_FLASH_SIZE_OPTIONS}
-                      onChange={(nextFlashSize) => onChange(nextFlashSize as FrameEmbeddedFlashSize)}
+                      onChange={(nextFlashSize) => {
+                        const flashSize = nextFlashSize as FrameEmbeddedFlashSize
+                        if (embeddedHardwarePreset !== 'custom' && flashSize !== '32MB') {
+                          setEsp32HardwarePresetCustom({
+                            embedded: { ...(frameForm.embedded ?? {}), flashSize },
+                          })
+                        } else {
+                          onChange(flashSize)
+                        }
+                      }}
                     />
                   )}
                 </Field>
@@ -944,18 +1130,32 @@ export function FrameSettings({
                   tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
                 >
                   {({ value, onChange }) => {
-                    const pins = normalizeEsp32PinLayout(value as Esp32Pins | undefined, frameForm.device)
+                    const pins = normalizeEsp32PinLayout(
+                      value as Esp32Pins | undefined,
+                      frameForm.device,
+                      embeddedHardwarePreset
+                    )
                     const preset = esp32PinLayoutPresetValue(pins)
-                    const recommended = esp32RecommendedPinLayout(frameForm.device)
+                    const recommended = esp32RecommendedPinLayout(frameForm.device, embeddedHardwarePreset)
                     return (
                       <div className="space-y-3">
                         <Select
                           value={preset}
                           options={esp32PinLayoutPresetOptions(frameForm.device)}
                           onChange={(nextPreset) => {
-                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device)
+                            if (nextPreset === 'waveshare-13in3e6') {
+                              setEsp32HardwarePreset(ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET)
+                              return
+                            }
+                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device, embeddedHardwarePreset)
                             if (layout) {
-                              onChange(layout)
+                              if (embeddedHardwarePreset !== 'custom') {
+                                setEsp32HardwarePresetCustom({
+                                  device_config: { ...(frameForm.device_config ?? {}), pins: layout },
+                                })
+                              } else {
+                                onChange(layout)
+                              }
                             }
                           }}
                         />
@@ -968,10 +1168,17 @@ export function FrameSettings({
                                 placeholder={String(recommended[key])}
                                 onChange={(nextValue) => {
                                   const fallback = key === 'cs2' || key === 'pwr' ? -1 : pins[key]
-                                  onChange({
+                                  const nextPins = {
                                     ...pins,
                                     [key]: normalizeEsp32PinNumber(nextValue, fallback),
-                                  })
+                                  }
+                                  if (embeddedHardwarePreset !== 'custom') {
+                                    setEsp32HardwarePresetCustom({
+                                      device_config: { ...(frameForm.device_config ?? {}), pins: nextPins },
+                                    })
+                                  } else {
+                                    onChange(nextPins)
+                                  }
                                 }}
                               />
                             </label>
@@ -1001,7 +1208,18 @@ export function FrameSettings({
                         <Switch
                           label="Mount FAT32 SD card at /srv/assets"
                           value={sdCardAssets.enabled}
-                          onChange={(enabled) => updateSdCardAssets({ enabled })}
+                          onChange={(enabled) => {
+                            if (embeddedHardwarePreset !== 'custom' && !enabled) {
+                              setEsp32HardwarePresetCustom({
+                                device_config: {
+                                  ...(frameForm.device_config ?? {}),
+                                  sdCardAssets: { ...sdCardAssets, enabled, mountPath: '/srv/assets' },
+                                },
+                              })
+                            } else {
+                              updateSdCardAssets({ enabled })
+                            }
+                          }}
                           fullWidth
                         />
                         <Select
@@ -1009,12 +1227,33 @@ export function FrameSettings({
                           options={[
                             { value: 'custom', label: 'Custom pins' },
                             { value: 'waveshare_esp32_s3_photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' },
+                            {
+                              value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+                              label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+                            },
                           ]}
                           onChange={(nextPreset) => {
-                            updateSdCardAssets({
+                            const nextSdCardAssets = {
                               preset: nextPreset as Esp32SdCardAssets['preset'],
                               pins: esp32SdCardPinsForPreset(nextPreset),
-                            })
+                            }
+                            if (
+                              embeddedHardwarePreset !== 'custom' &&
+                              nextPreset !== ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+                            ) {
+                              setEsp32HardwarePresetCustom({
+                                device_config: {
+                                  ...(frameForm.device_config ?? {}),
+                                  sdCardAssets: {
+                                    ...sdCardAssets,
+                                    ...nextSdCardAssets,
+                                    mountPath: '/srv/assets',
+                                  },
+                                },
+                              })
+                            } else {
+                              updateSdCardAssets(nextSdCardAssets)
+                            }
                           }}
                         />
                         <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
@@ -1023,15 +1262,29 @@ export function FrameSettings({
                               <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
                               <NumberTextInput
                                 value={sdCardAssets.pins[key]}
-                                placeholder={String(ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT[key])}
+                                placeholder={String(esp32SdCardPinsForPreset(preset)[key])}
                                 onChange={(nextValue) => {
-                                  updateSdCardAssets({
+                                  const nextSdCardAssets = {
                                     preset: 'custom',
                                     pins: {
                                       ...sdCardAssets.pins,
                                       [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
                                     },
-                                  })
+                                  } as Partial<Esp32SdCardAssets>
+                                  if (embeddedHardwarePreset !== 'custom') {
+                                    setEsp32HardwarePresetCustom({
+                                      device_config: {
+                                        ...(frameForm.device_config ?? {}),
+                                        sdCardAssets: {
+                                          ...sdCardAssets,
+                                          ...nextSdCardAssets,
+                                          mountPath: '/srv/assets',
+                                        },
+                                      },
+                                    })
+                                  } else {
+                                    updateSdCardAssets(nextSdCardAssets)
+                                  }
                                 }}
                               />
                             </label>
@@ -1042,9 +1295,23 @@ export function FrameSettings({
                           <NumberTextInput
                             value={sdCardAssets.maxFrequencyKHz}
                             placeholder="20000"
-                            onChange={(nextValue) =>
-                              updateSdCardAssets({ maxFrequencyKHz: normalizeEsp32SdCardFrequency(nextValue) })
-                            }
+                            onChange={(nextValue) => {
+                              const maxFrequencyKHz = normalizeEsp32SdCardFrequency(nextValue)
+                              if (embeddedHardwarePreset !== 'custom' && maxFrequencyKHz !== 20000) {
+                                setEsp32HardwarePresetCustom({
+                                  device_config: {
+                                    ...(frameForm.device_config ?? {}),
+                                    sdCardAssets: {
+                                      ...sdCardAssets,
+                                      maxFrequencyKHz,
+                                      mountPath: '/srv/assets',
+                                    },
+                                  },
+                                })
+                              } else {
+                                updateSdCardAssets({ maxFrequencyKHz })
+                              }
+                            }}
                           />
                         </label>
                       </div>

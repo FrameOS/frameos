@@ -1348,6 +1348,49 @@ async def test_api_frame_new_buildroot_defaults(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_embedded_waveshare_13in3e6_preset(async_client):
+    payload = {
+        "mode": "embedded",
+        "name": "WaveshareFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "esp32-s3",
+        "embedded": {"hardwarePreset": "waveshare_esp32_s3_epaper_13_3e6"},
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'embedded'
+    assert frame['frame_port'] == 80
+    assert frame['device'] == 'waveshare.EPD_13in3e'
+    assert frame['embedded']['platform'] == 'esp32-s3'
+    assert frame['embedded']['hardwarePreset'] == 'waveshare_esp32_s3_epaper_13_3e6'
+    assert frame['embedded']['flashSize'] == '32MB'
+    assert frame['device_config']['hardwarePreset'] == 'waveshare_esp32_s3_epaper_13_3e6'
+    assert frame['device_config']['psramMB'] == 16
+    assert frame['device_config']['pins'] == {
+        'rst': 10,
+        'dc': 7,
+        'cs': 1,
+        'cs2': 4,
+        'busy': 8,
+        'sck': 6,
+        'mosi': 5,
+        'pwr': 16,
+    }
+    assert frame['device_config']['sdCardAssets'] == {
+        'enabled': True,
+        'preset': 'waveshare_esp32_s3_epaper_13_3e6',
+        'mountPath': '/srv/assets',
+        'pins': {'cs': 3, 'sck': 44, 'miso': 43, 'mosi': 2},
+        'maxFrequencyKHz': 20000,
+    }
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_buildroot_accepts_root_password_and_ssh_keys(async_client):
     payload = {
         "mode": "buildroot",

@@ -61,6 +61,19 @@ EMBEDDED_DEFAULT_PINS = {
     "pwr": -1,
 }
 EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
+# Waveshare ESP32-S3 ePaper 13.3E6 schematic pinout:
+# CSB_M=GPIO1, CSB_S=GPIO4, SDA=GPIO5, SCL=GPIO6, D/C=GPIO7,
+# BUSY_N=GPIO8, RST_N=GPIO10, EPD_PWR=GPIO16.
+EMBEDDED_WAVESHARE_13IN3E6_PINS = {
+    "rst": 10,
+    "dc": 7,
+    "cs": 1,
+    "cs2": 4,
+    "busy": 8,
+    "sck": 6,
+    "mosi": 5,
+    "pwr": 16,
+}
 EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
     "cs": -1,
@@ -71,6 +84,8 @@ EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
 # Waveshare ESP32-S3 PhotoPainter TF socket, from the vendor schematic:
 # TF pin 2 (DAT3/CS)=GPIO38, pin 5 (CLK)=GPIO39, pin 7 (DAT0/MISO)=GPIO40,
 # pin 3 (CMD/MOSI)=GPIO41.
+# Waveshare ESP32-S3 ePaper 13.3E6 TF socket: SD_CS=GPIO3,
+# SD_CLK=GPIO44, SD_MISO=GPIO43, SD_MOSI=GPIO2.
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -78,8 +93,29 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
         "miso": 40,
         "mosi": 41,
     },
+    "waveshare_esp32_s3_epaper_13_3e6": {
+        "cs": 3,
+        "sck": 44,
+        "miso": 43,
+        "mosi": 2,
+    },
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
+EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
+    "waveshare_esp32_s3_epaper_13_3e6": {
+        "device": "waveshare.EPD_13in3e",
+        "flashSize": "32MB",
+        "psramMB": 16,
+        "pins": EMBEDDED_WAVESHARE_13IN3E6_PINS,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "waveshare_esp32_s3_epaper_13_3e6",
+            "pins": EMBEDDED_SD_CARD_ASSETS_PRESET_PINS["waveshare_esp32_s3_epaper_13_3e6"],
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+            "mountPath": "/srv/assets",
+        },
+    },
+}
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1
@@ -208,6 +244,9 @@ def embedded_flash_size_for_frame(frame: Frame) -> str:
             for key in ("flashSize", "flash_size", "flashSizeMB", "flash_size_mb"):
                 if key in source:
                     return normalize_embedded_flash_size(source.get(key))
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return normalize_embedded_flash_size(EMBEDDED_HARDWARE_PRESETS[preset_key]["flashSize"])
     return EMBEDDED_DEFAULT_FLASH_SIZE
 
 
@@ -295,6 +334,13 @@ def embedded_pixie_path() -> Path | None:
 
 def embedded_panel_for_frame(frame: Frame) -> str:
     """Map the frame's device string to a firmware panel name."""
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key and not frame.device:
+        frame_device = str(EMBEDDED_HARDWARE_PRESETS[preset_key]["device"])
+        if frame_device.startswith("waveshare."):
+            panel = frame_device.split(".", 1)[1]
+            if panel in EMBEDDED_SUPPORTED_PANELS:
+                return panel
     device = str(frame.device or "")
     if device.startswith("waveshare."):
         panel = device.split(".", 1)[1]
@@ -311,6 +357,9 @@ def embedded_module_psram_bytes(frame: Frame) -> int:
             mb = source.get("psramMB", source.get("psram_mb"))
             if isinstance(mb, (int, float)) and not isinstance(mb, bool) and mb > 0:
                 return int(mb * 1024 * 1024)
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return int(EMBEDDED_HARDWARE_PRESETS[preset_key]["psramMB"] * 1024 * 1024)
     return EMBEDDED_DEFAULT_PSRAM_BYTES
 
 
@@ -335,6 +384,50 @@ def embedded_device_config(frame: Frame) -> dict[str, Any]:
     return frame.device_config if isinstance(frame.device_config, dict) else {}
 
 
+def normalize_embedded_hardware_preset(value: object | None) -> str:
+    normalized = str(value or "").strip().replace("-", "_").replace(".", "_").lower()
+    if normalized in {"", "custom", "none"}:
+        return ""
+    if normalized in EMBEDDED_HARDWARE_PRESETS:
+        return normalized
+    supported = ", ".join(["custom", *EMBEDDED_HARDWARE_PRESETS])
+    raise ValueError(f"Unsupported ESP32 hardware preset: {value!r}. Supported presets: {supported}.")
+
+
+def embedded_hardware_preset_for_frame(frame: Frame) -> str:
+    for source in (frame.embedded, frame.device_config):
+        if isinstance(source, dict):
+            for key in ("hardwarePreset", "hardware_preset", "boardPreset", "board_preset"):
+                if key in source:
+                    return normalize_embedded_hardware_preset(source.get(key))
+    return ""
+
+
+def apply_embedded_hardware_preset(frame: Frame) -> str:
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if not preset_key:
+        return ""
+    preset = EMBEDDED_HARDWARE_PRESETS[preset_key]
+
+    frame.device = preset["device"]
+
+    embedded = dict(frame.embedded or {})
+    embedded["hardwarePreset"] = preset_key
+    embedded["flashSize"] = preset["flashSize"]
+    frame.embedded = embedded
+
+    device_config = dict(embedded_device_config(frame))
+    device_config["hardwarePreset"] = preset_key
+    device_config["psramMB"] = preset["psramMB"]
+    device_config["pins"] = dict(preset["pins"])
+    device_config["sdCardAssets"] = {
+        **preset["sdCardAssets"],
+        "pins": dict(preset["sdCardAssets"]["pins"]),
+    }
+    frame.device_config = device_config
+    return preset_key
+
+
 def embedded_max_http_response_bytes_for_frame(frame: Frame) -> int:
     value = getattr(frame, "max_http_response_bytes", None)
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -351,6 +444,9 @@ def embedded_default_pins_for_panel(panel: str) -> dict[str, int]:
 
 
 def embedded_default_pins_for_frame(frame: Frame) -> dict[str, int]:
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return dict(EMBEDDED_HARDWARE_PRESETS[preset_key]["pins"])
     return embedded_default_pins_for_panel(embedded_panel_for_frame(frame))
 
 
@@ -371,6 +467,9 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
 def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
     device_config = embedded_device_config(frame)
     raw = device_config.get("sdCardAssets", device_config.get("sd_card_assets"))
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if not isinstance(raw, dict) and preset_key:
+        raw = EMBEDDED_HARDWARE_PRESETS[preset_key]["sdCardAssets"]
     if not isinstance(raw, dict):
         raw = {}
 
@@ -626,6 +725,7 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     )
 
     frame.mode = "embedded"
+    apply_embedded_hardware_preset(frame)
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     if not frame.frame_port or frame.frame_port == 8787:

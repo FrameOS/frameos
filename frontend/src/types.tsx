@@ -3,6 +3,7 @@ import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
+export type FrameEmbeddedHardwarePreset = 'custom' | 'waveshare_esp32_s3_epaper_13_3e6'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode
@@ -68,6 +69,7 @@ export interface FrameType {
     uploadHeaders?: { name: string; value: string }[]
     psramMB?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
+    hardwarePreset?: FrameEmbeddedHardwarePreset
     pins?: {
       rst?: number
       dc?: number
@@ -81,7 +83,7 @@ export interface FrameType {
     }
     sdCardAssets?: {
       enabled?: boolean
-      preset?: 'custom' | 'waveshare_esp32_s3_photopainter'
+      preset?: 'custom' | 'waveshare_esp32_s3_photopainter' | 'waveshare_esp32_s3_epaper_13_3e6'
       pins?: {
         cs?: number
         sck?: number
@@ -180,6 +182,7 @@ export interface NewFrameFormType {
   frame_host?: string | null
   device?: string | null
   device_config?: FrameType['device_config']
+  embedded?: FrameEmbeddedConfig
   timezone?: string | null
   server_host?: string | null
   ssh_pass?: string | null
@@ -769,6 +772,7 @@ export interface FrameRpiOSConfig {
 export interface FrameEmbeddedConfig {
   platform?: string
   flashSize?: FrameEmbeddedFlashSize
+  hardwarePreset?: FrameEmbeddedHardwarePreset
   firmware?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     requestId?: string
