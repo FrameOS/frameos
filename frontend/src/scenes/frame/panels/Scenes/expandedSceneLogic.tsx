@@ -3,10 +3,11 @@ import { connect, kea, key, path, props, selectors } from 'kea'
 import type { expandedSceneLogicType } from './expandedSceneLogicType'
 import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { socketLogic } from '../../../socketLogic'
 
 export interface ExpandedSceneLogicProps {
   frameId: number
@@ -58,6 +59,15 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
             throw new Error('Failed to send scene activation event')
           }
           await response.json()
+          controlLogic({ frameId: props.frameId }).actions.currentSceneChanged(props.sceneId)
+          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: props.sceneId } as FrameType)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'activate',
+            sceneId: props.sceneId,
+            status: 'success',
+            detail: values.scene?.name || props.sceneId,
+          })
         } catch (error) {
           longRunningTasksModel.actions.taskFailed({
             frameId: props.frameId,

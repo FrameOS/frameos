@@ -587,6 +587,16 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
 
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
+  const { setCurrentScene } = useActions(controlLogic({ frameId: frame.id }))
+  const inFrameAdminMode = isInFrameAdminMode()
+
+  const handleSceneClick = (): void => {
+    if (inFrameAdminMode && !active) {
+      setCurrentScene(scene.id)
+      return
+    }
+    openSceneControl(frame.id, scene.id)
+  }
 
   return (
     <div
@@ -601,11 +611,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <button
-        type="button"
-        onClick={() => openSceneControl(frame.id, scene.id)}
-        className="flex h-full w-full flex-col"
-      >
+      <button type="button" onClick={handleSceneClick} className="flex h-full w-full flex-col">
         <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
           <FrameImage
             frameId={frame.id}

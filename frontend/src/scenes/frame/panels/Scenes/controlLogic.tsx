@@ -2,7 +2,7 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 
 import { frameLogic } from '../../frameLogic'
 
-import { FrameScene, FrameStateRecord } from '../../../../types'
+import { FrameScene, FrameStateRecord, FrameType } from '../../../../types'
 
 import { loaders } from 'kea-loaders'
 
@@ -147,6 +147,7 @@ export const controlLogic = kea<controlLogicType>([
         if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
           await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
           actions.currentSceneChanged(sceneId)
+          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
           longRunningTasksModel.actions.finishTask({
             frameId: props.frameId,
             kind: 'activate',
@@ -164,6 +165,15 @@ export const controlLogic = kea<controlLogicType>([
             throw new Error('Failed to send scene activation event')
           }
           await response.text()
+          actions.currentSceneChanged(sceneId)
+          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'activate',
+            sceneId,
+            status: 'success',
+            detail: scene?.name || sceneId,
+          })
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

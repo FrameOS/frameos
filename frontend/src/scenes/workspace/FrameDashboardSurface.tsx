@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import type { CSSProperties, DragEvent } from 'react'
+import type { CSSProperties, DragEvent, ReactNode } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   CalendarDaysIcon,
@@ -20,6 +20,7 @@ import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
+import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -384,6 +385,33 @@ function FrameSceneTile({
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const compiled = sceneIsCompiled(scene, frame.mode)
+  const inFrameAdminMode = isInFrameAdminMode()
+
+  const handleOpenSceneControl = (): void => {
+    hideForm()
+    openSceneControl(frame.id, scene.id)
+  }
+
+  const buttonContent = (
+    <>
+      <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
+        <FrameImage
+          frameId={frame.id}
+          sceneId={scene.id}
+          thumb
+          refreshable={false}
+          objectFit="cover"
+          className="h-full w-full rounded-none"
+        />
+      </div>
+      <div className="w-full px-3 py-2">
+        <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
+          {scene.name || 'Untitled scene'}
+        </div>
+        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
+      </div>
+    </>
+  )
 
   return (
     <div
@@ -398,31 +426,15 @@ function FrameSceneTile({
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <button
-        type="button"
-        onClick={() => {
-          hideForm()
-          openSceneControl(frame.id, scene.id)
-        }}
-        className="flex h-full w-full flex-col"
-      >
-        <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
-          <FrameImage
-            frameId={frame.id}
-            sceneId={scene.id}
-            thumb
-            refreshable={false}
-            objectFit="cover"
-            className="h-full w-full rounded-none"
-          />
-        </div>
-        <div className="w-full px-3 py-2">
-          <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
-            {scene.name || 'Untitled scene'}
-          </div>
-          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
-        </div>
-      </button>
+      {inFrameAdminMode && !active ? (
+        <FrameAdminActivateSceneButton frameId={frame.id} sceneId={scene.id} onBeforeActivate={hideForm}>
+          {buttonContent}
+        </FrameAdminActivateSceneButton>
+      ) : (
+        <button type="button" onClick={handleOpenSceneControl} className="flex h-full w-full flex-col">
+          {buttonContent}
+        </button>
+      )}
       {compiled || active ? (
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
           {compiled ? (
@@ -448,6 +460,33 @@ function FrameSceneTile({
         />
       ) : null}
     </div>
+  )
+}
+
+function FrameAdminActivateSceneButton({
+  frameId,
+  sceneId,
+  onBeforeActivate,
+  children,
+}: {
+  frameId: number
+  sceneId: string
+  onBeforeActivate: () => void
+  children: ReactNode
+}): JSX.Element {
+  const { setCurrentScene } = useActions(controlLogic({ frameId }))
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onBeforeActivate()
+        setCurrentScene(sceneId)
+      }}
+      className="flex h-full w-full flex-col"
+    >
+      {children}
+    </button>
   )
 }
 
