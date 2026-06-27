@@ -4,6 +4,10 @@ import type { entityImagesModelType } from './entityImagesModelType'
 import { useEffect, useState } from 'react'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
+import { apiFetch } from '../utils/apiFetch'
+import { isInFrameAdminMode } from '../utils/frameAdmin'
+
+const uploadedScenePrefix = 'uploaded/'
 
 export function useEntityImage(
   entity: string | null,
@@ -88,6 +92,26 @@ export const entityImagesModel = kea<entityImagesModelType>([
     },
     [socketLogic.actionTypes.frameRendered]: ({ frameId }) => {
       actions.updateEntityImage(`frames/${frameId}`, 'image')
+      if (isInFrameAdminMode()) {
+        void (async () => {
+          try {
+            const response = await apiFetch(`/api/frames/${frameId}/state`)
+            if (!response.ok) {
+              return
+            }
+            const payload = await response.json()
+            const activeSceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : ''
+            const sceneImageId = activeSceneId.startsWith(uploadedScenePrefix)
+              ? activeSceneId.slice(uploadedScenePrefix.length)
+              : activeSceneId
+            if (sceneImageId) {
+              actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneImageId}`)
+            }
+          } catch (error) {
+            console.error(error)
+          }
+        })()
+      }
     },
   })),
 ])

@@ -436,7 +436,7 @@ export function FrameosShell({
             }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
+            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
           </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
             {!inFrameAdminMode ? (

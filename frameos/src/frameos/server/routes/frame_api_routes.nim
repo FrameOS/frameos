@@ -8,7 +8,7 @@ import frameos/config
 import frameos/types
 import frameos/channels
 import frameos/utils/font
-import checksums/md5
+import frameos/scenes
 import ../state
 import ../auth
 import ../api
@@ -41,27 +41,10 @@ proc recentMetricsPayload(request: Request): JsonNode {.gcsafe.} =
   for index in start ..< filtered.len:
     result.add(filtered[index])
 
-proc sceneImageFilename(sceneId: string): string =
-  var safe = ""
-  for ch in sceneId:
-    if ch.isAlphaNumeric() or ch in {'-', '_', '.'}:
-      safe.add(ch)
-    else:
-      safe.add('_')
-  safe = safe.strip(chars = {'_', '.', '-'})
-  if safe.len == 0:
-    safe = "scene"
-  if safe.len > 64:
-    safe = safe[0 .. 63]
-  safe & "-" & getMD5(sceneId) & ".png"
-
-proc sceneImagePath(sceneId: string): string =
-  configuredAssetsPath() / ".frameos" / "scene_images" / sceneImageFilename(sceneId)
-
 proc storedSceneImagePayload(sceneId: string): tuple[status: HttpCode, headers: mummy.HttpHeaders, body: string] =
   var headers: mummy.HttpHeaders
   headers["Cache-Control"] = "no-cache"
-  let path = sceneImagePath(sceneId)
+  let path = sceneImagePath(configuredAssetsPath(), sceneId)
   if not fileExists(path):
     headers["Content-Type"] = "application/json"
     return (Http404, headers, $(%*{"detail": "Scene image not found"}))
@@ -71,13 +54,11 @@ proc storedSceneImagePayload(sceneId: string): tuple[status: HttpCode, headers: 
   (Http200, headers, readFile(path))
 
 proc saveStoredSceneImagePayload(sceneId: string, body: string): JsonNode =
-  let path = sceneImagePath(sceneId)
-  createDir(parentDir(path))
-  writeFile(path, body)
+  let savedImage = saveSceneImagePng(configuredAssetsPath(), sceneId, body)
   %*{
-    "scene_id": sceneId,
-    "path": relativeAssetPath(path),
-    "size": body.len,
+    "scene_id": savedImage.sceneId,
+    "path": sceneImageRelativePath(configuredAssetsPath(), savedImage.path),
+    "size": savedImage.size,
   }
 
 proc queueRuntimeControl(request: Request, action: string, eventName: string) {.gcsafe.} =

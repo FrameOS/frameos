@@ -1,5 +1,6 @@
 import json, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
 import pixie/fileformats/png
+import checksums/md5
 import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/channels
@@ -11,6 +12,12 @@ import frameos/js_runtime/runtime
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
 const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
+const UPLOADED_SCENE_PREFIX = "uploaded/"
+
+type SceneImageSaveResult* = object
+  sceneId*: string
+  path*: string
+  size*: int
 
 # All scenes that are compiled into the FrameOS binary
 var sceneRegistryLock: Lock
@@ -305,6 +312,44 @@ proc sanitizePathString*(s: string): string =
     trimmed = trimmed[0 ..< 120]
   return trimmed
 
+proc sceneImagePublicId*(sceneId: string): string =
+  if sceneId.startsWith(UPLOADED_SCENE_PREFIX):
+    sceneId[UPLOADED_SCENE_PREFIX.len .. ^1]
+  else:
+    sceneId
+
+proc sceneImageFilename*(sceneId: string): string =
+  let publicSceneId = sceneImagePublicId(sceneId)
+  var safe = ""
+  for ch in publicSceneId:
+    if ch.isAlphaNumeric() or ch in {'-', '_', '.'}:
+      safe.add(ch)
+    else:
+      safe.add('_')
+  safe = safe.strip(chars = {'_', '.', '-'})
+  if safe.len == 0:
+    safe = "scene"
+  if safe.len > 64:
+    safe = safe[0 .. 63]
+  safe & "-" & getMD5(publicSceneId) & ".png"
+
+proc sceneImagesAssetsRoot(assetsPath: string): string =
+  normalizedPath(if assetsPath.len > 0: assetsPath else: "/srv/assets")
+
+proc sceneImagePath*(assetsPath: string, sceneId: string): string =
+  sceneImagesAssetsRoot(assetsPath) / ".frameos" / "scene_images" / sceneImageFilename(sceneId)
+
+proc sceneImageRelativePath*(assetsPath, path: string): string =
+  let root = sceneImagesAssetsRoot(assetsPath)
+  let fullPath = normalizedPath(path)
+  if fullPath == root:
+    ""
+  else:
+    fullPath[(root.len + 1) .. ^1]
+
+proc sceneImageExists*(assetsPath: string, sceneId: SceneId): bool =
+  storedFileExists(sceneImagePath(assetsPath, sceneId.string))
+
 proc removePersistedState*(sceneId: SceneId) =
   if lastPersistedStates.hasKey(sceneId.string):
     lastPersistedStates.delete(sceneId.string)
@@ -379,6 +424,19 @@ proc getLastImagePng*(): string =
     width = lastImage.width
     height = lastImage.height
   return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
+
+proc saveSceneImagePng*(assetsPath: string, sceneId: string, png: string): SceneImageSaveResult =
+  let path = sceneImagePath(assetsPath, sceneId)
+  ensureParentDir(path)
+  writeTextFile(path, png)
+  SceneImageSaveResult(
+    sceneId: sceneImagePublicId(sceneId),
+    path: path,
+    size: png.len,
+  )
+
+proc saveLastSceneImagePng*(assetsPath: string, sceneId: SceneId): SceneImageSaveResult =
+  saveSceneImagePng(assetsPath, sceneId.string, getLastImagePng())
 
 proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
   {.gcsafe.}:

@@ -587,14 +587,8 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
 
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
-  const { setCurrentScene } = useActions(controlLogic({ frameId: frame.id }))
-  const inFrameAdminMode = isInFrameAdminMode()
 
   const handleSceneClick = (): void => {
-    if (inFrameAdminMode && !active) {
-      setCurrentScene(scene.id)
-      return
-    }
     openSceneControl(frame.id, scene.id)
   }
 

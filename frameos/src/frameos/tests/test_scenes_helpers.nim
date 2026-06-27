@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 
 import ../scenes
 import ../types
@@ -11,6 +11,19 @@ suite "Scene helper functions":
 
     let longName = "a".repeat(150)
     check sanitizePathString(longName).len == 120
+
+  test "scene image helpers strip uploaded runtime prefixes":
+    let assetsRoot = getTempDir() / "frameos-scene-image-helper-test"
+    if dirExists(assetsRoot):
+      removeDir(assetsRoot)
+
+    let saved = saveSceneImagePng(assetsRoot, "uploaded/example/scene", "scene-image-bytes")
+    check saved.sceneId == "example/scene"
+    check saved.path == sceneImagePath(assetsRoot, "example/scene")
+    check sceneImageExists(assetsRoot, "uploaded/example/scene".SceneId)
+    check readFile(saved.path) == "scene-image-bytes"
+
+    removeDir(assetsRoot)
 
   test "normalize uploaded payload prefixes scene ids and internal references":
     let payload = @[

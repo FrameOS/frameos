@@ -102,6 +102,10 @@ suite "web route behavior":
       )
       check adminDeepLink.status == 200
       check adminDeepLink.body.contains("frameAdminMode: true")
+      check adminDeepLink.body.contains("""href="/static/main.css"""")
+      check adminDeepLink.body.contains("""src="/static/main.js"""")
+      check not adminDeepLink.body.contains("""href="static/main.css"""")
+      check not adminDeepLink.body.contains("""src="static/main.js"""")
 
     let adminDeepLinkNoSession = httpRequest(server.port, "GET", "/frames/1?tool=settings")
     check adminDeepLinkNoSession.status == 302
