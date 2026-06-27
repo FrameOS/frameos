@@ -451,6 +451,8 @@ export function TemplateDrawer(): JSX.Element | null {
   const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { frames } = useValues(framesModel)
   const { closeTemplateDrawer } = useActions(workspaceLogic)
+  const splitLogic = splitScreenLayoutLogic({ frameId: templateDrawerFrameId ?? 0 })
+  const { editingSceneId, generatorOpen } = useValues(splitLogic)
 
   if (!templateDrawerFrameId) {
     return null
@@ -462,8 +464,6 @@ export function TemplateDrawer(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
-  const splitLogic = splitScreenLayoutLogic({ frameId: frame.id })
-  const { editingSceneId, generatorOpen } = useValues(splitLogic)
   const drawerTitle = generatorOpen && editingSceneId ? 'Edit split' : 'Add scene'
 
   return (
