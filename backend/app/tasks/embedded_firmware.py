@@ -46,7 +46,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 25  # Pull-side OTA checks from the ESP32 render loop
+EMBEDDED_FIRMWARE_VERSION = 26  # Optional SD-card assets mount at /srv/assets
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -61,6 +61,25 @@ EMBEDDED_DEFAULT_PINS = {
     "pwr": -1,
 }
 EMBEDDED_13IN3E_DEFAULT_PINS = {**EMBEDDED_DEFAULT_PINS, "cs2": 8}
+EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
+EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
+    "cs": -1,
+    "sck": -1,
+    "miso": -1,
+    "mosi": -1,
+}
+# Waveshare ESP32-S3 PhotoPainter TF socket, from the vendor schematic:
+# TF pin 2 (DAT3/CS)=GPIO38, pin 5 (CLK)=GPIO39, pin 7 (DAT0/MISO)=GPIO40,
+# pin 3 (CMD/MOSI)=GPIO41.
+EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
+    "waveshare_esp32_s3_photopainter": {
+        "cs": 38,
+        "sck": 39,
+        "miso": 40,
+        "mosi": 41,
+    },
+}
+EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1
@@ -349,6 +368,47 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
     return pins
 
 
+def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
+    device_config = embedded_device_config(frame)
+    raw = device_config.get("sdCardAssets", device_config.get("sd_card_assets"))
+    if not isinstance(raw, dict):
+        raw = {}
+
+    preset = str(raw.get("preset") or "custom").strip() or "custom"
+    normalized_preset = preset.replace("-", "_").lower()
+    pins = dict(
+        EMBEDDED_SD_CARD_ASSETS_PRESET_PINS.get(
+            normalized_preset,
+            EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS,
+        )
+    )
+
+    raw_pins = raw.get("pins")
+    if not isinstance(raw_pins, dict):
+        raw_pins = raw
+    for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS:
+        raw_value = raw_pins.get(key)
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+            pins[key] = raw_value
+
+    raw_frequency = raw.get("maxFrequencyKHz", raw.get("max_frequency_khz"))
+    max_frequency_khz = EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ
+    if isinstance(raw_frequency, (int, float)) and not isinstance(raw_frequency, bool):
+        max_frequency_khz = int(max(400, min(40_000, raw_frequency)))
+
+    enabled = raw.get("enabled") is True
+    if enabled and any(pins[key] < 0 for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS):
+        enabled = False
+
+    return {
+        "enabled": enabled,
+        "preset": normalized_preset if normalized_preset in EMBEDDED_SD_CARD_ASSETS_PRESET_PINS else "custom",
+        "mountPath": "/srv/assets",
+        "pins": pins,
+        "maxFrequencyKHz": max_frequency_khz,
+    }
+
+
 def embedded_pixel_format_for_panel(panel: str) -> int:
     return EMBEDDED_PANEL_FORMATS.get(panel, FOS_PIXEL_1BPP)
 
@@ -516,12 +576,24 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_TLS_PORT {int(tls_port)}",
         f"#define FRAMEOS_DEFAULT_TLS_SERVER_CERT {c_str(tls_certs.get('server', ''))}",
         f"#define FRAMEOS_DEFAULT_TLS_SERVER_KEY {c_str(tls_certs.get('server_key', ''))}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_PATH {c_str('/srv/assets')}",
     ]
     pins = embedded_pins_for_frame(frame)
     mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
                "sck": "SCK", "mosi": "MOSI", "pwr": "PWR"}
     for key, macro in mapping.items():
         lines.append(f"#define FRAMEOS_DEFAULT_PIN_{macro} {pins[key]}")
+
+    sd_card_assets = embedded_sd_card_assets_for_frame(frame)
+    sd_pins = sd_card_assets["pins"]
+    lines.extend([
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE {1 if sd_card_assets['enabled'] else 0}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS {sd_pins['cs']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK {sd_pins['sck']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO {sd_pins['miso']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI {sd_pins['mosi']}",
+        f"#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ {sd_card_assets['maxFrequencyKHz']}",
+    ])
 
     # Optional power-management settings (M4). Absent → firmware defaults
     # (no deep sleep, no battery pin); all still overridable from the device.
@@ -585,6 +657,9 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
 
     device_config = dict(embedded_device_config(frame))
     device_config["pins"] = embedded_pins_for_frame(frame)
+    if "sdCardAssets" in device_config or "sd_card_assets" in device_config:
+        device_config.pop("sd_card_assets", None)
+        device_config["sdCardAssets"] = embedded_sd_card_assets_for_frame(frame)
     frame.device_config = device_config
 
 

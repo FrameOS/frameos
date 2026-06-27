@@ -79,6 +79,18 @@ export interface FrameType {
       mosi?: number
       pwr?: number
     }
+    sdCardAssets?: {
+      enabled?: boolean
+      preset?: 'custom' | 'waveshare_esp32_s3_photopainter'
+      pins?: {
+        cs?: number
+        sck?: number
+        miso?: number
+        mosi?: number
+      }
+      maxFrequencyKHz?: number
+      mountPath?: string
+    }
   }
   color?: string
   interval: number

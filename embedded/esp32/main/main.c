@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 
+#include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_client.h"
@@ -116,6 +117,10 @@ void app_main(void)
     };
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
+    }
+
+    if (fos_assets_sd_mount(config) != ESP_OK) {
+        ESP_LOGW(TAG, "SD assets unavailable, continuing without /srv/assets");
     }
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit

@@ -30,6 +30,7 @@ from app.tasks.embedded_firmware import (
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
     embedded_sdkconfig_defaults_for_frame,
+    embedded_sd_card_assets_for_frame,
     ensure_embedded_frame_defaults,
     latest_embedded_firmware,
     normalize_embedded_flash_size,
@@ -516,6 +517,56 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1" in header
     assert "#define FRAMEOS_DEFAULT_TLS_ENABLE 0" in header
     assert "#define FRAMEOS_DEFAULT_TLS_PORT 8443" in header
+
+
+def test_generated_config_bakes_photo_painter_sd_card_assets():
+    frame = Frame(
+        id=7,
+        server_host="backend.local",
+        server_port=8989,
+        server_api_key="key",
+        device="waveshare.EPD_7in5_V2",
+        device_config={
+            "sdCardAssets": {
+                "enabled": True,
+                "preset": "waveshare_esp32_s3_photopainter",
+            },
+        },
+    )
+
+    config = embedded_sd_card_assets_for_frame(frame)
+    assert config == {
+        "enabled": True,
+        "preset": "waveshare_esp32_s3_photopainter",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
+        "maxFrequencyKHz": 20_000,
+    }
+
+    header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_ASSETS_PATH "/srv/assets"' in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 38" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ 20000" in header
+
+
+def test_sd_card_assets_require_all_custom_pins():
+    frame = Frame(
+        device="waveshare.EPD_7in5_V2",
+        device_config={
+            "sdCardAssets": {
+                "enabled": True,
+                "pins": {"cs": 10, "sck": 11, "miso": 12},
+            },
+        },
+    )
+
+    config = embedded_sd_card_assets_for_frame(frame)
+    assert config["enabled"] is False
+    assert config["pins"] == {"cs": 10, "sck": 11, "miso": 12, "mosi": -1}
 
 
 def test_generated_config_bakes_tls_settings():

@@ -18,6 +18,7 @@
 #include "esp_timer.h"
 
 #include "cJSON.h"
+#include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
@@ -346,8 +347,10 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     fos_config_t *config = fos_config();
     char field[64];
     char pins[FOS_STR_LEN];
+    char sd_pins[FOS_STR_LEN];
     char option_label[192];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
+    fos_config_format_assets_sd_pins(&config->assets_sd, sd_pins, sizeof(sd_pins));
 
     httpd_resp_set_type(req, "text/html");
     if (httpd_resp_sendstr_chunk(req, SETUP_PAGE_HEAD) != ESP_OK) return ESP_FAIL;
@@ -432,6 +435,21 @@ static esp_err_t root_get_handler(httpd_req_t *req)
                    " placeholder='rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'") != ESP_OK) {
         return ESP_FAIL;
     }
+    if (send_input(req, "Assets path", "assets_path", "text", config->assets_path,
+                   " placeholder='/srv/assets'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (sendstr(req, "<label for='assets_sd_enable'>SD card assets</label><select id='assets_sd_enable' name='assets_sd_enable'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Enabled (mount FAT32 card at assets path)", config->assets_sd.enabled) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Disabled", !config->assets_sd.enabled) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
+    if (send_input(req, "SD card pins", "assets_sd_pins", "text", sd_pins,
+                   " placeholder='cs=38,sck=39,miso=40,mosi=41'") != ESP_OK) {
+        return ESP_FAIL;
+    }
+    snprintf(field, sizeof(field), "%lu", (unsigned long)config->assets_sd.max_freq_khz);
+    if (send_input(req, "SD max frequency (kHz)", "assets_sd_freq", "number", field,
+                   " min='400' max='40000'") != ESP_OK) return ESP_FAIL;
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
         "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
@@ -449,7 +467,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "`<div class='metric'><b>Board</b>${b.target||'ESP32-S3'}</div>`+"
         "`<div class='metric'><b>Flash</b>${Math.round((st.flashBytes||0)/1024)}K: ${fl}</div>`+"
         "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
-        "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`;"
+        "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`+"
+        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`;"
         "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
         "function refreshPreview(){const img=document.getElementById('preview');img.src='/image?t='+Date.now();}"
         "function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;"
@@ -472,7 +491,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     elf_sha[0] = '\0';
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     char pins[FOS_STR_LEN];
+    char sd_pins[FOS_STR_LEN];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
+    fos_config_format_assets_sd_pins(&config->assets_sd, sd_pins, sizeof(sd_pins));
     int preview_width = 0, preview_height = 0;
     fos_pixel_format_t preview_format = FOS_PIXEL_1BPP;
     size_t preview_len = 0;
@@ -497,13 +518,15 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char *ip = json_escape_dup(fos_wifi_ip());
     char *panel = json_escape_dup(config->panel);
     char *pins_json = json_escape_dup(pins);
+    char *sd_pins_json = json_escape_dup(sd_pins);
+    char *assets_path = json_escape_dup(config->assets_path);
     char *backend = json_escape_dup(config->backend_url);
     char *ssid = json_escape_dup(config->wifi_ssid);
     char *nim_info = json_escape_dup(frameos_nim_info());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
-        !panel || !pins_json || !backend || !ssid || !nim_info) {
+        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-        free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
+        free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
         return httpd_resp_send_500(req);
     }
 
@@ -516,6 +539,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
+        "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
+        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu},"
         "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
         "\"resumable\":true,\"bootRequestSupported\":true,"
         "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
@@ -537,6 +562,10 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
         (unsigned)storage.ota_slot_bytes, (unsigned)storage.ota_bytes,
         (unsigned)storage.state_bytes,
+        assets_path, config->assets_sd.enabled ? "true" : "false",
+        fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
+        (unsigned long)config->assets_sd.max_freq_khz,
+        (unsigned long long)fos_assets_sd_capacity_bytes(),
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
@@ -554,7 +583,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         config->wake_schedule ? "true" : "false",
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-    free(panel); free(pins_json); free(backend); free(ssid); free(nim_info);
+    free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
     if (len < 0 || !json) {
         return httpd_resp_send_500(req);
     }
@@ -838,6 +867,13 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "server_send_logs", value, sizeof(value))) config->server_send_logs = atoi(value) != 0;
     if (form_value(body, "interval", value, sizeof(value)) && atoi(value) >= 5) config->interval_sec = atoi(value);
     if (form_value(body, "pins", value, sizeof(value))) fos_config_parse_pins(value, &config->pins);
+    if (form_value(body, "assets_path", value, sizeof(value))) strlcpy(config->assets_path, value, sizeof(config->assets_path));
+    if (form_value(body, "assets_sd_enable", value, sizeof(value))) config->assets_sd.enabled = atoi(value) != 0;
+    if (form_value(body, "assets_sd_pins", value, sizeof(value))) fos_config_parse_assets_sd_pins(value, &config->assets_sd);
+    if (form_value(body, "assets_sd_freq", value, sizeof(value))) {
+        uint32_t freq = strtoul(value, NULL, 10);
+        if (freq >= 400 && freq <= 40000) config->assets_sd.max_freq_khz = freq;
+    }
     free(body);
 
     esp_err_t err = fos_config_save();

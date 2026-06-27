@@ -65,6 +65,8 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
     if isImage(folder):
       return @[""]
     return @[]
+  if not dirExists(folder):
+    return @[]
 
   let searchQuery = search.toLower()
   var images: seq[string] = @[]

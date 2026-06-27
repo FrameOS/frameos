@@ -51,7 +51,9 @@ static int cmd_status(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
     char pins[FOS_STR_LEN];
+    char sd_pins[FOS_STR_LEN];
     fos_config_format_pins(&config->pins, pins, sizeof(pins));
+    fos_config_format_assets_sd_pins(&config->assets_sd, sd_pins, sizeof(sd_pins));
     printf("frame_id:    %lu\n", (unsigned long)config->frame_id);
     printf("wifi:        ssid=\"%s\" state=%d ip=%s rssi=%d\n",
            config->wifi_ssid, (int)fos_wifi_state(), fos_wifi_ip(), fos_wifi_rssi());
@@ -65,6 +67,9 @@ static int cmd_status(int argc, char **argv)
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("send_logs:   %d\n", (int)config->server_send_logs);
+    printf("assets:      path=%s sd=%d pins=%s freq=%lu kHz\n",
+           config->assets_path, (int)config->assets_sd.enabled, sd_pins,
+           (unsigned long)config->assets_sd.max_freq_khz);
     printf("interval:    %lu s, deep_sleep=%d, wake_schedule=%d\n",
            (unsigned long)config->interval_sec, (int)config->deep_sleep,
            (int)config->wake_schedule);
@@ -88,7 +93,8 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|panel|render_mode|"
-               "interval|server_send_logs|deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
+               "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
+               "deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -111,6 +117,15 @@ static int cmd_set(int argc, char **argv)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
+    else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));
+    else if (strcmp(key, "assets_sd") == 0) config->assets_sd.enabled = atoi(value) != 0;
+    else if (strcmp(key, "assets_sd_freq") == 0) config->assets_sd.max_freq_khz = strtoul(value, NULL, 10);
+    else if (strcmp(key, "assets_sd_pins") == 0) {
+        if (fos_config_parse_assets_sd_pins(value, &config->assets_sd) != ESP_OK) {
+            printf("bad SD pin spec, want e.g. cs=38,sck=39,miso=40,mosi=41\n");
+            return 1;
+        }
+    }
     else if (strcmp(key, "deep_sleep") == 0) config->deep_sleep = atoi(value) != 0;
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)atoi(value);

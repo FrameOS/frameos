@@ -41,7 +41,7 @@ function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplate
 export function Templates({ openInstalledSceneDrawer = false, persistOnInstall = false }: TemplatesProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
   const { applyTemplate, applyTemplateAndSave } = useActions(frameLogic)
-  const { frameId, mode } = useValues(frameLogic)
+  const { frameId, mode, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
@@ -165,7 +165,7 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                 .map((template, index) => ({
                   template,
                   index,
-                  compatibility: templateCompatibilityForFrame(mode, template, apps),
+                  compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
                 }))
                 .toSorted(sortCompatibleTemplates)
                 .map(({ template, index, compatibility }) => {
@@ -247,7 +247,7 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                     .map((template, index) => ({
                       template,
                       index,
-                      compatibility: templateCompatibilityForFrame(mode, template, apps),
+                      compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
                     }))
                     .toSorted(sortCompatibleTemplates)
                     .map(({ template, index, compatibility }) => {

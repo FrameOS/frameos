@@ -174,6 +174,16 @@ const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
 type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pins']>
 type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
 type Esp32PinLayout = Record<Esp32PinKey, number>
+type Esp32SdCardAssets = NonNullable<NonNullable<FrameType['device_config']>['sdCardAssets']>
+type Esp32SdCardPinKey = 'cs' | 'sck' | 'miso' | 'mosi'
+type Esp32SdCardPinLayout = Record<Esp32SdCardPinKey, number>
+type NormalizedEsp32SdCardAssets = {
+  enabled: boolean
+  preset: 'custom' | 'waveshare_esp32_s3_photopainter'
+  pins: Esp32SdCardPinLayout
+  maxFrequencyKHz: number
+  mountPath: string
+}
 
 const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
   { key: 'rst', label: 'RST' },
@@ -202,6 +212,27 @@ const ESP32_XIAO_13IN3E_PIN_LAYOUT: Esp32PinLayout = {
   cs2: 8,
 }
 
+const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
+  { key: 'cs', label: 'CS' },
+  { key: 'sck', label: 'SCK' },
+  { key: 'miso', label: 'MISO' },
+  { key: 'mosi', label: 'MOSI' },
+]
+
+const ESP32_SD_CARD_EMPTY_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: -1,
+  sck: -1,
+  miso: -1,
+  mosi: -1,
+}
+
+const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 38,
+  sck: 39,
+  miso: 40,
+  mosi: 41,
+}
+
 function esp32RecommendedPinLayout(device?: string): Esp32PinLayout {
   return device === 'waveshare.EPD_13in3e' ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
 }
@@ -211,6 +242,62 @@ function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
     return fallback
   }
   return Math.max(-1, Math.min(48, Math.round(value)))
+}
+
+function normalizeEsp32SdCardFrequency(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 20000
+  }
+  return Math.max(400, Math.min(40000, Math.round(value)))
+}
+
+function normalizeEsp32SdCardPinLayout(
+  value: Partial<Esp32SdCardPinLayout> | undefined,
+  fallback: Esp32SdCardPinLayout = ESP32_SD_CARD_EMPTY_PIN_LAYOUT
+): Esp32SdCardPinLayout {
+  return {
+    cs: normalizeEsp32PinNumber(value?.cs, fallback.cs),
+    sck: normalizeEsp32PinNumber(value?.sck, fallback.sck),
+    miso: normalizeEsp32PinNumber(value?.miso, fallback.miso),
+    mosi: normalizeEsp32PinNumber(value?.mosi, fallback.mosi),
+  }
+}
+
+function normalizeEsp32SdCardAssets(value: Esp32SdCardAssets | undefined): NormalizedEsp32SdCardAssets {
+  const preset =
+    value?.preset === 'waveshare_esp32_s3_photopainter' ? 'waveshare_esp32_s3_photopainter' : 'custom'
+  const presetPins =
+    preset === 'waveshare_esp32_s3_photopainter'
+      ? ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT
+      : ESP32_SD_CARD_EMPTY_PIN_LAYOUT
+  return {
+    enabled: value?.enabled === true,
+    preset,
+    pins: normalizeEsp32SdCardPinLayout(value?.pins, presetPins),
+    maxFrequencyKHz: normalizeEsp32SdCardFrequency(value?.maxFrequencyKHz),
+    mountPath: '/srv/assets',
+  }
+}
+
+function esp32SdCardPinLayoutsEqual(first: Esp32SdCardPinLayout, second: Esp32SdCardPinLayout): boolean {
+  return ESP32_SD_CARD_PIN_FIELDS.every(({ key }) => first[key] === second[key])
+}
+
+function esp32SdCardPresetValue(config: NormalizedEsp32SdCardAssets): string {
+  if (config.preset === 'waveshare_esp32_s3_photopainter') {
+    return 'waveshare_esp32_s3_photopainter'
+  }
+  if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT)) {
+    return 'waveshare_esp32_s3_photopainter'
+  }
+  return 'custom'
+}
+
+function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
+  if (preset === 'waveshare_esp32_s3_photopainter') {
+    return { ...ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT }
+  }
+  return { ...ESP32_SD_CARD_EMPTY_PIN_LAYOUT }
 }
 
 function normalizeEsp32PinLayout(value: Esp32Pins | undefined, device?: string): Esp32PinLayout {
@@ -890,6 +977,76 @@ export function FrameSettings({
                             </label>
                           ))}
                         </div>
+                      </div>
+                    )
+                  }}
+                </Field>
+                <Field
+                  name="sdCardAssets"
+                  label="SD card assets"
+                  tooltip="Mount a FAT32 SD card at /srv/assets so local image and font assets work on ESP32 frames."
+                >
+                  {({ value, onChange }) => {
+                    const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
+                    const preset = esp32SdCardPresetValue(sdCardAssets)
+                    const updateSdCardAssets = (nextValues: Partial<Esp32SdCardAssets>) => {
+                      onChange({
+                        ...sdCardAssets,
+                        ...nextValues,
+                        mountPath: '/srv/assets',
+                      })
+                    }
+                    return (
+                      <div className="space-y-3">
+                        <Switch
+                          label="Mount FAT32 SD card at /srv/assets"
+                          value={sdCardAssets.enabled}
+                          onChange={(enabled) => updateSdCardAssets({ enabled })}
+                          fullWidth
+                        />
+                        <Select
+                          value={preset}
+                          options={[
+                            { value: 'custom', label: 'Custom pins' },
+                            { value: 'waveshare_esp32_s3_photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' },
+                          ]}
+                          onChange={(nextPreset) => {
+                            updateSdCardAssets({
+                              preset: nextPreset as Esp32SdCardAssets['preset'],
+                              pins: esp32SdCardPinsForPreset(nextPreset),
+                            })
+                          }}
+                        />
+                        <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
+                          {ESP32_SD_CARD_PIN_FIELDS.map(({ key, label }) => (
+                            <label key={key} className="space-y-1">
+                              <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
+                              <NumberTextInput
+                                value={sdCardAssets.pins[key]}
+                                placeholder={String(ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT[key])}
+                                onChange={(nextValue) => {
+                                  updateSdCardAssets({
+                                    preset: 'custom',
+                                    pins: {
+                                      ...sdCardAssets.pins,
+                                      [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
+                                    },
+                                  })
+                                }}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <label className="space-y-1 block">
+                          <span className="frame-tool-muted block text-xs font-semibold">Max frequency (kHz)</span>
+                          <NumberTextInput
+                            value={sdCardAssets.maxFrequencyKHz}
+                            placeholder="20000"
+                            onChange={(nextValue) =>
+                              updateSdCardAssets({ maxFrequencyKHz: normalizeEsp32SdCardFrequency(nextValue) })
+                            }
+                          />
+                        </label>
                       </div>
                     )
                   }}
