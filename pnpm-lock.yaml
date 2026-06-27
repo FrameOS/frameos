@@ -9,6 +9,8 @@ overrides:
   '@types/react-dom': 18.0.6
   csstype: 3.2.3
 
+packageExtensionsChecksum: sha256-vsSjLdIOYVSo9NEFqxgkMNt3v3VTzjXkaTYuz7XdnIM=
+
 importers:
 
   .:
@@ -120,7 +122,7 @@ importers:
         version: 3.1.7(react@18.2.0)
       kea-forms:
         specifier: ^3.2.0
-        version: 3.2.0(kea@3.1.7(react@18.2.0))
+        version: 3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.8.3)
       kea-loaders:
         specifier: 3.1.1
         version: 3.1.1(kea@3.1.7(react@18.2.0))
@@ -307,7 +309,7 @@ importers:
         version: 3.1.7(react@18.2.0)
       kea-forms:
         specifier: ^3.2.0
-        version: 3.2.0(kea@3.1.7(react@18.2.0))
+        version: 3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.9.3)
       kea-loaders:
         specifier: ^3.1.1
         version: 3.1.1(kea@3.1.7(react@18.2.0))
@@ -2983,6 +2985,7 @@ packages:
     resolution: {integrity: sha512-R/ECGx6FxOZ2TEJv2GcFNLcQJePUK5Qd4Km81rN/7lBHd2hG4CAJglODVpcolWZ0RtcLcvMhHeTg/iqNz5pynw==}
     peerDependencies:
       kea: '>= 3.0.1'
+      typescript: '>=5.0.0'
 
   kea-loaders@3.1.1:
     resolution: {integrity: sha512-FZcOh5PSTIh5+Of5kZno7bXENmY4rCcRYnTB4e709Mbkc7KzriEZ6b/mIWvYx2vkDEgilIsvibUsGOADZ6wqPw==}
@@ -7165,9 +7168,15 @@ snapshots:
     optionalDependencies:
       graceful-fs: 4.2.11
 
-  kea-forms@3.2.0(kea@3.1.7(react@18.2.0)):
+  kea-forms@3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.8.3):
     dependencies:
       kea: 3.1.7(react@18.2.0)
+      typescript: 5.8.3
+
+  kea-forms@3.2.0(kea@3.1.7(react@18.2.0))(typescript@5.9.3):
+    dependencies:
+      kea: 3.1.7(react@18.2.0)
+      typescript: 5.9.3
 
   kea-loaders@3.1.1(kea@3.1.7(react@18.2.0)):
     dependencies:
