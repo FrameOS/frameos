@@ -137,7 +137,7 @@ function setInstallMethodValues(
       platform: EMBEDDED_ESP32_S3,
       frame_host: '',
       server_host: defaultNewFrameServerHost(savedSettings),
-      device: 'waveshare.EPD_7in5_V2',
+      device: '',
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
@@ -891,12 +891,16 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               <option value={WAVESHARE_13IN3E6_HARDWARE_PRESET}>Waveshare ESP32-S3 ePaper 13.3E6</option>
             </select>
           </FormField>
-          <FormField label="Display panel">
+          <FormField label="Display panel" error={newFrameErrors.device}>
             <select
               className={selectClassName()}
-              value={newFrame.device ?? 'waveshare.EPD_7in5_V2'}
+              value={newFrame.device ?? ''}
               onChange={(event) => setEmbeddedDevice(event.target.value)}
+              required
             >
+              <option value="" disabled>
+                Select display panel
+              </option>
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>

@@ -153,6 +153,7 @@ export const newFrameForm = kea<newFrameFormType>([
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,
+        device: frame.install_method === 'embedded' && !frame.device ? 'Please pick a display panel' : null,
         network: undefined,
       }),
       submit: async (frame) => {
