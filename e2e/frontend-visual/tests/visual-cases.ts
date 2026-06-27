@@ -108,7 +108,7 @@ async function expandDashboardScene(page: Page): Promise<void> {
     .filter({ has: page.getByRole('heading', { name: /^Dashboard$/ }) })
     .last()
   await sceneDrawer.getByRole('link', { name: /^Open editor$/ }).waitFor()
-  await sceneDrawer.getByRole('button', { name: /^Menu$/ }).first().waitFor()
+  await sceneDrawer.getByText(/^Scene control$/).waitFor()
 }
 
 async function fillLogsSearch(page: Page): Promise<void> {
