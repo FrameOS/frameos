@@ -30,6 +30,10 @@
 #include "EPD_13in3e.h"
 #include "Debug.h"
 
+#ifndef EPD_BUSY_TIMEOUT_MS
+#define EPD_BUSY_TIMEOUT_MS 120000
+#endif
+
 
 // const UBYTE spiCsPin[2] = {
 // 		SPI_CS0, SPI_CS1
@@ -151,18 +155,27 @@ static void EPD_13IN3E_SendData2(const UBYTE *buf, uint32_t Len)
 }
 
 /******************************************************************************
-function :	Wait until the busy_pin goes LOW
+function :	Wait until the busy_pin goes HIGH
 parameter:
 ******************************************************************************/
-static void EPD_13IN3E_ReadBusyH(void)
+static int EPD_13IN3E_ReadBusyH(const char *stage)
 {
     Debug("e-Paper busy\r\n");
+    UDOUBLE busy_wait_ms = 0;
 	while(!DEV_Digital_Read(EPD_BUSY_PIN)) {      //LOW: busy, HIGH: idle
+        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+            Debug("e-Paper busy timeout\r\n");
+            printf("EPD_13IN3E busy timeout during %s after %lu ms\r\n",
+                stage ? stage : "wait",
+                (unsigned long)busy_wait_ms);
+            return 1;
+        }
         DEV_Delay_ms(10);
-        // Debug("e-Paper busy release\r\n");
+        busy_wait_ms += 10;
     }
 	DEV_Delay_ms(20);
     Debug("e-Paper busy release\r\n");
+    return 0;
 }
 
 
@@ -176,14 +189,18 @@ static void EPD_13IN3E_TurnOnDisplay(void)
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SendCommand(0x04); // POWER_ON
     EPD_13IN3E_CS_ALL(1);
-    EPD_13IN3E_ReadBusyH();
+    if (EPD_13IN3E_ReadBusyH("turnOnDisplay:powerOn") != 0) {
+        return;
+    }
 
     printf("Write DRF \r\n");
     DEV_Delay_ms(50);
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SPI_Sand(DRF, DRF_V, sizeof(DRF_V));
     EPD_13IN3E_CS_ALL(1);
-    EPD_13IN3E_ReadBusyH();
+    if (EPD_13IN3E_ReadBusyH("turnOnDisplay:refresh") != 0) {
+        return;
+    }
 
     printf("Write POF \r\n");
     EPD_13IN3E_CS_ALL(0);
@@ -200,7 +217,9 @@ parameter:
 void EPD_13IN3E_Init(void)
 {
 	EPD_13IN3E_Reset();
-//    EPD_13IN3E_ReadBusyH();
+    if (EPD_13IN3E_ReadBusyH("init:reset") != 0) {
+        return;
+    }
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V, sizeof(AN_TM_V));

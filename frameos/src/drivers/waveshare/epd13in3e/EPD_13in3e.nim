@@ -80,6 +80,7 @@ const
   epdPwrPin = UWORD(18)
   busyLogLoopInterval = 100
   busyLogMinIntervalMs = 1000.0
+  busyWaitTimeoutMs = 120000.0
 
   psrV = [UBYTE(0xDF), UBYTE(0x69)]
   pwrV = [UBYTE(0x0F), UBYTE(0x00), UBYTE(0x28), UBYTE(0x2C), UBYTE(0x28), UBYTE(0x38)]
@@ -234,17 +235,30 @@ proc epd13in3eReset() =
   DEV_Delay_ms(UDOUBLE(30))
   logDebug("reset:done")
 
-proc epd13in3eReadBusyH() =
+proc epd13in3eReadBusyH(stage = "waitForHigh") =
   let startTime = getMonoTime()
   var loopCount = 0
   var lastLog = startTime
   let initialState = DEV_Digital_Read(epdBusyPin)
+  var observedLow = initialState == UBYTE(0)
+  var lowStartTime = startTime
+  var timedOut = false
   logDebug("busy:wait:start", %*{
+    "stage": stage,
     "initialState": initialState.int,
+    "timeoutMs": busyWaitTimeoutMs,
     "pins": capturePinStates()
   })
 
   while DEV_Digital_Read(epdBusyPin) == UBYTE(0):
+    if not observedLow:
+      observedLow = true
+      lowStartTime = getMonoTime()
+
+    if durationToMilliseconds(getMonoTime() - startTime) >= busyWaitTimeoutMs:
+      timedOut = true
+      break
+
     DEV_Delay_ms(UDOUBLE(10))
     inc loopCount
 
@@ -255,7 +269,7 @@ proc epd13in3eReadBusyH() =
           "event": "driver:waveshare:busy",
           "loops": loopCount,
           "elapsedMs": durationToMilliseconds(now - startTime),
-          "stage": "waitForHigh",
+          "stage": stage,
           "pins": capturePinStates()
         })
         lastLog = now
@@ -263,12 +277,31 @@ proc epd13in3eReadBusyH() =
   DEV_Delay_ms(UDOUBLE(20))
 
   let endTime = getMonoTime()
+  let waitForLowMs =
+    if observedLow:
+      durationToMilliseconds(lowStartTime - startTime)
+    else:
+      0.0
+  let waitForHighMs =
+    if observedLow:
+      durationToMilliseconds(endTime - lowStartTime)
+    else:
+      0.0
+
   logDebug("busy:wait:end", %*{
+    "stage": stage,
     "durationMs": durationToMilliseconds(endTime - startTime),
     "loops": loopCount,
     "finalState": DEV_Digital_Read(epdBusyPin).int,
+    "observedLow": observedLow,
+    "waitedForLowMs": waitForLowMs,
+    "waitedForHighMs": waitForHighMs,
+    "timedOutWaitingForHigh": timedOut,
     "pins": capturePinStates()
   })
+
+  if timedOut:
+    raise newException(Exception, &"Timed out waiting for Waveshare 13.3in E busy pin during {stage}")
 
 proc epd13in3eTurnOnDisplay() =
   logDebug("turnOnDisplay:start")
@@ -277,7 +310,7 @@ proc epd13in3eTurnOnDisplay() =
   epd13in3eCsAll(UBYTE(0))
   epd13in3eSendCommand(PON)
   epd13in3eCsAll(UBYTE(1))
-  epd13in3eReadBusyH()
+  epd13in3eReadBusyH("turnOnDisplay:powerOn")
 
   DEV_Delay_ms(UDOUBLE(50))
 
@@ -285,7 +318,7 @@ proc epd13in3eTurnOnDisplay() =
   epd13in3eCsAll(UBYTE(0))
   epd13in3eSpiSend(DRF, drfV)
   epd13in3eCsAll(UBYTE(1))
-  epd13in3eReadBusyH()
+  epd13in3eReadBusyH("turnOnDisplay:refresh")
 
   logDebug("turnOnDisplay:powerOff")
   epd13in3eCsAll(UBYTE(0))
@@ -296,7 +329,7 @@ proc epd13in3eTurnOnDisplay() =
 proc EPD_13IN3E_Init*() =
   logDebug("init:start")
   epd13in3eReset()
-  epd13in3eReadBusyH()
+  epd13in3eReadBusyH("init:reset")
 
   logDebug("init:analogTiming")
   DEV_Digital_Write(epdCsMPin, UBYTE(0))
