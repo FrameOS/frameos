@@ -24,6 +24,7 @@ import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
+import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
   type ChangeDetail,
@@ -1627,13 +1628,18 @@ export const frameLogic = kea<frameLogicType>([
       actions.touchFrameFormField('frame_admin_auth.pass')
     },
     generateTlsCertificates: async () => {
-      const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        throw new Error('Failed to generate TLS certificates')
+      let data
+      if (isInFrameAdminMode()) {
+        data = generateFrameTlsMaterial(values.frameForm.frame_host || values.frame?.frame_host || '')
+      } else {
+        const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
+          method: 'POST',
+        })
+        if (!response.ok) {
+          throw new Error('Failed to generate TLS certificates')
+        }
+        data = await response.json()
       }
-      const data = await response.json()
       actions.setFrameFormValues({
         https_proxy: {
           ...(values.frameForm.https_proxy || values.frame?.https_proxy || {}),
