@@ -1,9 +1,15 @@
-import std/[options, sequtils, unittest]
+import std/[options, os, sequtils, unittest]
 import pixie
 import ../font
 import ../text
 
-proc makeOptions(overflow = "fit-bounds", borderWidth = 0): TextRenderOptions =
+when not defined(frameosEmbedded):
+  proc copiedAssetsRoot(): string =
+    normalizedPath(
+      currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "assets" / "copied"
+    )
+
+proc makeOptions(overflow = "fit-bounds", borderWidth = 0, assetsPath = ""): TextRenderOptions =
   TextRenderOptions(
     text: "FrameOS text test",
     richTextMode: "disabled",
@@ -16,7 +22,7 @@ proc makeOptions(overflow = "fit-bounds", borderWidth = 0): TextRenderOptions =
     borderColor: parseHtmlColor("#ffffff"),
     borderWidth: borderWidth,
     overflow: overflow,
-    assetsPath: ""
+    assetsPath: assetsPath
   )
 
 suite "text layout helpers":
@@ -43,6 +49,23 @@ suite "text layout helpers":
 
     drawText(layout, image, offsetX = 3.0, offsetY = 2.0)
     check layout.textTypeset.runes.len > 0
+
+  when not defined(frameosEmbedded):
+    test "drawText renders default-font emoji through Noto fallback":
+      let assetsRoot = copiedAssetsRoot()
+      check fileExists(assetsRoot / "fonts" / "NotoColorEmoji.ttf")
+
+      let image = newImage(96, 96)
+      image.fill(parseHtmlColor("#ffffff"))
+      var opts = makeOptions(overflow = "visible", assetsPath = assetsRoot)
+      opts.text = "😀"
+      opts.fontSize = 64
+      opts.padding = 4
+
+      let layout = typesetIntoBounds(opts, image.width, image.height)
+      drawText(layout, image)
+
+      check image.data.anyIt(it != rgbx(255, 255, 255, 255))
 
   test "approximate stroke fallback draws border text":
     let image = newImage(120, 60)

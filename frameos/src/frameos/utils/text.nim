@@ -232,7 +232,7 @@ proc typesetIntoBounds*(
     innerH = max(0.0, height.float - 2 * opts.padding)
     bounds = vec2(innerW, innerH)
     baseSize = if opts.fontSize <= 0: 1.0 else: opts.fontSize
-    typeface = if opts.font.len == 0: getDefaultTypeface() else: getTypeface(opts.font, opts.assetsPath)
+    typeface = getTypeface(opts.font, opts.assetsPath)
 
   var chosen: Arrangement
   var chosenBorder: Option[Arrangement] = none(Arrangement)
