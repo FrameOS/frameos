@@ -4,6 +4,27 @@ import {
   stripFrameAdminLoginParams,
 } from '../../utils/frameAdminLoginParams'
 
+type FrameosTheme = 'light' | 'dark'
+
+function getInitialTheme(): FrameosTheme {
+  if (typeof window === 'undefined') {
+    return 'dark'
+  }
+  const storedTheme = window.localStorage.getItem('frameos.workspaceTheme')
+  if (storedTheme === 'light' || storedTheme === 'dark') {
+    return storedTheme
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function applyLoginTheme(theme: FrameosTheme): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  document.documentElement.dataset.frameosTheme = theme
+  document.documentElement.style.colorScheme = theme
+}
+
 export const loginLogic = kea([
   path(['frameos', 'frontend', 'loginLogic']),
   actions({
@@ -13,14 +34,20 @@ export const loginLogic = kea([
     setLoading: (loading: boolean) => ({ loading }),
     setError: (error: string | null) => ({ error }),
     bootstrapLoginPage: true,
+    toggleTheme: true,
   }),
   reducers({
     username: ['', { setUsername: (_, { username }) => username }],
     password: ['', { setPassword: (_, { password }) => password }],
     loading: [false, { setLoading: (_, { loading }) => loading }],
     error: [null as string | null, { setError: (_, { error }) => error }],
+    theme: [getInitialTheme(), { toggleTheme: (theme) => (theme === 'dark' ? 'light' : 'dark') }],
   }),
   listeners(({ actions, values }) => ({
+    toggleTheme: () => {
+      window.localStorage.setItem('frameos.workspaceTheme', values.theme)
+      applyLoginTheme(values.theme)
+    },
     bootstrapLoginPage: async () => {
       if (typeof window === 'undefined') {
         return
@@ -80,7 +107,8 @@ export const loginLogic = kea([
       }
     },
   })),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, values }) => {
+    applyLoginTheme(values.theme)
     actions.bootstrapLoginPage()
   }),
 ])

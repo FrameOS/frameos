@@ -19,3 +19,118 @@ body {
   min-height: 100vh;
   max-width: none !important;
 }
+
+.frame-local-login {
+  background: var(--frameos-color-mist);
+  color: #0f172a;
+}
+
+.frame-local-login.frameos-theme-dark {
+  background: var(--frameos-color-graphite);
+  color: #f8fafc;
+}
+
+.frame-local-login-card {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 24px 60px rgba(100, 116, 139, 0.28);
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-card {
+  background: rgba(29, 31, 37, 0.94);
+  border-color: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+}
+
+.frame-local-login-title {
+  color: #0f172a;
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-title {
+  color: #f8fafc;
+}
+
+.frame-local-login-field {
+  color: #334155;
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-field {
+  color: #dbe3ee;
+}
+
+.frame-local-login .frame-local-login-input {
+  height: 3rem;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.frame-local-login .frame-local-login-input::placeholder {
+  color: #94a3b8;
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-input {
+  background: rgba(38, 40, 47, 0.94);
+  border-color: rgba(148, 163, 184, 0.34);
+  color: #f8fafc;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-input::placeholder {
+  color: #8b95a5;
+}
+
+.frame-local-login .frame-local-login-input:focus {
+  background: #ffffff;
+  border-color: var(--frameos-primary);
+  --tw-ring-color: var(--frameos-primary-ring);
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-input:focus {
+  background: rgba(45, 48, 57, 0.98);
+}
+
+.frame-local-login-submit {
+  background: var(--frameos-primary);
+  color: #ffffff;
+  box-shadow: 0 12px 28px var(--frameos-primary-shadow);
+}
+
+.frame-local-login-submit:hover:not(:disabled) {
+  background: var(--frameos-primary-hover);
+}
+
+.frame-local-login-toggle {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  color: #334155;
+}
+
+.frame-local-login-toggle:hover {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-toggle {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #dbe3ee;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.frame-local-login-error {
+  color: #b91c1c;
+}
+
+.frame-local-login.frameos-theme-dark .frame-local-login-error {
+  color: #fca5a5;
+}
