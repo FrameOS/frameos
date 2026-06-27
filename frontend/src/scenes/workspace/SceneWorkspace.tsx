@@ -22,7 +22,6 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
-import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
@@ -869,9 +868,7 @@ function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: number; sceneId:
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen } = useValues(
-    frameLogic(frameLogicProps)
-  )
+  const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
   const { selectedSceneId, templateDrawerFrameId, utilityPanel } = useValues(workspaceLogic)
 
@@ -916,9 +913,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           showAiButton={false}
           mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
           rightPanel={
-            deployPlanModalOpen ? (
-              <FrameDeployPlanDrawer frame={frame} />
-            ) : templateDrawerFrameId ? (
+            templateDrawerFrameId ? (
               <TemplateDrawer />
             ) : activeUtilityDefinition ? (
               <UtilityDrawer frameId={frameId} scene={selectedScene} frameMode={frame.mode} />

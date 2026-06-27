@@ -1553,10 +1553,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     restartRemote,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
-    setDeployDrawerView,
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
-  const { closeFrameChangeDrawer } = useActions(workspaceLogic)
+  const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const { applyEmbeddedFirmwareOta, cancelDeploy, downloadEmbeddedFirmware, downloadSdCardImage, loadFrame } =
     useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
@@ -1593,7 +1592,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     hideDeployPlanModal()
     closeFrameChangeDrawer()
   }
-  const showMainDeployView = (): void => setDeployDrawerView('main')
+  const showDeployDrawerView = (view: DeployDrawerView): void => {
+    openFrameChangeDrawer(frame.id, 'deploy', view)
+  }
+  const showMainDeployView = (): void => showDeployDrawerView('main')
   const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
     (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
   )
@@ -1667,7 +1669,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
-              {!isEmbeddedFrame ? <AlternativesSection onSelect={setDeployDrawerView} /> : null}
+              {!isEmbeddedFrame ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">
                   <FrameBootstrapAction frame={frame} />
@@ -1786,7 +1788,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {isEmbeddedFrame ? (
                 <button
                   type="button"
-                  onClick={() => setDeployDrawerView('embedded')}
+                  onClick={() => showDeployDrawerView('embedded')}
                   className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   Firmware

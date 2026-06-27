@@ -79,7 +79,7 @@ function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityP
 
 function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDrawerView | undefined {
   const view = searchValue(search, 'deployView')
-  return view === 'sdCard' || view === 'script' || view === 'main' ? view : undefined
+  return view === 'sdCard' || view === 'script' || view === 'main' || view === 'embedded' ? view : undefined
 }
 
 export function frameToolScrollKey(frameId: number, panel: WorkspaceUtilityPanel): string {
@@ -1188,6 +1188,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }
       preserveFramesScroll()
     }
+    const hideActiveDeployDrawer = (frameId?: number) => {
+      if (frameId) {
+        frameLogic({ frameId }).actions.hideDeployPlanModal()
+      }
+      const selection = values.frameChangeDrawerSelection
+      if (selection?.kind === 'deploy' && selection.frameId !== frameId) {
+        frameLogic({ frameId: selection.frameId }).actions.hideDeployPlanModal()
+      }
+    }
 
     return {
       openSecondarySidebar: () => {
@@ -1221,6 +1230,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
       closeSceneControl: preserveFramesScroll,
       openTemplateDrawer: ({ frameId }) => {
+        hideActiveDeployDrawer(frameId)
         hideNewFrameFormAndPreserveScroll()
         ensureAddSceneTileVisibleAfterLayoutChange(frameId, cache)
       },

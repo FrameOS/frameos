@@ -12,7 +12,6 @@ import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { type AppConfig, type AppNodeData, type DiagramNode, type FrameScene, type FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
-import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
 import { appsWorkspaceLogic, SYSTEM_APPS_ROUTE_TOKEN } from './appsWorkspaceLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -741,7 +740,7 @@ function AppsWorkspaceFrame({
   routeSystemAppKeyword,
 }: AppsWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, deployPlanModalOpen } = useValues(frameLogic(frameLogicProps))
+  const { frame, scenes, unsavedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
   const { apps } = useValues(appsModel)
   const installedSystemApps = systemAppOptions(apps)
@@ -804,7 +803,7 @@ function AppsWorkspaceFrame({
           chatNodeId={sourceMode === 'frames' ? selectedApp?.nodeId ?? null : null}
           showAiButton={sourceMode === 'frames'}
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
-          rightPanel={deployPlanModalOpen ? <FrameDeployPlanDrawer frame={frame} /> : null}
+          rightPanel={null}
         >
           {sourceMode === 'system' ? (
             <SystemAppEditorSurface app={selectedSystemApp} />
