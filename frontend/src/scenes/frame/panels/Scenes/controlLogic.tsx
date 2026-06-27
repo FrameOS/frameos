@@ -35,6 +35,7 @@ export const controlLogic = kea<controlLogicType>([
   props({} as ControlLogicProps),
   key((props) => props.frameId),
   connect(({ frameId }: ControlLogicProps) => ({
+    logic: [longRunningTasksModel],
     values: [frameLogic({ frameId }), ['frame', 'frameForm']],
     actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
   })),

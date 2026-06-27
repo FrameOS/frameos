@@ -20,6 +20,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
   props({} as ExpandedSceneLogicProps),
   key((props) => `${props.frameId}${props.sceneId}`),
   connect(({ frameId }: ExpandedSceneLogicProps) => ({
+    logic: [longRunningTasksModel],
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], controlLogic({ frameId }), ['states', 'loading']],
     actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
   })),
