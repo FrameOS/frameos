@@ -287,6 +287,70 @@ async def test_api_frame_cancel_deploy_and_force_deploy(async_client, db, redis,
 
 
 @pytest.mark.asyncio
+async def test_api_frame_embedded_usb_deploy_complete_marks_snapshot(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="UsbDeployFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
+    frame.mode = "embedded"
+    frame.status = "deploying"
+    frame.scenes = [
+        {
+            "id": "scene-1",
+            "name": "Scene 1",
+            "settings": {},
+            "nodes": [],
+            "edges": [],
+        }
+    ]
+    frame.last_successful_deploy = {"stale": True}
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(
+        f"/api/frames/{frame.id}/embedded/usb_deploy_complete?task_id=usb_task.1"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["frame"]
+    assert payload["status"] == "starting"
+    assert payload["last_successful_deploy"]["id"] == frame.id
+    assert payload["last_successful_deploy"]["mode"] == "embedded"
+    assert payload["last_successful_deploy"]["scenes"] == frame.scenes
+    assert "last_successful_deploy" not in payload["last_successful_deploy"]
+    assert "last_successful_deploy_at" not in payload["last_successful_deploy"]
+    assert payload["last_successful_deploy_at"] is not None
+
+    logs = db.query(Log).filter_by(frame_id=frame.id).order_by(Log.id).all()
+    assert [(entry.type, entry.line) for entry in logs[-2:]] == [
+        ("stdinfo", "Embedded USB fast deploy complete; reload queued"),
+        ("stdout", "[frameos-task:usb_task.1] deploy completed fast"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_embedded_usb_deploy_complete_rejects_non_embedded(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="NotEmbeddedFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
+
+    response = await async_client.post(f"/api/frames/{frame.id}/embedded/usb_deploy_complete")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "USB deploy completion is only available for embedded frames"
+
+
+@pytest.mark.asyncio
 async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
     frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
     frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)

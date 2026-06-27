@@ -15,8 +15,10 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
+#include "mbedtls/sha256.h"
 
 #include "fos_battery.h"
 #include "fos_buttons.h"
@@ -41,6 +43,21 @@ static const char *TAG = "fos_client";
  * magic[4] ver(u8) format(u8) width(u16le) height(u16le) reserved(u16le),
  * then the packed payload bytes for the current FOS_PIXEL_* format. */
 #define FOSB_HEADER_LEN 12
+#define FOS_DISPLAY_STATE_MAGIC 0x46534453u /* "FSDS" */
+#define FOS_DISPLAY_HASH_LEN 32
+#define FOS_DISPLAY_STATE_PANEL_LEN 32
+#define FOS_SNAPSHOT_MIN_PSRAM_AFTER_COPY (1024u * 1024u)
+
+typedef struct {
+    uint32_t magic;
+    uint16_t width;
+    uint16_t height;
+    uint8_t format;
+    uint8_t reserved[3];
+    uint32_t len;
+    char panel[FOS_DISPLAY_STATE_PANEL_LEN];
+    uint8_t sha256[FOS_DISPLAY_HASH_LEN];
+} fos_display_state_t;
 
 static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_snapshot_lock;
@@ -53,9 +70,120 @@ static int s_last_frame_height = 0;
 static fos_pixel_format_t s_last_frame_format = FOS_PIXEL_1BPP;
 static uint32_t s_last_frame_render_count = 0;
 static int64_t s_last_frame_render_ms = 0;
+static bool s_display_state_loaded = false;
+static bool s_display_state_valid = false;
+static bool s_last_refresh_skipped = false;
+static fos_display_state_t s_display_state;
+
+static void load_display_state(void);
 
 uint32_t fos_client_render_count(void) { return s_render_count; }
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
+bool fos_client_last_refresh_skipped(void) { return s_last_refresh_skipped; }
+
+const char *fos_client_snapshot_mode(void)
+{
+    if (!s_snapshot_lock) return "none";
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    bool has_packed = s_last_frame && s_last_frame_len > 0;
+    xSemaphoreGive(s_snapshot_lock);
+    if (has_packed) return "packed";
+    load_display_state();
+    return s_display_state_valid ? "hash-only" : "none";
+}
+
+static void sha256_hex(const uint8_t sha[FOS_DISPLAY_HASH_LEN], char out[FOS_DISPLAY_HASH_LEN * 2 + 1])
+{
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < FOS_DISPLAY_HASH_LEN; i++) {
+        out[i * 2] = hex[(sha[i] >> 4) & 0x0F];
+        out[i * 2 + 1] = hex[sha[i] & 0x0F];
+    }
+    out[FOS_DISPLAY_HASH_LEN * 2] = '\0';
+}
+
+static esp_err_t sha256_buffer(const uint8_t *buf, size_t len, uint8_t out[FOS_DISPLAY_HASH_LEN])
+{
+    if (!buf || !out) return ESP_ERR_INVALID_ARG;
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    int rc = mbedtls_sha256_starts(&ctx, false);
+    if (rc == 0) rc = mbedtls_sha256_update(&ctx, buf, len);
+    if (rc == 0) rc = mbedtls_sha256_finish(&ctx, out);
+    mbedtls_sha256_free(&ctx);
+    return rc == 0 ? ESP_OK : ESP_FAIL;
+}
+
+static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, int height,
+                                     fos_pixel_format_t format, fos_display_state_t *state)
+{
+    memset(state, 0, sizeof(*state));
+    state->magic = FOS_DISPLAY_STATE_MAGIC;
+    state->width = (uint16_t)width;
+    state->height = (uint16_t)height;
+    state->format = (uint8_t)format;
+    state->len = (uint32_t)len;
+    strlcpy(state->panel, fos_display_panel_name(0), sizeof(state->panel));
+    if (sha256_buffer(buf, len, state->sha256) != ESP_OK) {
+        memset(state, 0, sizeof(*state));
+        return false;
+    }
+    return true;
+}
+
+static bool display_state_matches(const fos_display_state_t *a, const fos_display_state_t *b)
+{
+    return a && b &&
+        a->magic == FOS_DISPLAY_STATE_MAGIC &&
+        b->magic == FOS_DISPLAY_STATE_MAGIC &&
+        a->width == b->width &&
+        a->height == b->height &&
+        a->format == b->format &&
+        a->len == b->len &&
+        strncmp(a->panel, b->panel, sizeof(a->panel)) == 0 &&
+        memcmp(a->sha256, b->sha256, FOS_DISPLAY_HASH_LEN) == 0;
+}
+
+static void load_display_state(void)
+{
+    if (s_display_state_loaded) return;
+    s_display_state_loaded = true;
+    s_display_state_valid = false;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return;
+    fos_display_state_t state;
+    size_t len = sizeof(state);
+    esp_err_t err = nvs_get_blob(nvs, "display_state", &state, &len);
+    nvs_close(nvs);
+    if (err == ESP_OK && len == sizeof(state) && state.magic == FOS_DISPLAY_STATE_MAGIC) {
+        s_display_state = state;
+        s_display_state_valid = true;
+    }
+}
+
+static void save_display_state(const fos_display_state_t *state)
+{
+    if (!state || state->magic != FOS_DISPLAY_STATE_MAGIC) return;
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("frameos", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "display state open failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_set_blob(nvs, "display_state", state, sizeof(*state));
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "display state save failed: %s", esp_err_to_name(err));
+    }
+}
+
+static bool should_keep_packed_snapshot(size_t len)
+{
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t largest_psram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return largest_psram >= len && free_psram >= len + FOS_SNAPSHOT_MIN_PSRAM_AFTER_COPY;
+}
 
 void fos_client_render_now(void)
 {
@@ -117,6 +245,24 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
                            int64_t render_ms)
 {
     if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
+    if (!should_keep_packed_snapshot(len)) {
+        xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+        uint8_t *old = s_last_frame;
+        s_last_frame = NULL;
+        s_last_frame_len = 0;
+        s_last_frame_width = width;
+        s_last_frame_height = height;
+        s_last_frame_format = format;
+        s_last_frame_render_count = render_count;
+        s_last_frame_render_ms = render_ms;
+        xSemaphoreGive(s_snapshot_lock);
+        free(old);
+        ESP_LOGW(TAG, "preview snapshot kept as hash only: need %u bytes, psram free=%u largest=%u",
+                 (unsigned)len,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        return;
+    }
     uint8_t *copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!copy) copy = malloc(len);
     if (!copy) {
@@ -308,12 +454,35 @@ static esp_err_t render_once(void)
         err = fetch_remote_bitmap(buf, buf_len);
     }
 
+    fos_display_state_t rendered_state;
+    bool rendered_state_valid = err == ESP_OK && fos_display_present() &&
+        display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
+    bool skipped_refresh = false;
     if (err == ESP_OK && fos_display_present()) {
-        err = fos_display_blit(buf, buf_len);
+        load_display_state();
+        if (rendered_state_valid && s_display_state_valid && display_state_matches(&rendered_state, &s_display_state)) {
+            skipped_refresh = true;
+            s_last_refresh_skipped = true;
+            char sha_hex[FOS_DISPLAY_HASH_LEN * 2 + 1];
+            sha256_hex(rendered_state.sha256, sha_hex);
+            ESP_LOGI(TAG, "display refresh skipped: packed image unchanged (%.*s)", 12, sha_hex);
+        } else {
+            err = fos_display_blit(buf, buf_len);
+            if (err == ESP_OK && rendered_state_valid) {
+                s_display_state = rendered_state;
+                s_display_state_valid = true;
+                s_last_refresh_skipped = false;
+                save_display_state(&rendered_state);
+            }
+        }
     } else if (err == ESP_OK) {
         ESP_LOGI(TAG, "headless: rendered %u bytes, no panel to blit", (unsigned)buf_len);
     }
     if (err == ESP_OK) {
+        if (skipped_refresh && rendered_state_valid) {
+            s_display_state = rendered_state;
+            s_display_state_valid = true;
+        }
         s_render_count++;
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
         store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);

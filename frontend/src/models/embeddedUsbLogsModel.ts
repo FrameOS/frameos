@@ -13,6 +13,13 @@ export interface EmbeddedUsbLogStreamState {
   stoppedAt?: string | null
 }
 
+export interface EmbeddedUsbApiCommandResult {
+  command: string
+  text?: string
+  bytes?: Uint8Array
+  metadata?: string
+}
+
 const USB_SERIAL_BAUD_RATE = 115200
 const USB_LOG_BUFFER_SIZE = 65536
 const MAX_USB_LOG_LINES = 50000
@@ -32,6 +39,7 @@ interface UsbLogSession {
 }
 
 const sessions = new Map<number, UsbLogSession>()
+const lastPorts = new Map<number, SerialPort>()
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -114,6 +122,194 @@ async function openPort(port: SerialPort): Promise<void> {
     }
   }
   throw lastError
+}
+
+function appendSelectedUsbPort(frameId: number, port: SerialPort): void {
+  lastPorts.set(frameId, port)
+}
+
+export function embeddedUsbApiCanUse(frameId: number): boolean {
+  return webSerialSupported() && (sessions.has(frameId) || lastPorts.has(frameId))
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = window.atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+function usbApiResponseCommand(command: string): string {
+  return command.trim().split(/\s+/, 1)[0] || command
+}
+
+function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCommandResult | null {
+  const expectedCommand = usbApiResponseCommand(command)
+  const errorMatch = text.match(/__FRAMEOS_USB_ERROR__\s+(\S+)\s+(\S+)\s*([^\r\n]*)/)
+  if (errorMatch) {
+    if (errorMatch[1] !== expectedCommand) {
+      return null
+    }
+    throw new Error(`${errorMatch[2]} ${errorMatch[3] || ''}`.trim())
+  }
+
+  const okMatch = text.match(/__FRAMEOS_USB_OK__\s+(\S+)/)
+  if (okMatch) {
+    if (okMatch[1] !== expectedCommand) {
+      return null
+    }
+    return { command: okMatch[1] }
+  }
+
+  const beginMatch = text.match(/__FRAMEOS_USB_BEGIN__\s+(\S+)\s+(\d+)\s+(\S+)([^\r\n]*)\r?\n/)
+  if (!beginMatch) {
+    return null
+  }
+  const responseCommand = beginMatch[1]
+  if (responseCommand !== expectedCommand) {
+    return null
+  }
+  const beginEnd = beginMatch.index! + beginMatch[0].length
+  const endMarker = `__FRAMEOS_USB_END__ ${responseCommand}`
+  const endIndex = text.indexOf(endMarker, beginEnd)
+  if (endIndex < 0) {
+    return null
+  }
+  const payload = text.slice(beginEnd, endIndex).replace(/\r?\n$/, '')
+  const encoding = beginMatch[3]
+  const metadata = beginMatch[4]?.trim() || undefined
+  if (encoding === 'base64') {
+    return {
+      command: responseCommand,
+      bytes: base64ToBytes(payload.replace(/\s+/g, '')),
+      metadata,
+    }
+  }
+  return { command: responseCommand, text: payload, metadata }
+}
+
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number
+): Promise<ReadableStreamReadResult<Uint8Array> | null> {
+  let timeoutHandle: ReturnType<typeof window.setTimeout> | null = null
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<null>((resolve) => {
+        timeoutHandle = window.setTimeout(() => resolve(null), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutHandle !== null) {
+      window.clearTimeout(timeoutHandle)
+    }
+  }
+}
+
+async function runUsbApiCommandOnPort(
+  port: SerialPort,
+  command: string,
+  payload?: Uint8Array,
+  timeoutMs = 30000
+): Promise<EmbeddedUsbApiCommandResult> {
+  await openPort(port)
+  if (!port.readable || !port.writable) {
+    throw new Error('USB serial port is not open')
+  }
+
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+  const reader = port.readable.getReader()
+  const writer = port.writable.getWriter()
+  let received = ''
+  let timedOut = false
+  try {
+    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
+    if (payload) {
+      await writer.write(payload)
+    }
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const remaining = Math.max(1, deadline - Date.now())
+      const chunk = await readWithTimeout(reader, remaining)
+      if (chunk === null) {
+        timedOut = true
+        break
+      }
+      if (chunk.done) {
+        throw new Error('USB serial command stream ended')
+      }
+      if (chunk.value) {
+        received += decoder.decode(chunk.value, { stream: true })
+        const result = parseUsbCommandResult(command, received)
+        if (result) {
+          return result
+        }
+      }
+    }
+    throw new Error(`Timed out waiting for USB command response: ${command}`)
+  } finally {
+    try {
+      writer.releaseLock()
+    } catch (error) {}
+    if (timedOut) {
+      try {
+        await reader.cancel()
+      } catch (error) {}
+    }
+    try {
+      reader.releaseLock()
+    } catch (error) {}
+  }
+}
+
+export async function runEmbeddedUsbApiCommand(
+  frameId: number,
+  command: string,
+  options?: { payload?: string | Uint8Array; timeoutMs?: number; promptIfNeeded?: boolean }
+): Promise<EmbeddedUsbApiCommandResult> {
+  if (!webSerialSupported()) {
+    throw new Error('Web Serial is not supported in this browser. Use Chrome or Edge.')
+  }
+  const hadLogStream = sessions.has(frameId)
+  const stoppedPort = hadLogStream ? await stopEmbeddedUsbLogStream(frameId) : null
+  let port = stoppedPort || lastPorts.get(frameId) || null
+  if (!port && options?.promptIfNeeded) {
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: 'Choose the board USB serial port.',
+      status: 'selecting',
+    })
+    port = await navigator.serial.requestPort()
+  }
+  if (!port) {
+    throw new Error('No USB serial port selected for this frame')
+  }
+  appendSelectedUsbPort(frameId, port)
+  const payload =
+    typeof options?.payload === 'string'
+      ? new TextEncoder().encode(options.payload)
+      : options?.payload
+  try {
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: `Sending USB command: ${command}`,
+      status: 'connecting',
+    })
+    return await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs)
+  } finally {
+    if (hadLogStream) {
+      await startEmbeddedUsbLogStream(frameId, port)
+    } else {
+      await closePort(port)
+      embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+        message: null,
+        status: 'idle',
+        stoppedAt: new Date().toISOString(),
+      })
+    }
+  }
 }
 
 async function readUsbLogs(session: UsbLogSession): Promise<void> {
@@ -221,6 +417,7 @@ export async function startEmbeddedUsbLogStream(frameId: number, port?: SerialPo
       status: 'connecting',
     })
     await openPort(selectedPort)
+    appendSelectedUsbPort(frameId, selectedPort)
 
     const session: UsbLogSession = {
       frameId,

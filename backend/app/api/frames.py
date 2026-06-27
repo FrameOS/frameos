@@ -2876,6 +2876,42 @@ async def api_frame_fast_deploy_event(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_project.post("/frames/{id:int}/embedded/usb_deploy_complete")
+async def api_frame_embedded_usb_deploy_complete(
+    id: int,
+    task_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id) or _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("USB deploy completion is only available for embedded frames")
+
+    snapshot = frame.to_dict()
+    snapshot.pop("last_successful_deploy", None)
+    snapshot.pop("last_successful_deploy_at", None)
+    frame.status = "starting"
+    frame.last_successful_deploy = snapshot
+    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    await update_frame(db, redis, frame)
+    await log(
+        db,
+        redis,
+        id,
+        "stdinfo",
+        "Embedded USB fast deploy complete; reload queued",
+    )
+    if task_id:
+        await log(
+            db,
+            redis,
+            id,
+            "stdout",
+            f"[frameos-task:{_task_id_param(task_id)}] deploy completed fast",
+        )
+    return {"message": "Success", "frame": frame.to_dict()}
+
+
 @api_project.post("/frames/{id:int}/set_next_scene")
 async def api_frame_set_next_scene(
     id: int,

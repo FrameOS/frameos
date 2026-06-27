@@ -27,6 +27,7 @@ idf_component_register(
         app_update
         spi_flash
         json
+        mbedtls
         console
         driver
         spiffs

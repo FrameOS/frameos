@@ -17,6 +17,7 @@
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -24,6 +25,15 @@
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_console";
+
+#define FOS_USB_API_MAX_UPLOAD (512 * 1024)
+#define FOS_USB_API_MAX_SCENE_ID 256
+#define FOS_USB_API_RAW_CHUNK 384
+
+static const char *USB_API_OK = "__FRAMEOS_USB_OK__";
+static const char *USB_API_ERROR = "__FRAMEOS_USB_ERROR__";
+static const char *USB_API_BEGIN = "__FRAMEOS_USB_BEGIN__";
+static const char *USB_API_END = "__FRAMEOS_USB_END__";
 
 static const char *auth_mode_name(wifi_auth_mode_t authmode)
 {
@@ -264,6 +274,214 @@ static int cmd_scene(int argc, char **argv)
     return 0;
 }
 
+static void usb_api_ok(const char *name)
+{
+    printf("%s %s\n", USB_API_OK, name);
+    fflush(stdout);
+}
+
+static void usb_api_error(const char *name, esp_err_t err, const char *message)
+{
+    printf("%s %s %s %s\n", USB_API_ERROR, name, esp_err_to_name(err), message ? message : "");
+    fflush(stdout);
+}
+
+static bool usb_api_read_exact(uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+        buf[off++] = (uint8_t)ch;
+    }
+    return true;
+}
+
+static void usb_api_payload_text(const char *name, const char *text)
+{
+    size_t len = text ? strlen(text) : 0;
+    printf("%s %s %u text\n", USB_API_BEGIN, name, (unsigned)len);
+    if (len > 0) {
+        fwrite(text, 1, len, stdout);
+    }
+    printf("\n%s %s\n", USB_API_END, name);
+    fflush(stdout);
+}
+
+static size_t usb_api_base64_encode(const uint8_t *src, size_t len, char *dst)
+{
+    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = (uint32_t)src[i] << 16;
+        bool has_b = i + 1 < len;
+        bool has_c = i + 2 < len;
+        if (has_b) v |= (uint32_t)src[i + 1] << 8;
+        if (has_c) v |= src[i + 2];
+        dst[out++] = alphabet[(v >> 18) & 0x3F];
+        dst[out++] = alphabet[(v >> 12) & 0x3F];
+        dst[out++] = has_b ? alphabet[(v >> 6) & 0x3F] : '=';
+        dst[out++] = has_c ? alphabet[v & 0x3F] : '=';
+    }
+    dst[out] = '\0';
+    return out;
+}
+
+static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t len,
+                                   const char *metadata)
+{
+    char encoded[((FOS_USB_API_RAW_CHUNK + 2) / 3) * 4 + 1];
+    printf("%s %s %u base64%s%s\n", USB_API_BEGIN, name, (unsigned)len,
+           metadata && metadata[0] ? " " : "", metadata && metadata[0] ? metadata : "");
+    for (size_t off = 0; off < len; off += FOS_USB_API_RAW_CHUNK) {
+        size_t chunk = len - off;
+        if (chunk > FOS_USB_API_RAW_CHUNK) chunk = FOS_USB_API_RAW_CHUNK;
+        size_t encoded_len = usb_api_base64_encode(data + off, chunk, encoded);
+        fwrite(encoded, 1, encoded_len, stdout);
+        fputc('\n', stdout);
+    }
+    printf("%s %s\n", USB_API_END, name);
+    fflush(stdout);
+}
+
+static int cmd_usb_api(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state> ...\n");
+        return 1;
+    }
+
+    const char *subcommand = argv[1];
+    if (strcmp(subcommand, "status") == 0) {
+        char *json = fos_http_status_json();
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "status json allocation failed");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "scene-state") == 0) {
+        usb_api_payload_text(subcommand, frameos_nim_scene_state_json());
+        return 0;
+    }
+
+    if (strcmp(subcommand, "image") == 0) {
+        uint8_t *bmp = NULL;
+        size_t bmp_len = 0;
+        char scene_id[128];
+        scene_id[0] = '\0';
+        esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, err == ESP_ERR_NOT_FOUND ? "no preview rendered yet" : "image unavailable");
+            return 1;
+        }
+        char metadata[160];
+        snprintf(metadata, sizeof(metadata), "scene=%s", scene_id);
+        usb_api_payload_base64(subcommand, bmp, bmp_len, metadata);
+        free(bmp);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "render") == 0) {
+        fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "reload") == 0 || strcmp(subcommand, "scenes-sync") == 0) {
+        fos_scenes_request_sync();
+        fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "ota") == 0) {
+        esp_err_t err = fos_ota_request_check();
+        if (err == ESP_OK) {
+            usb_api_ok(subcommand);
+            return 0;
+        }
+        usb_api_error(subcommand, err, "ota request failed");
+        return 1;
+    }
+
+    if (strcmp(subcommand, "scene") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing scene id");
+            return 1;
+        }
+        esp_err_t err = fos_scenes_select(argv[2]);
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, "scene select failed");
+            return 1;
+        }
+        fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "scene-payload") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing byte length");
+            return 1;
+        }
+        size_t len = (size_t)strtoul(argv[2], NULL, 10);
+        if (len == 0 || len >= FOS_USB_API_MAX_SCENE_ID) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad scene id length");
+            return 1;
+        }
+        char scene_id[FOS_USB_API_MAX_SCENE_ID];
+        usb_api_read_exact((uint8_t *)scene_id, len);
+        scene_id[len] = '\0';
+        esp_err_t err = fos_scenes_select(scene_id);
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, "scene select failed");
+            return 1;
+        }
+        fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "upload-scenes") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing byte length");
+            return 1;
+        }
+        size_t len = (size_t)strtoul(argv[2], NULL, 10);
+        if (len == 0 || len > FOS_USB_API_MAX_UPLOAD) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
+            return 1;
+        }
+        uint8_t *body = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!body) body = malloc(len + 1);
+        if (!body) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
+            return 1;
+        }
+        usb_api_read_exact(body, len);
+        body[len] = '\0';
+        esp_err_t err = fos_http_store_uploaded_scenes_payload((const char *)body, len);
+        free(body);
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, "scene upload failed");
+            return 1;
+        }
+        fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    usb_api_error(subcommand, ESP_ERR_NOT_SUPPORTED, "unknown subcommand");
+    return 1;
+}
+
 static int cmd_restart(int argc, char **argv)
 {
     esp_restart();
@@ -312,6 +530,7 @@ esp_err_t fos_console_start(void)
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
         {.command = "scene_state", .help = "Show current interpreted scene state JSON", .func = cmd_scene_state},
         {.command = "scene", .help = "scene <id> — select a loaded scene and render", .func = cmd_scene},
+        {.command = "usb_api", .help = "USB API bridge for the browser", .func = cmd_usb_api},
         {.command = "restart", .help = "Reboot", .func = cmd_restart},
         {.command = "factory-reset", .help = "Erase config and reboot", .func = cmd_factory_reset},
     };

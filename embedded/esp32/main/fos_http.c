@@ -236,7 +236,7 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     return ESP_OK;
 }
 
-static esp_err_t store_uploaded_scenes_payload(const char *body, size_t len)
+esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
 {
     const char *payload = body;
     size_t payload_len = len;
@@ -489,7 +489,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
-static esp_err_t status_get_handler(httpd_req_t *req)
+char *fos_http_status_json(void)
 {
     fos_config_t *config = fos_config();
     const esp_app_desc_t *app = esp_app_get_description();
@@ -534,7 +534,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
         free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
-        return httpd_resp_send_500(req);
+        return NULL;
     }
 
     char *json = NULL;
@@ -554,7 +554,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
-        "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u},"
+        "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
+        "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\"},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
@@ -581,6 +582,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
+        fos_client_last_refresh_skipped() ? "true" : "false",
+        fos_client_snapshot_mode(),
         nim_info, scene_json,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
@@ -592,10 +595,20 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
     free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
     if (len < 0 || !json) {
+        free(json);
+        return NULL;
+    }
+    return json;
+}
+
+static esp_err_t status_get_handler(httpd_req_t *req)
+{
+    char *json = fos_http_status_json();
+    if (!json) {
         return httpd_resp_send_500(req);
     }
     httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_send(req, json, len);
+    esp_err_t err = httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
     free(json);
     return err;
 }
@@ -731,25 +744,29 @@ static uint8_t preview_palette_index(const uint8_t *buf, int width, int height,
     }
 }
 
-static esp_err_t preview_bmp_handler(httpd_req_t *req)
+esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene_id, size_t scene_id_len)
 {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!out || !out_len) return ESP_ERR_INVALID_ARG;
+
     int width = 0, height = 0;
     fos_pixel_format_t format = FOS_PIXEL_1BPP;
     size_t packed_len = 0;
     if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL)) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
     if (width <= 0 || height <= 0 || packed_len == 0) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
 
     uint8_t *packed = heap_caps_malloc(packed_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!packed) packed = malloc(packed_len);
-    if (!packed) return httpd_resp_send_500(req);
+    if (!packed) return ESP_ERR_NO_MEM;
     esp_err_t err = fos_client_snapshot_copy(packed, packed_len, &width, &height, &format, NULL, NULL);
     if (err != ESP_OK) {
         free(packed);
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        return ESP_ERR_NOT_FOUND;
     }
 
     uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
@@ -760,32 +777,31 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
         free(packed);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
+        return ESP_ERR_INVALID_SIZE;
     }
-
-    uint8_t header[54] = {0};
-    header[0] = 'B'; header[1] = 'M';
-    put_u32le(&header[2], (uint32_t)(54u + palette_bytes + pixel_bytes));
-    put_u32le(&header[10], (uint32_t)(54u + palette_bytes));
-    put_u32le(&header[14], 40);
-    put_u32le(&header[18], (uint32_t)width);
-    put_u32le(&header[22], (uint32_t)height);
-    put_u16le(&header[26], 1);
-    put_u16le(&header[28], bit_count);
-    put_u32le(&header[34], (uint32_t)pixel_bytes);
-    put_u32le(&header[46], (uint32_t)palette_entries);
-    put_u32le(&header[50], (uint32_t)palette_entries);
-
-    const size_t rows_per_chunk = 16;
-    uint8_t *rows = heap_caps_calloc(rows_per_chunk, row_stride, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!rows) rows = calloc(rows_per_chunk, row_stride);
-    if (!rows) {
+    size_t bmp_len = 54u + palette_bytes + pixel_bytes;
+    uint8_t *bmp = heap_caps_malloc(bmp_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!bmp) bmp = malloc(bmp_len);
+    if (!bmp) {
         free(packed);
-        return httpd_resp_send_500(req);
+        return ESP_ERR_NO_MEM;
     }
+    memset(bmp, 0, bmp_len);
 
-    uint8_t palette[64];
-    memset(palette, 255, sizeof(palette));
+    bmp[0] = 'B'; bmp[1] = 'M';
+    put_u32le(&bmp[2], (uint32_t)bmp_len);
+    put_u32le(&bmp[10], (uint32_t)(54u + palette_bytes));
+    put_u32le(&bmp[14], 40);
+    put_u32le(&bmp[18], (uint32_t)width);
+    put_u32le(&bmp[22], (uint32_t)height);
+    put_u16le(&bmp[26], 1);
+    put_u16le(&bmp[28], bit_count);
+    put_u32le(&bmp[34], (uint32_t)pixel_bytes);
+    put_u32le(&bmp[46], (uint32_t)palette_entries);
+    put_u32le(&bmp[50], (uint32_t)palette_entries);
+
+    uint8_t *palette = bmp + 54u;
+    memset(palette, 255, palette_bytes);
     size_t colors = 0;
     const uint8_t *rgb = preview_palette(format, &colors);
     for (size_t i = 0; i < palette_entries; i++) {
@@ -796,20 +812,13 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
         palette[i * 4u + 3u] = 0;
     }
 
-    httpd_resp_set_type(req, "image/bmp");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    char scene_id[128];
-    current_scene_id(scene_id, sizeof(scene_id));
-    if (scene_id[0]) {
-        httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
+    if (scene_id && scene_id_len > 0) {
+        current_scene_id(scene_id, scene_id_len);
     }
-    err = httpd_resp_send_chunk(req, (const char *)header, sizeof(header));
-    if (err == ESP_OK) {
-        err = httpd_resp_send_chunk(req, (const char *)palette, palette_bytes);
-    }
-    size_t pending_rows = 0;
-    for (int y = height - 1; err == ESP_OK && y >= 0; y--) {
-        uint8_t *row = rows + pending_rows * row_stride;
+    uint8_t *pixels = bmp + 54u + palette_bytes;
+    size_t row_index = 0;
+    for (int y = height - 1; y >= 0; y--) {
+        uint8_t *row = pixels + row_index * row_stride;
         memset(row, 0, row_stride);
         for (int x = 0; x < width; x++) {
             uint8_t index = preview_palette_index(packed, width, height, format, x, y);
@@ -821,17 +830,39 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
                 row[(size_t)x >> 1] |= (index & 0x0F) << 4;
             }
         }
-        pending_rows++;
-        if (pending_rows == rows_per_chunk || y == 0) {
-            err = httpd_resp_send_chunk(req, (const char *)rows, row_stride * pending_rows);
-            pending_rows = 0;
-        }
+        row_index++;
     }
 
-    free(rows);
     free(packed);
-    if (err != ESP_OK) return err;
-    return httpd_resp_send_chunk(req, NULL, 0);
+    *out = bmp;
+    *out_len = bmp_len;
+    return ESP_OK;
+}
+
+static esp_err_t preview_bmp_handler(httpd_req_t *req)
+{
+    uint8_t *bmp = NULL;
+    size_t bmp_len = 0;
+    char scene_id[128];
+    scene_id[0] = '\0';
+    esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
+    if (err == ESP_ERR_NOT_FOUND) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+    }
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "image/bmp");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (scene_id[0]) {
+        httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
+    }
+    err = httpd_resp_send(req, (const char *)bmp, bmp_len);
+    free(bmp);
+    return err;
 }
 
 static esp_err_t setup_post_handler(httpd_req_t *req)
@@ -1112,7 +1143,7 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
         fos_scenes_request_sync();
         if (s_render_cb) s_render_cb();
     } else if (strcmp(event_name, "uploadScenes") == 0) {
-        ok = store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
+        ok = fos_http_store_uploaded_scenes_payload(payload, strlen(payload)) == ESP_OK;
         if (ok && s_render_cb) s_render_cb();
     } else if (strcmp(event_name, "setCurrentScene") == 0) {
         char scene_id[128];
@@ -1281,7 +1312,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     body[total] = '\0';
 
     log_http_command(req, "uploadScenes", (size_t)total);
-    esp_err_t err = store_uploaded_scenes_payload(body, total);
+    esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
