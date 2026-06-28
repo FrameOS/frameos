@@ -41,6 +41,9 @@ def create_project_layout(tmp_path: Path) -> Path:
     write(repo_root / "frontend" / "schema" / "events.json", "{}\n")
     write(repo_root / "repo" / "apps" / "code" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
     write(repo_root / "repo" / "apps" / "code" / "sample" / "app.ts", "export function run() {}\n")
+    write(repo_root / "repo" / "scenes" / "samples" / "repository.json", "{\"name\":\"Samples\"}\n")
+    write(repo_root / "repo" / "scenes" / "samples" / "Sample" / "template.json", "{\"name\":\"Sample\"}\n")
+    write(repo_root / "repo" / "scenes" / "samples" / "Sample" / "scenes.json", "[]\n")
     write(repo_root / "versions.json", "{\"web\":\"1.0.0\"}\n")
 
     write(frameos_root / "frontend" / "package.json", "{}\n")
@@ -77,6 +80,7 @@ def test_prepare_assets_uses_manifest_to_skip_or_regenerate_work(tmp_path, monke
         write(project_root / "src" / "assets" / "web.nim", f"# web {version}\n")
         write(project_root / "src" / "assets" / "frame_web.nim", f"# frame web {version}\n")
         write(project_root / "src" / "assets" / "fonts.nim", f"# fonts {version}\n")
+        write(project_root / "src" / "assets" / "repo_scenes.nim", f"# repo scenes {version}\n")
 
     monkeypatch.setattr(prepare_assets, "build_frontend", fake_build_frontend)
     monkeypatch.setattr(prepare_assets, "generate_asset_modules", fake_generate_asset_modules)
@@ -190,6 +194,19 @@ def test_hash_frontend_inputs_tracks_repo_app_templates(tmp_path):
     assert after != before
 
 
+def test_hash_module_inputs_tracks_repo_scene_templates(tmp_path):
+    frameos_root = create_project_layout(tmp_path)
+
+    before = prepare_assets.hash_module_inputs(frameos_root)
+    write(
+        frameos_root.parent / "repo" / "scenes" / "samples" / "Sample" / "template.json",
+        "{\"name\":\"Updated\"}\n",
+    )
+    after = prepare_assets.hash_module_inputs(frameos_root)
+
+    assert after != before
+
+
 def test_hash_frontend_inputs_tracks_shared_public_assets(tmp_path):
     frameos_root = create_project_layout(tmp_path)
 
@@ -239,6 +256,7 @@ def test_prepare_assets_uses_packaged_frontend_when_shared_sources_are_missing(t
     write(frameos_root / "src" / "assets" / "web.nim", "# web\n")
     write(frameos_root / "src" / "assets" / "frame_web.nim", "# frame web\n")
     write(frameos_root / "src" / "assets" / "fonts.nim", "# fonts\n")
+    write(frameos_root / "src" / "assets" / "repo_scenes.nim", "# repo scenes\n")
     shutil.rmtree(frameos_root.parent / "frontend" / "src")
 
     build_calls: list[int] = []

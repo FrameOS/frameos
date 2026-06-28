@@ -63,6 +63,68 @@ suite "frame api route behavior":
     let states = httpRequest(server.port, "GET", "/api/frames/1/states?k=test-key", headers = [("Cookie", adminCookie)])
     check states.status == 200
 
+  test "repository endpoints expose bundled system templates only":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let unauthorized = httpRequest(server.port, "GET", "/api/repositories/system")
+    check unauthorized.status == 401
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let repositories = httpRequest(server.port, "GET", "/api/repositories/system", headers = [("Cookie", adminCookie)])
+    check repositories.status == 200
+    let repositoriesPayload = parseJson(repositories.body)
+    check repositoriesPayload.kind == JArray
+    check repositoriesPayload.len >= 2
+
+    var samples = newJNull()
+    for repository in repositoriesPayload:
+      if repository["id"].getStr() == "system-samples":
+        samples = repository
+    check samples.kind == JObject
+
+    if samples.kind == JObject:
+      check samples["name"].getStr() == "FrameOS Samples"
+      check samples["templates"].kind == JArray
+
+      var xkcd = newJNull()
+      for templateNode in samples["templates"]:
+        if templateNode["name"].getStr() == "XKCD":
+          xkcd = templateNode
+      check xkcd.kind == JObject
+
+      if xkcd.kind == JObject:
+        check xkcd["scenes"].kind == JArray
+        check xkcd["scenes"].len > 0
+        check xkcd["image"].getStr() == "/api/repositories/system/samples/templates/XKCD/image"
+
+    let image = httpRequest(
+      server.port,
+      "GET",
+      "/api/repositories/system/samples/templates/XKCD/image",
+      headers = [("Cookie", adminCookie)],
+    )
+    check image.status == 200
+    check image.header("content-type") == "image/jpeg"
+    check image.body.len > 0
+
+    let customRepositories = httpRequest(server.port, "GET", "/api/repositories", headers = [("Cookie", adminCookie)])
+    check customRepositories.status == 200
+    check parseJson(customRepositories.body).len == 0
+
   test "frame update endpoint persists config and interpreted scenes":
     drainEventChannel()
     let tempRoot = getTempDir() / "frameos-frame-api-save"
