@@ -44,6 +44,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     buildroot_base_cache_dir,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
+    stage_buildroot_frameos_service,
     _gzip_file,
     _sha256,
     normalize_buildroot_platform,
@@ -314,6 +315,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
     os.chmod(script_path, 0o755)
+    stage_buildroot_frameos_service(overlay)
     (systemd / SETUP_JSON_RESET_SERVICE_NAME).write_text(
         render_setup_json_reset_service(
             "/boot/frameos-setup.json",

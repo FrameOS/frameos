@@ -28,6 +28,7 @@ from app.tasks.buildroot_image import (
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
     precompiled_buildroot_sd_image_release_url,
+    stage_buildroot_frameos_service,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
 )
@@ -669,13 +670,13 @@ async def test_buildroot_run_hassio_precompiled_uses_container_even_with_build_h
 
 
 @pytest.mark.asyncio
-async def test_precompiled_sd_image_patch_uses_local_boot_tools_without_docker(monkeypatch):
+async def test_precompiled_sd_image_patch_uses_local_image_tools_without_docker(monkeypatch):
     builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
     builder.build_environment_provider = "docker"
     builder.executor = SimpleNamespace(uses_local_filesystem=True)
 
     async def fail_compose_tools_image():
-        raise AssertionError("precompiled SD image boot patch should not require Docker when mtools are local")
+        raise AssertionError("precompiled SD image patch should not require Docker when local image tools are available")
 
     monkeypatch.setattr(builder, "_host_has_boot_patch_tools", lambda: True)
     monkeypatch.setattr(builder, "_compose_tools_image", fail_compose_tools_image)
@@ -717,7 +718,7 @@ def test_buildroot_no_build_environment_message_mentions_hassio_container(monkey
 
 
 @pytest.mark.asyncio
-async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeypatch):
+async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path, monkeypatch):
     frame_data = {
         "id": 42,
         "project_id": 7,
@@ -756,9 +757,14 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
     async def fake_exec_local_command(*args, **kwargs):
         command = args[0]
         commands.append(command)
-        captured["patch_script"] = (tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh").read_text(
-            encoding="utf-8"
-        )
+        if "patch-root.sh" in command:
+            captured["root_patch_script"] = (tmp_path / ".output-root-patch" / "patch-root.sh").read_text(
+                encoding="utf-8"
+            )
+        if "patch-boot.sh" in command:
+            captured["boot_patch_script"] = (tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh").read_text(
+                encoding="utf-8"
+            )
         return 0, "", ""
 
     builder.executor = SimpleNamespace(run=fake_exec_local_command)
@@ -798,16 +804,24 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
     assert result is not None
     assert result.cache_hit is True
     assert output_image.read_bytes() == b"release-image"
-    assert len(commands) == 1
-    assert "patch-boot.sh" in commands[0]
-    assert "compose-partitions.sh" not in commands[0]
+    assert len(commands) == 2
+    assert "patch-root.sh" in commands[0]
+    assert "patch-boot.sh" in commands[1]
+    assert all("compose-partitions.sh" not in command for command in commands)
+    assert "write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service" in captured[
+        "root_patch_script"
+    ]
+    assert "symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service" in captured[
+        "root_patch_script"
+    ]
+    assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
     boot_root = temp_dir / "overlay" / "boot"
     assert (boot_root / "frameos-setup.json").is_file()
     assert (boot_root / "frameos-hostname").read_text(encoding="utf-8") == "kitchen-frame\n"
     assert not (boot_root / "frameos-wifi.nmconnection").exists()
-    assert "managed_boot_files=(" in captured["patch_script"]
-    assert "frameos-wifi.nmconnection" in captured["patch_script"]
-    assert 'mdel -i "$target"' in captured["patch_script"]
+    assert "managed_boot_files=(" in captured["boot_patch_script"]
+    assert "frameos-wifi.nmconnection" in captured["boot_patch_script"]
+    assert 'mdel -i "$target"' in captured["boot_patch_script"]
 
 
 @pytest.mark.asyncio
@@ -978,7 +992,13 @@ async def test_precompiled_sd_image_accepts_larger_data_partitions(tmp_path, mon
         patched["boot_root"] = boot_root_arg
         patched["image"] = image
 
+    async def fake_patch_root_partition(output_path_arg, partitions_arg, *, image):
+        patched["root_output_path"] = output_path_arg
+        patched["root_partitions"] = partitions_arg
+        patched["root_image"] = image
+
     monkeypatch.setattr(builder, "_log", fake_log)
+    monkeypatch.setattr(builder, "_patch_root_partition", fake_patch_root_partition)
     monkeypatch.setattr(builder, "_patch_boot_partition", fake_patch_boot_partition)
 
     await builder._compose_sd_image_from_precompiled_release(
@@ -989,6 +1009,9 @@ async def test_precompiled_sd_image_accepts_larger_data_partitions(tmp_path, mon
     )
 
     assert output_image.read_bytes() == release_image.read_bytes()
+    assert patched["root_output_path"] == output_image
+    assert patched["root_image"] is None
+    assert patched["root_partitions"][1] == {"start": partitions[1][0], "size": partitions[1][1]}
     assert patched["output_path"] == output_image
     assert patched["boot_root"] == tmp_path / "tmp" / "precompiled-compose" / "roots" / "boot"
     assert patched["image"] is None
@@ -1096,6 +1119,11 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         if kwargs["workspace"] == "boot-patch":
             captured["patch"] = kwargs
             captured["patch_script"] = (temp_dir / "compose" / "patch-boot.sh").read_text(encoding="utf-8")
+        if kwargs["workspace"] == "root-patch":
+            captured["root_patch"] = kwargs
+            captured["root_patch_script"] = (output_image.parent / ".output-root-patch" / "patch-root.sh").read_text(
+                encoding="utf-8"
+            )
         return 0, "", ""
 
     async def fake_log(*args, **kwargs):
@@ -1144,7 +1172,16 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
     assert captured["compose"]["args"] == ["bash", "/work/compose-partitions.sh"]
+    assert captured["root_patch"]["args"] == ["bash", "/patch-root.sh"]
     assert captured["patch"]["args"] == ["bash", "/patch-boot.sh"]
+    root_patch_mounts = captured["root_patch"]["mounts"]
+    assert root_patch_mounts[0].source == output_image.resolve()
+    assert root_patch_mounts[0].target == "/image/output.img"
+    assert root_patch_mounts[1].target == "/root-service"
+    assert "write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service" in captured[
+        "root_patch_script"
+    ]
+    assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
     patch_mounts = captured["patch"]["mounts"]
     assert patch_mounts[0].source == output_image.resolve()
     assert patch_mounts[0].target == "/image/output.img"
@@ -1159,7 +1196,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert (temp_dir / "compose" / "roots" / "assets" / "frameos-assets-placeholder").is_file()
     assert output_image.read_bytes() == b"base"
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
-    assert len(commands) == 2
+    assert len(commands) == 3
 
 
 @pytest.mark.asyncio
@@ -1259,10 +1296,15 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
         "/tmp/frameos-buildroot-test/compose/mount-0-compose",
         str(temp_dir / "compose"),
     ) in downloaded_dirs
-    assert "-v /tmp/frameos-buildroot-test/boot-patch/mount-0-output.img:/image/output.img" in commands[1]
+    assert "-v /tmp/frameos-buildroot-test/root-patch/mount-0-output.img:/image/output.img" in commands[1]
+    assert "-v /tmp/frameos-buildroot-test/boot-patch/mount-0-output.img:/image/output.img" in commands[2]
     assert any(local.endswith("output.img") and remote.endswith("/boot-patch/mount-0-output.img") for local, remote in synced_files)
     assert any(
         local.endswith("patch-boot.sh") and remote.endswith("/boot-patch/mount-2-patch-boot.sh")
+        for local, remote in synced_files
+    )
+    assert any(
+        local.endswith("patch-root.sh") and remote.endswith("/root-patch/mount-2-patch-root.sh")
         for local, remote in synced_files
     )
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
@@ -1325,12 +1367,34 @@ async def test_cached_base_composer_runs_without_docker_when_image_is_not_requir
         image=None,
     )
 
-    assert len(commands) == 2
+    assert len(commands) == 3
     assert all("docker run" not in command for command in commands)
     assert commands[0].startswith("FRAMEOS_COMPOSE_WORK_DIR=")
     assert commands[1].startswith("FRAMEOS_IMAGE_DIR=")
+    assert "patch-root.sh" in commands[1]
+    assert commands[2].startswith("FRAMEOS_IMAGE_DIR=")
+    assert "patch-boot.sh" in commands[2]
     assert output_image.read_bytes() == b"base"
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
+
+
+def test_stage_buildroot_frameos_service_enables_runtime(tmp_path):
+    stage_buildroot_frameos_service(tmp_path)
+
+    service = tmp_path / "etc" / "systemd" / "system" / "frameos.service"
+    wants_link = tmp_path / "etc" / "systemd" / "system" / "multi-user.target.wants" / "frameos.service"
+
+    assert service.is_file()
+    service_text = service.read_text(encoding="utf-8")
+    assert "User=root" in service_text
+    assert "ExecStart=/srv/frameos/current/frameos" in service_text
+    assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in service_text
+    assert (
+        "Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib"
+        in service_text
+    )
+    assert wants_link.is_symlink()
+    assert wants_link.readlink().as_posix() == "../frameos.service"
 
 
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):

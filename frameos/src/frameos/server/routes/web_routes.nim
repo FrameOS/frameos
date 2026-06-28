@@ -166,7 +166,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         params.getOrDefault("serverHost", globalFrameOS.frameConfig.serverHost),
         params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
       )
-      request.respond(Http200, body = netportal.confirmHtml())
+      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS))
   )
 
   router.get("/ping", proc(request: Request) {.gcsafe.} =

@@ -109,6 +109,8 @@ proc makeFrameOS(timeoutSeconds = 0.0): FrameOS =
     frameConfig: FrameConfig(
       serverHost: "frame.local",
       serverPort: 8989,
+      frameHost: "frame.local",
+      framePort: 8787,
       network: NetworkConfig(
         wifiHotspotSsid: "FrameOS-Setup",
         wifiHotspotPassword: "secret1234",
@@ -159,6 +161,19 @@ suite "portal network orchestration":
     check maskedPasswordArgs(@["-n", "nmcli", "password", "secret1234", "name", "x"]) ==
           @["-n", "nmcli", "password", "se********", "name", "x"]
     check maskedPasswordArgs(@["password"]) == @["password"]
+
+  test "confirmHtml tells user the post-WiFi frame URL":
+    let frame = makeFrameOS()
+    let html = confirmHtml(frame)
+
+    check html.contains("http://frame.local:8787/")
+    check html.contains("http://frame.local:8787/admin")
+
+  test "postSetupFrameUrl uses https proxy port when enabled":
+    let frame = makeFrameOS()
+    frame.frameConfig.httpsProxy = HttpsProxyConfig(enable: true, port: 8443, exposeOnlyPort: true)
+
+    check postSetupFrameUrl(frame) == "https://frame.local:8443/"
 
   test "availableNetworks deduplicates and drops empty ssids":
     hookMode = hmWifiList

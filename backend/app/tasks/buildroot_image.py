@@ -128,8 +128,8 @@ BUILDROOT_DOCKER_APT_DEPS = (
     "xz-utils",
 )
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
-BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
-BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel")
+BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel", "debugfs")
+BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel", "debugfs")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 LEGACY_PLATFORM_ALIASES = {
@@ -433,6 +433,57 @@ def _service_runtime_lines(
             "StandardError=journal+console",
         ])
     return lines
+
+
+def render_systemd_service(
+    source: Path,
+    *,
+    user: str,
+    console_output: bool = False,
+    environment: dict[str, str] | None = None,
+) -> str:
+    service = source.read_text(encoding="utf-8").replace("%I", user)
+    service_lines = service.splitlines()
+    rendered_lines: list[str] = []
+    in_service = False
+    inserted = False
+    for line in service_lines:
+        if line == "[Service]":
+            in_service = True
+            rendered_lines.append(line)
+            continue
+        if in_service and line.startswith("[") and line.endswith("]"):
+            if not inserted:
+                rendered_lines.extend(_service_runtime_lines(console_output, environment))
+                inserted = True
+            in_service = False
+        rendered_lines.append(line)
+    if in_service and not inserted:
+        rendered_lines.extend(_service_runtime_lines(console_output, environment))
+    return "\n".join(rendered_lines) + "\n"
+
+
+def render_buildroot_frameos_service() -> str:
+    return render_systemd_service(
+        REPO_ROOT / "frameos" / "frameos.service",
+        user="root",
+        environment={
+            "FRAMEOS_HOME": "/srv/frameos/current",
+            "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
+        },
+    )
+
+
+def stage_buildroot_frameos_service(root: Path) -> None:
+    systemd_dir = root / "etc" / "systemd" / "system"
+    wants_dir = systemd_dir / "multi-user.target.wants"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    wants_dir.mkdir(parents=True, exist_ok=True)
+    (systemd_dir / "frameos.service").write_text(render_buildroot_frameos_service(), encoding="utf-8")
+    link = wants_dir / "frameos.service"
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to("../frameos.service")
 
 
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
@@ -1359,25 +1410,15 @@ class BuildrootImageBuilder:
         console_output: bool = False,
         environment: dict[str, str] | None = None,
     ) -> None:
-        service = source.read_text(encoding="utf-8").replace("%I", user)
-        service_lines = service.splitlines()
-        rendered_lines: list[str] = []
-        in_service = False
-        inserted = False
-        for line in service_lines:
-            if line == "[Service]":
-                in_service = True
-                rendered_lines.append(line)
-                continue
-            if in_service and line.startswith("[") and line.endswith("]"):
-                if not inserted:
-                    rendered_lines.extend(_service_runtime_lines(console_output, environment))
-                    inserted = True
-                in_service = False
-            rendered_lines.append(line)
-        if in_service and not inserted:
-            rendered_lines.extend(_service_runtime_lines(console_output, environment))
-        destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
+        destination.write_text(
+            render_systemd_service(
+                source,
+                user=user,
+                console_output=console_output,
+                environment=environment,
+            ),
+            encoding="utf-8",
+        )
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = _get_frame_settings(self.db, self.frame)
@@ -1874,6 +1915,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 images_dir / "assets.vfat",
             ),
         )
+        await self._patch_root_partition(output_path, partitions, image=image)
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     @staticmethod
@@ -1921,6 +1963,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 output_path,
             ),
         )
+        await self._patch_root_partition(output_path, partitions, image=image)
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     @staticmethod
@@ -1935,6 +1978,128 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         # Release composition may grow those partitions beyond the minimum
         # defaults, and this path only patches BOOT files.
         return partitions
+
+    async def _patch_root_partition(
+        self,
+        output_path: Path,
+        partitions: list[dict[str, int]],
+        *,
+        image: str | None,
+    ) -> None:
+        if len(partitions) < 2:
+            raise RuntimeError("Cannot patch root partition; SD image has fewer than two partitions")
+
+        root_partition = partitions[1]
+        compose_dir = output_path.parent / f".{output_path.stem}-root-patch"
+        service_root = compose_dir / "root-service"
+        if compose_dir.exists():
+            shutil.rmtree(compose_dir)
+        compose_dir.mkdir(parents=True, exist_ok=True)
+        stage_buildroot_frameos_service(service_root)
+        (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+
+        script_path = compose_dir / "patch-root.sh"
+        script_path.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
+service_root="${{FRAMEOS_ROOT_SERVICE_ROOT:-/root-service}}"
+if ! command -v debugfs >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends e2fsprogs
+fi
+disk="$image_dir"/{shlex.quote(output_path.name)}
+rootfs="$(mktemp)"
+cmds="$(mktemp)"
+cleanup_root_patch() {{
+  rm -f "$rootfs" "$cmds"
+}}
+trap cleanup_root_patch EXIT
+python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
+import sys
+
+disk_path, rootfs_path, start, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+with open(disk_path, "rb") as disk, open(rootfs_path, "wb") as rootfs:
+    disk.seek(start)
+    remaining = size
+    while remaining:
+        chunk = disk.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise SystemExit("root partition ended unexpectedly")
+        rootfs.write(chunk)
+        remaining -= len(chunk)
+PY
+cat > "$cmds" <<EOF
+mkdir /etc
+mkdir /etc/systemd
+mkdir /etc/systemd/system
+mkdir /etc/systemd/system/multi-user.target.wants
+rm /etc/systemd/system/frameos.service
+write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service
+rm /etc/systemd/system/multi-user.target.wants/frameos.service
+symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
+rm /etc/hostname
+write $service_root/etc/hostname /etc/hostname
+EOF
+debugfs -w -f "$cmds" "$rootfs"
+python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
+import sys
+
+disk_path, rootfs_path, start = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(disk_path, "r+b") as disk, open(rootfs_path, "rb") as rootfs:
+    disk.seek(start)
+    while True:
+        chunk = rootfs.read(1024 * 1024)
+        if not chunk:
+            break
+        disk.write(chunk)
+PY
+""",
+            encoding="utf-8",
+        )
+        os.chmod(script_path, 0o755)
+
+        try:
+            if image:
+                if self.executor is None:
+                    raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+                status, _, err = await self._with_progress_updates(
+                    "Still patching Buildroot SD image root partition",
+                    self.executor.docker_run(
+                        image=image,
+                        mounts=[
+                            DockerMount(output_path.resolve(), f"/image/{output_path.name}"),
+                            DockerMount(service_root.resolve(), "/root-service", read_only=True),
+                            DockerMount(script_path.resolve(), "/patch-root.sh", read_only=True),
+                        ],
+                        args=["bash", "/patch-root.sh"],
+                        workspace="root-patch",
+                        log_command="docker run (buildroot root partition patch)",
+                        stderr_log_tag="stdout",
+                    ),
+                )
+            else:
+                patch_cmd = " ".join(
+                    [
+                        f"FRAMEOS_IMAGE_DIR={shlex.quote(str(output_path.parent))}",
+                        f"FRAMEOS_ROOT_SERVICE_ROOT={shlex.quote(str(service_root))}",
+                        "bash",
+                        shlex.quote(str(script_path)),
+                    ]
+                )
+                status, _, err = await self._with_progress_updates(
+                    "Still patching Buildroot SD image root partition",
+                    self._run_command(
+                        patch_cmd,
+                        log_command="buildroot root partition patch",
+                        stderr_log_tag="stdout",
+                    ),
+                )
+            if status != 0:
+                raise RuntimeError(f"Buildroot root partition patch failed: {err or 'see logs'}")
+        finally:
+            shutil.rmtree(compose_dir, ignore_errors=True)
 
     async def _patch_boot_partition(
         self,
@@ -2202,6 +2367,7 @@ fi
                         " && command -v mkfs.vfat >/dev/null 2>&1"
                         " && command -v mcopy >/dev/null 2>&1"
                         " && command -v mlabel >/dev/null 2>&1"
+                        " && command -v debugfs >/dev/null 2>&1"
                     ),
                 ]
             ),
@@ -2366,6 +2532,14 @@ target_dir="${TARGET_DIR:?TARGET_DIR is required}"
 chmod 0755 "$target_dir/srv/frameos/current/frameos" || true
 chmod 0755 "$target_dir/srv/frameos/remote/current/frameos_remote" || true
 mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/etc/cron.d"
+if [ -f "$target_dir/srv/frameos/current/frameos.service" ]; then
+  install -m 0644 "$target_dir/srv/frameos/current/frameos.service" "$target_dir/etc/systemd/system/frameos.service"
+  rm -f "$target_dir/etc/systemd/system/multi-user.target.wants/frameos.service"
+  ln -s ../frameos.service "$target_dir/etc/systemd/system/multi-user.target.wants/frameos.service"
+fi
+if [ -f "$target_dir/boot/frameos-hostname" ]; then
+  install -m 0644 "$target_dir/boot/frameos-hostname" "$target_dir/etc/hostname"
+fi
 
 if [ -d "$target_dir/lib/firmware/brcm" ]; then
   cd "$target_dir/lib/firmware/brcm"
@@ -3126,6 +3300,7 @@ def _replace_partition(image_path: Path, partitions: list[dict[str, int]], parti
 
 
 def _hostname_for_frame(frame: Frame) -> str:
-    host = (frame.frame_host or f"frame{frame.id}").split(".", 1)[0]
+    frame_id = getattr(frame, "id", "")
+    host = (getattr(frame, "frame_host", "") or f"frame{frame_id}").split(".", 1)[0]
     safe = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in host.lower()).strip("-")
-    return safe or f"frame{frame.id}"
+    return safe or f"frame{frame_id}" or "frameos"

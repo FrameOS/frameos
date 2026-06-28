@@ -529,10 +529,28 @@ setTimeout(updateNetworks, 4000); // refresh in 4 sec
 updateUI(false);         // start collapsed
 </script>""")
 
-proc confirmHtml*(): string =
-  layout("""
-<h1>Saved!</h1>
-<p>The frame is now attempting to connect to Wi-Fi. You may close this tab.</p>
+proc postSetupFrameUrl*(frameOS: FrameOS): string =
+  let frameConfig = frameOS.frameConfig
+  let scheme = if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.enable: "https" else: "http"
+  let host = if frameConfig.frameHost.strip().len > 0: frameConfig.frameHost.strip() else: "frame.local"
+  var port =
+    if scheme == "https":
+      if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.port > 0: frameConfig.httpsProxy.port else: 443
+    else:
+      if frameConfig.framePort > 0: frameConfig.framePort else: 8787
+  let portSuffix =
+    if (scheme == "http" and port == 80) or (scheme == "https" and port == 443): "" else: ":" & $port
+  result = scheme & "://" & host & portSuffix & "/"
+
+proc confirmHtml*(frameOS: FrameOS): string =
+  let frameUrl = postSetupFrameUrl(frameOS)
+  let adminUrl = frameUrl & "admin"
+  layout(
+    "<h1>Saved!</h1>\n" &
+    "<p>The frame is now attempting to connect to Wi-Fi. After your computer reconnects to the same network, look for the frame at <a href=\"" &
+      htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
+    "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
+    """
 <h2>Troubleshooting</h2>
 <ul>
   <li>Wait about 60 seconds—your device can stay stuck on the setup network for a short time.</li>
