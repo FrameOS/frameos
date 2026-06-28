@@ -177,6 +177,8 @@ BUILDROOT_IMAGE_QUEUE_INACTIVE_AFTER_SECONDS = int(
 )
 BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS = max(1, min(60, BUILDROOT_IMAGE_INACTIVE_AFTER_SECONDS // 3))
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
+BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
+BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
 BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH = "/usr/sbin/frameos-expand-sd-card"
 BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME = "frameos-expand-sd-card.service"
 BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
@@ -1016,6 +1018,7 @@ class BuildrootImageBuilder:
                 self._write_post_build_script(post_build_path)
                 self._write_partition_post_build_script(partition_post_build_path)
                 self._write_post_image_script(post_image_path)
+                self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
                 base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
                 await self._compose_sd_image_from_base(
                     temp_dir=temp_dir,
@@ -1483,6 +1486,7 @@ class BuildrootImageBuilder:
                     f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
                     'BR2_DL_DIR="/cache/dl"',
                     'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
+                    f'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="{BUILDROOT_BOOT_LOGO_WORK_PATH}"',
                     "BR2_PACKAGE_SYSTEMD=y",
                     "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
                     "BR2_PACKAGE_DBUS=y",
@@ -1623,6 +1627,13 @@ class BuildrootImageBuilder:
     def _write_post_image_script(path: Path) -> None:
         path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
         os.chmod(path, 0o755)
+
+    @staticmethod
+    def _write_boot_logo(path: Path) -> None:
+        if not BUILDROOT_BOOT_LOGO_SOURCE.is_file():
+            raise RuntimeError(f"Buildroot boot logo is missing; expected at {BUILDROOT_BOOT_LOGO_SOURCE}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(BUILDROOT_BOOT_LOGO_SOURCE, path)
 
     @staticmethod
     def _write_setup_payload(path: Path, payload: dict[str, Any]) -> None:

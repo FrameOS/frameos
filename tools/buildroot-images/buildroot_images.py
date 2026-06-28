@@ -381,6 +381,7 @@ def build(args: argparse.Namespace) -> None:
         BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
         BuildrootImageBuilder._write_partition_post_build_script(tmp_path / "partition-post-build.sh")
         BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh")
+        BuildrootImageBuilder._write_boot_logo(tmp_path / "frameos-boot-logo.png")
         BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img")
         container_name = f"frameos-buildroot-base-{uuid.uuid4().hex[:12]}"
         container_id = subprocess.check_output(

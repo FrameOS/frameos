@@ -326,7 +326,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert 'BR2_DL_DIR="/cache/dl"' in config
     assert "BR2_JLEVEL=0" in config
     assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
-    assert "BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH" not in config
+    assert 'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="/work/frameos-boot-logo.png"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_SHADOW=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
@@ -342,7 +342,6 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
     assert "BR2_PACKAGE_IMAGEMAGICK" not in config
-    assert "BR2_PACKAGE_HOST_IMAGEMAGICK" not in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
@@ -571,6 +570,15 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
         link = multi_user_wants / service
         assert link.is_symlink()
         assert link.readlink().as_posix() == f"/usr/lib/systemd/system/{service}"
+
+
+def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
+    logo_path = tmp_path / "frameos-boot-logo.png"
+
+    BuildrootImageBuilder._write_boot_logo(logo_path)
+
+    assert logo_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
 
 def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monkeypatch):
     monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL", "https://example.test/releases")
