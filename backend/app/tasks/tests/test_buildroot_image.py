@@ -331,6 +331,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y" in config
     assert "BR2_PACKAGE_WIRELESS_REGDB=y" in config
     assert "# BR2_CCACHE is not set" in config
     assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
