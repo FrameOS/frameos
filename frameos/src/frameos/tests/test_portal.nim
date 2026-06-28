@@ -8,6 +8,7 @@ type HookMode = enum
   hmWifiList
   hmStartApOk
   hmStartApFail
+  hmStartApTransientFail
   hmStopAp
   hmAttemptSuccess
   hmAttemptFail
@@ -60,6 +61,8 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
   if cmd.contains("device wifi hotspot"):
     inc runHotspotCalls
     if hookMode == hmStartApFail:
+      return ("failed", 2)
+    if hookMode == hmStartApTransientFail and runHotspotCalls <= 2:
       return ("failed", 2)
     return ("ok", 0)
   if cmd.contains("connection modify 'frameos-hotspot' ipv4.method shared"):
@@ -204,11 +207,29 @@ suite "portal network orchestration":
     startAp(frame)
 
     check frame.network.hotspotStatus == HotspotStatus.error
-    check runHotspotCalls == 2
+    check runHotspotCalls == 12
     check runModifySharedCalls == 0
+    check sleepCallCount == 5
+    check lastSleepMs == 5000
 
     let (ok, _) = eventChannel.tryRecv()
     check not ok
+
+  test "startAp retries transient hotspot command failures":
+    hookMode = hmStartApTransientFail
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    startAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    check runHotspotCalls == 3
+    check runModifySharedCalls == 1
+    check sleepCallCount == 1
+    check lastSleepMs == 5000
+
+    let (ok, ev) = eventChannel.tryRecv()
+    check ok
+    check ev[1] == "setCurrentScene"
+    check ev[2]["sceneId"].getStr() == "system/wifiHotspot"
 
   test "stopAp runs down and delete when hotspot is active":
     hookMode = hmStopAp

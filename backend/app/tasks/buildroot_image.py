@@ -1520,6 +1520,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
                     "BR2_PACKAGE_IW=y",
                     "BR2_PACKAGE_WIRELESS_TOOLS=y",
+                    "BR2_PACKAGE_WIRELESS_REGDB=y",
                     "BR2_PACKAGE_LINUX_FIRMWARE=y",
                     "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
                     "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",

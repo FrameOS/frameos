@@ -13,6 +13,10 @@ const
   # nmcli is invoked with --wait 15; anything slower than this is wedged
   portalCommandTimeoutMs = 60 * 1000
   clockSyncTimeoutMs = 120 * 1000
+  hotspotStartAttempts = 6
+  hotspotStartRetryDelayMs = 5000
+  hotspotDeviceWaitAttempts = 12
+  hotspotDeviceWaitDelayMs = 2500
 
 var logger: Logger
 var lastErrorLock: Lock
@@ -116,6 +120,22 @@ proc getWifiDevice*(): string =
     return parts[0]
   return "wlan0"
 
+proc getReadyWifiDevice(): string =
+  let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
+  if rc != 0:
+    return ""
+  parseWifiInterfaceFromNmcli(output)
+
+proc waitForReadyWifiDevice(): string =
+  for attempt in 1..hotspotDeviceWaitAttempts:
+    result = getReadyWifiDevice()
+    if result.len > 0:
+      return
+    pLog("portal:startAp:wifiDeviceWait",
+         %*{"attempt": attempt, "attempts": hotspotDeviceWaitAttempts})
+    if attempt < hotspotDeviceWaitAttempts:
+      portalSleepHook(hotspotDeviceWaitDelayMs)
+
 proc availableNetworks*(frameOS: FrameOS): seq[string] =
   ## Return a list of nearby Wi-Fi SSIDs using nmcli
   let (output, rc) = run("sudo nmcli --terse --fields SSID device wifi list 2>/dev/null || true")
@@ -159,46 +179,66 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   discard run("sudo rfkill unblock wifi || true")
   discard run("sudo nmcli radio wifi on || true")
 
-  discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
-  let wifiDevice = getWifiDevice()
-
   let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
   let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
+  let maskedHotspotPassword = masked(wifiHotspotPassword)
 
-  proc buildHotspotCmd(password: string, withIfname: bool): string =
+  proc buildHotspotCmd(password, wifiDevice: string, withIfname: bool): string =
     result = "sudo nmcli device wifi hotspot "
     if withIfname:
       result &= fmt"ifname {shQuote(wifiDevice)} "
     result &= fmt"con-name {shQuote(nmHotspotName)} ssid {shQuote(wifiHotspotSsid)} password {shQuote(password)}"
 
-  let maskedHotspotPassword = masked(wifiHotspotPassword)
-  if run(buildHotspotCmd(wifiHotspotPassword, true),
-         loggedCmd = buildHotspotCmd(maskedHotspotPassword, true))[1] != 0:
-    pLog("portal:startAp:ifnameRetry", %*{"device": wifiDevice})
-    if run(buildHotspotCmd(wifiHotspotPassword, false),
-           loggedCmd = buildHotspotCmd(maskedHotspotPassword, false))[1] != 0:
+  proc finishStartedHotspot(wifiDevice: string): bool =
+    if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
       frameOS.network.hotspotStatus = HotspotStatus.error
+      pLog("portal:startAp:managedFailed", %*{"device": wifiDevice})
+      pLog("portal:startAp:error")
+      return false
+
+    discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
+    discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
+
+    frameOS.network.hotspotStatus = HotspotStatus.enabled
+    startSetupProxy(frameOS.frameConfig)
+    pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
+    let hotspotStarted = getMonoTime()
+    frameOS.network.hotspotStartedAt = epochTime()
+    pLog("portal:startAp:done")
+    sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
+    if portalAutoTimeoutEnabledHook():
+      spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
+    true
+
+  for attempt in 1..hotspotStartAttempts:
+    discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
+    let wifiDevice = waitForReadyWifiDevice()
+    if wifiDevice.len == 0:
+      frameOS.network.hotspotStatus = HotspotStatus.error
+      pLog("portal:startAp:noWifiDevice", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
       pLog("portal:startAp:error")
       return
 
-  if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
-    frameOS.network.hotspotStatus = HotspotStatus.error
-    pLog("portal:startAp:managedFailed", %*{"device": wifiDevice})
-    pLog("portal:startAp:error")
-    return
+    if run(buildHotspotCmd(wifiHotspotPassword, wifiDevice, true),
+           loggedCmd = buildHotspotCmd(maskedHotspotPassword, wifiDevice, true))[1] == 0:
+      if finishStartedHotspot(wifiDevice):
+        return
+      return
 
-  discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
-  discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
+    pLog("portal:startAp:ifnameRetry", %*{"device": wifiDevice, "attempt": attempt})
+    if run(buildHotspotCmd(wifiHotspotPassword, wifiDevice, false),
+           loggedCmd = buildHotspotCmd(maskedHotspotPassword, wifiDevice, false))[1] == 0:
+      if finishStartedHotspot(wifiDevice):
+        return
+      return
 
-  frameOS.network.hotspotStatus = HotspotStatus.enabled
-  startSetupProxy(frameOS.frameConfig)
-  pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
-  let hotspotStarted = getMonoTime()
-  frameOS.network.hotspotStartedAt = epochTime()
-  pLog("portal:startAp:done")
-  sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
-  if portalAutoTimeoutEnabledHook():
-    spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
+    pLog("portal:startAp:retry", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
+    if attempt < hotspotStartAttempts:
+      portalSleepHook(hotspotStartRetryDelayMs)
+
+  frameOS.network.hotspotStatus = HotspotStatus.error
+  pLog("portal:startAp:error")
+
 
 proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.} =
   while true:
