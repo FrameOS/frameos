@@ -408,8 +408,9 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
     assert 'frameos_partition_size="$(partition_size_for_root "${BASE_DIR:?BASE_DIR is required}/frameos-partition-root" "30M")"' in post_image
+    assert 'assets_partition_size="$(partition_size_for_root "${BASE_DIR:?BASE_DIR is required}/assets-partition-root" "30M")"' in post_image
     assert "size = $frameos_partition_size" in post_image
-    assert "size = 30M" in post_image
+    assert "size = $assets_partition_size" in post_image
     assert 'rootfs_image="${BINARIES_DIR:?BINARIES_DIR is required}/rootfs.ext4"' in post_image
     assert 'resize2fs -M "$rootfs_image"' in post_image
     assert "console=tty1" in post_image
@@ -1107,10 +1108,11 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         return partitions
 
     builder.executor = SimpleNamespace(docker_run=fake_docker_run)
-    monkeypatch.setattr(
-        "app.tasks.buildroot_image._partition_size_for_root",
-        lambda _root, *, minimum_size: "42M",
-    )
+    def fake_partition_size_for_root(root, *, minimum_size):
+        assert minimum_size == "30M"
+        return {"frameos": "42M", "assets": "58M"}[root.name]
+
+    monkeypatch.setattr("app.tasks.buildroot_image._partition_size_for_root", fake_partition_size_for_root)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
         lambda _path: [
@@ -1138,6 +1140,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert f'srcpath = "{compose_root.group(1)}/rootfs"' not in captured["config"]
     assert f'srcpath = "{compose_root.group(1)}/boot"' not in captured["config"]
     assert "size = 42M" in captured["config"]
+    assert "size = 58M" in captured["config"]
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
     assert captured["compose"]["args"] == ["bash", "/work/compose-partitions.sh"]

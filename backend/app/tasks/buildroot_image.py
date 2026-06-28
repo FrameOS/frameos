@@ -76,7 +76,7 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 17
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 18
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
 BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
@@ -1779,6 +1779,10 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
             frameos_root,
             minimum_size=BUILDROOT_FRAMEOS_PARTITION_SIZE,
         )
+        assets_partition_size = _partition_size_for_root(
+            assets_root,
+            minimum_size=BUILDROOT_ASSETS_PARTITION_SIZE,
+        )
         compose_roots = f"/tmp/frameos-compose-roots-{os.getpid()}-{secure_token(6)}"
         genimage_cfg = compose_dir / "frameos-genimage.cfg"
         genimage_cfg.write_text(
@@ -1796,7 +1800,7 @@ image assets.vfat {{
 		label = "ASSETS"
 	}}
 	srcpath = "{compose_roots}/assets"
-	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
+	size = {assets_partition_size}
 }}
 """,
             encoding="utf-8",
@@ -2516,6 +2520,7 @@ PY
 }}
 
 frameos_partition_size="$(partition_size_for_root "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root" "{BUILDROOT_FRAMEOS_PARTITION_SIZE}")"
+assets_partition_size="$(partition_size_for_root "${{BASE_DIR:?BASE_DIR is required}}/assets-partition-root" "{BUILDROOT_ASSETS_PARTITION_SIZE}")"
 boot_files="$(printf '\\t\\t\\t"%s",\\n' "${{files[@]}}")"
 cat > "$genimage_cfg" <<EOF
 image boot.vfat {{
@@ -2543,7 +2548,7 @@ image assets.vfat {{
 		label = "ASSETS"
 	}}
 	srcpath = "${{BASE_DIR}}/assets-partition-root"
-	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
+	size = $assets_partition_size
 }}
 
 image sdcard.img {{
