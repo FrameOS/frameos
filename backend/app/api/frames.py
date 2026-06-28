@@ -453,7 +453,7 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         preview.error_behavior = normalize_error_behavior(preview.error_behavior)
 
     old_mode = frame.mode
-    if data.mode == "buildroot" or (preview.mode or "rpios") == "buildroot":
+    if data.mode == "buildroot" or ((preview.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         ensure_buildroot_frame_defaults(preview, (preview.buildroot or {}).get("platform"))
     elif data.mode == "embedded" or (preview.mode or "rpios") == "embedded":
         ensure_embedded_frame_defaults(preview, (preview.embedded or {}).get("platform"))
@@ -3181,7 +3181,7 @@ async def api_frame_update_endpoint(
     if "error_behavior" in update_data:
         frame.error_behavior = normalize_error_behavior(frame.error_behavior)
 
-    if data.mode == "buildroot" or (frame.mode or "rpios") == "buildroot":
+    if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         try:
             ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
         except ValueError as exc:

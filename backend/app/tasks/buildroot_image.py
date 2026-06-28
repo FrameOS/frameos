@@ -606,8 +606,6 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     frame.assets_path = "/srv/assets"
     frame.log_to_file = None
-    if getattr(frame, "image_engine", None) == "imagemagick":
-        frame.image_engine = ""
 
     https_proxy = dict(frame.https_proxy or {})
     https_proxy["enable"] = False
@@ -1513,6 +1511,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
                     "BR2_PACKAGE_ZLIB=y",
+                    "BR2_PACKAGE_IMAGEMAGICK=y",
                     "BR2_PACKAGE_FFMPEG=y",
                     "BR2_PACKAGE_FFMPEG_FFPROBE=y",
                     "BR2_PACKAGE_FFMPEG_SWSCALE=y",

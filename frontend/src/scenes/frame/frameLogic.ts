@@ -1239,11 +1239,9 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       })()
     : frame.rpios
 
-  const imageEngine = frame.mode === 'buildroot' && frame.image_engine === 'imagemagick' ? '' : frame.image_engine ?? ''
-
   return {
     ...frame,
-    image_engine: imageEngine,
+    image_engine: frame.image_engine ?? '',
     timezone_updater: normalizeTimezoneUpdater(frame.timezone_updater),
     assets_path: assetsPath,
     rpios,
@@ -1260,10 +1258,8 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 }
 
 function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> {
-  const imageEngine = frame.mode === 'buildroot' && frame.image_engine === 'imagemagick' ? '' : frame.image_engine
   const normalizedFrame = {
     ...frame,
-    image_engine: imageEngine,
     timezone_updater: compactTimezoneUpdaterForSubmit(frame.timezone_updater),
   }
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame

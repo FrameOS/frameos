@@ -242,10 +242,6 @@ async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
     data = get_frame_json(db, frame)
     assert data["imageEngine"] == "imagemagick"
 
-    frame.mode = "buildroot"
-    data = get_frame_json(db, frame)
-    assert data["imageEngine"] == ""
-
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)

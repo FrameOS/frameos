@@ -849,16 +849,6 @@ export function FrameSettings({
   const isBuildrootMode = mode === 'buildroot'
   const isEmbeddedMode = mode === 'embedded'
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
-  const imageEngineOptions = isBuildrootMode
-    ? [
-        { value: '', label: 'Default (Pixie)' },
-        { value: 'pixie', label: 'Pixie' },
-      ]
-    : [
-        { value: '', label: 'Default (Pixie)' },
-        { value: 'pixie', label: 'Pixie' },
-        { value: 'imagemagick', label: 'ImageMagick' },
-      ]
   const maxHttpResponsePlaceholder = String(
     isEmbeddedMode ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
   )
@@ -2561,7 +2551,14 @@ export function FrameSettings({
             />
           </Field>
           <Field name="image_engine" label="Image engine">
-            <Select name="image_engine" options={imageEngineOptions} />
+            <Select
+              name="image_engine"
+              options={[
+                { value: '', label: 'Default (Pixie)' },
+                { value: 'pixie', label: 'Pixie' },
+                { value: 'imagemagick', label: 'ImageMagick' },
+              ]}
+            />
           </Field>
         </div>
 

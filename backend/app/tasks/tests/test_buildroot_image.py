@@ -287,22 +287,6 @@ def test_buildroot_defaults_remove_setup_json_reset_file_path():
     assert setup_json_reset_file_path(frame) == DEFAULT_SETUP_JSON_RESET_FILE_PATH
 
 
-def test_buildroot_defaults_clear_imagemagick_engine():
-    frame = SimpleNamespace(
-        id=7,
-        frame_host="",
-        image_engine="imagemagick",
-        buildroot={"platform": "raspberry-pi-zero-2-w"},
-        https_proxy={},
-        agent={},
-        network={},
-    )
-
-    ensure_buildroot_frame_defaults(frame)
-
-    assert frame.image_engine == ""
-
-
 def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
     scenes = [
         {"id": "scene-1", "settings": {"execution": "interpreted"}},
@@ -341,7 +325,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DOSFSTOOLS=y" in config
     assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
-    assert "BR2_PACKAGE_IMAGEMAGICK" not in config
+    assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
