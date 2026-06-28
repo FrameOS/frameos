@@ -22,11 +22,13 @@ export function FrameSceneSidebarCard({
   className,
 }: FrameSceneSidebarCardProps): JSX.Element {
   const { hideDeployPlanModal, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { hasFrameSyncChanges } = useValues(frameLogic({ frameId: frame.id }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const deployDrawerIsOpen =
     frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
   const inFrameAdminMode = isInFrameAdminMode()
+  const showSync = hasFrameSyncChanges
 
   const openDeployPlan = (): void => {
     closeChatDrawer()
@@ -53,11 +55,11 @@ export function FrameSceneSidebarCard({
           onClick={() => openDeployPlan()}
           className={clsx(
             'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges || undeployedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'
+            showSync || unsavedChanges || undeployedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'
           )}
         >
           <DeployToFrameIcon className="h-4 w-4 shrink-0" />
-          Deploy
+          {showSync ? 'Sync' : 'Deploy'}
         </button>
       )}
     </div>

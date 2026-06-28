@@ -5,6 +5,7 @@ import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -106,6 +107,42 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   return nextSearch
 }
 
+function deployDrawerSearchForFrame(
+  frameId: number,
+  baseSearch: Record<string, unknown>,
+  sourcePathname: string = router.values.location.pathname,
+  sourceSearch: Record<string, unknown> = router.values.searchParams
+): Record<string, unknown> {
+  if (searchValue(sourceSearch, 'drawer') !== 'deployPlan') {
+    return baseSearch
+  }
+  const drawerFrameId = drawerFrameIdFromSearch(sourceSearch) ?? frameIdFromWorkspacePath(sourcePathname)
+  if (drawerFrameId !== frameId) {
+    return baseSearch
+  }
+  const deployView = deployDrawerViewFromSearch(sourceSearch)
+  return {
+    ...baseSearch,
+    drawer: 'deployPlan',
+    ...(deployView ? { deployView } : {}),
+  }
+}
+
+function deployDrawerSearchFromPreviousLocation(
+  frameId: number,
+  search: Record<string, unknown>,
+  previousLocation: { pathname?: string; searchParams?: Record<string, unknown> } | undefined
+): Record<string, unknown> | null {
+  if (searchValue(search, 'drawer')) {
+    return null
+  }
+  const previousSearch = previousLocation?.searchParams ?? {}
+  if (searchValue(previousSearch, 'drawer') !== 'deployPlan') {
+    return null
+  }
+  return deployDrawerSearchForFrame(frameId, search, previousLocation?.pathname ?? '', previousSearch)
+}
+
 function framesRoutePath(): string {
   return urls.frames() || '/'
 }
@@ -171,7 +208,11 @@ function drawerPathForFrame(frameId: number): string {
 function shouldOpenScenePreviewInDrawer(frameId: number): boolean {
   const pathname = router.values.location.pathname
   const search = router.values.searchParams
-  return isFramesRoutePath(pathname) || isFrameOverviewRoutePathForFrame(pathname, search, frameId)
+  return (
+    isFramesRoutePath(pathname) ||
+    isFrameOverviewRoutePathForFrame(pathname, search, frameId) ||
+    (isInFrameAdminMode() && isWorkspaceRoutePathForFrame(pathname, frameId))
+  )
 }
 
 function drawerUrlForFrame(
@@ -1336,7 +1377,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       openFrameTool: ({ frameId, panel }) => {
         router.actions.push(
           urls.frame(frameId),
-          { tool: panel },
+          deployDrawerSearchForFrame(frameId, { tool: panel }),
           utilityDrawerClosedHash(workspaceContentNavigationHash())
         )
       },
@@ -1511,15 +1552,23 @@ export const workspaceLogic = kea<workspaceLogicType>([
     return {
       [framesPath]: applyFramesRoute,
       [`${framesPath.replace(/\/$/, '')}/`]: applyFramesRoute,
-      [urls.frame(':id')]: ({ id }, search, hash) => {
+      [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) => {
         syncSecondarySidebarFromHashForMobile(hash)
         const frameId = parseInt(String(id), 10)
         const validFrameId = Number.isFinite(frameId) ? frameId : null
+        const preservedSearch = validFrameId
+          ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
+          : null
+        const effectiveSearch =
+          preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan' ? preservedSearch : search
         if (validFrameId) {
           actions.selectFrame(validFrameId)
         }
-        actions.openUtilityPanel(frameToolFromSearch(search))
-        applyDrawerFromSearch(validFrameId, search)
+        actions.openUtilityPanel(frameToolFromSearch(effectiveSearch))
+        applyDrawerFromSearch(validFrameId, effectiveSearch)
+        if (validFrameId && preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan') {
+          router.actions.replace(urls.frame(validFrameId), preservedSearch, hash)
+        }
       },
       [urls.scenes(':frameId')]: applySceneOrAppRoute,
       [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,

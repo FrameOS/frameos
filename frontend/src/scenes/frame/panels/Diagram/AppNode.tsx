@@ -29,6 +29,7 @@ import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
 import { ColorInput } from '../../../../components/ColorInput'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import * as ReactJsonModule from '@microlink/react-json-view'
 const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
@@ -48,6 +49,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isCustomApp,
     isSceneApp,
     isJavaScriptSceneApp,
+    isNimAppInInterpretedScene,
     isDataApp,
     configJsonError,
     output,
@@ -62,6 +64,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
+  const hideReadOnlyNimAppAction = isInFrameAdminMode() && isNimAppInInterpretedScene
 
   const backgroundClassName = clsx(
     'frameos-diagram-node shadow-lg border-2',
@@ -143,7 +146,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
             buttonColor="none"
             horizontal
             items={[
-              ...(isDispatch || isScene
+              ...(isDispatch || isScene || hideReadOnlyNimAppAction
                 ? []
                 : [
                     {

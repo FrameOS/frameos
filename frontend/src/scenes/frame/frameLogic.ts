@@ -9,6 +9,10 @@ import {
   DiagramNode,
   FrameErrorBehavior,
   FrameScene,
+  FrameSyncChoice,
+  FrameSyncSceneChoice,
+  FrameSyncSectionId,
+  FrameSyncStatus,
   FrameType,
   SceneNodeData,
   TemplateType,
@@ -63,6 +67,72 @@ export const DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 interface DeployPlanApiResponse {
   plan: DeployPlanResponse
+}
+
+interface FrameSyncApiResponse {
+  sync: FrameSyncStatus
+  frame?: FrameType
+}
+
+export interface FrameSyncChoices {
+  frame_json: Record<string, FrameSyncChoice>
+  scenes_json: Record<string, FrameSyncSceneChoice>
+}
+export type FrameSyncView = 'diff' | 'backend' | 'frame'
+export type FrameSyncViews = Partial<Record<FrameSyncSectionId, FrameSyncView>>
+
+export function frameSyncChangeKey(change: { choice_key?: string; path: string }): string {
+  return change.choice_key ?? change.path
+}
+
+function syncHintIsNewerThanStatus(frame: FrameType | null, sync: FrameSyncStatus): boolean {
+  const hintTime = Date.parse(frame?.frame_sync_hint?.checked_at || '')
+  const statusTime = Date.parse(sync.checked_at || '')
+  return Number.isFinite(hintTime) && (!Number.isFinite(statusTime) || hintTime > statusTime)
+}
+
+function defaultFrameSyncChoices(sync: FrameSyncStatus | null): FrameSyncChoices {
+  const choices: FrameSyncChoices = { frame_json: {}, scenes_json: {} }
+  for (const section of sync?.sections ?? []) {
+    if (!section.has_changes) {
+      continue
+    }
+    for (const change of section.changes) {
+      choices[section.id][frameSyncChangeKey(change)] =
+        section.id === 'scenes_json' && change.kind === 'added' ? 'frame' : 'backend'
+    }
+  }
+  return choices
+}
+
+function discardFrameSyncChoices(sync: FrameSyncStatus | null): FrameSyncChoices {
+  const choices: FrameSyncChoices = { frame_json: {}, scenes_json: {} }
+  for (const section of sync?.sections ?? []) {
+    if (!section.has_changes) {
+      continue
+    }
+    for (const change of section.changes) {
+      choices[section.id][frameSyncChangeKey(change)] = 'backend'
+    }
+  }
+  return choices
+}
+
+function hasSelectedFrameSyncChoices(choices: FrameSyncChoices): boolean {
+  return (
+    Object.values(choices.frame_json).some((choice) => choice !== 'ignore') ||
+    Object.values(choices.scenes_json).some((choice) => choice !== 'ignore')
+  )
+}
+
+function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
+  const views: FrameSyncViews = {}
+  for (const section of sync?.sections ?? []) {
+    if (section.has_changes) {
+      views[section.id] = 'diff'
+    }
+  }
+  return views
 }
 
 export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
@@ -1466,6 +1536,20 @@ export const frameLogic = kea<frameLogicType>([
     loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
+    loadFrameSyncStatus: true,
+    loadFrameSyncStatusSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
+    loadFrameSyncStatusFailure: (error: string) => ({ error }),
+    setFrameSyncItemChoice: (
+      sectionId: FrameSyncSectionId,
+      choiceKey: string,
+      choice: FrameSyncChoice | FrameSyncSceneChoice
+    ) => ({ sectionId, choiceKey, choice }),
+    setFrameSyncChoices: (choices: FrameSyncChoices) => ({ choices }),
+    setFrameSyncView: (sectionId: FrameSyncSectionId, view: FrameSyncView) => ({ sectionId, view }),
+    applyFrameSync: true,
+    discardFrameSyncChanges: true,
+    applyFrameSyncSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
+    applyFrameSyncFailure: (error: string) => ({ error }),
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -1584,6 +1668,86 @@ export const frameLogic = kea<frameLogicType>([
         hideDeployPlanModal: () => 'main',
       },
     ],
+    frameSyncStatus: [
+      null as FrameSyncStatus | null,
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => sync,
+        applyFrameSyncSuccess: (_, { sync }) => sync,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+      },
+    ],
+    frameSyncChoices: [
+      defaultFrameSyncChoices(null),
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => defaultFrameSyncChoices(sync),
+        applyFrameSyncSuccess: (_, { sync }) => defaultFrameSyncChoices(sync),
+        setFrameSyncItemChoice: (state, { sectionId, choiceKey, choice }) =>
+          sectionId === 'frame_json'
+            ? {
+                ...state,
+                frame_json: { ...state.frame_json, [choiceKey]: choice as FrameSyncChoice },
+              }
+            : {
+                ...state,
+                scenes_json: { ...state.scenes_json, [choiceKey]: choice as FrameSyncSceneChoice },
+              },
+        setFrameSyncChoices: (_, { choices }) => choices,
+        setFrameFormValue: () => defaultFrameSyncChoices(null),
+        setFrameFormValues: () => defaultFrameSyncChoices(null),
+      },
+    ],
+    frameSyncViews: [
+      {} as FrameSyncViews,
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => defaultFrameSyncViews(sync),
+        applyFrameSyncSuccess: (_, { sync }) => defaultFrameSyncViews(sync),
+        setFrameSyncView: (state, { sectionId, view }) => ({ ...state, [sectionId]: view }),
+        setFrameFormValue: () => ({}),
+        setFrameFormValues: () => ({}),
+      },
+    ],
+    frameSyncStatusLoading: [
+      false,
+      {
+        loadFrameSyncStatus: () => true,
+        loadFrameSyncStatusSuccess: () => false,
+        loadFrameSyncStatusFailure: () => false,
+      },
+    ],
+    frameSyncApplying: [
+      false,
+      {
+        applyFrameSync: () => true,
+        discardFrameSyncChanges: () => true,
+        applyFrameSyncSuccess: () => false,
+        applyFrameSyncFailure: () => false,
+      },
+    ],
+    frameSyncApplyMode: [
+      null as 'commit' | 'discard' | null,
+      {
+        applyFrameSync: () => 'commit',
+        discardFrameSyncChanges: () => 'discard',
+        applyFrameSyncSuccess: () => null,
+        applyFrameSyncFailure: () => null,
+      },
+    ],
+    frameSyncError: [
+      null as string | null,
+      {
+        loadFrameSyncStatus: () => null,
+        loadFrameSyncStatusSuccess: () => null,
+        loadFrameSyncStatusFailure: (_, { error }) => error,
+        applyFrameSync: () => null,
+        discardFrameSyncChanges: () => null,
+        applyFrameSyncSuccess: () => null,
+        applyFrameSyncFailure: (_, { error }) => error,
+        hideDeployPlanModal: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+      },
+    ],
   }),
   listeners(({ asyncActions, actions, values }) => ({
     resetUnsavedChanges: () => {
@@ -1699,7 +1863,76 @@ export const frameLogic = kea<frameLogicType>([
       const payload = (await response.json()) as DeployPlanApiResponse
       actions.loadDeployPlansSuccess(payload.plan)
     },
+    loadFrameSyncStatus: async () => {
+      if (isInFrameAdminMode() || !values.frame || values.frame.archived) {
+        actions.loadFrameSyncStatusSuccess(null)
+        return
+      }
+      const response = await apiFetch(`/api/frames/${values.frameId}/sync`)
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.loadFrameSyncStatusFailure(
+          typeof payload?.detail === 'string' ? payload.detail : 'Failed to check frame sync'
+        )
+        return
+      }
+      const payload = (await response.json()) as FrameSyncApiResponse
+      actions.loadFrameSyncStatusSuccess(payload.sync)
+      if (payload.frame) {
+        framesModel.actions.loadFrame(values.frameId)
+      }
+    },
+    applyFrameSync: async () => {
+      const body = {
+        frame_json_choices: values.frameSyncChoices.frame_json,
+        scenes_json_choices: values.frameSyncChoices.scenes_json,
+      }
+      if (!hasSelectedFrameSyncChoices(values.frameSyncChoices)) {
+        actions.applyFrameSyncFailure('Choose what to sync first')
+        return
+      }
+      const response = await apiFetch(`/api/frames/${values.frameId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.applyFrameSyncFailure(typeof payload?.detail === 'string' ? payload.detail : 'Failed to sync frame')
+        return
+      }
+      const payload = (await response.json()) as FrameSyncApiResponse
+      actions.applyFrameSyncSuccess(payload.sync)
+      framesModel.actions.loadFrame(values.frameId)
+    },
+    discardFrameSyncChanges: async () => {
+      const choices = discardFrameSyncChoices(values.frameSyncStatus)
+      actions.setFrameSyncChoices(choices)
+      if (!hasSelectedFrameSyncChoices(choices)) {
+        actions.applyFrameSyncFailure('No frame changes to discard')
+        return
+      }
+      const response = await apiFetch(`/api/frames/${values.frameId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          frame_json_choices: choices.frame_json,
+          scenes_json_choices: choices.scenes_json,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.applyFrameSyncFailure(typeof payload?.detail === 'string' ? payload.detail : 'Failed to discard frame changes')
+        return
+      }
+      const payload = (await response.json()) as FrameSyncApiResponse
+      actions.applyFrameSyncSuccess(payload.sync)
+      framesModel.actions.loadFrame(values.frameId)
+    },
     showDeployPlanModal: () => {
+      if (!values.frameSyncStatusLoading && !values.frameSyncStatus && !isInFrameAdminMode()) {
+        actions.loadFrameSyncStatus()
+      }
       const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
       const buildrootFirstInstall =
         isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
@@ -1887,6 +2120,25 @@ export const frameLogic = kea<frameLogicType>([
         return isRemoteDeployConfigured(agent)
       },
     ],
+    frameSyncSectionsWithChanges: [
+      (s) => [s.frameSyncStatus],
+      (frameSyncStatus: FrameSyncStatus | null) => frameSyncStatus?.sections.filter((section) => section.has_changes) ?? [],
+    ],
+    hasFrameSyncChanges: [
+      (s) => [s.frameSyncStatus, s.isFrameAdminMode, s.frame],
+      (frameSyncStatus: FrameSyncStatus | null, isFrameAdminMode: boolean, frame: FrameType | null): boolean => {
+        if (isFrameAdminMode) {
+          return false
+        }
+        if (frameSyncStatus) {
+          if (syncHintIsNewerThanStatus(frame, frameSyncStatus)) {
+            return Boolean(frame?.frame_sync_hint?.has_changes)
+          }
+          return Boolean(frameSyncStatus.has_changes)
+        }
+        return Boolean(frame?.frame_sync_hint?.has_changes)
+      },
+    ],
     remoteDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
@@ -2066,6 +2318,9 @@ export const frameLogic = kea<frameLogicType>([
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
+    }
+    if (!isInFrameAdminMode() && values.frame && !values.frame.archived) {
+      actions.loadFrameSyncStatus()
     }
 
     cache.keydownHandler = (event: KeyboardEvent) => {

@@ -595,6 +595,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
         "deviceConfig": serialize_device_config(frame.device_config),
+        "interval": frame.interval or 300.0,
         "metricsInterval": frame.metrics_interval or 60.0,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
@@ -712,6 +713,13 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         **({'user': frame_admin_auth['user']} if frame_admin_auth['user'] else {}),
         **({'pass': frame_admin_auth['pass']} if frame_admin_auth['pass'] else {}),
     }
+
+    frame_sync_deploy_revision = getattr(frame, "_frame_sync_deploy_revision", None)
+    if isinstance(frame_sync_deploy_revision, str) and frame_sync_deploy_revision:
+        frame_json["frameApi"] = {
+            "frame_sync_current_revision": frame_sync_deploy_revision,
+            "frame_sync_deployed_revision": frame_sync_deploy_revision,
+        }
 
     frame_json['settings'] = final_settings
     return frame_json

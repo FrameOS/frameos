@@ -104,6 +104,40 @@ proc loadScenePayload(): JsonNode =
     discard
   return %*[]
 
+proc fileModifiedIso(path: string): JsonNode =
+  try:
+    if path.len > 0 and fileExists(path):
+      let modified = getFileInfo(path).lastWriteTime
+      return %format(fromUnix(modified.toUnix()), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
+  except CatchableError:
+    discard
+  newJNull()
+
+const frameSyncCurrentRevisionKey = "frame_sync_current_revision"
+const frameSyncDeployedRevisionKey = "frame_sync_deployed_revision"
+const frameSyncMarkDeployedKey = "frame_sync_mark_deployed"
+
+proc nextFrameSyncRevision(frameApi: JsonNode): string =
+  let previous = frameApi{frameSyncCurrentRevisionKey}.getStr("")
+  let micros = int64(epochTime() * 1000000.0)
+  result = "rev-" & $micros
+  if result == previous:
+    result = "rev-" & $(micros + 1)
+
+proc shouldBumpFrameSyncRevision(payload: JsonNode): bool =
+  if payload == nil or payload.kind != JObject or payload{frameSyncMarkDeployedKey}.getBool(false):
+    return false
+  for key in payload.keys:
+    if key notin [
+      "next_action",
+      "skip_runtime_reload",
+      frameSyncMarkDeployedKey,
+      "last_successful_deploy",
+      "last_successful_deploy_at",
+    ]:
+      return true
+  false
+
 proc ensureParentDir(path: string) =
   let dir = splitFile(path).dir
   if dir.len > 0 and not dirExists(dir):
@@ -214,8 +248,27 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
 
   var frameApi = if result{"frameApi"} != nil and result{"frameApi"}.kind == JObject: copy(result["frameApi"]) else: %*{}
   for key in payload.keys:
-    if key != "next_action" and key != "skip_runtime_reload":
+    if key != "next_action" and key != "skip_runtime_reload" and key != frameSyncMarkDeployedKey:
       frameApi[key] = copy(payload[key])
+  if payload{frameSyncMarkDeployedKey}.getBool(false):
+    var revision = payload{frameSyncCurrentRevisionKey}.getStr("")
+    if revision.len == 0:
+      revision = frameApi{frameSyncCurrentRevisionKey}.getStr("")
+    if revision.len == 0:
+      revision = nextFrameSyncRevision(frameApi)
+    frameApi[frameSyncCurrentRevisionKey] = %revision
+    frameApi[frameSyncDeployedRevisionKey] = %revision
+  elif shouldBumpFrameSyncRevision(payload):
+    let previousRevision = frameApi{frameSyncCurrentRevisionKey}.getStr("")
+    if frameApi{frameSyncDeployedRevisionKey}.getStr("").len == 0:
+      let deployedRevision = if previousRevision.len > 0: previousRevision else: "legacy-deploy"
+      frameApi[frameSyncDeployedRevisionKey] = %deployedRevision
+    frameApi[frameSyncCurrentRevisionKey] = %nextFrameSyncRevision(frameApi)
+  elif frameApi{frameSyncCurrentRevisionKey}.getStr("").len == 0:
+    let revision = nextFrameSyncRevision(frameApi)
+    frameApi[frameSyncCurrentRevisionKey] = %revision
+    if frameApi{frameSyncDeployedRevisionKey}.getStr("").len == 0:
+      frameApi[frameSyncDeployedRevisionKey] = %revision
   result["frameApi"] = frameApi
 
 proc persistScenesPayload*(scenes: JsonNode) =
@@ -390,6 +443,20 @@ proc storedFrameApiPayload(configJson: JsonNode): JsonNode =
     return copy(configJson["frameApi"])
   %*{}
 
+proc touchFrameSyncRevision*() =
+  let configPath = getConfigFilename()
+  var configJson = loadConfigJson()
+  if configJson == nil or configJson.kind != JObject:
+    configJson = %*{}
+  var frameApi = storedFrameApiPayload(configJson)
+  let previousRevision = frameApi{frameSyncCurrentRevisionKey}.getStr("")
+  if frameApi{frameSyncDeployedRevisionKey}.getStr("").len == 0:
+    let deployedRevision = if previousRevision.len > 0: previousRevision else: "legacy-deploy"
+    frameApi[frameSyncDeployedRevisionKey] = %deployedRevision
+  frameApi[frameSyncCurrentRevisionKey] = %nextFrameSyncRevision(frameApi)
+  configJson["frameApi"] = frameApi
+  writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+
 proc storedConfigValue(configJson: JsonNode, key: string, fallback: JsonNode): JsonNode =
   if configJson.kind == JObject and configJson.hasKey(key):
     return copy(configJson[key])
@@ -422,6 +489,7 @@ proc storedFrameAdminAuthValue(configJson: JsonNode, storedFrameApi: JsonNode, e
     result["pass"] = %source{"pass"}.getStr("")
 
 proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false): JsonNode =
+  let configPath = getConfigFilename()
   let configJson = loadConfigJson()
   let storedFrameApi = storedFrameApiPayload(configJson)
   let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
@@ -433,6 +501,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   let frameAccessKey = if exposeSecrets: globalFrameConfig.frameAccessKey else: ""
   let frameAdminAuth = storedFrameAdminAuthValue(configJson, storedFrameApi, exposeSecrets)
   let serverApiKey = if exposeSecrets: globalFrameConfig.serverApiKey else: ""
+  let scenesSource = activeScenesJsonPath()
   var activeConnections = 0
   withLock connectionsState.lock:
     activeConnections = connectionsState.items.len
@@ -496,13 +565,48 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "terminal_history": storedApiOrConfigValue(
       configJson, storedFrameApi, "terminal_history", "terminalHistory", %*[]
     ),
-    "last_successful_deploy": newJNull(),
-    "last_successful_deploy_at": newJNull(),
+    "last_successful_deploy": storedApiOrConfigValue(
+      configJson, storedFrameApi, "last_successful_deploy", "lastSuccessfulDeploy", newJNull()
+    ),
+    "last_successful_deploy_at": storedApiOrConfigValue(
+      configJson, storedFrameApi, "last_successful_deploy_at", "lastSuccessfulDeployAt", newJNull()
+    ),
+    "frame_sync": {
+      "current_revision": storedFrameApi{frameSyncCurrentRevisionKey}.getStr(""),
+      "deployed_revision": storedFrameApi{frameSyncDeployedRevisionKey}.getStr(""),
+      "frame_config_modified_at": fileModifiedIso(configPath),
+      "scenes_modified_at": fileModifiedIso(scenesSource.path),
+    },
     "active_connections": activeConnections,
   }
   for key in storedFrameApi.keys:
     if exposeSecrets or not result.hasKey(key):
       result[key] = copy(storedFrameApi[key])
+
+const frameSyncExposeHeaders = "X-Scene-Id, X-FrameOS-Sync-Changed, X-FrameOS-Sync-Revision, X-FrameOS-Deployed-Revision, X-FrameOS-Frame-Config-Modified-At, X-FrameOS-Scenes-Modified-At, X-FrameOS-Last-Successful-Deploy-At"
+
+proc putHeaderIfPresent(headers: var mummy.HttpHeaders, name: string, value: string) =
+  if value.len > 0:
+    headers[name] = value
+
+proc addFrameSyncHeaders(headers: var mummy.HttpHeaders) =
+  let configPath = getConfigFilename()
+  let scenesSource = activeScenesJsonPath()
+  let configJson = loadConfigJson()
+  let storedFrameApi = storedFrameApiPayload(configJson)
+  let currentRevision = storedFrameApi{frameSyncCurrentRevisionKey}.getStr("")
+  let deployedRevision = storedFrameApi{frameSyncDeployedRevisionKey}.getStr("")
+  let lastSuccessfulDeployAt = storedApiOrConfigValue(
+    configJson, storedFrameApi, "last_successful_deploy_at", "lastSuccessfulDeployAt", newJNull()
+  ).getStr("")
+  let hasChanges = currentRevision.len > 0 and deployedRevision.len > 0 and currentRevision != deployedRevision
+  headers["X-FrameOS-Sync-Changed"] = if hasChanges: "1" else: "0"
+  putHeaderIfPresent(headers, "X-FrameOS-Sync-Revision", currentRevision)
+  putHeaderIfPresent(headers, "X-FrameOS-Deployed-Revision", deployedRevision)
+  putHeaderIfPresent(headers, "X-FrameOS-Frame-Config-Modified-At", fileModifiedIso(configPath).getStr(""))
+  putHeaderIfPresent(headers, "X-FrameOS-Scenes-Modified-At", fileModifiedIso(scenesSource.path).getStr(""))
+  putHeaderIfPresent(headers, "X-FrameOS-Last-Successful-Deploy-At", lastSuccessfulDeployAt)
+  headers["Access-Control-Expose-Headers"] = frameSyncExposeHeaders
 
 proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
   let startedAt = epochTime()
@@ -512,7 +616,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   if shouldReturnNotModified(request.headers, lastUpdate):
     var headers: mummy.HttpHeaders
     headers["X-Scene-Id"] = $sceneId
-    headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+    addFrameSyncHeaders(headers)
     if logImageRequest:
       log(%*{
         "event": "http:image",
@@ -530,7 +634,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   headers["Content-Type"] = "image/png"
   headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
   headers["X-Scene-Id"] = $sceneId
-  headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+  addFrameSyncHeaders(headers)
   if lastUpdate > 0.0:
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified

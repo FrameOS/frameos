@@ -176,6 +176,8 @@ async def test_plan_fast_for_embedded_uses_http_scene_reload_plan():
     assert plan.fast_deploy is not None
     assert plan.fast_deploy.action == "http_upload_scenes_reload"
     assert plan.frame_dict["mode"] == "embedded"
+    assert plan.frame_dict["frame_sync_current_revision"].startswith("deploy-sha256-")
+    assert plan.frame_dict["frame_sync_deployed_revision"] == plan.frame_dict["frame_sync_current_revision"]
     assert plan.full_deploy is None
 
 

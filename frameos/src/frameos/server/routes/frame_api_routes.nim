@@ -313,6 +313,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
         return
+      touchFrameSyncRevision()
       queueRuntimeControl(request, "reload", "reload")
   )
 

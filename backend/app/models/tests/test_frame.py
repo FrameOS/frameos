@@ -245,6 +245,17 @@ async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_interval(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.interval = 3600
+
+    data = get_frame_json(db, frame)
+
+    assert data["interval"] == 3600
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_includes_partial_device_config(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
 

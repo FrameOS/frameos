@@ -148,6 +148,9 @@ suite "frame api route behavior":
       check savedConfig["httpsProxy"]["serverCert"].getStr() == "cert"
       check savedConfig["errorBehavior"]["silentRetryForever"].getBool()
       check savedConfig["frameApi"]["name"].getStr() == "Standalone editor"
+      let savedRevision = savedConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check savedRevision.len > 0
+      check savedConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
       check globalFrameConfig.name == "Test Frame"
       check globalFrameConfig.frameAdminAuth["pass"].getStr() == "secret"
 
@@ -173,6 +176,8 @@ suite "frame api route behavior":
       check framePayload["error_behavior"]["mode"].getStr() == "silent_retry"
       check framePayload["error_behavior"]["silent_retry_forever"].getBool()
       check framePayload["buildroot"]["readonly"].getBool()
+      check framePayload["frame_sync"]["current_revision"].getStr() == savedRevision
+      check framePayload["frame_sync"]["deployed_revision"].getStr() == "legacy-deploy"
 
       let skipReload = httpRequest(
         server.port,
@@ -190,12 +195,21 @@ suite "frame api route behavior":
       let quietConfig = parseJson(readFile(configPath))
       check quietConfig["name"].getStr() == "Standalone editor saved quietly"
       check not quietConfig["frameApi"].hasKey("skip_runtime_reload")
+      let quietRevision = quietConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check quietRevision.len > 0
+      check quietRevision != savedRevision
+      check quietConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
       check framePayload["scenes"].len == 1
 
       drainEventChannel()
       let reload = httpRequest(server.port, "POST", "/api/frames/1/reload", headers = [("Cookie", refreshedCookie)])
       check reload.status == 200
       check parseJson(reload.body)["action"].getStr() == "reload"
+      let reloadConfig = parseJson(readFile(configPath))
+      let reloadRevision = reloadConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check reloadRevision.len > 0
+      check reloadRevision != quietRevision
+      check reloadConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
       let (runtimeReloadReceived, runtimeReloadPayload) = eventChannel.tryRecv()
       check runtimeReloadReceived
       check runtimeReloadPayload[1] == "reload"

@@ -5,6 +5,7 @@ import copy from 'copy-to-clipboard'
 import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
+  ArrowsRightLeftIcon,
   ChevronRightIcon,
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
@@ -24,7 +25,16 @@ import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
 import { buildrootPlatforms, devices, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../devices'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
-import type { FrameOSSettings, FrameType, LogType } from '../../types'
+import type {
+  FrameOSSettings,
+  FrameSyncChoice,
+  FrameSyncChange,
+  FrameSyncSceneChoice,
+  FrameSyncSection,
+  FrameSyncStatus,
+  FrameType,
+  LogType,
+} from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
@@ -34,7 +44,9 @@ import {
   type ChangeDetail,
   type DeployDrawerView,
   type DeployRecommendation,
+  type FrameSyncChoices,
   type SummaryItem,
+  frameSyncChangeKey,
 } from '../frame/frameLogic'
 import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNotice } from '../frame/frameDeployUtils'
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
@@ -1326,6 +1338,334 @@ function BuildrootSdCardSection({
   )
 }
 
+function formatSyncTimestamp(timestamp?: string | null): string {
+  if (!timestamp) {
+    return 'Unknown'
+  }
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return timestamp
+  }
+  return date.toLocaleString()
+}
+
+function syncDownloadFilename(change: FrameSyncChange, side: 'backend' | 'frame'): string {
+  const name = change.label.replace(/^Scene (changed|added on frame|only in backend):\s*/i, '') || change.choice_key || 'scene'
+  const safeName = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${safeName || 'scene'}-${side}.json`
+}
+
+function downloadSyncJson(filename: string, value: unknown): void {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function FrameSyncSideLabel({
+  change,
+  side,
+  label,
+}: {
+  change: FrameSyncChange
+  side: 'backend' | 'frame'
+  label: string
+}): JSX.Element {
+  const payload = side === 'backend' ? change.backend_json : change.frame_json
+  return (
+    <div className="frame-tool-muted flex items-center gap-1 font-semibold uppercase tracking-wide">
+      <span>{label}</span>
+      {change.kind === 'changed' && payload ? (
+        <button
+          type="button"
+          title={`Download ${label.toLowerCase()} scene JSON`}
+          onClick={() => downloadSyncJson(syncDownloadFilename(change, side), payload)}
+          className="rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+type FrameSyncAnyChoice = FrameSyncChoice | FrameSyncSceneChoice
+type FrameSyncResolutionChoice = Exclude<FrameSyncAnyChoice, 'ignore'>
+type FrameSyncApplyMode = 'commit' | 'discard' | null
+interface FrameSyncResolutionOption {
+  choice: FrameSyncResolutionChoice
+  label: string
+  description: string
+}
+
+function syncChoiceLabel(choice: FrameSyncResolutionChoice, sectionId: FrameSyncSection['id']): string {
+  if (choice === 'backend') {
+    return 'Use backend'
+  }
+  if (choice === 'frame') {
+    return 'Use frame'
+  }
+  if (choice === 'both' && sectionId === 'scenes_json') {
+    return 'Keep both'
+  }
+  return 'Use backend'
+}
+
+function syncChoiceDescription(choice: FrameSyncResolutionChoice, sectionId: FrameSyncSection['id']): string {
+  if (choice === 'backend') {
+    return 'Commit the backend version to both sides.'
+  }
+  if (choice === 'frame') {
+    return 'Commit the frame version to both sides.'
+  }
+  if (choice === 'both' && sectionId === 'scenes_json') {
+    return 'Keep the backend scene and add the frame version as a copy.'
+  }
+  return 'Commit the backend version to both sides.'
+}
+
+function syncResolutionOptions(section: FrameSyncSection, change: FrameSyncChange): FrameSyncResolutionOption[] {
+  if (section.id === 'scenes_json' && change.kind === 'added') {
+    return [
+      {
+        choice: 'frame',
+        label: 'Keep',
+        description: 'Add this frame scene to the backend.',
+      },
+      {
+        choice: 'backend',
+        label: 'Delete',
+        description: 'Remove this scene from the frame.',
+      },
+    ]
+  }
+  if (section.id === 'scenes_json' && change.kind === 'removed') {
+    return [
+      {
+        choice: 'backend',
+        label: 'Keep',
+        description: 'Restore this backend scene to the frame.',
+      },
+      {
+        choice: 'frame',
+        label: 'Delete',
+        description: 'Delete this scene from the backend.',
+      },
+    ]
+  }
+  const choices: FrameSyncResolutionChoice[] =
+    section.id === 'scenes_json' ? ['backend', 'frame', 'both'] : ['backend', 'frame']
+  return choices.map((choice) => ({
+    choice,
+    label: syncChoiceLabel(choice, section.id),
+    description: syncChoiceDescription(choice, section.id),
+  }))
+}
+
+function FrameSyncResolutionButtons({
+  section,
+  change,
+  choice,
+  onChange,
+}: {
+  section: FrameSyncSection
+  change: FrameSyncChange
+  choice: FrameSyncAnyChoice
+  onChange: (choice: FrameSyncAnyChoice) => void
+}): JSX.Element {
+  const options = syncResolutionOptions(section, change)
+  const defaultChoice = options[0]?.choice ?? 'backend'
+  const selectedChoice: FrameSyncResolutionChoice =
+    choice !== 'ignore' && options.some((option) => option.choice === choice) ? choice : defaultChoice
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {options.map((option) => (
+        <button
+          key={`${section.id}-${change.path}-resolution-${option.choice}`}
+          type="button"
+          aria-pressed={selectedChoice === option.choice}
+          onClick={() => onChange(option.choice)}
+          className={clsx(
+            'rounded-xl border px-3 py-2 text-left text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            selectedChoice === option.choice
+              ? 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm'
+              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+          )}
+        >
+          <span className="block font-semibold">{option.label}</span>
+          <span className="mt-0.5 block leading-4 text-current opacity-75">{option.description}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function FrameSyncReviewSection({
+  sync,
+  choices,
+  onChoice,
+  onRefresh,
+  loading,
+  applying,
+  applyingMode,
+  error,
+}: {
+  sync: FrameSyncStatus
+  choices: FrameSyncChoices
+  onChoice: (sectionId: FrameSyncSection['id'], choiceKey: string, choice: FrameSyncAnyChoice) => void
+  onRefresh: () => void
+  loading: boolean
+  applying: boolean
+  applyingMode: FrameSyncApplyMode
+  error: string | null
+}): JSX.Element {
+  const sections = sync.sections.filter((section) => section.has_changes)
+  const applyingTitle = applyingMode === 'discard' ? 'Discarding frame changes' : 'Committing sync changes'
+  const applyingDescription =
+    applyingMode === 'discard'
+      ? 'Restoring the backend frame.json and scenes.json on the frame.'
+      : 'Writing the selected choices to the backend and the frame. Large scene files can take a moment to save.'
+
+  return (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <DrawerHeading
+          action={
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              {loading ? 'Checking' : 'Refresh'}
+            </button>
+          }
+        >
+          Sync from frame
+        </DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            The backend copy and the live frame copy differ.
+          </div>
+          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+            <div className="frameos-inset rounded-xl border p-3">
+              <div className="frame-tool-muted font-semibold uppercase tracking-wide">Last in sync</div>
+              <div className="mt-1 font-semibold text-[color:var(--tool-strong)]">
+                {formatSyncTimestamp(sync.last_in_sync_at)}
+              </div>
+            </div>
+            <div className="frameos-inset rounded-xl border p-3">
+              <div className="frame-tool-muted font-semibold uppercase tracking-wide">Checked</div>
+              <div className="mt-1 font-semibold text-[color:var(--tool-strong)]">
+                {formatSyncTimestamp(sync.checked_at)}
+              </div>
+            </div>
+          </div>
+          {error ? <div className="text-sm font-semibold text-red-500">{error}</div> : null}
+          {applying ? (
+            <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+              <Spinner />
+              <div>
+                <div className="font-semibold">{applyingTitle}</div>
+                <div className="mt-0.5 leading-5 text-blue-900/75">{applyingDescription}</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {sections.map((section) => (
+        <section key={section.id} className="space-y-2">
+          <DrawerHeading>{section.label}</DrawerHeading>
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+              <div>
+                <div className="frame-tool-muted font-semibold uppercase tracking-wide">Backend</div>
+                <div className="mt-1 font-semibold text-[color:var(--tool-strong)]">
+                  {section.backend_updated_at || sync.backend?.updated_at
+                    ? formatSyncTimestamp(section.backend_updated_at ?? sync.backend?.updated_at)
+                    : 'Current backend copy'}
+                </div>
+              </div>
+              <div>
+                <div className="frame-tool-muted font-semibold uppercase tracking-wide">Frame file</div>
+                <div className="mt-1 font-semibold text-[color:var(--tool-strong)]">
+                  {formatSyncTimestamp(section.frame_updated_at)}
+                </div>
+              </div>
+            </div>
+              <div className="space-y-3">
+                {section.changes.map((change) => {
+                  const choiceKey = frameSyncChangeKey(change)
+                  const choice = choices[section.id]?.[choiceKey] ?? 'ignore'
+                  return (
+                    <div key={`${section.id}-${change.path}`} className="frameos-inset rounded-xl border p-3">
+                      <div className="flex items-start gap-2">
+                        <ArrowsRightLeftIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{change.label}</div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                            <div>
+                              <FrameSyncSideLabel change={change} side="backend" label="Backend" />
+                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
+                                {change.backend}
+                              </div>
+                            </div>
+                            <div>
+                              <FrameSyncSideLabel change={change} side="frame" label="Frame" />
+                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
+                                {change.frame}
+                              </div>
+                            </div>
+                          </div>
+                          {change.details?.length ? (
+                            <div className="mt-3 space-y-1 border-t border-slate-200/70 pt-2">
+                              {change.details.slice(0, 8).map((detail) => (
+                                <div
+                                  key={`${change.path}-${detail.path}`}
+                                  className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
+                                >
+                                  <div className="frame-tool-muted truncate font-mono">{detail.path}</div>
+                                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                    <div className="break-words text-slate-500">Backend: {detail.backend}</div>
+                                    <div className="break-words text-slate-700">Frame: {detail.frame}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-3 border-t border-slate-200/70 pt-3">
+                            <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">
+                              Resolution
+                            </div>
+                            <FrameSyncResolutionButtons
+                              section={section}
+                              change={change}
+                              choice={choice}
+                              onChange={(next) => onChoice(section.id, choiceKey, next)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
 interface FrameBootstrapApiResponse {
   command: string
 }
@@ -1558,15 +1898,26 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployTransportToggleVisible,
     deployWithAgent,
     frameForm,
+    frameSyncApplyMode,
+    frameSyncApplying,
+    frameSyncChoices,
+    frameSyncError,
+    frameSyncStatus,
+    frameSyncStatusLoading,
     fullDeployPlanSummary,
+    hasFrameSyncChanges,
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
+    applyFrameSync,
+    discardFrameSyncChanges,
     hideDeployPlanModal,
     deployRemote,
     loadDeployPlans,
+    loadFrameSyncStatus,
     restartRemote,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
+    setFrameSyncItemChoice,
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
@@ -1613,6 +1964,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const deploySummaryWithoutBuildOptions = fullDeployPlanSummary.filter(
     (item) => item.label !== 'Build strategy' && item.label !== 'Compilation'
   )
+  const canApplyFrameSync =
+    Object.values(frameSyncChoices.frame_json).some((choice) => choice !== 'ignore') ||
+    Object.values(frameSyncChoices.scenes_json).some((choice) => choice !== 'ignore')
+  const frameSyncStatusNeedsRefresh =
+    hasFrameSyncChanges && Boolean(frame.frame_sync_hint?.has_changes) && (!frameSyncStatus || !frameSyncStatus.has_changes)
+  const frameSyncStatusReady = Boolean(frameSyncStatus && !frameSyncStatusNeedsRefresh)
+  const canDiscardFrameSyncChanges = hasFrameSyncChanges && frameSyncStatusReady && Boolean(frameSyncStatus?.has_changes)
 
   const saveSdCardSettingsAndDownload = async (): Promise<void> => {
     const response = await apiFetch(`/api/frames/${frame.id}`, {
@@ -1653,7 +2011,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
               {frame.name || frameHost(frame)}
             </div>
-            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Deploy</h2>
+            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+              {hasFrameSyncChanges ? 'Sync' : 'Deploy'}
+            </h2>
           </div>
           <button
             type="button"
@@ -1703,7 +2063,41 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   onChange={setDeployWithAgent}
                 />
               ) : null}
-              {deployPlansLoading ? (
+              {hasFrameSyncChanges && frameSyncStatusReady && frameSyncStatus ? (
+                <FrameSyncReviewSection
+                  sync={frameSyncStatus}
+                  choices={frameSyncChoices}
+                  onChoice={setFrameSyncItemChoice}
+                  onRefresh={loadFrameSyncStatus}
+                  loading={frameSyncStatusLoading}
+                  applying={frameSyncApplying}
+                  applyingMode={frameSyncApplyMode}
+                  error={frameSyncError}
+                />
+              ) : hasFrameSyncChanges ? (
+                <section className="space-y-2">
+                  <DrawerHeading
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => loadFrameSyncStatus()}
+                        disabled={frameSyncStatusLoading}
+                        className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                      >
+                        {frameSyncStatusLoading ? 'Checking' : 'Refresh'}
+                      </button>
+                    }
+                  >
+                    Sync changes detected
+                  </DrawerHeading>
+                  <div className="frame-tool-card rounded-[22px] p-4">
+                    <div className="frame-tool-muted text-sm leading-5">
+                      The frame reports local changes since the last successful deploy. Checking the detailed diff.
+                    </div>
+                    {frameSyncError ? <div className="mt-2 text-sm font-semibold text-red-500">{frameSyncError}</div> : null}
+                  </div>
+                </section>
+              ) : deployPlansLoading ? (
                 <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
               ) : deployPlansError ? (
                 <div className="space-y-3">
@@ -1719,6 +2113,27 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 </div>
               ) : (
                 <div className="space-y-5">
+                  {frameSyncError ? (
+                    <section className="space-y-2">
+                      <DrawerHeading
+                        action={
+                          <button
+                            type="button"
+                            onClick={() => loadFrameSyncStatus()}
+                            disabled={frameSyncStatusLoading}
+                            className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                          >
+                            Retry
+                          </button>
+                        }
+                      >
+                        Sync unavailable
+                      </DrawerHeading>
+                      <div className="frame-tool-card rounded-[22px] p-4">
+                        <div className="text-sm font-semibold text-amber-600">{frameSyncError}</div>
+                      </div>
+                    </section>
+                  ) : null}
                   {deployRecommendation ? (
                     <section className="space-y-2">
                       <DrawerHeading
@@ -1771,6 +2186,55 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             >
               {closeOnlyDrawerView ? 'Close' : 'Cancel'}
             </button>
+          ) : hasFrameSyncChanges ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => loadFrameSyncStatus()}
+                disabled={frameSyncStatusLoading || frameSyncApplying}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => discardFrameSyncChanges()}
+                disabled={frameSyncApplying || !canDiscardFrameSyncChanges}
+                title="Restore the backend frame.json and scenes.json on the frame"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                {frameSyncApplyMode === 'discard' ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner />
+                    Discarding frame changes
+                  </span>
+                ) : (
+                  'Discard frame changes'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFrameSync()}
+                disabled={frameSyncApplying || !frameSyncStatusReady || !canApplyFrameSync}
+                className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {frameSyncApplyMode === 'commit' ? <Spinner color="white" /> : null}
+                {frameSyncApplyMode === 'commit'
+                  ? 'Committing sync changes'
+                  : !frameSyncStatusReady
+                  ? 'Checking'
+                  : canApplyFrameSync
+                  ? 'Commit selected choices'
+                  : 'Choose changes'}
+              </button>
+            </>
           ) : (
             <>
               {frame.status === 'deploying' ? (

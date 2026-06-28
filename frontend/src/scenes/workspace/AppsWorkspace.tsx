@@ -434,7 +434,7 @@ function AppsTopBar({
           <span className="truncate">{app?.label ?? 'Apps'}</span>
         </h1>
       </div>
-      <div className="apps-topbar-actions flex flex-nowrap items-center justify-center gap-2 @md:justify-end">
+      <div className="apps-topbar-actions flex flex-nowrap items-center justify-start gap-2">
         {scene && app ? (
           <>
             <BackToSceneButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />

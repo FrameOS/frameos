@@ -44,11 +44,11 @@ export function FrameChangeStatusIcon({
   frameId: number
   variant?: 'sidebar' | 'dashboard'
 }): JSX.Element {
-  const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { hasFrameSyncChanges, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
+  const statusLabel = unsavedChanges ? 'Unsaved' : hasFrameSyncChanges ? 'Sync' : undeployedChanges ? 'Undeployed' : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
@@ -117,6 +117,8 @@ export function FrameChangeStatusIcon({
             : 'Close deploy'
           : unsavedChanges
           ? 'Open unsaved changes'
+          : hasFrameSyncChanges
+          ? 'Open sync'
           : 'Open deploy for undeployed changes'
       }
       onClick={openDrawer}

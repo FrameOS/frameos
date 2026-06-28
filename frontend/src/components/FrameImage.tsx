@@ -129,7 +129,7 @@ export function FrameImage({
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
-  const { updateEntityImage } = useActions(entityImagesModel)
+  const { refreshEntityImageMetadata, updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
   const frameAspectRatio =
     frame?.width && frame.height
@@ -241,6 +241,7 @@ export function FrameImage({
     setIsLoading(false)
     queueFullSizeLoad()
     maybeRefreshMissingInitialFrameImage()
+    refreshEntityImageMetadata(entityId, subEntityId, imageSrc)
   }
 
   return (

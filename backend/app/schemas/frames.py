@@ -263,3 +263,10 @@ class FrameSetNextSceneRequest(BaseModel):
     sceneId: str
     state: Optional[Dict[str, Any]] = None
     fastDeploy: Optional[bool] = True
+
+
+class FrameSyncApplyRequest(BaseModel):
+    frame_json: Optional[Literal["backend", "frame", "ignore"]] = "ignore"
+    scenes_json: Optional[Literal["backend", "frame", "ignore"]] = "ignore"
+    frame_json_choices: Optional[Dict[str, Literal["backend", "frame", "ignore"]]] = None
+    scenes_json_choices: Optional[Dict[str, Literal["backend", "frame", "both", "ignore"]]] = None

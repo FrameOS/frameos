@@ -159,6 +159,70 @@ export interface FrameType {
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
+  frame_sync_hint?: FrameSyncHint
+}
+
+export type FrameSyncSectionId = 'frame_json' | 'scenes_json'
+export type FrameSyncChoice = 'backend' | 'frame' | 'ignore'
+export type FrameSyncSceneChoice = FrameSyncChoice | 'both'
+
+export interface FrameSyncHint {
+  has_changes: boolean
+  checked_at?: string | null
+  current_revision?: string | null
+  deployed_revision?: string | null
+  frame_config_modified_at?: string | null
+  scenes_modified_at?: string | null
+  last_successful_deploy_at?: string | null
+}
+
+export interface FrameSyncChangeDetail {
+  path: string
+  backend: string
+  frame: string
+}
+
+export interface FrameSyncChange {
+  path: string
+  choice_key?: string
+  label: string
+  kind: 'added' | 'removed' | 'changed'
+  backend: string
+  frame: string
+  backend_json?: Record<string, any>
+  frame_json?: Record<string, any>
+  details?: FrameSyncChangeDetail[]
+}
+
+export interface FrameSyncSection {
+  id: FrameSyncSectionId
+  label: string
+  filename: string
+  has_changes: boolean
+  backend_updated_at?: string | null
+  frame_updated_at?: string | null
+  changes: FrameSyncChange[]
+}
+
+export interface FrameSyncStatus {
+  status: 'ok'
+  has_changes: boolean
+  checked_at: string
+  last_in_sync_at?: string | null
+  backend?: {
+    last_successful_deploy_at?: string | null
+    updated_at?: string | null
+  }
+  frame?: {
+    id?: number | string | null
+    name?: string | null
+    current_revision?: string | null
+    deployed_revision?: string | null
+    frame_config_modified_at?: string | null
+    scenes_modified_at?: string | null
+    last_successful_deploy_at?: string | null
+  }
+  sections: FrameSyncSection[]
 }
 
 export interface FrameMountpointConfig {
