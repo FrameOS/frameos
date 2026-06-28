@@ -158,6 +158,32 @@ function currentFrameSyncToken(frame: FrameType | null, sync: FrameSyncStatus | 
   return frameSyncStatusToken(sync) ?? frameSyncHintToken(frame)
 }
 
+function frameHasSyncCredentials(frame: FrameType | null): boolean {
+  const frameAdminAuth = frame?.frame_admin_auth
+  return Boolean(frameAdminAuth?.enabled && frameAdminAuth.user && frameAdminAuth.pass)
+}
+
+function shouldLoadFrameSyncStatus(
+  frame: FrameType | null,
+  sync: FrameSyncStatus | null,
+  ignoredToken: string | null
+): boolean {
+  if (
+    isInFrameAdminMode() ||
+    !frame ||
+    frame.archived ||
+    !frame.frame_sync_hint?.has_changes ||
+    !frameHasSyncCredentials(frame)
+  ) {
+    return false
+  }
+  const syncToken = currentFrameSyncToken(frame, sync)
+  if (syncToken && syncToken === ignoredToken) {
+    return false
+  }
+  return !sync || syncHintIsNewerThanStatus(frame, sync)
+}
+
 function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
   const views: FrameSyncViews = {}
   for (const section of sync?.sections ?? []) {
@@ -1950,7 +1976,10 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     showDeployPlanModal: () => {
-      if (!values.frameSyncStatusLoading && !values.frameSyncStatus && !isInFrameAdminMode()) {
+      if (
+        !values.frameSyncStatusLoading &&
+        shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
+      ) {
         actions.loadFrameSyncStatus()
       }
       const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
@@ -2179,6 +2208,12 @@ export const frameLogic = kea<frameLogicType>([
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
       }
+      if (
+        !values.frameSyncStatusLoading &&
+        shouldLoadFrameSyncStatus(frame ?? null, values.frameSyncStatus, values.frameSyncIgnoredToken)
+      ) {
+        actions.loadFrameSyncStatus()
+      }
     },
   })),
   listeners(({ asyncActions, actions, values, props }) => {
@@ -2348,7 +2383,10 @@ export const frameLogic = kea<frameLogicType>([
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
     }
-    if (!isInFrameAdminMode() && values.frame && !values.frame.archived) {
+    if (
+      !values.frameSyncStatusLoading &&
+      shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
+    ) {
       actions.loadFrameSyncStatus()
     }
 
