@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import type { MouseEvent, SVGProps } from 'react'
-import { CloudArrowUpIcon } from '@heroicons/react/24/outline'
+import { ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -51,7 +51,7 @@ export function FrameChangeStatusIcon({
   const statusLabel = unsavedChanges ? 'Unsaved' : hasFrameSyncChanges ? 'Sync' : undeployedChanges ? 'Undeployed' : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
-  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
+  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
     ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'

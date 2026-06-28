@@ -693,6 +693,39 @@ async def test_api_frame_get_image_caches_sync_hint_headers_for_head(async_clien
 
 
 @pytest.mark.asyncio
+async def test_api_frames_include_cached_sync_hint(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SyncHintFrame', 'localhost', 'localhost')
+    await frame_sync.store_frame_sync_hint_headers(
+        redis,
+        frame.id,
+        {
+            'x-frameos-sync-changed': '1',
+            'x-frameos-sync-revision': 'rev-local',
+            'x-frameos-deployed-revision': 'rev-deployed',
+            'x-frameos-frame-config-modified-at': '2026-06-28T10:00:00Z',
+            'x-frameos-scenes-modified-at': '2026-06-28T10:01:00Z',
+            'x-frameos-last-successful-deploy-at': '2026-06-28T09:59:00Z',
+        },
+    )
+
+    detail_response = await async_client.get(f'/api/frames/{frame.id}')
+    assert detail_response.status_code == 200
+    detail_hint = detail_response.json()['frame']['frame_sync_hint']
+    assert detail_hint['has_changes'] is True
+    assert detail_hint['current_revision'] == 'rev-local'
+    assert detail_hint['deployed_revision'] == 'rev-deployed'
+    assert detail_hint['frame_config_modified_at'] == '2026-06-28T10:00:00Z'
+    assert detail_hint['scenes_modified_at'] == '2026-06-28T10:01:00Z'
+    assert detail_hint['last_successful_deploy_at'] == '2026-06-28T09:59:00Z'
+
+    list_response = await async_client.get('/api/frames')
+    assert list_response.status_code == 200
+    list_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert list_frame['frame_sync_hint']['has_changes'] is True
+    assert list_frame['frame_sync_hint']['current_revision'] == 'rev-local'
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_caches_uploaded_preview_under_original_scene_id(async_client, db, redis):
     frame = await new_frame(db, redis, 'UploadedPreviewImageFrame', 'localhost', 'localhost')
     frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]

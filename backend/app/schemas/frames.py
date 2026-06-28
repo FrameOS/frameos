@@ -49,6 +49,15 @@ class FrameTimezoneUpdater(BaseModel):
         return value
 
 
+class FrameSyncHint(BaseModel):
+    has_changes: bool
+    checked_at: Optional[str] = None
+    current_revision: Optional[str] = None
+    deployed_revision: Optional[str] = None
+    frame_config_modified_at: Optional[str] = None
+    scenes_modified_at: Optional[str] = None
+    last_successful_deploy_at: Optional[str] = None
+
 
 class FrameBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -112,6 +121,7 @@ class FrameBase(BaseModel):
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
     active_scene_id: Optional[str] = None
+    frame_sync_hint: Optional[FrameSyncHint] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase
