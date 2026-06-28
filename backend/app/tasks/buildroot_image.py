@@ -464,13 +464,18 @@ def render_systemd_service(
 
 
 def render_buildroot_frameos_service() -> str:
-    return render_systemd_service(
+    service = render_systemd_service(
         REPO_ROOT / "frameos" / "frameos.service",
         user="root",
         environment={
             "FRAMEOS_HOME": "/srv/frameos/current",
             "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
         },
+    )
+    return service.replace(
+        "After=network.target\n",
+        "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n",
+        1,
     )
 
 

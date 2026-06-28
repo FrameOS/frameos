@@ -1394,6 +1394,8 @@ def test_stage_buildroot_frameos_service_enables_runtime(tmp_path):
     assert service.is_file()
     service_text = service.read_text(encoding="utf-8")
     assert "User=root" in service_text
+    assert "Wants=NetworkManager.service" in service_text
+    assert "After=network.target NetworkManager.service" in service_text
     assert "ExecStart=/srv/frameos/current/frameos" in service_text
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in service_text
     assert (
