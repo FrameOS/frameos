@@ -2012,8 +2012,9 @@ fi
 disk="$image_dir"/{shlex.quote(output_path.name)}
 rootfs="$(mktemp)"
 cmds="$(mktemp)"
+firmware_tmp="$(mktemp -d)"
 cleanup_root_patch() {{
-  rm -f "$rootfs" "$cmds"
+  rm -rf "$rootfs" "$cmds" "$firmware_tmp"
 }}
 trap cleanup_root_patch EXIT
 python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
@@ -2042,6 +2043,84 @@ symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.s
 rm /etc/hostname
 write $service_root/etc/hostname /etc/hostname
 EOF
+if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \
+   ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" "$rootfs" >/dev/null 2>&1; then
+python3 - "$firmware_tmp" <<'PY'
+import hashlib
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+destination = Path(sys.argv[1])
+base_url = (
+    "https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/"
+    "c91cd2804cf7463aab913e7247c176049f16bbd6/debian/config/brcm80211/brcm"
+)
+firmware_files = [
+    ("510a7dd1e056199b309425548ee0bd846993a1837ac7fa1e4d3e641f05a1327a", "brcmfmac43436-sdio.bin"),
+    ("fce7cbb62ffa6a5a65ca97b13f6fbf28d06c02d986c2072d65bf72164755fc34", "brcmfmac43436-sdio.clm_blob"),
+    ("4cda90facd8844cff60d80b34b24ecbae76adb9a62508a109461b8bf42b478d1", "brcmfmac43436-sdio.txt"),
+    ("68b9bcc9855d91733cd44c21de4cb507c91b0d32d838c0696def5eb96c99e2de", "brcmfmac43436s-sdio.bin"),
+    ("37a8b85a5a9742761101b764a07bc4d0c8b09f2e180eaea3b503a834277ad595", "brcmfmac43436s-sdio.txt"),
+]
+for expected_sha, name in firmware_files:
+    url = f"{{base_url}}/{{urllib.parse.quote(name, safe='')}}"
+    data = urllib.request.urlopen(url, timeout=60).read()
+    actual_sha = hashlib.sha256(data).hexdigest()
+    if actual_sha != expected_sha:
+        raise SystemExit(f"Checksum mismatch for {{name}}: {{actual_sha}}")
+    (destination / name).write_bytes(data)
+PY
+cat >> "$cmds" <<EOF
+mkdir /usr
+mkdir /usr/lib
+mkdir /usr/lib/firmware
+mkdir /usr/lib/firmware/brcm
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin
+write $firmware_tmp/brcmfmac43436-sdio.bin /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.clm_blob
+write $firmware_tmp/brcmfmac43436-sdio.clm_blob /usr/lib/firmware/brcm/brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.txt
+write $firmware_tmp/brcmfmac43436-sdio.txt /usr/lib/firmware/brcm/brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.bin
+write $firmware_tmp/brcmfmac43436s-sdio.bin /usr/lib/firmware/brcm/brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.txt
+write $firmware_tmp/brcmfmac43436s-sdio.txt /usr/lib/firmware/brcm/brcmfmac43436s-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436s-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436s-sdio.txt
+EOF
+fi
 debugfs -w -f "$cmds" "$rootfs"
 python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
 import sys
@@ -2541,8 +2620,8 @@ if [ -f "$target_dir/boot/frameos-hostname" ]; then
   install -m 0644 "$target_dir/boot/frameos-hostname" "$target_dir/etc/hostname"
 fi
 
-if [ -d "$target_dir/lib/firmware/brcm" ]; then
-  cd "$target_dir/lib/firmware/brcm"
+if [ -d "$target_dir/usr/lib/firmware/brcm" ]; then
+  cd "$target_dir/usr/lib/firmware/brcm"
   for base in brcmfmac43436-sdio brcmfmac43436s-sdio brcmfmac43430-sdio; do
     for model in raspberrypi,model-zero-2-w raspberrypi,model-zero-2-2; do
       if [ -e "${base}.bin" ] && [ ! -e "${base}.${model}.bin" ]; then
@@ -2554,6 +2633,60 @@ if [ -d "$target_dir/lib/firmware/brcm" ]; then
     done
   done
 fi
+
+rpi_wifi_firmware_commit="c91cd2804cf7463aab913e7247c176049f16bbd6"
+rpi_wifi_firmware_base_url="https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/${rpi_wifi_firmware_commit}/debian/config/brcm80211/brcm"
+rpi_wifi_firmware_dir="$target_dir/usr/lib/firmware/brcm"
+mkdir -p "$rpi_wifi_firmware_dir"
+rpi_wifi_tmp="$(mktemp -d)"
+trap 'rm -rf "$rpi_wifi_tmp"' EXIT
+
+while read -r expected_sha firmware_name; do
+  [ -n "$firmware_name" ] || continue
+  destination="$rpi_wifi_firmware_dir/$firmware_name"
+  if [ -f "$destination" ]; then
+    actual_sha="$(sha256sum "$destination" | awk '{print $1}')"
+    if [ "$actual_sha" = "$expected_sha" ]; then
+      continue
+    fi
+  fi
+
+  encoded_firmware_name="${firmware_name//,/%2C}"
+  curl -fsSL --retry 3 --retry-delay 2 \
+    -o "$rpi_wifi_tmp/$firmware_name" \
+    "$rpi_wifi_firmware_base_url/$encoded_firmware_name"
+  printf '%s  %s\n' "$expected_sha" "$rpi_wifi_tmp/$firmware_name" | sha256sum -c -
+  install -m 0644 "$rpi_wifi_tmp/$firmware_name" "$destination"
+done <<'EOF'
+510a7dd1e056199b309425548ee0bd846993a1837ac7fa1e4d3e641f05a1327a brcmfmac43436-sdio.bin
+fce7cbb62ffa6a5a65ca97b13f6fbf28d06c02d986c2072d65bf72164755fc34 brcmfmac43436-sdio.clm_blob
+4cda90facd8844cff60d80b34b24ecbae76adb9a62508a109461b8bf42b478d1 brcmfmac43436-sdio.txt
+68b9bcc9855d91733cd44c21de4cb507c91b0d32d838c0696def5eb96c99e2de brcmfmac43436s-sdio.bin
+37a8b85a5a9742761101b764a07bc4d0c8b09f2e180eaea3b503a834277ad595 brcmfmac43436s-sdio.txt
+EOF
+
+while read -r firmware_link firmware_target; do
+  [ -n "$firmware_link" ] || continue
+  rm -f "$rpi_wifi_firmware_dir/$firmware_link"
+  ln -s "$firmware_target" "$rpi_wifi_firmware_dir/$firmware_link"
+done <<'EOF'
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436s-sdio.bin
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436s-sdio.txt
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436s-sdio.bin
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436s-sdio.txt
+EOF
 """
 
 

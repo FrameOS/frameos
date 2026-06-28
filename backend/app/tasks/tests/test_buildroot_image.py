@@ -405,6 +405,8 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "assets-partition-root" in partition_post_build
     assert '"$target_dir/etc/cron.d"' in post_build
     assert "brcmfmac43430-sdio" in post_build
+    assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in post_build
+    assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in post_build
     assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
@@ -815,6 +817,8 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
         "root_patch_script"
     ]
     assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
+    assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
+    assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
     boot_root = temp_dir / "overlay" / "boot"
     assert (boot_root / "frameos-setup.json").is_file()
     assert (boot_root / "frameos-hostname").read_text(encoding="utf-8") == "kitchen-frame\n"
@@ -1182,6 +1186,8 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         "root_patch_script"
     ]
     assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
+    assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
+    assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
     patch_mounts = captured["patch"]["mounts"]
     assert patch_mounts[0].source == output_image.resolve()
     assert patch_mounts[0].target == "/image/output.img"
