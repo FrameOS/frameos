@@ -52,6 +52,7 @@ FRONTEND_REQUIRED_SOURCE_FILES = (
     Path("frontend/tsconfig.dev.json"),
     Path("frontend/tsconfig.json"),
     Path("../frontend/package.json"),
+    Path("../frontend/public"),
     Path("../frontend/schema"),
     Path("../frontend/scripts/generateRepoApps.mjs"),
     Path("../frontend/src"),

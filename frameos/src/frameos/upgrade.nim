@@ -71,6 +71,10 @@ proc writeUpgradeStatus*(payload: JsonNode) =
   createDir(frameosStateDir())
   writeFile(frameosUpgradeStatusPath(), pretty(payload, indent = 2) & "\n")
 
+proc deleteIfPresent(payload: JsonNode, key: string) =
+  if payload != nil and payload.kind == JObject and payload.hasKey(key):
+    payload.delete(key)
+
 proc readUpgradeStatus*(): JsonNode =
   try:
     if fileExists(frameosUpgradeStatusPath()):
@@ -230,6 +234,9 @@ proc latestFrameOSRelease*(target = ""): FrameOSReleaseInfo =
 proc currentFrameConfigPath(): string =
   frameosInstallDir() / "current" / "frame.json"
 
+proc adminSessionSaltPath(): string =
+  frameosStateDir() / "admin_session_salt"
+
 proc currentFrameConfig(): JsonNode =
   try:
     if fileExists(currentFrameConfigPath()):
@@ -263,6 +270,12 @@ proc releaseJson(release: FrameOSReleaseInfo): JsonNode =
     "html_url": release.htmlUrl,
   }
 
+proc applyLatestReleaseToStatus*(payload: JsonNode, release: FrameOSReleaseInfo, currentVersion: string) =
+  payload["latest_release"] = releaseJson(release)
+  payload["latest_version"] = %release.version
+  payload["update_available"] = %(compareFrameOSVersions(currentVersion, release.version) < 0 or currentVersion == "unknown")
+  deleteIfPresent(payload, "latest_error")
+
 proc frameOSUpgradeStatusPayload*(checkLatest = false): JsonNode =
   var targetError = ""
   let target =
@@ -280,10 +293,7 @@ proc frameOSUpgradeStatusPayload*(checkLatest = false): JsonNode =
   if checkLatest and target.len > 0:
     try:
       let release = latestFrameOSRelease(target)
-      result["latest_release"] = releaseJson(release)
-      result["latest_version"] = %release.version
-      result["update_available"] = %(compareFrameOSVersions(installedFrameOSVersion(), release.version) < 0 or installedFrameOSVersion() == "unknown")
-      result.delete("latest_error")
+      applyLatestReleaseToStatus(result, release, installedFrameOSVersion())
     except CatchableError as error:
       result["latest_error"] = %error.msg
       result["update_available"] = %false
@@ -349,6 +359,15 @@ proc copyCompressedPayload(releaseDir, oldDir, compressedName, plainName: string
 proc copyScenePayloads(releaseDir, oldDir: string) =
   copyCompressedPayload(releaseDir, oldDir, "all_scenes.json.gz", "all_scenes.json")
   copyCompressedPayload(releaseDir, oldDir, "scenes.json.gz", "scenes.json")
+
+proc copyAdminSessionSaltForUpgrade*(releaseDir: string) =
+  let targetSalt = releaseDir / "frame.json.admin_session_salt"
+  let sharedSalt = adminSessionSaltPath()
+  let legacySalt = currentFrameConfigPath() & ".admin_session_salt"
+  if fileExists(sharedSalt):
+    copyFile(sharedSalt, targetSalt)
+  elif fileExists(legacySalt):
+    copyFile(legacySalt, targetSalt)
 
 proc writeFrameConfigForUpgrade(configPath, destination, version: string) =
   var payload = parseFile(configPath)
@@ -439,9 +458,7 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     copyFile(result.frameosReleaseDir / "frame.json", result.remoteReleaseDir / "frame.json")
     copyScenePayloads(result.frameosReleaseDir, oldReleaseDir)
 
-    let legacySalt = currentFrameConfigPath() & ".admin_session_salt"
-    if fileExists(legacySalt):
-      copyFile(legacySalt, result.frameosReleaseDir / "frame.json.admin_session_salt")
+    copyAdminSessionSaltForUpgrade(result.frameosReleaseDir)
 
     let serviceUser = serviceUserFromFile("/etc/systemd/system/frameos.service")
     result.serviceUser = serviceUser

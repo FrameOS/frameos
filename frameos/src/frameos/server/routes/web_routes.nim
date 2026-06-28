@@ -56,6 +56,24 @@ proc respondAdminWebApp(request: Request) {.gcsafe.} =
   else:
     request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
 
+proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
+  if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
+    request.respond(Http401, body = "Unauthorized")
+    return
+  try:
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = contentTypeForAsset(assetPath)
+    headers["Vary"] = "Accept-Encoding"
+    let asset =
+      if clientAcceptsGzip(request):
+        headers["Content-Encoding"] = "gzip"
+        getCompressedFrameWebAsset(assetPath)
+      else:
+        getFrameWebAsset(assetPath)
+    request.respond(Http200, headers, asset)
+  except KeyError:
+    request.respond(Http404, body = "Not found!")
+
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
@@ -122,23 +140,13 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
 
   router.get("/static/@asset", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
-      if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
-        request.respond(Http401, body = "Unauthorized")
-        return
       let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
-      try:
-        var headers: mummy.HttpHeaders
-        headers["Content-Type"] = contentTypeForAsset(assetPath)
-        headers["Vary"] = "Accept-Encoding"
-        let asset =
-          if clientAcceptsGzip(request):
-            headers["Content-Encoding"] = "gzip"
-            getCompressedFrameWebAsset(assetPath)
-          else:
-            getFrameWebAsset(assetPath)
-        request.respond(Http200, headers, asset)
-      except KeyError:
-        request.respond(Http404, body = "Not found!")
+      respondFrameWebAsset(request, assetPath)
+  )
+
+  router.get("/img/**", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      respondFrameWebAsset(request, "assets/compiled/frame_web" & request.path)
   )
 
   router.post("/setup", proc(request: Request) {.gcsafe.} =

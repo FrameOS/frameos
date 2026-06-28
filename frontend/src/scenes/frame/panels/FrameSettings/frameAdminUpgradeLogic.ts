@@ -49,6 +49,16 @@ const UPGRADE_RELOAD_MS = 1200
 const UPGRADE_PENDING_KEY = 'frameos.upgrade.pending'
 const UPGRADE_RELOAD_KEY = 'frameos.upgrade.reloaded'
 
+class UpgradeApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'UpgradeApiError'
+    this.status = status
+  }
+}
+
 function browserSessionStorage(): Storage | null {
   if (typeof window === 'undefined') {
     return null
@@ -115,7 +125,7 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
 async function loadUpgradeStatus(checkLatest = false): Promise<FrameOSUpgradeStatus> {
   const response = await apiFetch(`/api/upgrade/status${checkLatest ? '?check=1' : ''}`)
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, 'Failed to load upgrade status'))
+    throw new UpgradeApiError(await responseErrorMessage(response, 'Failed to load upgrade status'), response.status)
   }
   return (await response.json()) as FrameOSUpgradeStatus
 }
@@ -134,6 +144,10 @@ async function postUpgrade(body: Record<string, unknown>): Promise<FrameOSUpgrad
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error)
+}
+
+function statusEndpointUnavailable(error: unknown): boolean {
+  return error instanceof UpgradeApiError && (error.status === 401 || error.status === 404)
 }
 
 export const frameAdminUpgradeLogic = kea<frameAdminUpgradeLogicType>([
@@ -213,11 +227,20 @@ export const frameAdminUpgradeLogic = kea<frameAdminUpgradeLogicType>([
       actions.setUpgradeError(errorMessage(error))
     },
     loadUpgradeStatusFailure: ({ error }) => {
-      actions.setUpgradeError(errorMessage(error))
-      if (values.isUpgradePolling || readPendingUpgrade()) {
+      if (values.isUpgradePolling || values.upgradeRunningSeen || readPendingUpgrade()) {
+        if (statusEndpointUnavailable(error)) {
+          setPendingUpgrade(false)
+          actions.setUpgradePolling(false)
+          actions.setUpgradeError(null)
+          actions.reloadAfterUpgrade()
+          return
+        }
+        actions.setUpgradeError(null)
         actions.setUpgradePolling(true)
         actions.scheduleUpgradeStatusPoll(UPGRADE_POLL_MS)
+        return
       }
+      actions.setUpgradeError(errorMessage(error))
     },
     loadUpgradeStatusSuccess: ({ upgradeStatus }) => {
       if (statusIsActive(upgradeStatus)) {

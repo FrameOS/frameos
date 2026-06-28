@@ -9,6 +9,7 @@ import ../[auth, state]
 var server = startRouterServer(19331)
 
 const stableStaticAssetPath = "/static/main.js"
+const stableImageAssetPath = "/img/logo-2/logo-white-colors.svg"
 
 suite "web route behavior":
   setup:
@@ -203,6 +204,10 @@ suite "web route behavior":
     let loginCss = httpRequest(server.port, "GET", "/static/main.css")
     check loginCss.status == 200
 
+    let loginLogo = httpRequest(server.port, "GET", stableImageAssetPath)
+    check loginLogo.status == 200
+    check loginLogo.header("content-type") == "image/svg+xml"
+
   test "static assets load without auth for public and protected frame access":
     var config = defaultFrameConfig()
     config.frameAccess = "public"
@@ -210,12 +215,16 @@ suite "web route behavior":
 
     let publicAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check publicAsset.status == 200
+    let publicLogo = httpRequest(server.port, "GET", stableImageAssetPath)
+    check publicLogo.status == 200
 
     config.frameAccess = "protected"
     configureServerState(config)
 
     let protectedAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check protectedAsset.status == 200
+    let protectedLogo = httpRequest(server.port, "GET", stableImageAssetPath)
+    check protectedLogo.status == 200
 
   test "static assets reuse embedded gzip data when requested":
     var config = defaultFrameConfig()
@@ -253,6 +262,8 @@ suite "web route behavior":
 
     let privateAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check privateAsset.status == 401
+    let privateLogo = httpRequest(server.port, "GET", stableImageAssetPath)
+    check privateLogo.status == 401
 
     let authedPrivateAsset = httpRequest(
       server.port,
@@ -262,11 +273,19 @@ suite "web route behavior":
     )
     check authedPrivateAsset.status == 200
 
+    let authedPrivateLogo = httpRequest(
+      server.port,
+      "GET",
+      stableImageAssetPath,
+      headers = [("Cookie", ACCESS_COOKIE & "=test-key")],
+    )
+    check authedPrivateLogo.status == 200
+
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()
     configureServerState(config)
 
-    for path in ["/static/foo.js", "/image", "/states", "/state", "/ws", "/ws/admin"]:
+    for path in ["/static/foo.js", stableImageAssetPath, "/image", "/states", "/state", "/ws", "/ws/admin"]:
       let response = httpRequest(server.port, "GET", path)
       check response.status == 401
 
