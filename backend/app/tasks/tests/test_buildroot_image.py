@@ -412,7 +412,12 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
         in partition_post_build
     )
     assert 'mkdir -p "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
+    assert (
+        'chown 0:0 "$frameos_root/state/NetworkManager" '
+        '"$frameos_root/state/NetworkManager/system-connections"'
+    ) in partition_post_build
     assert 'chmod 700 "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
+    assert 'chown 0:0 "$target_dir/etc/NetworkManager/system-connections"' in partition_post_build
     assert "frameos-partition-root" in partition_post_build
     assert "assets-partition-root" in partition_post_build
     assert '"$target_dir/etc/cron.d"' in post_build

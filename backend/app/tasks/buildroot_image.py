@@ -2737,8 +2737,10 @@ if ! find "$assets_root" -mindepth 1 -maxdepth 1 | grep -q .; then
 fi
 
 mkdir -p "$frameos_root/state/NetworkManager/system-connections"
+chown 0:0 "$frameos_root/state/NetworkManager" "$frameos_root/state/NetworkManager/system-connections"
 chmod 700 "$frameos_root/state/NetworkManager/system-connections"
 mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections"
+chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
 chmod 700 "$target_dir/etc/NetworkManager/system-connections"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
