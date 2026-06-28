@@ -1,4 +1,4 @@
-{.compile: "EPD_12in48b.c".}
+{.compile: "EPD_12in48b_V2.c".}
 ## ***************************************************************************
 ##  | File      	:	EPD_12in48b.h
 ##  | Author      :   Waveshare team
