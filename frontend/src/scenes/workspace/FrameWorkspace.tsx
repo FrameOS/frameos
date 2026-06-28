@@ -57,6 +57,7 @@ import {
 import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -248,13 +249,24 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
-function frameToolPanelFromSearchParams(searchParams: Record<string, unknown>): WorkspaceUtilityPanel | null {
+const frameAdminUnsupportedToolPanels = new Set<WorkspaceUtilityPanel>(['terminal', 'ping'])
+
+function frameToolDefinitionsForMode(inFrameAdminMode: boolean): FrameToolDefinition[] {
+  return inFrameAdminMode
+    ? frameToolDefinitions.filter((definition) => !frameAdminUnsupportedToolPanels.has(definition.panel))
+    : frameToolDefinitions
+}
+
+function frameToolPanelFromSearchParams(
+  searchParams: Record<string, unknown>,
+  availableDefinitions: FrameToolDefinition[] = frameToolDefinitions
+): WorkspaceUtilityPanel | null {
   const value = searchParams.tool
   const tool = Array.isArray(value) ? value[0] : value
   if (!tool) {
     return 'overview'
   }
-  return typeof tool === 'string' && frameToolDefinitions.some((definition) => definition.panel === tool)
+  return typeof tool === 'string' && availableDefinitions.some((definition) => definition.panel === tool)
     ? (tool as WorkspaceUtilityPanel)
     : 'overview'
 }
@@ -454,15 +466,19 @@ function FrameTree({
   frame,
   frames,
   activeTool,
+  toolDefinitions,
   unsavedChanges,
   undeployedChanges,
 }: {
   frame: FrameType
   frames: FrameType[]
   activeTool: WorkspaceUtilityPanel
+  toolDefinitions: FrameToolDefinition[]
   unsavedChanges: boolean
   undeployedChanges: boolean
 }): JSX.Element {
+  const inFrameAdminMode = isInFrameAdminMode()
+
   return (
     <div className="@container space-y-4">
       <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
@@ -473,14 +489,14 @@ function FrameTree({
           mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} />
+          {!inFrameAdminMode ? <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} /> : null}
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
-          {frameToolDefinitions.map((definition) => {
+          {toolDefinitions.map((definition) => {
             const active = activeTool === definition.panel
             return (
               <div key={definition.panel} className="space-y-1">
@@ -572,6 +588,10 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
 
+  const handleSceneClick = (): void => {
+    openSceneControl(frame.id, scene.id)
+  }
+
   return (
     <div
       draggable
@@ -585,11 +605,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <button
-        type="button"
-        onClick={() => openSceneControl(frame.id, scene.id)}
-        className="flex h-full w-full flex-col"
-      >
+      <button type="button" onClick={handleSceneClick} className="flex h-full w-full flex-col">
         <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
           <FrameImage
             frameId={frame.id}
@@ -1266,6 +1282,8 @@ function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
 
 function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const frameLogicProps = { frameId }
+  const inFrameAdminMode = isInFrameAdminMode()
+  const availableToolDefinitions = frameToolDefinitionsForMode(inFrameAdminMode)
   useMountedLogic(terminalLogic(frameLogicProps))
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
@@ -1276,10 +1294,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
+  const requestedPanel = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions)
+  const fallbackPanel = availableToolDefinitions.some((definition) => definition.panel === utilityPanel)
+    ? utilityPanel
+    : 'overview'
   const activeTool =
-    frameToolDefinitions.find(
-      (definition) => definition.panel === (frameToolPanelFromSearchParams(searchParams) ?? utilityPanel)
-    ) ?? frameToolDefinitions[0]
+    availableToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
+    availableToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
@@ -1394,6 +1415,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
               frame={frame}
               frames={framesList}
               activeTool={activeToolPanel}
+              toolDefinitions={availableToolDefinitions}
               unsavedChanges={unsavedChanges}
               undeployedChanges={undeployedChanges}
             />
@@ -1441,6 +1463,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
   const { searchParams } = useValues(router)
+  const availableToolDefinitions = frameToolDefinitionsForMode(isInFrameAdminMode())
   const routeFrameId = parseFrameId(id)
   const firstFrame =
     (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
@@ -1450,7 +1473,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool = frameToolPanelFromSearchParams(searchParams) ?? 'overview'
+    const loadingTool = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions) ?? 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (

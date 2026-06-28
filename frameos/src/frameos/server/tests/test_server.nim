@@ -46,6 +46,7 @@ suite "Server request logging":
     check not shouldLogHttpRequest("/ws")
     check not shouldLogHttpRequest("/ws/admin")
     check not shouldLogHttpRequest("/static/asset-4X3RUWXO.png")
+    check not shouldLogHttpRequest("/img/logo-2/logo-white-colors.svg")
     check not shouldLogHttpRequest("/api/frames/1/logs")
     check not shouldLogHttpRequest("/api/frames/1/scene_images/example-scene")
 

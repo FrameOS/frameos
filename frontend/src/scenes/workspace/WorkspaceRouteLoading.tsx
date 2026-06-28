@@ -19,6 +19,8 @@ import { Spinner } from '../../components/Spinner'
 import { urls } from '../../urls'
 import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
 import { FrameDashboardLoadingSkeleton, FrameHomeTopBarLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import {
   isMobileWorkspaceViewport,
   requestNextFramesHomeScrollTop,
@@ -185,13 +187,22 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const { toggleSecondarySidebar, toggleTheme } = useActions(workspaceLogic)
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
-  const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
-  const appsHref = lastAppsHref ?? urls.systemApps()
+  const inFrameAdminMode = isInFrameAdminMode()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const scenesHref = selectedFrame
+    ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
+    : inFrameAdminMode
+    ? urls.frameControlScenes()
+    : urls.scenes()
+  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const appsHref = inFrameAdminMode
+    ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
+    : lastAppsHref ?? urls.systemApps()
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
-  const preloadFrames = () => preloadSceneComponent('frames')
+  const preloadHome = () => preloadSceneComponent('frames')
 
   return (
     <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
@@ -208,52 +219,58 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
           )}
         >
           <a
-            href={urls.frames()}
-            title="Frames home"
-            onPointerEnter={preloadFrames}
-            onFocus={preloadFrames}
-            onMouseDown={preloadFrames}
+            href={homeHref}
+            title={inFrameAdminMode ? 'Frame' : 'Frames home'}
+            onPointerEnter={preloadHome}
+            onFocus={preloadHome}
+            onMouseDown={preloadHome}
             onClick={(event: MouseEvent<HTMLAnchorElement>) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
                 return
               }
               event.preventDefault()
+              if (inFrameAdminMode) {
+                router.actions.push(homeHref)
+                return
+              }
               requestNextFramesHomeScrollTop()
               if (mode === 'frames') {
                 scrollFramesHomeToTop('smooth', false)
               } else {
-                router.actions.push(urls.frames())
+                router.actions.push(homeHref)
                 scrollFramesHomeToTop()
               }
             }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
+            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
           </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
-            <LoadingNavButton
-              active={mode === 'frames'}
-              href={urls.frames()}
-              pending={spinnerMode === 'frames'}
-              preloadScene="frames"
-              sidebarOpen={secondarySidebarOpen}
-              title="Frames home"
-              onActiveClick={() => {
-                requestNextFramesHomeScrollTop()
-                scrollFramesHomeToTop('smooth', false)
-              }}
-              onInactiveClick={requestNextFramesHomeScrollTop}
-            >
-              <Squares2X2Icon className="h-7 w-7" />
-            </LoadingNavButton>
+            {!inFrameAdminMode ? (
+              <LoadingNavButton
+                active={mode === 'frames'}
+                href={urls.frames()}
+                pending={spinnerMode === 'frames'}
+                preloadScene="frames"
+                sidebarOpen={secondarySidebarOpen}
+                title="Frames home"
+                onActiveClick={() => {
+                  requestNextFramesHomeScrollTop()
+                  scrollFramesHomeToTop('smooth', false)
+                }}
+                onInactiveClick={requestNextFramesHomeScrollTop}
+              >
+                <Squares2X2Icon className="h-7 w-7" />
+              </LoadingNavButton>
+            ) : null}
             <LoadingNavButton
               active={mode === 'frame'}
-              href={urls.frames()}
-              pending={spinnerMode === 'frames'}
+              href={frameHref}
+              pending={spinnerMode === 'frame'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
-              onActiveClick={() => router.actions.push(urls.frames())}
+              onActiveClick={() => router.actions.push(frameHref)}
             >
               <ComputerDesktopIcon className="h-7 w-7" />
             </LoadingNavButton>

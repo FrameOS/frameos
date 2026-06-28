@@ -186,6 +186,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         self.forceSceneReload = false
       var sceneId = self.currentSceneId
       var exportedScene = findExportedScene(sceneId)
+      var sceneChangedThisCycle = false
       if exportedScene.isNone:
         sceneId = getFirstSceneId()
         exportedScene = findExportedScene(sceneId)
@@ -197,6 +198,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       if sceneId != self.currentSceneId:
         self.currentSceneId = sceneId
       if lastSceneId != sceneId:
+        sceneChangedThisCycle = true
         var sceneInitialized = true
         self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
         # Persist the active scene context early in boot, then stop writing it
@@ -230,6 +232,21 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       var lastRotatedImage = renderResult[0]
       let nextSleep = renderResult[1]
       reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
+      if sceneChangedThisCycle or not sceneImageExists(self.frameConfig.assetsPath, currentScene.id):
+        try:
+          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
+          self.logger.log(%*{
+            "event": "render:sceneImage:saved",
+            "sceneId": currentScene.id.string,
+            "publicSceneId": savedImage.sceneId,
+            "bytes": savedImage.size,
+          })
+        except Exception as e:
+          self.logSignal(%*{
+            "event": "render:sceneImage:error",
+            "sceneId": currentScene.id.string,
+            "error": e.msg,
+          })
       clearBootCrashCount()
       successfulSceneRenders += 1
       if interval < 1:
@@ -465,6 +482,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
+          of "restart":
+            self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
+            quit(QuitSuccess)
           of "uploadScenes":
             let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
             if mainSceneId.isNone:

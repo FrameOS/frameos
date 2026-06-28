@@ -654,12 +654,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             <div
               key={log.id}
               className={clsx(
-                'rounded-lg px-2 py-0.5 transition @md:flex @md:flex-row',
+                'flex flex-row items-start gap-x-3 rounded-lg px-2 py-0.5 transition',
                 logTypeClassName(log.type, renderTheme)
               )}
             >
-              <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
-              <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
+              <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
+              <div className="min-w-0 flex-1 break-words" style={{ wordBreak: 'break-word' }}>
                 {logLine}
               </div>
             </div>

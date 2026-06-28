@@ -47,6 +47,7 @@ import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragDa
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -128,6 +129,7 @@ function SceneSelector({
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
   const frameGroups = groupFramesByStatus(frames)
+  const inFrameAdminMode = isInFrameAdminMode()
 
   const handleSceneListDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -155,36 +157,38 @@ function SceneSelector({
           mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <div>
-            <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <select
-                  value={frame.id}
-                  onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-                  className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-                >
-                  {frameGroups.map((group) => (
-                    <optgroup key={group.key} label={group.label}>
-                      {group.frames.map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name || frameHost(candidate)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <FrameMetricAlertIndicator
+          {!inFrameAdminMode ? (
+            <div>
+              <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <select
+                    value={frame.id}
+                    onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+                    className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    {frameGroups.map((group) => (
+                      <optgroup key={group.key} label={group.label}>
+                        {group.frames.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name || frameHost(candidate)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <FrameMetricAlertIndicator
+                    frame={frame}
+                    containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
+                  />
+                </div>
+                <FrameActionsMenu
                   frame={frame}
-                  containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
+                  className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 />
               </div>
-              <FrameActionsMenu
-                frame={frame}
-                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              />
             </div>
-          </div>
+          ) : null}
           {sidebarActions}
         </div>
       </div>

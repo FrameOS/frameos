@@ -4,6 +4,7 @@ import { AiSceneLogType, FrameType, LogType } from '../types'
 import type { socketLogicType } from './socketLogicType'
 import { getBasePath } from '../utils/getBasePath'
 import { getFrameControlFrameId, isFrameControlMode } from '../utils/frameControlMode'
+import { isInFrameAdminMode } from '../utils/frameAdmin'
 
 export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
@@ -29,10 +30,7 @@ export const socketLogic = kea<socketLogicType>([
   }),
   afterMount(({ actions, cache }) => {
     const frameControlMode = isFrameControlMode()
-    const isFrameOSAdmin =
-      typeof window !== 'undefined' &&
-      !!(window as any).FRAMEOS_APP_CONFIG &&
-      (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/control'))
+    const isFrameOSAdmin = isInFrameAdminMode()
 
     cache.reconnectAttempts = 0
     cache.everDisconnected = false
@@ -50,7 +48,7 @@ export const socketLogic = kea<socketLogicType>([
       }
 
       cache.ws.onmessage = function (event: any) {
-        if (frameControlMode && event.data === 'render') {
+        if ((frameControlMode || isFrameOSAdmin) && event.data === 'render') {
           actions.frameRendered(getFrameControlFrameId())
           return
         }

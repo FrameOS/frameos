@@ -677,11 +677,12 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.previewSceneFailure()
         return
       }
+      const taskKind = values.isFrameAdminMode ? 'activate' : 'preview'
       longRunningTasksModel.actions.startTask({
         frameId: props.frameId,
-        kind: 'preview',
+        kind: taskKind,
         sceneId,
-        title: 'Previewing scene',
+        title: values.isFrameAdminMode ? 'Activating scene' : 'Previewing scene',
         detail: scene.name || scene.id,
       })
       try {
@@ -705,9 +706,13 @@ export const scenesLogic = kea<scenesLogicType>([
         console.error(error)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
-          kind: 'preview',
+          kind: taskKind,
           sceneId,
-          detail: error instanceof Error ? error.message : 'Failed to preview the scene',
+          detail: error instanceof Error
+            ? error.message
+            : values.isFrameAdminMode
+            ? 'Failed to activate the scene'
+            : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
       }

@@ -2,8 +2,10 @@ import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 
 import type { FrameType } from '../../types'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { frameLogic } from '../frame/frameLogic'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
+import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
 import { workspaceLogic } from './workspaceLogic'
 
 interface FrameSceneSidebarCardProps {
@@ -20,10 +22,13 @@ export function FrameSceneSidebarCard({
   className,
 }: FrameSceneSidebarCardProps): JSX.Element {
   const { hideDeployPlanModal, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { hasFrameSyncChanges } = useValues(frameLogic({ frameId: frame.id }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const deployDrawerIsOpen =
     frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
+  const inFrameAdminMode = isInFrameAdminMode()
+  const showSync = hasFrameSyncChanges
 
   const openDeployPlan = (): void => {
     closeChatDrawer()
@@ -38,17 +43,25 @@ export function FrameSceneSidebarCard({
   return (
     <div className={clsx('grid grid-cols-2 gap-2', className)}>
       <SaveFrameButton onSave={saveFrame} unsavedChanges={unsavedChanges} />
-      <button
-        type="button"
-        onClick={() => openDeployPlan()}
-        className={clsx(
-          'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-          unsavedChanges || undeployedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'
-        )}
-      >
-        <DeployToFrameIcon className="h-4 w-4 shrink-0" />
-        Deploy
-      </button>
+      {inFrameAdminMode ? (
+        <FrameLocalDeployMenu
+          frameId={frame.id}
+          buttonTitle="Frame actions"
+          buttonClassName={unsavedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => openDeployPlan()}
+          className={clsx(
+            'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            showSync || unsavedChanges || undeployedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'
+          )}
+        >
+          <DeployToFrameIcon className="h-4 w-4 shrink-0" />
+          {showSync ? 'Sync' : 'Deploy'}
+        </button>
+      )}
     </div>
   )
 }

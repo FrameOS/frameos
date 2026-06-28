@@ -1,5 +1,7 @@
 import std/[json, os, strutils, unittest]
+import zippy
 
+import ../../channels
 import ../state
 import ./helpers/http_harness
 
@@ -37,6 +39,10 @@ suite "frame api route behavior":
     check apps.status == 200
     discard parseJson(apps.body)
 
+    let fonts = httpRequest(server.port, "GET", "/api/fonts?k=test-key", headers = [("Cookie", adminCookie)])
+    check fonts.status == 200
+    check parseJson(fonts.body)["fonts"].kind == JArray
+
     let frames = httpRequest(server.port, "GET", "/api/frames?k=test-key", headers = [("Cookie", adminCookie)])
     check frames.status == 200
     let framesPayload = parseJson(frames.body)
@@ -56,6 +62,174 @@ suite "frame api route behavior":
     check state.status == 200
     let states = httpRequest(server.port, "GET", "/api/frames/1/states?k=test-key", headers = [("Cookie", adminCookie)])
     check states.status == 200
+
+  test "frame update endpoint persists config and interpreted scenes":
+    drainEventChannel()
+    let tempRoot = getTempDir() / "frameos-frame-api-save"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    let scenesPath = tempRoot / "scenes.json.gz"
+    writeFile(configPath, "{}")
+    writeFile(scenesPath, compress("[]", dataFormat = dfGzip))
+
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let oldConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+    let hadScenesEnv = existsEnv("FRAMEOS_SCENES_JSON")
+    let oldScenesEnv = if hadScenesEnv: getEnv("FRAMEOS_SCENES_JSON") else: ""
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+      putEnv("FRAMEOS_SCENES_JSON", scenesPath)
+
+      var config = defaultFrameConfig()
+      config.frameAdminAuth = %*{
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      }
+      configureServerState(config)
+
+      let login = httpRequest(
+        server.port,
+        "POST",
+        "/api/admin/login",
+        headers = [("Content-Type", "application/json")],
+        body = $(%*{"username": "admin", "password": "secret"}),
+      )
+      let adminCookie = adminCookieFrom(login)
+
+      let updatePayload = %*{
+        "name": "Standalone editor",
+        "interval": 42,
+        "frame_admin_auth": {
+          "enabled": true,
+          "user": "admin",
+          "pass": "new-secret",
+        },
+        "https_proxy": {
+          "enable": true,
+          "port": 9443,
+          "expose_only_port": true,
+          "certs": {"server": "cert", "server_key": "key"},
+        },
+        "error_behavior": {
+          "mode": "silent_retry",
+          "retry_seconds": 30,
+          "silent_retry_seconds": 15,
+          "silent_retry_forever": true,
+          "silent_window_minutes": 7,
+          "show_error_retry_seconds": 20,
+        },
+        "buildroot": {"readonly": true},
+        "scenes": [
+          {
+            "id": "scene/local",
+            "name": "Local scene",
+            "nodes": [],
+            "edges": [],
+            "fields": [],
+            "settings": {"execution": "interpreted", "backgroundColor": "#000000", "refreshInterval": 42},
+          }
+        ],
+      }
+      let update = httpRequest(
+        server.port,
+        "POST",
+        "/api/frames/1",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = $updatePayload,
+      )
+      check update.status == 200
+
+      let savedConfig = parseFile(configPath)
+      check savedConfig["name"].getStr() == "Standalone editor"
+      check savedConfig["interval"].getInt() == 42
+      check savedConfig["frameAdminAuth"]["pass"].getStr() == "new-secret"
+      check savedConfig["httpsProxy"]["port"].getInt() == 9443
+      check savedConfig["httpsProxy"]["serverCert"].getStr() == "cert"
+      check savedConfig["errorBehavior"]["silentRetryForever"].getBool()
+      check savedConfig["frameApi"]["name"].getStr() == "Standalone editor"
+      let savedRevision = savedConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check savedRevision.len > 0
+      check savedConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
+      check globalFrameConfig.name == "Test Frame"
+      check globalFrameConfig.frameAdminAuth["pass"].getStr() == "secret"
+
+      let savedScenes = parseJson(uncompress(readFile(scenesPath)))
+      check savedScenes.kind == JArray
+      check savedScenes.len == 1
+      check savedScenes[0]["id"].getStr() == "scene/local"
+
+      let (reloadReceived, reloadPayload) = eventChannel.tryRecv()
+      check reloadReceived
+      check reloadPayload[1] == "reload"
+
+      let refreshedCookie = adminCookieFrom(update)
+      check refreshedCookie.contains("frame_admin_session=")
+      let frame = httpRequest(server.port, "GET", "/api/frames/1", headers = [("Cookie", refreshedCookie)])
+      check frame.status == 200
+      let framePayload = parseJson(frame.body)["frame"]
+      check framePayload["name"].getStr() == "Standalone editor"
+      check framePayload["frame_admin_auth"]["pass"].getStr() == "new-secret"
+      check framePayload["https_proxy"]["port"].getInt() == 9443
+      check framePayload["https_proxy"]["certs"]["server"].getStr() == "cert"
+      check framePayload["https_proxy"]["certs"]["server_key"].getStr() == "key"
+      check framePayload["error_behavior"]["mode"].getStr() == "silent_retry"
+      check framePayload["error_behavior"]["silent_retry_forever"].getBool()
+      check framePayload["buildroot"]["readonly"].getBool()
+      check framePayload["frame_sync"]["current_revision"].getStr() == savedRevision
+      check framePayload["frame_sync"]["deployed_revision"].getStr() == "legacy-deploy"
+
+      let skipReload = httpRequest(
+        server.port,
+        "POST",
+        "/api/frames/1?k=test-key",
+        headers = [("Cookie", refreshedCookie), ("Content-Type", "application/json")],
+        body = $(%*{
+          "name": "Standalone editor saved quietly",
+          "skip_runtime_reload": true,
+        }),
+      )
+      check skipReload.status == 200
+      let (quietReloadReceived, _) = eventChannel.tryRecv()
+      check not quietReloadReceived
+      let quietConfig = parseJson(readFile(configPath))
+      check quietConfig["name"].getStr() == "Standalone editor saved quietly"
+      check not quietConfig["frameApi"].hasKey("skip_runtime_reload")
+      let quietRevision = quietConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check quietRevision.len > 0
+      check quietRevision != savedRevision
+      check quietConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
+      check framePayload["scenes"].len == 1
+
+      drainEventChannel()
+      let reload = httpRequest(server.port, "POST", "/api/frames/1/reload", headers = [("Cookie", refreshedCookie)])
+      check reload.status == 200
+      check parseJson(reload.body)["action"].getStr() == "reload"
+      let reloadConfig = parseJson(readFile(configPath))
+      let reloadRevision = reloadConfig["frameApi"]["frame_sync_current_revision"].getStr()
+      check reloadRevision.len > 0
+      check reloadRevision != quietRevision
+      check reloadConfig["frameApi"]["frame_sync_deployed_revision"].getStr() == "legacy-deploy"
+      let (runtimeReloadReceived, runtimeReloadPayload) = eventChannel.tryRecv()
+      check runtimeReloadReceived
+      check runtimeReloadPayload[1] == "reload"
+
+      drainEventChannel()
+      let restart = httpRequest(server.port, "POST", "/api/frames/1/restart", headers = [("Cookie", refreshedCookie)])
+      check restart.status == 200
+      check parseJson(restart.body)["action"].getStr() == "restart"
+      let (restartReceived, restartPayload) = eventChannel.tryRecv()
+      check restartReceived
+      check restartPayload[1] == "restart"
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", oldConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
+      if hadScenesEnv:
+        putEnv("FRAMEOS_SCENES_JSON", oldScenesEnv)
+      else:
+        delEnv("FRAMEOS_SCENES_JSON")
 
   test "legacy auth-disabled admin configs still require login":
     var config = defaultFrameConfig()
@@ -100,9 +274,17 @@ suite "frame api route behavior":
       "/api/frames/2/assets",
       "/api/frames/2/asset?path=x&k=test-key",
       "/api/frames/2/image",
+      "/api/frames/2/scene_images/example-scene",
     ]:
       let requestPath = if '?' in path: path else: path & "?k=test-key"
       let response = httpRequest(server.port, "GET", requestPath, headers = [("Cookie", adminCookie)])
+      check response.status == 404
+
+    for path in [
+      "/api/frames/2/reload",
+      "/api/frames/2/restart",
+    ]:
+      let response = httpRequest(server.port, "POST", path, headers = [("Cookie", adminCookie)])
       check response.status == 404
 
   test "read access omits secrets while authenticated admins keep them":
@@ -200,6 +382,57 @@ suite "frame api route behavior":
     check found.header("content-type") == "application/octet-stream"
     check found.body == "hello asset"
 
+  test "scene image endpoint stores local scene previews":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    let assetsRoot = getTempDir() / "frameos-frame-api-scene-images"
+    if dirExists(assetsRoot):
+      removeDir(assetsRoot)
+    createDir(assetsRoot)
+    config.assetsPath = assetsRoot
+    configureServerState(config)
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let missing = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/scene_images/example-scene?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check missing.status == 404
+    check missing.body.contains("Scene image not found")
+
+    let saved = httpRequest(
+      server.port,
+      "POST",
+      "/api/frames/1/scene_images/example-scene?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "image/png")],
+      body = "scene-image-bytes",
+    )
+    check saved.status == 201
+    check parseJson(saved.body)["size"].getInt() == "scene-image-bytes".len
+
+    let found = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/scene_images/example-scene?thumb=1&k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check found.status == 200
+    check found.header("content-type") == "image/png"
+    check found.body == "scene-image-bytes"
 
   test "authenticated admins can still access frame asset endpoints":
     var config = defaultFrameConfig()
@@ -266,6 +499,24 @@ suite "frame api route behavior":
       "line": $(%*{"event": "http", "path": "/ping"}),
       "frame_id": 1,
     })
+    storeUiLog(%*{
+      "id": 3,
+      "timestamp": "2026-03-08T10:00:10Z",
+      "ip": "",
+      "type": "webhook",
+      "event": "metrics",
+      "line": $(%*{"event": "metrics", "cpuUsage": 50.0}),
+      "frame_id": 1,
+    })
+    storeUiLog(%*{
+      "id": 4,
+      "timestamp": "2026-03-08T10:00:20Z",
+      "ip": "",
+      "type": "webhook",
+      "event": "metrics",
+      "line": $(%*{"event": "metrics", "cpuUsage": 60.0}),
+      "frame_id": 1,
+    })
 
     let login = httpRequest(
       server.port,
@@ -286,10 +537,23 @@ suite "frame api route behavior":
 
     let payload = parseJson(response.body)["metrics"]
     check payload.kind == JArray
-    check payload.len == 1
+    check payload.len == 3
     check payload[0]["id"].getStr() == "1"
     check payload[0]["timestamp"].getStr() == "2026-03-08T10:00:00Z"
     check payload[0]["frame_id"].getInt() == 1
     check payload[0]["metrics"]["cpuUsage"].getFloat() == 42.5
     check payload[0]["metrics"]["openFileDescriptors"].getInt() == 17
     check not payload[0]["metrics"].hasKey("event")
+
+    let recentResponse = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/metrics/recent?since=2026-03-08T10%3A00%3A05Z&limit=1&k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check recentResponse.status == 200
+    let recentPayload = parseJson(recentResponse.body)["metrics"]
+    check recentPayload.kind == JArray
+    check recentPayload.len == 1
+    check recentPayload[0]["id"].getStr() == "4"
+    check recentPayload[0]["timestamp"].getStr() == "2026-03-08T10:00:20Z"

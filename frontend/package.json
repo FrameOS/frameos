@@ -60,6 +60,7 @@
     "kea-subscriptions": "^3.0.1",
     "messg": "^2.2.2",
     "monaco-editor": "^0.43.0",
+    "node-forge": "^1.4.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-markdown": "^9.0.0",

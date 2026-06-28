@@ -157,7 +157,8 @@ async function recoverEmbeddedFirmwareBuild(frameId: number, status: EmbeddedFir
     kind: 'embeddedFirmware',
     progressCurrent: null,
     progressTotal: null,
-    detail: status.status === 'stale' ? 'Rebuilding firmware from current settings' : 'Rebuilding missing firmware image',
+    detail:
+      status.status === 'stale' ? 'Rebuilding firmware from current settings' : 'Rebuilding missing firmware image',
   })
   const firmware = await requestEmbeddedFirmwareBuild(frameId, true)
   if (firmware) {
@@ -426,7 +427,7 @@ function startEmbeddedFirmwareProgress(frameId: number): void {
 }
 
 export const framesModel = kea<framesModelType>([
-  connect(() => ({ logic: [socketLogic, entityImagesModel] })),
+  connect(() => ({ logic: [socketLogic, entityImagesModel, longRunningTasksModel] })),
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
@@ -736,7 +737,10 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to restart frame')
+      }
     },
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
@@ -899,8 +903,8 @@ export const framesModel = kea<framesModelType>([
           firmware?.status === 'ready' && !force
             ? 'Requesting OTA update'
             : firmware?.status === 'building' || firmware?.status === 'queued'
-              ? 'Waiting for firmware build'
-              : 'Preparing firmware image',
+            ? 'Waiting for firmware build'
+            : 'Preparing firmware image',
       })
 
       try {

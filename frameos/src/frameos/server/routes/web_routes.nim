@@ -43,6 +43,19 @@ proc clientAcceptsGzip(request: Request): bool =
 
   wildcardAllowed
 
+proc redirectTo(request: Request, location: string) {.gcsafe.} =
+  var headers: mummy.HttpHeaders
+  headers["Location"] = location
+  request.respond(Http302, headers)
+
+proc respondAdminWebApp(request: Request) {.gcsafe.} =
+  if not adminPanelEnabled():
+    request.respond(Http401, body = "Admin panel disabled")
+  elif not hasAdminSession(request):
+    redirectTo(request, "/login")
+  else:
+    request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
+
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
@@ -56,6 +69,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
           headers["Location"] = "/"
           headers["Set-Cookie"] = accessCookieHeader(request, accessKey)
           request.respond(Http302, headers)
+        elif adminPanelEnabled() and hasAdminSession(request):
+          redirectTo(request, "/admin")
         elif not hasAccess(request, Read):
           request.respond(Http401, body = "Unauthorized")
         else:
@@ -63,39 +78,25 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/admin", proc(request: Request) {.gcsafe.} =
-    {.gcsafe.}:
-      if not adminPanelEnabled():
-        request.respond(Http401, body = "Admin panel disabled")
-      elif not hasAdminSession(request):
-        var headers: mummy.HttpHeaders
-        headers["Location"] = "/login"
-        request.respond(Http302, headers)
-      else:
-        request.respond(Http200, body = frameWebHtml())
+    respondAdminWebApp(request)
   )
 
   router.get("/control", proc(request: Request) {.gcsafe.} =
     if not adminPanelEnabled():
       request.respond(Http401, body = "Admin panel disabled")
     else:
-      var headers: mummy.HttpHeaders
-      headers["Location"] = "/admin"
-      request.respond(Http302, headers)
+      redirectTo(request, "/admin")
   )
 
   router.get("/login", proc(request: Request) {.gcsafe.} =
     if not adminPanelEnabled():
       request.respond(Http401, body = "Admin panel disabled")
     elif not adminAuthEnabled():
-      var headers: mummy.HttpHeaders
-      headers["Location"] = "/admin"
-      request.respond(Http302, headers)
+      redirectTo(request, "/admin")
     elif hasAdminSession(request):
-      var headers: mummy.HttpHeaders
-      headers["Location"] = "/admin"
-      request.respond(Http302, headers)
+      redirectTo(request, "/admin")
     else:
-      request.respond(Http200, body = frameWebHtml())
+      request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
   )
 
   router.get("/logout", proc(request: Request) {.gcsafe.} =
@@ -105,6 +106,19 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     headers["Set-Cookie"] = clearAdminSessionCookieHeader(request)
     request.respond(Http302, headers)
   )
+
+  for path in [
+    "/frames",
+    "/frames/**",
+    "/scenes",
+    "/scenes/**",
+    "/apps",
+    "/apps/**",
+    "/settings",
+    "/signup",
+    "/setup-unavailable",
+  ]:
+    router.get(path, respondAdminWebApp)
 
   router.get("/static/@asset", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
@@ -269,7 +283,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         # object other threads are reading is a use-after-free waiting to
         # happen under ORC.
         discard loadConfig()
-        clearAdminSessions()
       sendEvent("reload", %*{})
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:

@@ -129,7 +129,7 @@ export function FrameImage({
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
-  const { updateEntityImage } = useActions(entityImagesModel)
+  const { refreshEntityImageMetadata, updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
   const frameAspectRatio =
     frame?.width && frame.height
@@ -147,9 +147,11 @@ export function FrameImage({
   const shouldProgressivelyLoadFullSize = Boolean(loadFullSizeAfterThumb && thumb && imageUrl)
   const [fullSizeLoadUrl, setFullSizeLoadUrl] = useState<string | null>(null)
   const [fullSizeLoadedUrl, setFullSizeLoadedUrl] = useState<string | null>(null)
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null)
   const fullSizeLoadFrames = useRef<number[]>([])
   const shouldLoadFullSize = shouldProgressivelyLoadFullSize && fullSizeLoadUrl === imageUrl
   const fullSizeLoaded = shouldProgressivelyLoadFullSize && fullSizeLoadedUrl === imageUrl
+  const baseImageFailed = !!imageSrc && failedImageUrl === imageSrc
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
@@ -166,6 +168,10 @@ export function FrameImage({
   useEffect(() => {
     return cancelQueuedFullSizeLoad
   }, [])
+
+  useEffect(() => {
+    setFailedImageUrl(null)
+  }, [imageSrc])
 
   const handleRefreshClick =
     onClick ||
@@ -235,6 +241,7 @@ export function FrameImage({
     setIsLoading(false)
     queueFullSizeLoad()
     maybeRefreshMissingInitialFrameImage()
+    refreshEntityImageMetadata(entityId, subEntityId, imageSrc)
   }
 
   return (
@@ -253,14 +260,19 @@ export function FrameImage({
     >
       {frame && (
         <>
-          <img
-            className={baseImageClassName}
-            src={imageSrc}
-            onLoad={handleBaseImageLoad}
-            onError={() => setIsLoading(false)}
-            style={imageStyle}
-            alt=""
-          />
+          {imageSrc && !baseImageFailed ? (
+            <img
+              className={baseImageClassName}
+              src={imageSrc}
+              onLoad={handleBaseImageLoad}
+              onError={() => {
+                setIsLoading(false)
+                setFailedImageUrl(imageSrc)
+              }}
+              style={imageStyle}
+              alt=""
+            />
+          ) : null}
           {shouldProgressivelyLoadFullSize && shouldLoadFullSize ? (
             <img
               className={clsx(

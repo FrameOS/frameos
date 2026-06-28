@@ -43,6 +43,8 @@ import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameRenameModal } from './FrameActionsMenu'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
@@ -201,6 +203,83 @@ function WorkspaceChatDrawer({
   sceneId: string | null
   source?: 'templates' | null
 }): JSX.Element | null {
+  if (isInFrameAdminMode()) {
+    return <WorkspaceChatComingSoonDrawer frameId={frameId} source={source} />
+  }
+
+  return <WorkspaceChatDrawerContent frameId={frameId} nodeId={nodeId} sceneId={sceneId} source={source} />
+}
+
+function WorkspaceChatComingSoonDrawer({
+  frameId,
+  source,
+}: {
+  frameId: number
+  source?: 'templates' | null
+}): JSX.Element | null {
+  const { frames } = useValues(framesModel)
+  const { closeChatDrawer, openTemplateDrawer } = useActions(workspaceLogic)
+  const frame = frames[frameId]
+
+  if (!frame) {
+    return null
+  }
+
+  return (
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            {source === 'templates' ? (
+              <button
+                type="button"
+                title="Back to Add scene"
+                aria-label="Back to Add scene"
+                onClick={() => openTemplateDrawer(frameId)}
+                className="frameos-icon-button mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ArrowLeftIcon className="h-5 w-5" />
+              </button>
+            ) : null}
+            <div className="min-w-0">
+              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
+              <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
+                {frame.name || frameHost(frame)}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={closeChatDrawer}
+            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <XMarkIcon className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
+          <div className="max-w-xs space-y-2">
+            <div className="frameos-strong text-base font-semibold">Coming soon in on-frame admin mode</div>
+            <p className="frameos-muted text-sm leading-6">
+              AI chat only works from the FrameOS backend for now.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceChatDrawerContent({
+  frameId,
+  nodeId,
+  sceneId,
+  source,
+}: {
+  frameId: number
+  nodeId?: string | null
+  sceneId: string | null
+  source?: 'templates' | null
+}): JSX.Element | null {
   useMountedLogic(chatLogic({ frameId, sceneId }))
   useMountedLogic(workspaceChatDrawerLogic({ frameId, nodeId, sceneId }))
   const { frames } = useValues(framesModel)
@@ -324,9 +403,17 @@ export function FrameosShell({
   const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
-  const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
-  const appsHref = lastAppsHref ?? urls.systemApps()
+  const inFrameAdminMode = isInFrameAdminMode()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const scenesHref = selectedFrame
+    ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
+    : inFrameAdminMode
+    ? urls.frameControlScenes()
+    : urls.scenes()
+  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const appsHref = inFrameAdminMode
+    ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
+    : lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
@@ -371,7 +458,7 @@ export function FrameosShell({
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
     browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
-  const preloadFrames = () => preloadSceneComponent('frames')
+  const preloadHome = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -400,50 +487,57 @@ export function FrameosShell({
           )}
         >
           <a
-            href={urls.frames()}
-            title="Frames home"
-            onPointerEnter={preloadFrames}
-            onFocus={preloadFrames}
-            onMouseDown={preloadFrames}
+            href={homeHref}
+            title={inFrameAdminMode ? 'Frame' : 'Frames home'}
+            onPointerEnter={preloadHome}
+            onFocus={preloadHome}
+            onMouseDown={preloadHome}
             onClick={(event: MouseEvent<HTMLAnchorElement>) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
                 return
               }
               event.preventDefault()
+              if (inFrameAdminMode) {
+                prepareFirstLevelNavigation()
+                router.actions.push(homeHref)
+                return
+              }
               requestNextFramesHomeScrollTop()
               prepareFirstLevelNavigation()
               if (mode === 'frames') {
                 scrollFramesHomeToTop('smooth', false)
               } else {
-                router.actions.push(urls.frames())
+                router.actions.push(homeHref)
                 scrollFramesHomeToTop()
               }
             }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
+            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
           </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
-            <NavButton
-              active={activeMode === 'frames'}
-              current={mode === 'frames'}
-              href={urls.frames()}
-              pending={pendingMode === 'frames'}
-              preloadScene="frames"
-              sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
-              onActiveClick={() => {
-                requestNextFramesHomeScrollTop()
-                prepareFirstLevelNavigation()
-                toggleSecondarySidebar()
-              }}
-              onInactiveClick={() => {
-                requestNextFramesHomeScrollTop()
-                prepareFirstLevelNavigation()
-              }}
-            >
-              <Squares2X2Icon className="h-7 w-7" />
-            </NavButton>
+            {!inFrameAdminMode ? (
+              <NavButton
+                active={activeMode === 'frames'}
+                current={mode === 'frames'}
+                href={urls.frames()}
+                pending={pendingMode === 'frames'}
+                preloadScene="frames"
+                sidebarOpen={secondarySidebarOpen}
+                title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
+                onActiveClick={() => {
+                  requestNextFramesHomeScrollTop()
+                  prepareFirstLevelNavigation()
+                  toggleSecondarySidebar()
+                }}
+                onInactiveClick={() => {
+                  requestNextFramesHomeScrollTop()
+                  prepareFirstLevelNavigation()
+                }}
+              >
+                <Squares2X2Icon className="h-7 w-7" />
+              </NavButton>
+            ) : null}
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}

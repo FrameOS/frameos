@@ -76,6 +76,7 @@ from app.schemas.frames import (
     FramePingResponse,
     FrameSSHKeysUpdateRequest,
     FrameSetNextSceneRequest,
+    FrameSyncApplyRequest,
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
@@ -98,6 +99,12 @@ from app.utils.frame_http import (
     _frame_scheme_port,
     _httpx_verify,
 )
+from app.api.frame_sync import (
+    apply_frame_sync,
+    get_frame_sync_status,
+    read_frame_sync_hint_headers,
+    store_frame_sync_hint_headers,
+)
 from app.tasks.utils import find_nim_v2
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
@@ -119,6 +126,7 @@ from app.utils.build_executor import build_environment_requires_executor_config
 from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.timezone import frame_timezone, normalize_timezone, stored_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
+from app.utils.versions import current_frameos_version
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
@@ -174,8 +182,6 @@ FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
 FRAME_IMAGE_REFRESH_LOCK_SECONDS = 65
 FRAME_IMAGE_REFRESH_WAIT_SECONDS = 2.0
 FRAME_IMAGE_PLACEHOLDER_HEADERS = {"X-FrameOS-Image-State": "placeholder"}
-
-
 def _not_found():
     raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -1820,6 +1826,38 @@ async def api_frame_get(
     return {"frame": data}
 
 
+@api_project.get("/frames/{id:int}/sync")
+async def api_frame_sync_status(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    return await get_frame_sync_status(frame, db, redis, _fetch_frame_http_bytes)
+
+
+@api_project.post("/frames/{id:int}/sync")
+async def api_frame_sync_apply(
+    id: int,
+    data: FrameSyncApplyRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    sync_status = await apply_frame_sync(frame, data, db, redis, _fetch_frame_http_bytes)
+    latest_log_at = (
+        db.query(func.max(Log.timestamp))
+        .filter_by(project_id=frame.project_id, frame_id=frame.id)
+        .filter(_frame_activity_log_filter())
+        .scalar()
+    )
+    return {
+        "message": "Frame sync applied",
+        "sync": sync_status,
+        "frame": _frame_to_response_dict(frame, latest_log_at),
+    }
+
+
 @api_project.get("/frames/{id:int}/logs", response_model=FrameLogsResponse)
 async def api_frame_get_logs(
     id: int,
@@ -1907,7 +1945,7 @@ async def api_frame_get_image(
     path = "/image"
 
     if request.method == "HEAD":
-        headers = {}
+        headers = await read_frame_sync_hint_headers(redis, frame.id)
         if not await _get_cached_frame_image(redis, cache_key):
             headers.update(FRAME_IMAGE_PLACEHOLDER_HEADERS)
         return Response(content=b"", media_type="image/png", headers=headers)
@@ -1915,7 +1953,11 @@ async def api_frame_get_image(
     if request.query_params.get("t") == "-1":
         last_image = await _get_cached_frame_image(redis, cache_key)
         if last_image:
-            return Response(content=last_image, media_type="image/png")
+            return Response(
+                content=last_image,
+                media_type="image/png",
+                headers=await read_frame_sync_hint_headers(redis, frame.id),
+            )
         else:
             return await _frame_image_placeholder_response(frame)
 
@@ -1924,7 +1966,11 @@ async def api_frame_get_image(
     if waited_for_lock:
         cached = await _wait_for_cached_frame_image(redis, cache_key)
         if cached:
-            return Response(content=cached, media_type="image/png")
+            return Response(
+                content=cached,
+                media_type="image/png",
+                headers=await read_frame_sync_hint_headers(redis, frame.id),
+            )
         return await _frame_image_placeholder_response(frame)
 
     async with frame_image_lock:
@@ -1940,7 +1986,11 @@ async def api_frame_get_image(
         if not refresh_lock_acquired:
             cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
-                return Response(content=cached, media_type="image/png")
+                return Response(
+                    content=cached,
+                    media_type="image/png",
+                    headers=await read_frame_sync_hint_headers(redis, frame.id),
+                )
             return await _frame_image_placeholder_response(frame)
 
         # Use shared semaphore and client
@@ -1961,11 +2011,16 @@ async def api_frame_get_image(
                     if encoded_scene_id:
                         scene_id = encoded_scene_id.decode("utf-8")
                 await _store_frame_image(db, redis, frame, body, scene_id=scene_id, publish_rendered=False)
+                response_headers = await store_frame_sync_hint_headers(redis, frame.id, headers)
 
-                return Response(content=body, media_type="image/png")
+                return Response(content=body, media_type="image/png", headers=response_headers)
             else:
                 if cached:
-                    return Response(content=cached, media_type="image/png")
+                    return Response(
+                        content=cached,
+                        media_type="image/png",
+                        headers=await read_frame_sync_hint_headers(redis, frame.id),
+                    )
                 await log(
                     db,
                     redis,
@@ -1977,7 +2032,11 @@ async def api_frame_get_image(
 
         except httpx.ReadTimeout:
             if cached:
-                return Response(content=cached, media_type="image/png")
+                return Response(
+                    content=cached,
+                    media_type="image/png",
+                    headers=await read_frame_sync_hint_headers(redis, frame.id),
+                )
             await log(
                 db,
                 redis,
@@ -1988,7 +2047,11 @@ async def api_frame_get_image(
             return await _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
         except HTTPException as exc:
             if cached:
-                return Response(content=cached, media_type="image/png")
+                return Response(
+                    content=cached,
+                    media_type="image/png",
+                    headers=await read_frame_sync_hint_headers(redis, frame.id),
+                )
             await log(
                 db,
                 redis,
@@ -1999,7 +2062,11 @@ async def api_frame_get_image(
             return await _frame_image_error_response(frame, str(exc.detail), exc.status_code)
         except Exception as e:
             if cached:
-                return Response(content=cached, media_type="image/png")
+                return Response(
+                    content=cached,
+                    media_type="image/png",
+                    headers=await read_frame_sync_hint_headers(redis, frame.id),
+                )
             await log(
                 db,
                 redis,
@@ -2962,6 +3029,9 @@ async def api_frame_embedded_usb_deploy_complete(
     snapshot = frame.to_dict()
     snapshot.pop("last_successful_deploy", None)
     snapshot.pop("last_successful_deploy_at", None)
+    frameos_version = current_frameos_version()
+    if isinstance(frameos_version, str) and frameos_version:
+        snapshot["frameos_version"] = frameos_version
     frame.status = "starting"
     frame.last_successful_deploy = snapshot
     frame.last_successful_deploy_at = datetime.now(timezone.utc)

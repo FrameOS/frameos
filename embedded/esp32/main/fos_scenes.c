@@ -191,6 +191,14 @@ int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
 void fos_scenes_request_sync(void) { s_sync_requested = true; }
 
+char *fos_scenes_json_copy(size_t *out_len)
+{
+    if (out_len != NULL) *out_len = 0;
+    esp_err_t err = mount_state();
+    if (err != ESP_OK) return NULL;
+    return read_file(SCENES_PATH, out_len);
+}
+
 esp_err_t fos_scenes_select(const char *scene_id)
 {
     if (scene_id == NULL || scene_id[0] == '\0') return ESP_ERR_INVALID_ARG;

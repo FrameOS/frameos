@@ -5,10 +5,12 @@ export function isFrameAdminPath(pathname: string): boolean {
 }
 
 export function isInFrameAdminMode(): boolean {
-  return typeof window !== 'undefined' && isFrameAdminPath(window.location.pathname)
+  return (
+    typeof window !== 'undefined' &&
+    (!!(window as any).FRAMEOS_APP_CONFIG?.frameAdminMode || isFrameAdminPath(window.location.pathname))
+  )
 }
 
 export function frameAdminPath(): string {
   return FRAME_ADMIN_PATH
 }
-

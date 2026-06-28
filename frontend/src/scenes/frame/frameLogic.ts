@@ -9,6 +9,10 @@ import {
   DiagramNode,
   FrameErrorBehavior,
   FrameScene,
+  FrameSyncChoice,
+  FrameSyncSceneChoice,
+  FrameSyncSectionId,
+  FrameSyncStatus,
   FrameType,
   SceneNodeData,
   TemplateType,
@@ -24,6 +28,7 @@ import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
+import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
   type ChangeDetail,
@@ -62,6 +67,131 @@ export const DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 interface DeployPlanApiResponse {
   plan: DeployPlanResponse
+}
+
+interface FrameSyncApiResponse {
+  sync: FrameSyncStatus
+  frame?: FrameType
+}
+
+export interface FrameSyncChoices {
+  frame_json: Record<string, FrameSyncChoice>
+  scenes_json: Record<string, FrameSyncSceneChoice>
+}
+export type FrameSyncView = 'diff' | 'backend' | 'frame'
+export type FrameSyncViews = Partial<Record<FrameSyncSectionId, FrameSyncView>>
+
+export function frameSyncChangeKey(change: { choice_key?: string; path: string }): string {
+  return change.choice_key ?? change.path
+}
+
+function syncHintIsNewerThanStatus(frame: FrameType | null, sync: FrameSyncStatus): boolean {
+  const hintTime = Date.parse(frame?.frame_sync_hint?.checked_at || '')
+  const statusTime = Date.parse(sync.checked_at || '')
+  return Number.isFinite(hintTime) && (!Number.isFinite(statusTime) || hintTime > statusTime)
+}
+
+function defaultFrameSyncChoices(sync: FrameSyncStatus | null): FrameSyncChoices {
+  const choices: FrameSyncChoices = { frame_json: {}, scenes_json: {} }
+  for (const section of sync?.sections ?? []) {
+    if (!section.has_changes) {
+      continue
+    }
+    for (const change of section.changes) {
+      choices[section.id][frameSyncChangeKey(change)] =
+        section.id === 'scenes_json' && change.kind === 'added' ? 'frame' : 'backend'
+    }
+  }
+  return choices
+}
+
+function hasSelectedFrameSyncChoices(choices: FrameSyncChoices): boolean {
+  return (
+    Object.values(choices.frame_json).some((choice) => choice !== 'ignore') ||
+    Object.values(choices.scenes_json).some((choice) => choice !== 'ignore')
+  )
+}
+
+function frameSyncStatusToken(sync: FrameSyncStatus | null): string | null {
+  if (!sync?.has_changes) {
+    return null
+  }
+  return JSON.stringify({
+    frame: {
+      current_revision: sync.frame?.current_revision ?? null,
+      deployed_revision: sync.frame?.deployed_revision ?? null,
+      frame_config_modified_at: sync.frame?.frame_config_modified_at ?? null,
+      scenes_modified_at: sync.frame?.scenes_modified_at ?? null,
+    },
+    sections: sync.sections
+      .filter((section) => section.has_changes)
+      .map((section) => ({
+        id: section.id,
+        changes: section.changes.map((change) => ({
+          key: frameSyncChangeKey(change),
+          kind: change.kind,
+          backend: change.backend,
+          frame: change.frame,
+        })),
+      })),
+  })
+}
+
+function frameSyncHintToken(frame: FrameType | null): string | null {
+  const hint = frame?.frame_sync_hint
+  if (!hint?.has_changes) {
+    return null
+  }
+  return JSON.stringify({
+    current_revision: hint.current_revision ?? null,
+    deployed_revision: hint.deployed_revision ?? null,
+    frame_config_modified_at: hint.frame_config_modified_at ?? null,
+    scenes_modified_at: hint.scenes_modified_at ?? null,
+    last_successful_deploy_at: hint.last_successful_deploy_at ?? null,
+  })
+}
+
+function currentFrameSyncToken(frame: FrameType | null, sync: FrameSyncStatus | null): string | null {
+  if (sync && syncHintIsNewerThanStatus(frame, sync)) {
+    return frameSyncHintToken(frame)
+  }
+  return frameSyncStatusToken(sync) ?? frameSyncHintToken(frame)
+}
+
+function frameHasSyncCredentials(frame: FrameType | null): boolean {
+  const frameAdminAuth = frame?.frame_admin_auth
+  return Boolean(frameAdminAuth?.enabled && frameAdminAuth.user && frameAdminAuth.pass)
+}
+
+function shouldLoadFrameSyncStatus(
+  frame: FrameType | null,
+  sync: FrameSyncStatus | null,
+  ignoredToken: string | null
+): boolean {
+  if (
+    isInFrameAdminMode() ||
+    !frame ||
+    frame.archived ||
+    !frame.frame_sync_hint?.has_changes ||
+    !frameHasSyncCredentials(frame)
+  ) {
+    return false
+  }
+  const syncToken = currentFrameSyncToken(frame, sync)
+  if (syncToken && syncToken === ignoredToken) {
+    return false
+  }
+  return !sync || syncHintIsNewerThanStatus(frame, sync)
+}
+
+function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
+  const views: FrameSyncViews = {}
+  for (const section of sync?.sections ?? []) {
+    if (section.has_changes) {
+      views[section.id] = 'diff'
+    }
+  }
+  return views
 }
 
 export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
@@ -1348,6 +1478,8 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAct
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
+  } else if (isInFrameAdminMode()) {
+    json['skip_runtime_reload'] = true
   }
   const response = await apiFetch(`/api/frames/${frameId}`, {
     method: 'POST',
@@ -1463,6 +1595,21 @@ export const frameLogic = kea<frameLogicType>([
     loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
+    loadFrameSyncStatus: true,
+    loadFrameSyncStatusSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
+    loadFrameSyncStatusFailure: (error: string) => ({ error }),
+    setFrameSyncItemChoice: (
+      sectionId: FrameSyncSectionId,
+      choiceKey: string,
+      choice: FrameSyncChoice | FrameSyncSceneChoice
+    ) => ({ sectionId, choiceKey, choice }),
+    setFrameSyncChoices: (choices: FrameSyncChoices) => ({ choices }),
+    setFrameSyncView: (sectionId: FrameSyncSectionId, view: FrameSyncView) => ({ sectionId, view }),
+    applyFrameSync: true,
+    ignoreFrameSyncChanges: true,
+    setFrameSyncIgnoredToken: (token: string | null) => ({ token }),
+    applyFrameSyncSuccess: (sync: FrameSyncStatus | null) => ({ sync }),
+    applyFrameSyncFailure: (error: string) => ({ error }),
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -1581,6 +1728,90 @@ export const frameLogic = kea<frameLogicType>([
         hideDeployPlanModal: () => 'main',
       },
     ],
+    frameSyncStatus: [
+      null as FrameSyncStatus | null,
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => sync,
+        applyFrameSyncSuccess: (_, { sync }) => sync,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+      },
+    ],
+    frameSyncChoices: [
+      defaultFrameSyncChoices(null),
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => defaultFrameSyncChoices(sync),
+        applyFrameSyncSuccess: (_, { sync }) => defaultFrameSyncChoices(sync),
+        setFrameSyncItemChoice: (state, { sectionId, choiceKey, choice }) =>
+          sectionId === 'frame_json'
+            ? {
+                ...state,
+                frame_json: { ...state.frame_json, [choiceKey]: choice as FrameSyncChoice },
+              }
+            : {
+                ...state,
+                scenes_json: { ...state.scenes_json, [choiceKey]: choice as FrameSyncSceneChoice },
+              },
+        setFrameSyncChoices: (_, { choices }) => choices,
+        setFrameFormValue: () => defaultFrameSyncChoices(null),
+        setFrameFormValues: () => defaultFrameSyncChoices(null),
+      },
+    ],
+    frameSyncViews: [
+      {} as FrameSyncViews,
+      {
+        loadFrameSyncStatusSuccess: (_, { sync }) => defaultFrameSyncViews(sync),
+        applyFrameSyncSuccess: (_, { sync }) => defaultFrameSyncViews(sync),
+        setFrameSyncView: (state, { sectionId, view }) => ({ ...state, [sectionId]: view }),
+        setFrameFormValue: () => ({}),
+        setFrameFormValues: () => ({}),
+      },
+    ],
+    frameSyncStatusLoading: [
+      false,
+      {
+        loadFrameSyncStatus: () => true,
+        loadFrameSyncStatusSuccess: () => false,
+        loadFrameSyncStatusFailure: () => false,
+      },
+    ],
+    frameSyncApplying: [
+      false,
+      {
+        applyFrameSync: () => true,
+        applyFrameSyncSuccess: () => false,
+        applyFrameSyncFailure: () => false,
+      },
+    ],
+    frameSyncApplyMode: [
+      null as 'commit' | null,
+      {
+        applyFrameSync: () => 'commit',
+        applyFrameSyncSuccess: () => null,
+        applyFrameSyncFailure: () => null,
+      },
+    ],
+    frameSyncIgnoredToken: [
+      null as string | null,
+      {
+        setFrameSyncIgnoredToken: (_, { token }) => token,
+        applyFrameSyncSuccess: () => null,
+      },
+    ],
+    frameSyncError: [
+      null as string | null,
+      {
+        loadFrameSyncStatus: () => null,
+        loadFrameSyncStatusSuccess: () => null,
+        loadFrameSyncStatusFailure: (_, { error }) => error,
+        applyFrameSync: () => null,
+        applyFrameSyncSuccess: () => null,
+        applyFrameSyncFailure: (_, { error }) => error,
+        hideDeployPlanModal: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+      },
+    ],
   }),
   listeners(({ asyncActions, actions, values }) => ({
     resetUnsavedChanges: () => {
@@ -1625,13 +1856,18 @@ export const frameLogic = kea<frameLogicType>([
       actions.touchFrameFormField('frame_admin_auth.pass')
     },
     generateTlsCertificates: async () => {
-      const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        throw new Error('Failed to generate TLS certificates')
+      let data
+      if (isInFrameAdminMode()) {
+        data = generateFrameTlsMaterial(values.frameForm.frame_host || values.frame?.frame_host || '')
+      } else {
+        const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
+          method: 'POST',
+        })
+        if (!response.ok) {
+          throw new Error('Failed to generate TLS certificates')
+        }
+        data = await response.json()
       }
-      const data = await response.json()
       actions.setFrameFormValues({
         https_proxy: {
           ...(values.frameForm.https_proxy || values.frame?.https_proxy || {}),
@@ -1691,7 +1927,61 @@ export const frameLogic = kea<frameLogicType>([
       const payload = (await response.json()) as DeployPlanApiResponse
       actions.loadDeployPlansSuccess(payload.plan)
     },
+    loadFrameSyncStatus: async () => {
+      if (isInFrameAdminMode() || !values.frame || values.frame.archived) {
+        actions.loadFrameSyncStatusSuccess(null)
+        return
+      }
+      const response = await apiFetch(`/api/frames/${values.frameId}/sync`)
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.loadFrameSyncStatusFailure(
+          typeof payload?.detail === 'string' ? payload.detail : 'Failed to check frame sync'
+        )
+        return
+      }
+      const payload = (await response.json()) as FrameSyncApiResponse
+      actions.loadFrameSyncStatusSuccess(payload.sync)
+      if (payload.frame) {
+        framesModel.actions.loadFrame(values.frameId)
+      }
+    },
+    applyFrameSync: async () => {
+      const body = {
+        frame_json_choices: values.frameSyncChoices.frame_json,
+        scenes_json_choices: values.frameSyncChoices.scenes_json,
+      }
+      if (!hasSelectedFrameSyncChoices(values.frameSyncChoices)) {
+        actions.applyFrameSyncFailure('Choose what to sync first')
+        return
+      }
+      const response = await apiFetch(`/api/frames/${values.frameId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.applyFrameSyncFailure(typeof payload?.detail === 'string' ? payload.detail : 'Failed to sync frame')
+        return
+      }
+      const payload = (await response.json()) as FrameSyncApiResponse
+      actions.applyFrameSyncSuccess(payload.sync)
+      framesModel.actions.loadFrame(values.frameId)
+    },
+    ignoreFrameSyncChanges: () => {
+      actions.setFrameSyncIgnoredToken(currentFrameSyncToken(values.frame, values.frameSyncStatus))
+      if (!values.deployPlansLoading && !values.deployPlans && !isInFrameAdminMode()) {
+        actions.loadDeployPlans()
+      }
+    },
     showDeployPlanModal: () => {
+      if (
+        !values.frameSyncStatusLoading &&
+        shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
+      ) {
+        actions.loadFrameSyncStatus()
+      }
       const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
       const buildrootFirstInstall =
         isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
@@ -1879,6 +2169,34 @@ export const frameLogic = kea<frameLogicType>([
         return isRemoteDeployConfigured(agent)
       },
     ],
+    frameSyncSectionsWithChanges: [
+      (s) => [s.frameSyncStatus],
+      (frameSyncStatus: FrameSyncStatus | null) => frameSyncStatus?.sections.filter((section) => section.has_changes) ?? [],
+    ],
+    hasFrameSyncChanges: [
+      (s) => [s.frameSyncStatus, s.isFrameAdminMode, s.frame, s.frameSyncIgnoredToken],
+      (
+        frameSyncStatus: FrameSyncStatus | null,
+        isFrameAdminMode: boolean,
+        frame: FrameType | null,
+        frameSyncIgnoredToken: string | null
+      ): boolean => {
+        if (isFrameAdminMode) {
+          return false
+        }
+        const syncToken = currentFrameSyncToken(frame, frameSyncStatus)
+        if (syncToken && syncToken === frameSyncIgnoredToken) {
+          return false
+        }
+        if (frameSyncStatus) {
+          if (syncHintIsNewerThanStatus(frame, frameSyncStatus)) {
+            return Boolean(frame?.frame_sync_hint?.has_changes)
+          }
+          return Boolean(frameSyncStatus.has_changes)
+        }
+        return Boolean(frame?.frame_sync_hint?.has_changes)
+      },
+    ],
     remoteDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
@@ -1889,6 +2207,12 @@ export const frameLogic = kea<frameLogicType>([
         : false
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
+      }
+      if (
+        !values.frameSyncStatusLoading &&
+        shouldLoadFrameSyncStatus(frame ?? null, values.frameSyncStatus, values.frameSyncIgnoredToken)
+      ) {
+        actions.loadFrameSyncStatus()
       }
     },
   })),
@@ -2058,6 +2382,12 @@ export const frameLogic = kea<frameLogicType>([
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
+    }
+    if (
+      !values.frameSyncStatusLoading &&
+      shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
+    ) {
+      actions.loadFrameSyncStatus()
     }
 
     cache.keydownHandler = (event: KeyboardEvent) => {

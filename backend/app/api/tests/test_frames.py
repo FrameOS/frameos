@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image
 from urllib.parse import urlparse
 
-from app.api import frames as frames_api
+from app.api import frame_sync, frames as frames_api
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
@@ -321,6 +321,7 @@ async def test_api_frame_embedded_usb_deploy_complete_marks_snapshot(async_clien
     assert payload["status"] == "starting"
     assert payload["last_successful_deploy"]["id"] == frame.id
     assert payload["last_successful_deploy"]["mode"] == "embedded"
+    assert payload["last_successful_deploy"]["frameos_version"] == frames_api.current_frameos_version()
     assert payload["last_successful_deploy"]["scenes"] == frame.scenes
     assert "last_successful_deploy" not in payload["last_successful_deploy"]
     assert "last_successful_deploy_at" not in payload["last_successful_deploy"]
@@ -649,6 +650,46 @@ async def test_api_frame_get_image_converts_bmp_preview(async_client, db, redis)
         assert image.size == (2, 1)
     cached = await redis.get(frames_api._frame_image_cache_key(frame.id))
     assert cached.startswith(b'\x89PNG')
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_caches_sync_hint_headers_for_head(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SyncHintImageFrame', 'localhost', 'localhost')
+    png = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(png, format='PNG')
+    png_body = png.getvalue()
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        return 200, png_body, {
+            'content-type': 'image/png',
+            'x-scene-id': 'scene-1',
+            'x-frameos-sync-changed': '1',
+            'x-frameos-sync-revision': 'rev-local',
+            'x-frameos-deployed-revision': 'rev-deployed',
+            'x-frameos-frame-config-modified-at': '2026-06-28T10:00:00Z',
+            'x-frameos-scenes-modified-at': '2026-06-28T10:01:00Z',
+            'x-frameos-last-successful-deploy-at': '2026-06-28T09:59:00Z',
+        }
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.headers['x-frameos-sync-changed'] == '1'
+    assert response.headers['x-frameos-sync-revision'] == 'rev-local'
+    assert response.headers['x-frameos-deployed-revision'] == 'rev-deployed'
+    assert response.headers['x-frameos-frame-config-modified-at'] == '2026-06-28T10:00:00Z'
+    assert response.headers['x-frameos-scenes-modified-at'] == '2026-06-28T10:01:00Z'
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
+        head_response = await async_client.head(f'/api/frames/{frame.id}/image?t=123')
+
+    assert head_response.status_code == 200
+    assert head_response.headers['x-frameos-sync-changed'] == '1'
+    assert head_response.headers['x-frameos-sync-revision'] == 'rev-local'
+    assert head_response.headers['x-frameos-deployed-revision'] == 'rev-deployed'
+    assert head_response.headers['x-frameos-last-successful-deploy-at'] == '2026-06-28T09:59:00Z'
+    fetch_frame.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1337,6 +1378,438 @@ async def test_api_frame_update_scenes_invalid(async_client, db, redis):
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"scenes": "not valid JSON"})
     assert resp.status_code == 422
     assert "Input should be a valid list" in json.dumps(resp.json()['detail'])
+
+
+def _sync_admin_login_response():
+    return 200, b'{"status":"ok"}', {'set-cookie': 'frame_admin_session=test-session; Path=/'}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_sync_status_reports_frame_and_scene_changes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Backend Name', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.scenes = [{'id': 'scene-1', 'name': 'Backend scene', 'nodes': [], 'edges': []}]
+    frame.last_successful_deploy = frame.to_dict()
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    remote_frame = {
+        **frame.to_dict(),
+        'id': 1,
+        'name': 'Frame Name',
+        'scenes': [{'id': 'scene-2', 'name': 'Frame scene', 'nodes': [], 'edges': []}],
+        'frame_sync': {
+            'frame_config_modified_at': '2026-06-28T10:00:00Z',
+            'scenes_modified_at': '2026-06-28T10:01:00Z',
+        },
+    }
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        return 200, json.dumps({'frame': remote_frame}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.get(f'/api/frames/{frame.id}/sync')
+
+    assert response.status_code == 200
+    sync = response.json()['sync']
+    assert sync['has_changes'] is True
+    assert sync['last_in_sync_at'] is not None
+    assert sync['sections'][0]['id'] == 'frame_json'
+    assert any(change['path'] == 'name' for change in sync['sections'][0]['changes'])
+    assert sync['sections'][0]['frame_updated_at'] == '2026-06-28T10:00:00Z'
+    assert sync['sections'][1]['id'] == 'scenes_json'
+    assert {change['kind'] for change in sync['sections'][1]['changes']} == {'added', 'removed'}
+    assert sync['sections'][1]['frame_updated_at'] == '2026-06-28T10:01:00Z'
+
+
+def test_frame_sync_scene_diff_ignores_editor_layout_noise():
+    backend_scene = {
+        'id': 'scene-1',
+        'name': 'Calendar',
+        'settings': {'execution': 'interpreted', 'refreshInterval': 300},
+        'nodes': [
+            {
+                'id': 'node-1',
+                'type': 'app',
+                'position': {'x': 189.39661853806825, 'y': -941.1436002264414},
+                'positionAbsolute': {'x': 189.39661853806825, 'y': -941.1436002264414},
+                'width': 237,
+                'height': 134,
+                'selected': False,
+                'dragging': False,
+                'data': {'keyword': 'render/text', 'config': {'text': 'Calendar'}},
+            }
+        ],
+        'edges': [],
+    }
+    frame_scene = {
+        **backend_scene,
+        'nodes': [
+            {
+                'id': 'node-1',
+                'type': 'app',
+                'position': {'x': 0, 'y': 12},
+                'data': {'keyword': 'render/text', 'config': {'text': 'Calendar'}},
+            }
+        ],
+    }
+
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+
+    assert section['changes'] == []
+
+
+def test_frame_sync_scene_diff_reports_semantic_scene_changes():
+    backend_scene = {
+        'id': 'scene-1',
+        'name': 'Calendar',
+        'settings': {'execution': 'interpreted', 'refreshInterval': 300},
+        'nodes': [
+            {
+                'id': 'node-1',
+                'type': 'app',
+                'position': {'x': 189.39661853806825, 'y': -941.1436002264414},
+                'width': 237,
+                'height': 134,
+                'data': {'keyword': 'render/text', 'config': {'text': 'Calendar'}},
+            }
+        ],
+        'edges': [],
+    }
+    frame_scene = {
+        **backend_scene,
+        'nodes': [
+            {
+                'id': 'node-1',
+                'type': 'app',
+                'position': {'x': 0, 'y': 12},
+                'data': {'keyword': 'render/text', 'config': {'text': 'Frame Calendar'}},
+            }
+        ],
+    }
+
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+
+    assert len(section['changes']) == 1
+    assert section['changes'][0]['backend_json'] == backend_scene
+    assert section['changes'][0]['frame_json'] == frame_scene
+    details = section['changes'][0]['details']
+    assert details == [
+        {
+            'path': 'Node render/text config.text',
+            'backend': 'Calendar',
+            'frame': 'Frame Calendar',
+        }
+    ]
+    assert 'scene-1' not in details[0]['path']
+    assert 'nodes[0]' not in details[0]['path']
+
+
+@pytest.mark.asyncio
+async def test_api_frame_sync_status_filters_runtime_and_deploy_noise(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Noise Backend', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.https_proxy = {
+        'enable': True,
+        'port': 8443,
+        'expose_only_port': True,
+        'certs': {
+            'server': 'server-cert',
+            'server_key': 'server-key',
+            'client_ca': 'client-ca',
+        },
+        'server_cert_not_valid_after': '2028-06-15T00:17:50+00:00',
+        'client_ca_cert_not_valid_after': '2036-03-10T00:17:50+00:00',
+    }
+    frame.ssh_user = 'marius'
+    frame.ssh_keys = ['default', 'secondary']
+    frame.timezone_updater = {'enabled': True}
+    frame.log_to_file = None
+    frame.device_config = {
+        'queryParam': 'images',
+        'uploadMethod': 'POST',
+    }
+    frame.reboot = {'enabled': False, 'crontab': '0 0 * * *'}
+    frame.control_code = {'enabled': 'false', 'size': '5', 'offsetX': '0', 'offsetY': '0'}
+    frame.schedule = {'disabled': False, 'events': []}
+    frame.gpio_buttons = [{'pin': '5', 'label': 'Pin 5'}]
+    frame.network = {
+        'agent': True,
+        'agentConnection': True,
+        'agentEnabled': True,
+        'agentSharedSecret': 'legacy-secret',
+        'reverseProxyEnabled': True,
+        'reverseProxyTlsCert': 'cert',
+        'reverseProxyTlsKey': 'key',
+    }
+    frame.agent = {
+        'agentEnabled': False,
+        'agentVersion': '2026.6.24',
+        'remoteCapabilities': {'restart': True},
+        'deployWithAgent': False,
+    }
+    frame.buildroot = {'readonly': True}
+    frame.rpios = {'compilationMode': 'precompiled'}
+    frame.scenes = []
+    db.add(frame)
+    db.commit()
+
+    remote_frame = {
+        **frame.to_dict(),
+        'id': 1,
+        'ssh_user': '',
+        'ssh_keys': [],
+        'timezone_updater': None,
+        'log_to_file': '',
+        'https_proxy': {
+            'enable': True,
+            'port': 8443,
+            'expose_only_port': True,
+            'certs': {
+                'server': 'server-cert',
+                'server_key': 'server-key',
+                'client_ca': '',
+            },
+            'server_cert_not_valid_after': None,
+            'client_ca_cert_not_valid_after': None,
+        },
+        'device_config': {
+            'partial': False,
+            'partialMaxAreaPercent': 0,
+            'partialMaxRefreshesBeforeFull': 0,
+            'vcom': 0,
+        },
+        'reboot': None,
+        'control_code': {
+            'enabled': False,
+            'size': 5,
+            'padding': 1,
+            'offsetX': 0,
+            'offsetY': 0,
+            'qrCodeColor': '#000000',
+            'backgroundColor': '#FFFFFF',
+        },
+        'schedule': {'events': []},
+        'gpio_buttons': [{'pin': 5}],
+        'network': {},
+        'agent': {
+            'agentEnabled': False,
+            'agentRunCommands': False,
+            'agentSharedSecret': '',
+        },
+        'palette': {},
+        'buildroot': None,
+        'rpios': None,
+        'frame_sync': {
+            'frame_config_modified_at': '2026-06-28T10:00:00Z',
+            'scenes_modified_at': '2026-06-28T10:01:00Z',
+        },
+    }
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        return 200, json.dumps({'frame': remote_frame}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.get(f'/api/frames/{frame.id}/sync')
+
+    assert response.status_code == 200
+    sync = response.json()['sync']
+    assert sync['has_changes'] is False
+    assert sync['sections'][0]['changes'] == []
+    assert sync['sections'][1]['changes'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_sync_status_repairs_synced_baseline_missing_frameos_version(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Synced No Version', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]
+    baseline = frame.to_dict()
+    baseline.pop('last_successful_deploy', None)
+    baseline.pop('last_successful_deploy_at', None)
+    baseline.pop('frameos_version', None)
+    frame.last_successful_deploy = baseline
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    remote_frame = {
+        **frame.to_dict(),
+        'id': 1,
+        'frame_sync': {
+            'frame_config_modified_at': '2026-06-28T10:00:00Z',
+            'scenes_modified_at': '2026-06-28T10:01:00Z',
+        },
+    }
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        return 200, json.dumps({'frame': remote_frame}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.get(f'/api/frames/{frame.id}/sync')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['sync']['has_changes'] is False
+    assert payload['frame']['last_successful_deploy']['frameos_version'] == frames_api.current_frameos_version()
+    assert payload['frame']['last_successful_deploy_at'] == '2026-01-01T00:00:00+00:00'
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.last_successful_deploy['frameos_version'] == frames_api.current_frameos_version()
+    assert updated_frame.last_successful_deploy_at == datetime(2026, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_api_frame_sync_apply_imports_frame_copy_and_marks_baseline(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Backend Name', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.scenes = [{'id': 'scene-1', 'name': 'Backend scene', 'nodes': [], 'edges': []}]
+    frame.last_successful_deploy = frame.to_dict()
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    remote_scenes = [{'id': 'scene-2', 'name': 'Frame scene', 'nodes': [], 'edges': []}]
+    posted_payloads = []
+
+    def remote_frame_payload():
+        return {
+            **frame.to_dict(),
+            'id': 1,
+            'name': 'Frame Name',
+            'scenes': remote_scenes,
+            'frame_sync': {
+                'frame_config_modified_at': '2026-06-28T10:00:00Z',
+                'scenes_modified_at': '2026-06-28T10:01:00Z',
+            },
+        }
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        if method == 'POST':
+            posted_payloads.append(json.loads(body))
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': remote_frame_payload()}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/sync',
+            json={'frame_json': 'frame', 'scenes_json': 'frame'},
+        )
+
+    assert response.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.name == 'Frame Name'
+    assert updated_frame.scenes == remote_scenes
+    assert updated_frame.last_successful_deploy_at is not None
+    assert updated_frame.last_successful_deploy['name'] == 'Frame Name'
+    assert updated_frame.last_successful_deploy['scenes'] == remote_scenes
+    assert updated_frame.last_successful_deploy['frameos_version'] == frames_api.current_frameos_version()
+    assert response.json()['sync']['has_changes'] is False
+    assert posted_payloads[-1]['last_successful_deploy']['name'] == 'Frame Name'
+    assert posted_payloads[-1]['last_successful_deploy']['frameos_version'] == frames_api.current_frameos_version()
+    assert posted_payloads[-1]['frame_sync_mark_deployed'] is True
+    assert posted_payloads[-1]['skip_runtime_reload'] is True
+
+
+@pytest.mark.asyncio
+async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_scene_versions(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Backend Name', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.interval = 300
+    frame.scenes = [
+        {
+            'id': 'scene-1',
+            'name': 'Backend scene',
+            'nodes': [{'id': 'node-1', 'type': 'event'}],
+            'edges': [],
+        }
+    ]
+    frame.last_successful_deploy = frame.to_dict()
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.add(frame)
+    db.commit()
+
+    remote_frame = {
+        **frame.to_dict(),
+        'id': 1,
+        'name': 'Frame Name',
+        'interval': 600,
+        'scenes': [
+            {
+                'id': 'scene-1',
+                'name': 'Frame scene',
+                'nodes': [{'id': 'node-2', 'type': 'event'}],
+                'edges': [],
+            }
+        ],
+        'frame_sync': {
+            'frame_config_modified_at': '2026-06-28T10:00:00Z',
+            'scenes_modified_at': '2026-06-28T10:01:00Z',
+        },
+    }
+    posted_payloads = []
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        if method == 'POST':
+            payload = json.loads(body)
+            posted_payloads.append(payload)
+            for key, value in payload.items():
+                if key != 'skip_runtime_reload':
+                    remote_frame[key] = value
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': remote_frame}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/sync',
+            json={
+                'frame_json_choices': {'name': 'frame', 'interval': 'backend'},
+                'scenes_json_choices': {'scene-1': 'both'},
+            },
+        )
+
+    assert response.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.name == 'Frame Name'
+    assert updated_frame.interval == 300
+    assert len(updated_frame.scenes) == 2
+    assert updated_frame.scenes[0]['id'] == 'scene-1'
+    assert updated_frame.scenes[0]['name'] == 'Backend scene'
+    assert updated_frame.scenes[1]['id'] != 'scene-1'
+    assert updated_frame.scenes[1]['name'] == 'Frame scene (frame copy)'
+
+    sync_write = next(payload for payload in posted_payloads if 'scenes' in payload)
+    assert sync_write['interval'] == 300
+    assert sync_write['scenes'] == updated_frame.scenes
+    assert remote_frame['name'] == 'Frame Name'
+    assert remote_frame['interval'] == 300
+    assert remote_frame['scenes'] == updated_frame.scenes
+    assert response.json()['sync']['has_changes'] is False
+    assert updated_frame.last_successful_deploy_at is not None
+    assert posted_payloads[-1]['frame_sync_mark_deployed'] is True
 
 
 @pytest.mark.asyncio

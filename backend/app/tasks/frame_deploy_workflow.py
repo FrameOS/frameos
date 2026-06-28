@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
+import hashlib
 import json
 import os
 import shlex
@@ -55,10 +56,31 @@ REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
 FRAMEOS_AVAILABLE_COMMANDS = ("start", "check", "setup", "help")
+FRAME_SYNC_CURRENT_REVISION_KEY = "frame_sync_current_revision"
+FRAME_SYNC_DEPLOYED_REVISION_KEY = "frame_sync_deployed_revision"
 REMOTE_BUILD_FEATURE_CFLAGS = {
     "amd64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
     "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
 }
+
+
+def _new_frame_sync_deploy_revision(frame_dict: dict[str, Any]) -> str:
+    revision_payload = {
+        key: value
+        for key, value in frame_dict.items()
+        if key not in {FRAME_SYNC_CURRENT_REVISION_KEY, FRAME_SYNC_DEPLOYED_REVISION_KEY}
+    }
+    encoded = json.dumps(revision_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return f"deploy-sha256-{hashlib.sha256(encoded).hexdigest()[:32]}"
+
+
+def _apply_frame_sync_deploy_revision(frame: Frame, frame_dict: dict[str, Any]) -> None:
+    revision = _new_frame_sync_deploy_revision(frame_dict)
+    frame_dict[FRAME_SYNC_CURRENT_REVISION_KEY] = revision
+    frame_dict[FRAME_SYNC_DEPLOYED_REVISION_KEY] = revision
+    setattr(frame, "_frame_sync_deploy_revision", revision)
+
+
 def deploy_lock_key(frame_id: int) -> str:
     return f"frame:deploy:lock:{frame_id}"
 
@@ -353,12 +375,15 @@ class FrameDeployWorkflow:
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
 
         if mode == "combined":
-            return await self._plan_combined(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
-        if mode == "fast":
-            return await self._plan_fast(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
-        if mode == "full":
-            return await self._plan_full(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
-        raise ValueError(f"Unsupported deploy mode: {mode}")
+            plan = await self._plan_combined(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
+        elif mode == "fast":
+            plan = await self._plan_fast(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
+        elif mode == "full":
+            plan = await self._plan_full(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
+        else:
+            raise ValueError(f"Unsupported deploy mode: {mode}")
+        _apply_frame_sync_deploy_revision(self.frame, plan.frame_dict)
+        return plan
 
     # Matches the arq job_timeout, so a crashed worker can never wedge a
     # frame's deploys for longer than the job itself could have run.

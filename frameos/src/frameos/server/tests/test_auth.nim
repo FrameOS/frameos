@@ -7,6 +7,8 @@ import ../../types
 import ../state
 import ../auth
 
+let missingConfigPath = getTempDir() / ("frameos-auth-tests-missing-frame-" & $getCurrentProcessId() & ".json")
+
 proc configureAdmin(enabled: bool, user: string, pass: string) =
   globalFrameConfig = FrameConfig(
     frameAdminAuth: %*{
@@ -35,6 +37,9 @@ proc makeRequest(
 suite "Server auth helpers":
   setup:
     clearAdminSessions()
+    if fileExists(missingConfigPath):
+      removeFile(missingConfigPath)
+    putEnv("FRAMEOS_CONFIG", missingConfigPath)
 
   test "admin auth enabled requires full config":
     configureAdmin(true, "admin", "secret")
@@ -64,6 +69,29 @@ suite "Server auth helpers":
     check adminPanelEnabled()
     check adminAuthEnabled()
 
+  test "persisted admin auth is used if live runtime auth is missing":
+    let tempDir = getTempDir() / "frameos-auth-persisted-config"
+    createDir(tempDir)
+    let configPath = tempDir / "frame.json"
+    writeFile(configPath, $(%*{
+      "frameAdminAuth": {
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      },
+    }))
+    putEnv("FRAMEOS_CONFIG", configPath)
+
+    globalFrameConfig = FrameConfig(
+      frameAdminAuth: %*{},
+      frameAccess: "public",
+      frameAccessKey: "",
+    )
+
+    check adminPanelEnabled()
+    check adminAuthEnabled()
+    check validateAdminCredentials("admin", "secret")
+
   test "legacy auth toggle no longer bypasses admin credentials":
     globalFrameConfig = FrameConfig(
       frameAccess: "private",
@@ -88,7 +116,7 @@ suite "Server auth helpers":
     check validateAdminCredentials("admin", "secret")
     check not validateAdminCredentials("admin", "nope")
 
-  test "admin sessions use unique opaque tokens":
+  test "admin sessions use unique signed tokens":
     configureAdmin(true, "admin", "secret")
     setGlobalAdminSessionSalt("salt-one")
     let first = createAdminSession()
@@ -99,10 +127,29 @@ suite "Server auth helpers":
     check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & first)]))
     check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & second)]))
 
-  test "admin sessions expire server-side":
+  test "admin sessions expire from signed expiry":
     configureAdmin(true, "admin", "secret")
     let expired = createAdminSession(ttlSeconds = -1)
     check not hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & expired)]))
+
+  test "admin sessions reject tampered tokens":
+    configureAdmin(true, "admin", "secret")
+    setGlobalAdminSessionSalt("salt-one")
+    let token = createAdminSession()
+    check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & token)]))
+
+    let tampered = token[0 ..< token.high] & (if token[token.high] == '0': "1" else: "0")
+    check not hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & tampered)]))
+
+  test "admin sessions survive process restart session clear":
+    configureAdmin(true, "admin", "secret")
+    setGlobalAdminSessionSalt("salt-one")
+    let token = createAdminSession()
+    let request = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & token)])
+    check hasAdminSession(request)
+
+    clearAdminSessions()
+    check hasAdminSession(request)
 
   test "admin sessions are invalidated when credentials change":
     configureAdmin(true, "admin", "secret")

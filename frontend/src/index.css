@@ -2163,7 +2163,8 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 
   .workspace-sidebar .frameos-rail img {
     height: 2.25rem;
-    width: 2.25rem;
+    max-width: 2.25rem;
+    width: auto;
   }
 
   .workspace-sidebar nav {
@@ -2236,7 +2237,8 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   .workspace-sidebar .workspace-logo-button svg,
   .workspace-sidebar .workspace-logo-button img {
     height: 2rem;
-    width: 2rem;
+    max-width: 2rem;
+    width: auto;
   }
 
   .workspace-sidebar .frameos-rail svg {
