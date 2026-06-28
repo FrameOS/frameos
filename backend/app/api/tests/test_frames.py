@@ -1267,6 +1267,23 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_clears_imagemagick_for_buildroot(async_client, db, redis):
+    frame = await new_frame(db, redis, 'BuildrootEngine', 'localhost', 'localhost')
+    frame.mode = "buildroot"
+    frame.ssh_user = "root"
+    frame.buildroot = {"platform": "raspberry-pi-zero-2-w"}
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"image_engine": "imagemagick"})
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.image_engine == ""
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_max_http_response_bytes(async_client, db, redis):
     frame = await new_frame(db, redis, 'HttpLimitFrame', 'localhost', 'localhost')
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"max_http_response_bytes": 32 * 1024 * 1024})

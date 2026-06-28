@@ -559,6 +559,14 @@ def get_templates_json() -> dict:
     else:
         return {}
 
+
+def frame_image_engine(frame: Frame) -> str:
+    image_engine = frame.image_engine or ""
+    if (frame.mode or "rpios") == "buildroot" and image_engine == "imagemagick":
+        return ""
+    return image_engine
+
+
 def get_frame_json(db: Session, frame: Frame) -> dict:
     https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
@@ -600,7 +608,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
-        "imageEngine": frame.image_engine or "",
+        "imageEngine": frame_image_engine(frame),
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,
