@@ -19,6 +19,9 @@ from app.tasks.buildroot_image import (
     BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
+    BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
+    BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
+    BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
     PrecompiledBuildrootSdImageResult,
@@ -216,6 +219,7 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "sudo -E /srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
     assert "LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes" in script
     assert "mount -o remount,rw /" in script
+    assert "install -d -m 700 /etc/NetworkManager/system-connections" in script
     assert "root:%s" in script
     assert "chpasswd" in script
     assert 'DROPBEAR_ARGS=""' in script
@@ -402,7 +406,13 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "LABEL=BOOT /boot vfat" in partition_post_build
     assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
-    assert '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' in partition_post_build
+    assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in partition_post_build
+    assert (
+        "[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]"
+        in partition_post_build
+    )
+    assert 'mkdir -p "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
+    assert 'chmod 700 "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
     assert "frameos-partition-root" in partition_post_build
     assert "assets-partition-root" in partition_post_build
     assert '"$target_dir/etc/cron.d"' in post_build
@@ -549,6 +559,13 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     assert service_link.readlink().as_posix() == f"../{BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME}"
     assert script_path.read_text(encoding="utf-8") == render_expand_sd_card_script()
     assert oct(script_path.stat().st_mode & 0o777) == "0o755"
+    assert (overlay / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")).is_dir()
+    nm_state_dir = overlay / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
+    assert nm_state_dir.is_dir()
+    assert oct(nm_state_dir.stat().st_mode & 0o777) == "0o700"
+    assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in (
+        overlay / "etc" / "fstab"
+    ).read_text(encoding="utf-8")
     multi_user_wants = overlay / "etc" / "systemd" / "system" / "multi-user.target.wants"
     for service in ("dcron.service", "systemd-timesyncd.service"):
         link = multi_user_wants / service
@@ -1612,6 +1629,12 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
         release_dir / "frame.json"
     ).read_text(encoding="utf-8")
     assert (release_dir / "frameos.service").exists()
+    nm_state_dir = overlay_dir / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
+    assert nm_state_dir.is_dir()
+    assert oct(nm_state_dir.stat().st_mode & 0o777) == "0o700"
+    nm_connections_dir = overlay_dir / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
+    assert nm_connections_dir.is_dir()
+    assert oct(nm_connections_dir.stat().st_mode & 0o777) == "0o700"
     frameos_service = (release_dir / "frameos.service").read_text(encoding="utf-8")
     assert "User=root" in frameos_service
     assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in frameos_service

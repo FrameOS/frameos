@@ -186,6 +186,12 @@ BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
     # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
     "gpu_mem=32",
 )
+BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
+BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR = "/srv/frameos/state/NetworkManager/system-connections"
+BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
+    f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
+    "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
+)
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 FRAMEOS_BUILD_TARGET = TargetMetadata(
@@ -489,6 +495,15 @@ def stage_buildroot_frameos_service(root: Path) -> None:
     if link.exists() or link.is_symlink():
         link.unlink()
     link.symlink_to("../frameos.service")
+
+
+def stage_buildroot_network_manager_state(root: Path) -> None:
+    state_dir = root / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
+    connections_dir = root / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    connections_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    os.chmod(connections_dir, 0o700)
 
 
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
@@ -1265,6 +1280,7 @@ class BuildrootImageBuilder:
             wants_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+        stage_buildroot_network_manager_state(overlay_dir)
 
         if not frameos_build.binary_path:
             raise RuntimeError("FrameOS cross compilation did not produce a binary")
@@ -2720,15 +2736,19 @@ if ! find "$assets_root" -mindepth 1 -maxdepth 1 | grep -q .; then
   touch "$assets_root/frameos-assets-placeholder"
 fi
 
-mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
+mkdir -p "$frameos_root/state/NetworkManager/system-connections"
+chmod 700 "$frameos_root/state/NetworkManager/system-connections"
+mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections"
+chmod 700 "$target_dir/etc/NetworkManager/system-connections"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
 LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
 LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
+/srv/frameos/state/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0
 EOF
 mv "$tmp_fstab" "$fstab"
 """

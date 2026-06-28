@@ -34,6 +34,9 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
+    BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
+    BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
+    BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
     FRAMEOS_BUILD_TARGET,
@@ -48,6 +51,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     _gzip_file,
     _sha256,
     normalize_buildroot_platform,
+    stage_buildroot_network_manager_state,
 )
 from app.models.frame import (  # noqa: E402
     DEFAULT_ERROR_BEHAVIOR,
@@ -333,6 +337,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to(f"/usr/lib/systemd/system/{service}")
+    stage_buildroot_network_manager_state(overlay)
     resize_script = overlay / BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH.lstrip("/")
     resize_script.parent.mkdir(parents=True, exist_ok=True)
     resize_script.write_text(render_expand_sd_card_script(), encoding="utf-8")
@@ -355,7 +360,8 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     (overlay / "etc" / "fstab").write_text(
         "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0\n"
         "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
-        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n",
+        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n"
+        f"{BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE}\n",
         encoding="utf-8",
     )
     (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
