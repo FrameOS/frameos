@@ -156,3 +156,28 @@ async def test_fetch_frame_http_bytes_falls_back_after_tls_candidate_error(monke
         "https://espvaarikas.local:8443/api/action/ota",
         "http://10.8.0.232:80/api/action/ota",
     ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_frame_http_bytes_encodes_remote_text_as_utf8(monkeypatch):
+    frame = _frame("frame.local")
+
+    async def fake_use_remote(_frame, _redis):
+        return True
+
+    async def fake_http_get_on_frame(*_args, **_kwargs):
+        return {
+            "status": 200,
+            "body": '{"name":"non\u2011breaking hyphen"}',
+            "headers": {"content-type": "application/json"},
+        }
+
+    monkeypatch.setattr(frame_http, "_use_remote", fake_use_remote)
+    monkeypatch.setattr(frame_http, "http_get_on_frame", fake_http_get_on_frame)
+
+    status, body, headers = await frame_http._fetch_frame_http_bytes(frame, None, path="/api/frames/1")
+
+    assert status == 200
+    assert body == b'{"name":"non\xe2\x80\x91breaking hyphen"}'
+    assert body.decode("utf-8") == '{"name":"non\u2011breaking hyphen"}'
+    assert headers["content-type"] == "application/json"

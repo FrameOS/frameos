@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
 import { isFrameControlMode } from '../utils/frameControlMode'
+import { isInFrameAdminMode } from '../utils/frameAdmin'
 
 export const repositoriesModel = kea<repositoriesModelType>([
   path(['src', 'models', 'repositoriesModel']),
@@ -19,11 +20,15 @@ export const repositoriesModel = kea<repositoriesModelType>([
       {
         loadRepositories: async () => {
           try {
+            const inFrameAdminMode = isInFrameAdminMode()
             const systemResponse = await apiFetch('/api/repositories/system')
             if (!systemResponse.ok) {
               throw new Error('Failed to fetch system repositories')
             }
             const systemData = await systemResponse.json()
+            if (inFrameAdminMode) {
+              return systemData as RepositoryType[]
+            }
             const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
@@ -81,7 +86,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
     },
   }),
   afterMount(({ actions }) => {
-    if (isFrameControlMode()) {
+    if (isFrameControlMode() && !isInFrameAdminMode()) {
       return
     }
     actions.loadRepositories()

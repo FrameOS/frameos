@@ -251,7 +251,7 @@ async def _fetch_frame_http_bytes(
                 body = resp.get("body", b"")  # already bytes
             else:
                 raw = resp.get("body", "")
-                body = raw.encode("latin1") if isinstance(raw, str) else raw
+                body = raw.encode("utf-8") if isinstance(raw, str) else raw
             hdrs = {
                 str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()
             }

@@ -525,6 +525,11 @@ class FrameDeployer:
             repo_apps_code_dir = Path(temp_dir) / "repo" / "apps" / "code"
             repo_apps_code_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(repo_apps_code, repo_apps_code_dir, dirs_exist_ok=True)
+        repo_scenes = repo_root / "repo" / "scenes"
+        if repo_scenes.is_dir():
+            repo_scenes_dir = Path(temp_dir) / "repo" / "scenes"
+            repo_scenes_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_scenes, repo_scenes_dir, dirs_exist_ok=True)
         repo_versions = repo_root / "versions.json"
         if repo_versions.is_file():
             shutil.copy2(repo_versions, Path(temp_dir) / "versions.json")

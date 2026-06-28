@@ -25,11 +25,13 @@ MODULE_OUTPUTS = (
     Path("src/assets/web.nim"),
     Path("src/assets/frame_web.nim"),
     Path("src/assets/fonts.nim"),
+    Path("src/assets/repo_scenes.nim"),
 )
 
 MODULE_SOURCE_FILES = (
     Path("assets/compiled/web/control.html"),
     Path("assets/compiled/fonts/Ubuntu-Regular.ttf"),
+    Path("../repo/scenes"),
     Path("tools/generate_apps_asset_nim.py"),
     Path("tools/generate_compressed_asset_nim.py"),
     Path("tools/prepare_assets.py"),
@@ -352,6 +354,18 @@ def generate_asset_modules(project_root: Path) -> None:
             "assets/compiled/fonts/Ubuntu-Regular.ttf",
             "--output",
             "src/assets/fonts.nim",
+        ],
+        [
+            python,
+            "tools/generate_compressed_asset_nim.py",
+            "--source-dir",
+            ".",
+            "--dir",
+            "../repo/scenes",
+            "--key-prefix",
+            "repo/scenes",
+            "--output",
+            "src/assets/repo_scenes.nim",
         ],
     )
 

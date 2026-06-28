@@ -86,6 +86,11 @@ async def build_driver_libraries(
             source_dir,
             ignore=shutil.ignore_patterns("build", "node_modules"),
         )
+        repo_scenes = frameos_root.parent / "repo" / "scenes"
+        if repo_scenes.is_dir():
+            repo_scenes_dir = Path(tmp) / "repo" / "scenes"
+            repo_scenes_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_scenes, repo_scenes_dir, dirs_exist_ok=True)
         generate_driver_sources(
             frameos_root=source_dir,
             config_path=config_path,

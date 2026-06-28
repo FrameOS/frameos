@@ -15,7 +15,7 @@ import React from 'react'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
-import { TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType } from '../../../../types'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
@@ -38,6 +38,10 @@ function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplate
     return a.compatibility.supported ? -1 : 1
   }
   return a.template.name.localeCompare(b.template.name)
+}
+
+function isSystemRepository(repository: RepositoryType): boolean {
+  return Boolean(repository.id?.startsWith('system-') || repository.url?.startsWith('/api/repositories/system/'))
 }
 
 export function Templates({ openInstalledSceneDrawer = false, persistOnInstall = false }: TemplatesProps = {}) {
@@ -208,9 +212,10 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
         </div>
       )}
 
-      {!inFrameAdminMode && (
-        <>
-          {(repositories ?? []).map((repository) => (
+      <>
+        {(repositories ?? []).map((repository) => {
+          const systemRepository = isSystemRepository(repository)
+          return (
             <div className="space-y-2 !mt-8" key={repository.id}>
               <div className="flex gap-2 items-start justify-between">
                 <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded(repository.url)}>
@@ -222,29 +227,39 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                   {repository.name || repository.url}
                   {repository.templates?.length ? ` (${repository.templates.length})` : ''}
                 </H6>
-                <DropdownMenu
-                  buttonColor="secondary"
-                  className="mr-3"
-                  items={[
-                    {
-                      label: 'Refresh',
-                      onClick: () => repository.id && refreshRepository(repository.id),
-                      icon: <ArrowPathIcon className="w-5 h-5" />,
-                      title: `Last refresh: ${repository.last_updated_at}`,
-                    },
-                    {
-                      label: 'Copy repository URL',
-                      title: repository.url,
-                      onClick: async () => repository.url && copy(repository.url),
-                      icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
-                    },
-                    {
-                      label: 'Remove',
-                      onClick: () => repository.id && removeRepository(repository.id),
-                      icon: <TrashIcon className="w-5 h-5" />,
-                    },
-                  ]}
-                />
+                {!inFrameAdminMode ? (
+                  <DropdownMenu
+                    buttonColor="secondary"
+                    className="mr-3"
+                    items={[
+                      ...(!systemRepository
+                        ? [
+                            {
+                              label: 'Refresh',
+                              onClick: () => repository.id && refreshRepository(repository.id),
+                              icon: <ArrowPathIcon className="w-5 h-5" />,
+                              title: `Last refresh: ${repository.last_updated_at}`,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: 'Copy repository URL',
+                        title: repository.url,
+                        onClick: async () => repository.url && copy(repository.url),
+                        icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
+                      },
+                      ...(!systemRepository
+                        ? [
+                            {
+                              label: 'Remove',
+                              onClick: () => repository.id && removeRepository(repository.id),
+                              icon: <TrashIcon className="w-5 h-5" />,
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
+                ) : null}
               </div>
               {isExpanded(repository.url) && repository.description ? (
                 <div className="frame-tool-muted text-sm">{repository.description}</div>
@@ -268,7 +283,9 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                           favourite={favouriteTemplateIds.has(favouriteId)}
                           favouriteId={favouriteId}
                           onToggleFavourite={togglePersonalFavouriteTemplate}
-                          saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                          saveRemoteAsLocal={
+                            !inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined
+                          }
                           applyTemplate={(template) => {
                             applyRemoteToFrame(
                               repository,
@@ -300,59 +317,68 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                 <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">This repository has no scenes.</div>
               ) : null}
             </div>
-          ))}
-          {repositories.length === 0 || hiddenRepositories > 0 ? (
-            <div className="space-y-2">
-              {repositories.length === 0 ? <H6>Remote repositories</H6> : null}
-              <div className="frame-tool-muted text-sm">
-                {hiddenRepositories > 0 ? (
-                  <>
-                    {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for "
-                    {search}".
-                  </>
-                ) : (
-                  <>You have no repositories installed.</>
-                )}
-              </div>
-            </div>
-          ) : null}
-          {showingAddRepository ? (
-            <Box className="frame-tool-card rounded-[22px] p-4">
-              <Form
-                logic={templatesLogic}
-                props={{ frameId }}
-                formKey="addRepositoryForm"
-                enableFormOnSubmit
-                className="space-y-3"
-              >
-                <H6>Add scenes repository</H6>
+          )
+        })}
+        {!inFrameAdminMode ? (
+          <>
+            {repositories.length === 0 || hiddenRepositories > 0 ? (
+              <div className="space-y-2">
+                {repositories.length === 0 ? <H6>Remote repositories</H6> : null}
                 <div className="frame-tool-muted text-sm">
-                  Use a FrameOS repository JSON URL. Repository scenes appear in this drawer after import.{' '}
-                  <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
-                    Repository format
-                  </a>
+                  {hiddenRepositories > 0 ? (
+                    <>
+                      {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for "
+                      {search}".
+                    </>
+                  ) : (
+                    <>You have no repositories installed.</>
+                  )}
                 </div>
-                <Field label="" name="url">
-                  <TextInput placeholder="https://repo.frameos.net/samples/repository.json" />
-                </Field>
-                <div className="flex gap-2">
-                  <Button type="submit" size="small" color="primary">
-                    Add repository
-                  </Button>
-                  <Button size="small" color="secondary" onClick={hideAddRepository}>
-                    Close
-                  </Button>
-                </div>
-              </Form>
-            </Box>
-          ) : (
-            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showAddRepository}>
-              <PlusIcon className="w-4 h-4" />
-              Add repository
-            </Button>
-          )}
-        </>
-      )}
+              </div>
+            ) : null}
+            {showingAddRepository ? (
+              <Box className="frame-tool-card rounded-[22px] p-4">
+                <Form
+                  logic={templatesLogic}
+                  props={{ frameId }}
+                  formKey="addRepositoryForm"
+                  enableFormOnSubmit
+                  className="space-y-3"
+                >
+                  <H6>Add scenes repository</H6>
+                  <div className="frame-tool-muted text-sm">
+                    Use a FrameOS repository JSON URL. Repository scenes appear in this drawer after import.{' '}
+                    <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
+                      Repository format
+                    </a>
+                  </div>
+                  <Field label="" name="url">
+                    <TextInput placeholder="https://repo.frameos.net/samples/repository.json" />
+                  </Field>
+                  <div className="flex gap-2">
+                    <Button type="submit" size="small" color="primary">
+                      Add repository
+                    </Button>
+                    <Button size="small" color="secondary" onClick={hideAddRepository}>
+                      Close
+                    </Button>
+                  </div>
+                </Form>
+              </Box>
+            ) : (
+              <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showAddRepository}>
+                <PlusIcon className="w-4 h-4" />
+                Add repository
+              </Button>
+            )}
+          </>
+        ) : repositories.length === 0 ? (
+          <div className="space-y-2">
+            <H6>Bundled scenes</H6>
+            <div className="frame-tool-muted text-sm">No bundled scenes are available.</div>
+          </div>
+        ) : null}
+      </>
     </div>
   )
 }
