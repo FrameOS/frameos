@@ -9,5 +9,5 @@ export default {
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/container-queries')],
 }

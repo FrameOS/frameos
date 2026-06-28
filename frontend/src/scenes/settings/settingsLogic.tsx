@@ -9,6 +9,7 @@ import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { guessBrowserTimezone } from '../../utils/timezone'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
@@ -219,11 +220,13 @@ export const settingsLogic = kea<settingsLogicType>([
     },
   })),
   afterMount(({ actions }) => {
-    if (isFrameControlMode()) {
+    if (isFrameControlMode() && !isInFrameAdminMode()) {
       return
     }
     actions.loadSettings()
-    actions.loadCustomFonts()
+    if (!isFrameControlMode()) {
+      actions.loadCustomFonts()
+    }
   }),
   listeners(({ values, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {

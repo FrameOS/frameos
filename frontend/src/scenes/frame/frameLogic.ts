@@ -1795,7 +1795,6 @@ export const frameLogic = kea<frameLogicType>([
       null as string | null,
       {
         setFrameSyncIgnoredToken: (_, { token }) => token,
-        applyFrameSyncSuccess: () => null,
       },
     ],
     frameSyncError: [

@@ -1188,6 +1188,44 @@ def _frame_to_response_dict(
     return data
 
 
+def _sync_hint_response_value(headers: dict[str, str], name: str) -> str | None:
+    value = headers.get(name) or headers.get(name.lower())
+    return value or None
+
+
+def _frame_sync_hint_from_headers(headers: dict[str, str]) -> dict[str, Any] | None:
+    changed = _sync_hint_response_value(headers, "X-FrameOS-Sync-Changed")
+    if changed not in ("0", "1"):
+        return None
+    return {
+        "has_changes": changed == "1",
+        "checked_at": _sync_hint_response_value(headers, "X-FrameOS-Sync-Checked-At"),
+        "current_revision": _sync_hint_response_value(headers, "X-FrameOS-Sync-Revision"),
+        "deployed_revision": _sync_hint_response_value(headers, "X-FrameOS-Deployed-Revision"),
+        "frame_config_modified_at": _sync_hint_response_value(headers, "X-FrameOS-Frame-Config-Modified-At"),
+        "scenes_modified_at": _sync_hint_response_value(headers, "X-FrameOS-Scenes-Modified-At"),
+        "last_successful_deploy_at": _sync_hint_response_value(
+            headers, "X-FrameOS-Last-Successful-Deploy-At"
+        ),
+    }
+
+
+async def _frame_sync_hint_for_response(redis: Redis, frame_id: int) -> dict[str, Any] | None:
+    return _frame_sync_hint_from_headers(await read_frame_sync_hint_headers(redis, frame_id))
+
+
+async def _frame_to_api_response_dict(
+    frame: Frame,
+    redis: Redis,
+    latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET,
+) -> dict[str, Any]:
+    data = _frame_to_response_dict(frame, latest_log_at)
+    sync_hint = await _frame_sync_hint_for_response(redis, frame.id)
+    if sync_hint:
+        data["frame_sync_hint"] = sync_hint
+    return data
+
+
 @api_project.get("/frames", response_model=FramesListResponse)
 async def api_frames_list(
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
@@ -1201,18 +1239,13 @@ async def api_frames_list(
         .group_by(Log.frame_id)
         .all()
     )
-    return {
-        "frames": [
-            {
-                **_frame_to_response_dict(f, latest_logs.get(f.id)),
-                "active_scene_id": await _active_scene_id_from_cache(redis, f.id),
-                "active_connections": await number_of_connections_for_frame(
-                    redis, f.id
-                ),
-            }
-            for f in frames
-        ]
-    }
+    frame_items = []
+    for f in frames:
+        data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id))
+        data["active_scene_id"] = await _active_scene_id_from_cache(redis, f.id)
+        data["active_connections"] = await number_of_connections_for_frame(redis, f.id)
+        frame_items.append(data)
+    return {"frames": frame_items}
 
 
 @api_project.get("/frames/{id:int}/state", response_model=FrameStateResponse)
@@ -1819,7 +1852,7 @@ async def api_frame_get(
         .filter(_frame_activity_log_filter())
         .scalar()
     )
-    data = _frame_to_response_dict(frame, latest_log_at)
+    data = await _frame_to_api_response_dict(frame, redis, latest_log_at)
     active = await redis.get(f"frame:{frame.id}:active_connections")
     data["active_connections"] = int(active or 0)
     data["active_scene_id"] = await _active_scene_id_from_cache(redis, frame.id)

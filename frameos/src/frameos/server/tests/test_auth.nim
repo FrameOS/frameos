@@ -181,6 +181,49 @@ suite "Server auth helpers":
 
     removeFile(secretPath)
 
+  test "installed release session salt is shared across release config paths":
+    let tempDir = getTempDir() / "frameos-auth-shared-salt"
+    if dirExists(tempDir):
+      removeDir(tempDir)
+    createDir(tempDir / "releases" / "release_old")
+    createDir(tempDir / "releases" / "release_new")
+    let oldConfigPath = tempDir / "releases" / "release_old" / "frame.json"
+    let newConfigPath = tempDir / "releases" / "release_new" / "frame.json"
+    writeFile(oldConfigPath, "{}")
+    writeFile(newConfigPath, "{}")
+
+    let hadFrameosDir = existsEnv("FRAMEOS_DIR")
+    let oldFrameosDir = if hadFrameosDir: getEnv("FRAMEOS_DIR") else: ""
+    let hadSalt = existsEnv("FRAMEOS_ADMIN_SESSION_SALT")
+    let oldSalt = if hadSalt: getEnv("FRAMEOS_ADMIN_SESSION_SALT") else: ""
+    let hadSaltFile = existsEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE")
+    let oldSaltFile = if hadSaltFile: getEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE") else: ""
+    try:
+      putEnv("FRAMEOS_DIR", tempDir)
+      delEnv("FRAMEOS_ADMIN_SESSION_SALT")
+      delEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE")
+      let first = getOrCreateAdminSessionSalt(oldConfigPath)
+      let second = getOrCreateAdminSessionSalt(newConfigPath)
+      check first.len > 0
+      check second == first
+      check fileExists(tempDir / "state" / "admin_session_salt")
+      check not fileExists(newConfigPath & ".admin_session_salt")
+    finally:
+      if hadFrameosDir:
+        putEnv("FRAMEOS_DIR", oldFrameosDir)
+      else:
+        delEnv("FRAMEOS_DIR")
+      if hadSalt:
+        putEnv("FRAMEOS_ADMIN_SESSION_SALT", oldSalt)
+      else:
+        delEnv("FRAMEOS_ADMIN_SESSION_SALT")
+      if hadSaltFile:
+        putEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE", oldSaltFile)
+      else:
+        delEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE")
+      if dirExists(tempDir):
+        removeDir(tempDir)
+
   test "getCookieValue parses existing cookies":
     let request = makeRequest(headers = @[("cookie", "a=1;frame_access_key=abc;z=9")])
     check getCookieValue(request, "frame_access_key") == "abc"

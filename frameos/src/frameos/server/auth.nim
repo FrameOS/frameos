@@ -114,20 +114,52 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
   if envSecret.len > 0:
     return envSecret
 
-  let secretPath = configPath & ".admin_session_salt"
-  try:
-    if fileExists(secretPath):
-      let existing = readFile(secretPath).strip()
-      if existing.len > 0:
-        return existing
-  except CatchableError:
-    discard
+  let legacySecretPath = configPath & ".admin_session_salt"
+  let configuredSecretPath = getEnv("FRAMEOS_ADMIN_SESSION_SALT_FILE").strip()
+  let frameosDir = getEnv("FRAMEOS_DIR", "/srv/frameos").strip(leading = false, trailing = true, chars = {'/'})
+  var secretPath = legacySecretPath
+
+  if configuredSecretPath.len > 0:
+    secretPath = configuredSecretPath
+  elif frameosDir.len > 0:
+    let absoluteConfigPath =
+      try:
+        absolutePath(configPath)
+      except CatchableError:
+        configPath
+    let absoluteFrameosDir =
+      try:
+        absolutePath(frameosDir)
+      except CatchableError:
+        frameosDir
+    if absoluteConfigPath == absoluteFrameosDir / "current" / "frame.json" or
+        absoluteConfigPath.startsWith(absoluteFrameosDir / "releases" / ""):
+      secretPath = absoluteFrameosDir / "state" / "admin_session_salt"
+
+  for path in [secretPath, legacySecretPath]:
+    try:
+      if path.len > 0 and fileExists(path):
+        let existing = readFile(path).strip()
+        if existing.len > 0:
+          if path != secretPath:
+            try:
+              createDir(parentDir(secretPath))
+              writeFile(secretPath, existing & "\n")
+            except CatchableError:
+              discard
+          return existing
+    except CatchableError:
+      discard
 
   let generated = secureRandomToken()
   try:
+    createDir(parentDir(secretPath))
     writeFile(secretPath, generated & "\n")
   except CatchableError:
-    discard
+    try:
+      writeFile(legacySecretPath, generated & "\n")
+    except CatchableError:
+      discard
   return generated
 
 proc adminSessionCredentialFingerprint(): string =

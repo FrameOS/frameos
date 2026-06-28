@@ -1968,7 +1968,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const frameSyncStatusNeedsRefresh =
     hasFrameSyncChanges && Boolean(frame.frame_sync_hint?.has_changes) && (!frameSyncStatus || !frameSyncStatus.has_changes)
   const frameSyncStatusReady = Boolean(frameSyncStatus && !frameSyncStatusNeedsRefresh)
-  const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading && !frameSyncApplying
+  const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading
 
   const saveSdCardSettingsAndDownload = async (): Promise<void> => {
     const response = await apiFetch(`/api/frames/${frame.id}`, {

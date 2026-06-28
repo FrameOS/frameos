@@ -6,6 +6,7 @@ import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -1547,29 +1548,46 @@ export const workspaceLogic = kea<workspaceLogicType>([
         closeDrawersFromUrl()
       }
     }
+    const applyFrameRoute = (
+      id: unknown,
+      search: Record<string, unknown>,
+      hash: Record<string, unknown>,
+      previousLocation: { pathname?: string; searchParams?: Record<string, unknown> }
+    ) => {
+      syncSecondarySidebarFromHashForMobile(hash)
+      const frameId = parseInt(String(id), 10)
+      const validFrameId = Number.isFinite(frameId) ? frameId : null
+      const preservedSearch = validFrameId
+        ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
+        : null
+      const effectiveSearch =
+        preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan' ? preservedSearch : search
+      if (validFrameId) {
+        actions.selectFrame(validFrameId)
+      }
+      actions.openUtilityPanel(frameToolFromSearch(effectiveSearch))
+      applyDrawerFromSearch(validFrameId, effectiveSearch)
+      if (validFrameId && preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan') {
+        router.actions.replace(urls.frame(validFrameId), preservedSearch, hash)
+      }
+    }
+    const applyFrameAdminRootRoute = (
+      _: Record<string, unknown>,
+      search: Record<string, unknown>,
+      hash: Record<string, unknown>,
+      _payload: { initial?: boolean },
+      previousLocation: { pathname?: string; searchParams?: Record<string, unknown> }
+    ) => {
+      applyFrameRoute(getFrameControlFrameId(), search, hash, previousLocation)
+    }
     const framesPath = framesRoutePath()
+    const rootRouteHandler = isInFrameAdminMode() ? applyFrameAdminRootRoute : applyFramesRoute
 
     return {
-      [framesPath]: applyFramesRoute,
-      [`${framesPath.replace(/\/$/, '')}/`]: applyFramesRoute,
-      [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) => {
-        syncSecondarySidebarFromHashForMobile(hash)
-        const frameId = parseInt(String(id), 10)
-        const validFrameId = Number.isFinite(frameId) ? frameId : null
-        const preservedSearch = validFrameId
-          ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
-          : null
-        const effectiveSearch =
-          preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan' ? preservedSearch : search
-        if (validFrameId) {
-          actions.selectFrame(validFrameId)
-        }
-        actions.openUtilityPanel(frameToolFromSearch(effectiveSearch))
-        applyDrawerFromSearch(validFrameId, effectiveSearch)
-        if (validFrameId && preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan') {
-          router.actions.replace(urls.frame(validFrameId), preservedSearch, hash)
-        }
-      },
+      [framesPath]: rootRouteHandler,
+      [`${framesPath.replace(/\/$/, '')}/`]: rootRouteHandler,
+      [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) =>
+        applyFrameRoute(id, search, hash, previousLocation),
       [urls.scenes(':frameId')]: applySceneOrAppRoute,
       [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId')]: applySceneOrAppRoute,

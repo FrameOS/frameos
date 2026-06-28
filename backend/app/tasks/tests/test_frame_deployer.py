@@ -15,6 +15,7 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     frameos_root = repo_root / "frameos"
     shared_frontend_src = repo_root / "frontend" / "src"
     shared_frontend_schema = repo_root / "frontend" / "schema"
+    shared_frontend_public = repo_root / "frontend" / "public"
 
     (frameos_root / "frontend" / "src").mkdir(parents=True)
     (frameos_root / "frontend" / "src" / "main.tsx").write_text("local frame frontend\n", encoding="utf-8")
@@ -40,6 +41,8 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     (shared_frontend_src / "initKea.ts").write_text("export function initKea() {}\n", encoding="utf-8")
     shared_frontend_schema.mkdir(parents=True)
     (shared_frontend_schema / "events.json").write_text("{}\n", encoding="utf-8")
+    (shared_frontend_public / "img" / "logo-2").mkdir(parents=True)
+    (shared_frontend_public / "img" / "logo-2" / "logo-white-colors.svg").write_text("<svg />\n", encoding="utf-8")
     (repo_root / "frontend" / "scripts").mkdir(parents=True)
     (repo_root / "frontend" / "scripts" / "generateRepoApps.mjs").write_text("export {}\n", encoding="utf-8")
     (repo_root / "repo" / "apps" / "code" / "sample").mkdir(parents=True)
@@ -72,6 +75,7 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (tmp_path / "build" / "pnpm-workspace.yaml").exists()
     assert (tmp_path / "build" / "pnpm-lock.yaml").exists()
     assert (tmp_path / "build" / "frontend" / "src" / "initKea.ts").exists()
+    assert (tmp_path / "build" / "frontend" / "public" / "img" / "logo-2" / "logo-white-colors.svg").exists()
     assert (tmp_path / "build" / "frontend" / "schema" / "events.json").exists()
     assert (tmp_path / "build" / "frontend" / "scripts" / "generateRepoApps.mjs").exists()
     assert (tmp_path / "build" / "frontend" / "package.json").exists()

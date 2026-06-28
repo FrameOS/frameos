@@ -8,13 +8,8 @@ from ./frameos/boot_guard import clearBootCrashCount, updateBootGuardFailureDeta
 from ./frameos/frameos import startFrameOS, describeFatalStartupError, fatalStartupRetryAction,
   loadFatalErrorBehavior, renderFatalStartupError
 from ./frameos/setup import setupFrameOS, startFrameOSSystemdServices, writeSetupReleasePayload
-
-const frameosVersion {.strdefine.}: string = "unknown"
-
-proc compiledFrameOSVersion(): string =
-  result = frameosVersion.strip()
-  if result.len == 0:
-    result = "unknown"
+from ./frameos/upgrade import runFrameOSUpgrade, parseFrameOSUpgradeOptions
+from ./frameos/version import compiledFrameOSVersion
 
 proc printHelp() =
   echo "FrameOS version: " & compiledFrameOSVersion()
@@ -24,6 +19,8 @@ proc printHelp() =
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
   echo "         --with-setup=/boot/frameos-setup.json[.gz] to install from first-boot setup JSON"
+  echo "  upgrade Upgrade this installed frame to the latest GitHub release"
+  echo "          --dry-run to validate and print the upgrade plan without changing files"
   echo "  help    Show this help"
 
 when isMainModule:
@@ -59,6 +56,9 @@ when isMainModule:
       if activateServices:
         startFrameOSSystemdServices(setupFromFile)
       quit(0)
+    elif args.len > 0 and args[0] == "upgrade":
+      let upgradeArgs = if args.len > 1: args[1 .. ^1] else: @[]
+      quit(runFrameOSUpgrade(parseFrameOSUpgradeOptions(upgradeArgs)))
     elif args.len == 0 or args[0] == "start" or args[0].startsWith("--"):
       var firstFatalFailureAt = 0.0
       while true:

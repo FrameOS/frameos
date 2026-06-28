@@ -1,5 +1,6 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
+import { ArrowsRightLeftIcon } from '@heroicons/react/24/outline'
 
 import type { FrameType } from '../../types'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -29,6 +30,7 @@ export function FrameSceneSidebarCard({
     frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
   const inFrameAdminMode = isInFrameAdminMode()
   const showSync = hasFrameSyncChanges
+  const DeployButtonIcon = showSync ? ArrowsRightLeftIcon : DeployToFrameIcon
 
   const openDeployPlan = (): void => {
     closeChatDrawer()
@@ -58,7 +60,7 @@ export function FrameSceneSidebarCard({
             showSync || unsavedChanges || undeployedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'
           )}
         >
-          <DeployToFrameIcon className="h-4 w-4 shrink-0" />
+          <DeployButtonIcon className="h-4 w-4 shrink-0" />
           {showSync ? 'Sync' : 'Deploy'}
         </button>
       )}

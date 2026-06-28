@@ -17,12 +17,17 @@ const isWatch = process.argv.includes('--watch')
 
 const outputDir = path.resolve(__dirname, '../assets/compiled/frame_web')
 const staticDir = path.join(outputDir, 'static')
+const publicDir = path.resolve(__dirname, '../../frontend/public')
 
 await import('../../frontend/scripts/generateRepoApps.mjs')
 
 await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
+await fs.cp(publicDir, outputDir, {
+  recursive: true,
+  filter: (source) => path.basename(source) !== '.DS_Store',
+})
 
 const postcssPlugins = [
   tailwindcss({ config: path.resolve(__dirname, 'tailwind.config.js') }),

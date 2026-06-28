@@ -231,6 +231,102 @@ suite "frame api route behavior":
       else:
         delEnv("FRAMEOS_SCENES_JSON")
 
+  test "settings endpoint exposes and updates editable service settings only":
+    let tempRoot = getTempDir() / "frameos-frame-api-settings"
+    if dirExists(tempRoot):
+      removeDir(tempRoot)
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    writeFile(
+      configPath,
+      $(%*{
+        "settings": {
+          "frameOS": {"apiKey": "gallery-key"},
+          "openAI": {"apiKey": "old-openai", "backendApiKey": "hidden-openai"},
+          "homeAssistant": {"url": "http://homeassistant.local", "accessToken": "ha-token"},
+          "github": {"api_key": "github-token"},
+          "unsplash": {"accessKey": "unsplash-token"},
+          "posthog": {"backendApiKey": "hidden-posthog"},
+          "buildHost": {"sshKey": "hidden-build-host"},
+        }
+      }),
+    )
+
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let oldConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+
+      var config = defaultFrameConfig()
+      config.frameAdminAuth = %*{
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      }
+      configureServerState(config)
+
+      let unauthorized = httpRequest(server.port, "GET", "/api/settings")
+      check unauthorized.status == 401
+
+      let login = httpRequest(
+        server.port,
+        "POST",
+        "/api/admin/login",
+        headers = [("Content-Type", "application/json")],
+        body = $(%*{"username": "admin", "password": "secret"}),
+      )
+      let adminCookie = adminCookieFrom(login)
+
+      let settings = httpRequest(server.port, "GET", "/api/settings", headers = [("Cookie", adminCookie)])
+      check settings.status == 200
+      let settingsPayload = parseJson(settings.body)
+      check settingsPayload["frameOS"]["apiKey"].getStr() == "gallery-key"
+      check settingsPayload["openAI"]["apiKey"].getStr() == "old-openai"
+      check not settingsPayload["openAI"].hasKey("backendApiKey")
+      check settingsPayload["homeAssistant"]["accessToken"].getStr() == "ha-token"
+      check settingsPayload["github"]["api_key"].getStr() == "github-token"
+      check settingsPayload["unsplash"]["accessKey"].getStr() == "unsplash-token"
+      check not settingsPayload.hasKey("posthog")
+      check not settingsPayload.hasKey("buildHost")
+
+      let update = httpRequest(
+        server.port,
+        "POST",
+        "/api/settings",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = $(%*{
+          "frameOS": {"apiKey": "new-gallery-key"},
+          "openAI": {"apiKey": "new-openai", "backendApiKey": "ignored-openai"},
+          "homeAssistant": {"url": "http://ha-new.local"},
+          "posthog": {"backendApiKey": "ignored-posthog"},
+          "buildHost": {"sshKey": "ignored-build-host"},
+        }),
+      )
+      check update.status == 200
+      let updatePayload = parseJson(update.body)
+      check updatePayload["frameOS"]["apiKey"].getStr() == "new-gallery-key"
+      check updatePayload["openAI"]["apiKey"].getStr() == "new-openai"
+      check not updatePayload["openAI"].hasKey("backendApiKey")
+      check updatePayload["homeAssistant"]["url"].getStr() == "http://ha-new.local"
+      check updatePayload["homeAssistant"]["accessToken"].getStr() == "ha-token"
+      check not updatePayload.hasKey("posthog")
+      check not updatePayload.hasKey("buildHost")
+
+      let savedConfig = parseFile(configPath)
+      check savedConfig["settings"]["frameOS"]["apiKey"].getStr() == "new-gallery-key"
+      check savedConfig["settings"]["openAI"]["apiKey"].getStr() == "new-openai"
+      check savedConfig["settings"]["openAI"]["backendApiKey"].getStr() == "hidden-openai"
+      check savedConfig["settings"]["homeAssistant"]["url"].getStr() == "http://ha-new.local"
+      check savedConfig["settings"]["homeAssistant"]["accessToken"].getStr() == "ha-token"
+      check savedConfig["settings"]["posthog"]["backendApiKey"].getStr() == "hidden-posthog"
+      check savedConfig["settings"]["buildHost"]["sshKey"].getStr() == "hidden-build-host"
+      check globalFrameConfig.settings["openAI"]["apiKey"].getStr() == "new-openai"
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", oldConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
+
   test "legacy auth-disabled admin configs still require login":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{

@@ -505,6 +505,11 @@ class FrameDeployer:
             frontend_dir = Path(temp_dir) / "frontend"
             frontend_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(repo_frontend_package, frontend_dir / "package.json")
+        repo_frontend_public = repo_root / "frontend" / "public"
+        if repo_frontend_public.is_dir():
+            frontend_public_dir = Path(temp_dir) / "frontend" / "public"
+            frontend_public_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_frontend_public, frontend_public_dir, dirs_exist_ok=True)
         repo_frontend_schema = repo_root / "frontend" / "schema"
         if repo_frontend_schema.is_dir():
             frontend_schema_dir = Path(temp_dir) / "frontend" / "schema"
