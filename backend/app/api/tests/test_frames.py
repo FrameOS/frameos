@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image
 from urllib.parse import urlparse
 
-from app.api import frames as frames_api
+from app.api import frame_sync, frames as frames_api
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
@@ -1459,7 +1459,7 @@ def test_frame_sync_scene_diff_ignores_editor_layout_noise():
         ],
     }
 
-    section = frames_api._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
 
     assert section['changes'] == []
 
@@ -1493,7 +1493,7 @@ def test_frame_sync_scene_diff_reports_semantic_scene_changes():
         ],
     }
 
-    section = frames_api._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
 
     assert len(section['changes']) == 1
     assert section['changes'][0]['backend_json'] == backend_scene

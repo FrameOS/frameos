@@ -1399,7 +1399,6 @@ function FrameSyncSideLabel({
 
 type FrameSyncAnyChoice = FrameSyncChoice | FrameSyncSceneChoice
 type FrameSyncResolutionChoice = Exclude<FrameSyncAnyChoice, 'ignore'>
-type FrameSyncApplyMode = 'commit' | 'discard' | null
 interface FrameSyncResolutionOption {
   choice: FrameSyncResolutionChoice
   label: string
@@ -1515,7 +1514,6 @@ function FrameSyncReviewSection({
   onRefresh,
   loading,
   applying,
-  applyingMode,
   error,
 }: {
   sync: FrameSyncStatus
@@ -1524,15 +1522,14 @@ function FrameSyncReviewSection({
   onRefresh: () => void
   loading: boolean
   applying: boolean
-  applyingMode: FrameSyncApplyMode
   error: string | null
 }): JSX.Element {
   const sections = sync.sections.filter((section) => section.has_changes)
-  const applyingTitle = applyingMode === 'discard' ? 'Discarding frame changes' : 'Committing sync changes'
+  const applyingTitle = 'Committing sync changes'
   const applyingDescription =
-    applyingMode === 'discard'
-      ? 'Restoring the backend frame.json and scenes.json on the frame.'
-      : 'Writing the selected choices to the backend and the frame. Large scene files can take a moment to save.'
+    'Writing the selected choices to the backend and the frame. Large scene files can take a moment to save.'
+  const refreshButtonBusy = loading || applying
+  const refreshButtonLabel = applying ? 'Syncing' : loading ? 'Refreshing' : 'Refresh'
 
   return (
     <div className="space-y-5">
@@ -1542,10 +1539,11 @@ function FrameSyncReviewSection({
             <button
               type="button"
               onClick={onRefresh}
-              disabled={loading}
-              className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              disabled={refreshButtonBusy}
+              className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
             >
-              {loading ? 'Checking' : 'Refresh'}
+              {refreshButtonBusy ? <Spinner className="flex h-3.5 w-3.5 items-center justify-center" /> : null}
+              {refreshButtonLabel}
             </button>
           }
         >
@@ -1909,9 +1907,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
     applyFrameSync,
-    discardFrameSyncChanges,
     hideDeployPlanModal,
     deployRemote,
+    ignoreFrameSyncChanges,
     loadDeployPlans,
     loadFrameSyncStatus,
     restartRemote,
@@ -1970,7 +1968,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const frameSyncStatusNeedsRefresh =
     hasFrameSyncChanges && Boolean(frame.frame_sync_hint?.has_changes) && (!frameSyncStatus || !frameSyncStatus.has_changes)
   const frameSyncStatusReady = Boolean(frameSyncStatus && !frameSyncStatusNeedsRefresh)
-  const canDiscardFrameSyncChanges = hasFrameSyncChanges && frameSyncStatusReady && Boolean(frameSyncStatus?.has_changes)
+  const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading && !frameSyncApplying
 
   const saveSdCardSettingsAndDownload = async (): Promise<void> => {
     const response = await apiFetch(`/api/frames/${frame.id}`, {
@@ -2071,7 +2069,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   onRefresh={loadFrameSyncStatus}
                   loading={frameSyncStatusLoading}
                   applying={frameSyncApplying}
-                  applyingMode={frameSyncApplyMode}
                   error={frameSyncError}
                 />
               ) : hasFrameSyncChanges ? (
@@ -2205,19 +2202,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               </button>
               <button
                 type="button"
-                onClick={() => discardFrameSyncChanges()}
-                disabled={frameSyncApplying || !canDiscardFrameSyncChanges}
-                title="Restore the backend frame.json and scenes.json on the frame"
-                className="rounded-lg px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-40 disabled:hover:bg-transparent"
+                onClick={() => ignoreFrameSyncChanges()}
+                disabled={!canIgnoreFrameSyncChanges}
+                title="Hide these frame changes and continue to deploy"
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
               >
-                {frameSyncApplyMode === 'discard' ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner />
-                    Discarding frame changes
-                  </span>
-                ) : (
-                  'Discard frame changes'
-                )}
+                Ignore frame changes
               </button>
               <button
                 type="button"
