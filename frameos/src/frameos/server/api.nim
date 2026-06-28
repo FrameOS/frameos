@@ -15,6 +15,7 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/font
 import frameos/config
+import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
     getDynamicSceneOptions
@@ -150,6 +151,64 @@ proc writeTextFileAtomically(path: string, body: string) =
   if fileExists(path):
     removeFile(path)
   moveFile(tempPath, path)
+
+const frameAdminEditableSettingsFields = [
+  ("frameOS", "apiKey"),
+  ("openAI", "apiKey"),
+  ("homeAssistant", "url"),
+  ("homeAssistant", "accessToken"),
+  ("github", "api_key"),
+  ("unsplash", "accessKey"),
+]
+
+proc frameAdminSettingsSource(configJson: JsonNode): JsonNode =
+  if configJson != nil and configJson.kind == JObject and configJson{"settings"} != nil and
+      configJson{"settings"}.kind == JObject:
+    return copy(configJson["settings"])
+  if globalFrameConfig != nil and globalFrameConfig.settings != nil and globalFrameConfig.settings.kind == JObject:
+    return copy(globalFrameConfig.settings)
+  %*{}
+
+proc frameAdminEditableSettingsPayload*(settings: JsonNode = nil): JsonNode =
+  let source =
+    if settings != nil and settings.kind == JObject:
+      settings
+    else:
+      frameAdminSettingsSource(loadConfigJson())
+  result = %*{}
+  for (section, field) in frameAdminEditableSettingsFields:
+    let sectionNode = source{section}
+    if sectionNode != nil and sectionNode.kind == JObject and sectionNode.hasKey(field):
+      if result{section} == nil or result{section}.kind != JObject:
+        result[section] = %*{}
+      result[section][field] = copy(sectionNode[field])
+
+proc persistFrameAdminSettingsUpdate*(payload: JsonNode): JsonNode =
+  if payload == nil or payload.kind != JObject:
+    raise newException(ValueError, "Settings payload must be an object")
+
+  let configPath = getConfigFilename()
+  var configJson = loadConfigJson()
+  if configJson == nil or configJson.kind != JObject:
+    configJson = %*{}
+
+  var settings = frameAdminSettingsSource(configJson)
+  for (section, field) in frameAdminEditableSettingsFields:
+    let sectionPayload = payload{section}
+    if sectionPayload != nil and sectionPayload.kind == JObject and sectionPayload.hasKey(field):
+      if settings{section} == nil or settings{section}.kind != JObject:
+        settings[section] = %*{}
+      settings[section][field] = copy(sectionPayload[field])
+
+  configJson["settings"] = settings
+  writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+
+  if globalFrameConfig != nil:
+    globalFrameConfig.settings = copy(settings)
+  if globalFrameOS != nil and globalFrameOS.frameConfig != nil:
+    globalFrameOS.frameConfig.settings = copy(settings)
+
+  frameAdminEditableSettingsPayload(settings)
 
 proc putJsonIfPresent(target: JsonNode, source: JsonNode, sourceKey, targetKey: string) =
   if source.kind != JObject or not source.hasKey(sourceKey):
@@ -527,7 +586,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "server_send_logs": globalFrameConfig.serverSendLogs,
     "status": "ready",
     "archived": false,
-    "version": newJNull(),
+    "version": compiledFrameOSVersion(),
     "width": globalFrameConfig.width,
     "height": globalFrameConfig.height,
     "device": globalFrameConfig.device,

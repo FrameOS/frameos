@@ -5,6 +5,7 @@ import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
+import { SecretField } from '../../../../components/SecretField'
 import { Select, type Option } from '../../../../components/Select'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import {
@@ -60,6 +61,8 @@ import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { Tooltip } from '../../../../components/Tooltip'
+import { getSettingsValue, settingsDetails } from '../secretSettings'
+import { frameAdminUpgradeLogic, type FrameOSUpgradeStatus } from './frameAdminUpgradeLogic'
 
 export interface FrameSettingsProps {
   className?: string
@@ -171,6 +174,232 @@ const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
   { value: '16MB', label: '16MB' },
   { value: '32MB', label: '32MB' },
 ]
+
+const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'unsplash'] as const
+
+function displayVersion(version?: string | null): string {
+  const trimmed = version?.trim()
+  return trimmed && trimmed !== 'unknown' ? trimmed : 'Unknown'
+}
+
+function latestUpgradeVersion(status: FrameOSUpgradeStatus | null): string | undefined {
+  return status?.latest_version || status?.latest_release?.version
+}
+
+function upgradeStatusColor(status: string | undefined) {
+  return status === 'failed'
+    ? 'red'
+    : status === 'success'
+    ? 'teal'
+    : status === 'reboot_required'
+    ? 'orange'
+    : status === 'running' || status === 'starting'
+    ? 'primary'
+    : status === 'dry_run'
+    ? 'yellow'
+    : 'gray'
+}
+
+function upgradeStatusLabel(status: string | undefined): string {
+  return status ? status.replace(/_/g, ' ') : 'idle'
+}
+
+function hasSettingsFieldValue(value: unknown): boolean {
+  return value !== undefined && value !== null && (typeof value === 'string' ? value.trim() !== '' : true)
+}
+
+function settingsInputValue(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value)
+}
+
+function FrameAdminServiceSecretsSection(): JSX.Element {
+  const { settings, savedSettings, settingsChanged, isSettingsSubmitting } = useValues(settingsLogic)
+  const { setSettingsValue, submitSettings } = useActions(settingsLogic)
+
+  return (
+    <>
+      <H6 id="frame-settings-service-secrets" className="mt-2">
+        Service secrets
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-3">
+        <div className="frameos-muted text-sm">Credentials stored on this frame and used by scene apps.</div>
+        <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2">
+          {FRAME_ADMIN_SERVICE_SETTING_KEYS.map((settingsKey) => {
+            const details = settingsDetails[settingsKey]
+            const saved = details.fields.every((field) =>
+              hasSettingsFieldValue(getSettingsValue(savedSettings, field.path))
+            )
+
+            return (
+              <div key={settingsKey} className="frameos-inset rounded-lg border px-3 py-3 text-sm space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="frameos-strong font-semibold">{details.title}</div>
+                    {details.description ? <div className="frameos-muted text-xs">{details.description}</div> : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Tag color={saved ? 'teal' : 'yellow'}>{saved ? 'Saved' : 'Missing'}</Tag>
+                    {details.fields.some((field) => field.secret) ? <Tag color="orange">Secret</Tag> : null}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {details.fields.map((field) => {
+                    const value = settingsInputValue(getSettingsValue(settings, field.path))
+                    return (
+                      <div key={field.path.join('.')} className="space-y-1 @md:flex @md:gap-2">
+                        <Label className="@md:w-1/3">{field.label}</Label>
+                        <div className="w-full">
+                          {field.secret ? (
+                            <SecretField value={value}>
+                              <TextInput
+                                value={value}
+                                onChange={(nextValue) => setSettingsValue(field.path as any, nextValue)}
+                              />
+                            </SecretField>
+                          ) : (
+                            <TextInput
+                              value={value}
+                              onChange={(nextValue) => setSettingsValue(field.path as any, nextValue)}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex justify-end">
+          <Button
+            size="small"
+            color={settingsChanged ? 'primary' : 'secondary'}
+            disabled={!settingsChanged || isSettingsSubmitting}
+            onClick={submitSettings}
+            className="inline-flex items-center gap-2"
+          >
+            {isSettingsSubmitting ? <Spinner color="white" /> : null}
+            Save service secrets
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function FrameAdminUpgradeSection(): JSX.Element {
+  const {
+    upgradeStatus,
+    upgradeStatusLoading,
+    isUpgradePolling,
+    upgradeError,
+    upgradeStatusIsActive,
+  } = useValues(frameAdminUpgradeLogic)
+  const { checkUpgradeStatus, dryRunUpgrade, confirmStartUpgrade, loadUpgradeStatus } =
+    useActions(frameAdminUpgradeLogic)
+
+  const latestVersion = latestUpgradeVersion(upgradeStatus)
+  const updateAvailable = upgradeStatus?.update_available === true
+  const checkingOrPolling = upgradeStatusLoading || isUpgradePolling || upgradeStatusIsActive
+  const upgradeDisabled = checkingOrPolling || !updateAvailable
+  const releaseUrl = upgradeStatus?.latest_release?.html_url
+
+  return (
+    <>
+      <H6 id="frame-settings-upgrade" className="mt-2">
+        FrameOS upgrade
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-3">
+        <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
+          <div className="frameos-inset rounded-lg border px-3 py-3 text-sm space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="frameos-muted">Running version</div>
+              <div className="frameos-strong font-semibold">{displayVersion(upgradeStatus?.current_version)}</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="frameos-muted">Release target</div>
+              <div className="frameos-strong font-mono text-xs">{upgradeStatus?.target || 'Unknown'}</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="frameos-muted">Latest release</div>
+              {releaseUrl && latestVersion ? (
+                <a
+                  href={releaseUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="frameos-link font-semibold hover:underline"
+                >
+                  {latestVersion}
+                </a>
+              ) : (
+                <div className="frameos-strong font-semibold">{displayVersion(latestVersion)}</div>
+              )}
+            </div>
+          </div>
+          <div className="frameos-inset rounded-lg border px-3 py-3 text-sm space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="frameos-muted">Status</div>
+              <Tag color={upgradeStatusColor(upgradeStatus?.status)}>{upgradeStatusLabel(upgradeStatus?.status)}</Tag>
+            </div>
+            <div className="frameos-muted min-h-[2.5rem]">
+              {upgradeError ||
+                upgradeStatus?.target_error ||
+                upgradeStatus?.latest_error ||
+                upgradeStatus?.message ||
+                (updateAvailable ? 'A newer stable release is available.' : 'No upgrade has been checked yet.')}
+            </div>
+            {upgradeStatus?.log_path ? (
+              <div className="frameos-muted text-xs break-all">Log: {upgradeStatus.log_path}</div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            size="small"
+            color="secondary"
+            disabled={checkingOrPolling}
+            onClick={() => loadUpgradeStatus()}
+            className="inline-flex items-center gap-2"
+          >
+            {upgradeStatusLoading ? <Spinner /> : <ArrowPathIcon className="h-4 w-4" />}
+            Refresh
+          </Button>
+          <Button
+            size="small"
+            color="secondary"
+            disabled={checkingOrPolling}
+            onClick={() => checkUpgradeStatus()}
+            className="inline-flex items-center gap-2"
+          >
+            {upgradeStatusLoading ? <Spinner /> : <ArrowPathIcon className="h-4 w-4" />}
+            Check latest
+          </Button>
+          <Button
+            size="small"
+            color="secondary"
+            disabled={checkingOrPolling}
+            onClick={() => dryRunUpgrade()}
+            className="inline-flex items-center gap-2"
+          >
+            {upgradeStatusLoading ? <Spinner /> : <ArrowPathIcon className="h-4 w-4" />}
+            Dry run
+          </Button>
+          <Button
+            size="small"
+            color={updateAvailable ? 'primary' : 'secondary'}
+            disabled={upgradeDisabled}
+            onClick={() => confirmStartUpgrade()}
+            className="inline-flex items-center gap-2"
+          >
+            {checkingOrPolling ? <Spinner color="white" /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+            Upgrade
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
 
 type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pins']>
 type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
@@ -941,6 +1170,8 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
+        {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
+        {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
         {showFrameInfo ? (
           <H6 id="frame-settings-device" className="mt-2">
             Device settings

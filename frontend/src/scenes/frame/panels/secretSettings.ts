@@ -40,12 +40,11 @@ export const settingsDetails: Record<
     freeLimitedUsage: true,
     fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
   },
-  // frameOS: {
-  //   title: 'FrameOS Gallery',
-  //   tagLabel: 'Uses FrameOS Gallery API key',
-  //   description: 'Premium AI slop to get you started.',
-  //   fields: [{ label: 'API key', secret: true, path: ['frameOS', 'apiKey'] }],
-  // },
+  frameOS: {
+    title: 'FrameOS Gallery',
+    tagLabel: 'FrameOS Gallery API key missing',
+    fields: [{ label: 'API key', secret: true, path: ['frameOS', 'apiKey'] }],
+  },
 }
 
 export function resolveAppConfig(apps: Record<string, AppConfig>, keyword?: string): AppConfig | undefined {

@@ -1,11 +1,12 @@
 import json
+import strutils
 import mummy
 import mummy/routers
 import httpcore
 import frameos/channels
+import frameos/upgrade
 import ../auth
 import ../api
-import ../state
 import ./admin_api_assets_routes
 import ./common
 
@@ -38,6 +39,65 @@ proc addAdminApiRoutes*(router: var Router) =
     headers["Content-Type"] = "application/json"
     headers["Set-Cookie"] = clearAdminSessionCookieHeader(request)
     request.respond(Http200, headers, $(%*{"status": "ok"}))
+  )
+
+  router.get("/api/settings", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      jsonResponse(request, Http200, frameAdminEditableSettingsPayload())
+  )
+
+  router.post("/api/settings", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      var payload: JsonNode
+      try:
+        payload = parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+      except JsonParsingError:
+        jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+        return
+      try:
+        jsonResponse(request, Http200, persistFrameAdminSettingsUpdate(payload))
+      except ValueError as error:
+        jsonResponse(request, Http400, %*{"detail": error.msg})
+      except CatchableError as error:
+        jsonResponse(request, Http500, %*{"detail": error.msg})
+  )
+
+  router.get("/api/upgrade/status", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let checkLatest = request.queryParams.getOrDefault("check", "") in ["1", "true", "yes"]
+      jsonResponse(request, Http200, frameOSUpgradeStatusPayload(checkLatest))
+  )
+
+  router.post("/api/upgrade", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      var payload: JsonNode
+      try:
+        payload = parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+      except JsonParsingError:
+        jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+        return
+
+      try:
+        if payload{"dry_run"}.getBool(false):
+          jsonResponse(request, Http200, performFrameOSUpgrade(FrameOSUpgradeOptions(dryRun: true)))
+        else:
+          jsonResponse(request, Http202, scheduleFrameOSUpgrade())
+      except ValueError as error:
+        jsonResponse(request, Http400, %*{"detail": error.msg})
+      except CatchableError as error:
+        jsonResponse(request, Http500, %*{"detail": error.msg})
   )
 
   addAdminApiAssetRoutes(router)
