@@ -528,6 +528,7 @@ def _scene_compare_value(scene: Any) -> dict[str, Any]:
         "name": _sync_prune_empty(scene.get("name")),
         "settings": _sync_prune_empty(scene.get("settings")) or {},
         "fields": _sync_prune_empty(scene.get("fields")) or [],
+        "customEvents": _sync_prune_empty(scene.get("customEvents")) or [],
         "apps": _sync_prune_empty(scene.get("apps")) or {},
         "nodes": {
             key: _scene_node_compare_value(node)
@@ -551,7 +552,13 @@ def _scene_diff_details(backend_scene: Any, frame_scene: Any, *, limit: int = 12
 
     details: list[dict[str, Any]] = []
 
-    for key, label in (("name", "Name"), ("settings", "Settings"), ("fields", "Fields"), ("apps", "Apps")):
+    for key, label in (
+        ("name", "Name"),
+        ("settings", "Settings"),
+        ("fields", "Fields"),
+        ("customEvents", "Custom events"),
+        ("apps", "Apps"),
+    ):
         if len(details) >= limit:
             return details
         if _sync_values_equal(backend_compare.get(key), frame_compare.get(key)):

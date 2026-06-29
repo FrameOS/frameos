@@ -1611,6 +1611,46 @@ def test_frame_sync_scene_diff_reports_semantic_scene_changes():
     assert 'nodes[0]' not in details[0]['path']
 
 
+def test_frame_sync_scene_diff_reports_custom_event_changes():
+    backend_scene = {
+        'id': 'scene-1',
+        'name': 'Calendar',
+        'settings': {'execution': 'interpreted', 'refreshInterval': 300},
+        'customEvents': [
+            {
+                'name': 'refresh',
+                'label': 'Refresh',
+                'fields': [{'name': 'message', 'type': 'string'}],
+            }
+        ],
+        'nodes': [],
+        'edges': [],
+    }
+    frame_scene = {
+        **backend_scene,
+        'customEvents': [
+            {
+                'name': 'refresh',
+                'label': 'Refresh now',
+                'fields': [{'name': 'message', 'type': 'string'}],
+            }
+        ],
+    }
+
+    section = frame_sync._build_scene_sync_section({'scenes': [backend_scene]}, {'scenes': [frame_scene]})
+
+    assert len(section['changes']) == 1
+    assert section['changes'][0]['backend_json'] == backend_scene
+    assert section['changes'][0]['frame_json'] == frame_scene
+    assert section['changes'][0]['details'] == [
+        {
+            'path': 'Custom events[0].label',
+            'backend': 'Refresh',
+            'frame': 'Refresh now',
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_api_frame_sync_status_filters_runtime_and_deploy_noise(async_client, db, redis):
     frame = await new_frame(db, redis, 'Noise Backend', 'localhost', 'localhost')
