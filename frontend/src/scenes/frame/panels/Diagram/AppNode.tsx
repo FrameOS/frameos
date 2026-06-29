@@ -59,12 +59,15 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     nodeOutputFields,
     showOutput,
     showNextPrev,
+    runtimeNodeError,
   } = useValues(appNodeLogic(appNodeLogicProps))
   const data: AppNodeData = (node?.data as AppNodeData) ?? ({ keyword: '', config: {} } satisfies AppNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
   const hideReadOnlyNimAppAction = isInFrameAdminMode() && isNimAppInInterpretedScene
+  const runtimeErrorTitle = runtimeNodeError ? `${runtimeNodeError.event}: ${runtimeNodeError.message}` : undefined
+  const runtimeErrorClassName = runtimeNodeError ? 'border-red-500 shadow-red-500/80 ring-2 ring-red-500/70' : null
 
   const backgroundClassName = clsx(
     'frameos-diagram-node shadow-lg border-2',
@@ -78,7 +81,8 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
       ? 'border-green-700 shadow-green-500/50 '
       : isScene
       ? 'frameos-diagram-node-scene '
-      : 'border-sky-900 shadow-sky-700/50 '
+      : 'border-sky-900 shadow-sky-700/50 ',
+    runtimeErrorClassName
   )
 
   const titleBackground = isSelected
@@ -102,7 +106,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
-      <div onClick={select} className={clsx(backgroundClassName, 'relative')}>
+      <div onClick={select} className={clsx(backgroundClassName, 'relative')} title={runtimeErrorTitle}>
         <NodeResizer minWidth={200} minHeight={130} />
         <div className={titleClassName}>
           {showNextPrev ? (

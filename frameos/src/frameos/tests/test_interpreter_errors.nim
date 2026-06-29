@@ -52,6 +52,16 @@ proc ctx(scene: FrameScene, event: string): ExecutionContext =
     loopKey: "."
   )
 
+proc ctx(scene: FrameScene, event: string, payload: JsonNode): ExecutionContext =
+  ExecutionContext(
+    scene: scene,
+    event: event,
+    payload: payload,
+    hasImage: false,
+    loopIndex: 0,
+    loopKey: "."
+  )
+
 proc eventPayload(store: LogStore, eventName: string): JsonNode =
   for entry in store.entries:
     if entry.kind == JObject and entry.hasKey("event") and entry["event"].kind == JString and entry["event"].getStr() == eventName:
@@ -158,6 +168,31 @@ suite "interpreter error paths":
       check scene.state{"bucket"}.getStr() == ""
       check eventPayload(store, "interpreter:dispatch:ignored").isNil
 
+  test "event node config filters interpreted listener payloads":
+    let sceneId = "tests/interpreter-errors/event-filter".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "event filter",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "keyUp", "config": {"key": "Enter"}}),
+        node(20, "source", %*{"keyword": "source/demo"})
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      runEvent(scene, ctx(scene, "keyUp", %*{"key": "Escape"}))
+      check eventPayload(store, "runEventInterpreted:error").isNil
+
+      runEvent(scene, ctx(scene, "keyUp", %*{"key": "Enter"}))
+      let err = eventPayload(store, "runEventInterpreted:error")
+      check not err.isNil
+      check err["nodeId"].getInt() == 20
+
   test "codeJS expression with trailing comma is normalized":
     let sceneId = "tests/interpreter-errors/codejs-trailing-comma".SceneId
     let exported = ExportedInterpretedScene(
@@ -180,6 +215,48 @@ suite "interpreter error paths":
       check value.kind == fkString
       check value.asString() == "hello 2"
       check eventPayload(store, "interpreter:jsCompileError").isNil
+
+  test "js runtime errors include original diagram node id from parsed scenes":
+    let sceneId = "tests/interpreter-errors/source-node-id".SceneId
+    let parsed = parseInterpretedScenes($(%*[
+      {
+        "id": "tests/interpreter-errors/source-node-id",
+        "name": "source node id",
+        "settings": {
+          "backgroundColor": "#000000",
+          "refreshInterval": 1
+        },
+        "fields": [],
+        "nodes": [
+          {
+            "id": "event-node",
+            "type": "event",
+            "data": {"keyword": "render"}
+          },
+          {
+            "id": "code-node",
+            "type": "code",
+            "data": {"codeJS": "missingValue"}
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-node",
+            "source": "event-node",
+            "sourceHandle": "next",
+            "target": "code-node",
+            "targetHandle": "prev"
+          }
+        ]
+      }
+    ]))
+    let exported = parsed[sceneId]
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      discard render(scene, ctx(scene, "render"))
+      let err = eventPayload(store, "interpreter:jsError")
+      check not err.isNil
+      check err["sourceNodeId"].getStr() == "code-node"
 
   test "render dispatch from render event is ignored to avoid immediate self loop":
     clearEventChannel()

@@ -1,6 +1,7 @@
 #include "fos_console.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,6 +77,7 @@ static int cmd_status(int argc, char **argv)
     printf("admin_auth:  %s user=%s\n",
            (config->admin_auth_enabled && config->admin_user[0] && config->admin_pass[0]) ? "enabled" : "disabled",
            config->admin_user[0] ? config->admin_user : "(unset)");
+    printf("hardware:    %s\n", config->hardware_preset[0] ? config->hardware_preset : "(custom)");
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
@@ -105,7 +107,7 @@ static int cmd_status(int argc, char **argv)
 static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
-        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|panel|render_mode|"
+        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|hardware|panel|render_mode|"
                "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
         return 1;
@@ -124,6 +126,8 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "backend") == 0) strlcpy(config->backend_url, value, sizeof(config->backend_url));
     else if (strcmp(key, "api_key") == 0) strlcpy(config->api_key, value, sizeof(config->api_key));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
+    else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0)
+        strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
     else if (strcmp(key, "panel") == 0) strlcpy(config->panel, value, sizeof(config->panel));
     else if (strcmp(key, "render_mode") == 0)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
@@ -234,6 +238,77 @@ static int cmd_render(int argc, char **argv)
     fos_client_render_now();
     printf("render triggered\n");
     return 0;
+}
+
+static void display_test_set_4bpp(uint8_t *buf, int width, int x, int y, uint8_t color)
+{
+    size_t row_bytes = ((size_t)width + 1u) / 2u;
+    size_t offset = (size_t)y * row_bytes + (size_t)x / 2u;
+    if ((x & 1) == 0) {
+        buf[offset] = (uint8_t)((buf[offset] & 0x0F) | ((color & 0x0F) << 4));
+    } else {
+        buf[offset] = (uint8_t)((buf[offset] & 0xF0) | (color & 0x0F));
+    }
+}
+
+static uint8_t display_test_color_4bpp(const char *name)
+{
+    if (strcmp(name, "black") == 0) return 0x0;
+    if (strcmp(name, "yellow") == 0) return 0x2;
+    if (strcmp(name, "red") == 0) return 0x3;
+    if (strcmp(name, "blue") == 0) return 0x5;
+    if (strcmp(name, "green") == 0) return 0x6;
+    return 0x1; /* white */
+}
+
+static int cmd_display_test(int argc, char **argv)
+{
+    const char *mode = argc >= 2 ? argv[1] : "bands";
+    int width = fos_display_width();
+    int height = fos_display_height();
+    fos_pixel_format_t format = fos_display_format();
+    size_t len = fos_display_buffer_size();
+    if (!fos_display_present() || width <= 0 || height <= 0 || len == 0) {
+        printf("display_test: no display configured\n");
+        return 1;
+    }
+
+    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) buf = malloc(len);
+    if (!buf) {
+        printf("display_test: allocation failed (%u bytes)\n", (unsigned)len);
+        return 1;
+    }
+
+    if (format == FOS_PIXEL_4BPP_SPECTRA6 || format == FOS_PIXEL_4BPP_7COLOR ||
+        format == FOS_PIXEL_4BPP_GRAY) {
+        memset(buf, 0x11, len);
+        if (strcmp(mode, "bands") == 0) {
+            static const uint8_t colors[] = {0x0, 0x3, 0x6, 0x5, 0x2, 0x1};
+            int color_count = (int)(sizeof(colors) / sizeof(colors[0]));
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int band = (x * color_count) / width;
+                    if (band < 0) band = 0;
+                    if (band >= color_count) band = color_count - 1;
+                    display_test_set_4bpp(buf, width, x, y, colors[band]);
+                }
+            }
+        } else {
+            uint8_t color = display_test_color_4bpp(mode);
+            uint8_t packed = (uint8_t)((color << 4) | color);
+            memset(buf, packed, len);
+        }
+    } else {
+        memset(buf, 0x00, len);
+    }
+
+    printf("display_test: mode=%s panel=%s %dx%d format=%d bytes=%u\n",
+           mode, fos_display_panel_name(0), width, height, (int)format, (unsigned)len);
+    esp_err_t err = fos_display_blit(buf, len);
+    free(buf);
+    printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);
+    return err == ESP_OK ? 0 : 1;
 }
 
 static int cmd_ota(int argc, char **argv)
@@ -529,6 +604,7 @@ esp_err_t fos_console_start(void)
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},
         {.command = "render", .help = "Render now", .func = cmd_render},
+        {.command = "display_test", .help = "display_test [bands|black|white|red|green|blue|yellow] — draw direct panel test", .func = cmd_display_test},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
         {.command = "scene_state", .help = "Show current interpreted scene state JSON", .func = cmd_scene_state},

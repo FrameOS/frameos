@@ -306,6 +306,41 @@ class SceneWriter:
         self.read_nodes()
         return self.write_source()
 
+    def event_schema_for(self, event: str) -> dict | None:
+        for schema in [*self.events_schema, *self.scene.get("customEvents", [])]:
+            if schema.get("name") == event:
+                return schema
+        return None
+
+    def event_filter_pairs_for_node(self, node: dict) -> list[tuple[str, str]]:
+        data = node.get("data", {}) if isinstance(node.get("data", {}), dict) else {}
+        config = data.get("config", {})
+        filters: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        if isinstance(config, dict):
+            for key, value in config.items():
+                expected = self.event_filter_value(value)
+                if expected != "":
+                    filters.append((str(key), expected))
+                    seen.add(str(key))
+
+        legacy_button_label = self.event_filter_value(data.get("label", ""))
+        if legacy_button_label != "" and "label" not in seen:
+            filters.append(("label", legacy_button_label))
+
+        return filters
+
+    def event_filter_value(self, value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        return json.dumps(value, separators=(",", ":"))
 
     def read_edges(self):
         for edge in self.edges:
@@ -899,11 +934,7 @@ class SceneWriter:
                         node_fields_for_node = self.node_fields.get(node_id, {})
                         required_fields = {}
 
-                        event_schema = None
-                        for schema in self.events_schema:
-                            if schema.get("name") == event:
-                                event_schema = schema
-                                break
+                        event_schema = self.event_schema_for(event)
 
                         event_payload_pairs: list[list[str]] = []
                         if event_schema:
@@ -1109,19 +1140,18 @@ class SceneWriter:
 
             for node in nodes:
                 next_node = self.next_nodes.get(node["id"], "-1")
-                button_label = ""
-                if event == "button":
-                    button_label = (node.get("data", {}).get("label") or "").strip()
+                filter_pairs = self.event_filter_pairs_for_node(node)
 
-                if event == "button" and button_label:
-                    filter_value = sanitize_nim_string(button_label)
-                    condition = (
-                        '  if not context.payload.isNil and context.payload.kind == JObject '
-                        'and context.payload.hasKey("label") '
-                        f'and context.payload["label"].getStr() == "{filter_value}":'
+                if filter_pairs:
+                    condition = " and ".join(
+                        [
+                            'frameosEventPayloadValueMatches(context.payload, '
+                            f'"{sanitize_nim_string(key)}", "{sanitize_nim_string(value)}")'
+                            for key, value in filter_pairs
+                        ]
                     )
                     self.run_event_lines += [
-                        condition,
+                        f"  if {condition}:",
                         f"    try: discard self.runNode({self.node_id_to_integer(next_node)}.NodeId, context)",
                         f'    except Exception as e: self.logger.log(%*{{"event": "{sanitize_nim_string(event)}:error", ' +
                         f'"node": {self.node_id_to_integer(next_node)}, "error": $e.msg, "stacktrace": e.getStackTrace()}})'
@@ -1248,6 +1278,28 @@ type Scene* = ref object of FrameScene
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
 {newline.join(self.cache_fields)}
+
+proc frameosEventPayloadValueMatches(payload: JsonNode, key: string, expected: string): bool =
+  if expected.len == 0:
+    return true
+  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
+    return false
+  let value = payload[key]
+  case value.kind
+  of JString:
+    return value.getStr() == expected
+  of JInt:
+    return $value.getInt() == expected
+  of JFloat:
+    return $value.getFloat() == expected
+  of JBool:
+    if value.getBool():
+      return expected == "true"
+    return expected == "false"
+  of JNull:
+    return expected == "null"
+  else:
+    return $value == expected
 
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   result = VNone()

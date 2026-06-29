@@ -56,4 +56,10 @@ void EPD_7IN3E_Show(void);
 void EPD_7IN3E_Display(UBYTE *Image);
 void EPD_7IN3E_Sleep(void);
 
+/* FrameOS divergence from Waveshare upstream:
+ * Enables PhotoPainter-specific power/sleep behavior while keeping normal
+ * EPD_7in3e users on the stock command sequence.
+ */
+void EPD_7IN3E_SetPhotoPainterMode(int enabled);
+
 #endif

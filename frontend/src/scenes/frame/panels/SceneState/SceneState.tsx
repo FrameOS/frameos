@@ -3,32 +3,16 @@ import { useState, DragEvent as ReactDragEvent } from 'react'
 import { frameLogic } from '../../frameLogic'
 import { sceneStateLogic } from './sceneStateLogic'
 import { Form, Group } from 'kea-forms'
-import { Field } from '../../../../components/Field'
-import { TextInput } from '../../../../components/TextInput'
-import { Select } from '../../../../components/Select'
-import { appConfigFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
-import { Switch } from '../../../../components/Switch'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import copy from 'copy-to-clipboard'
-import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
-
-function codenameToLabel(codename: string): string {
-  const label = codename
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
-  return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
-}
+import { FieldDefinitionForm } from '../Fields/FieldDefinitionForm'
 
 function JavaScriptStateHelp({ codeClassName }: { codeClassName?: string }): JSX.Element {
   return (
@@ -147,118 +131,15 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                   </div>
                 ) : null}
                 {editingFields[index] ? (
-                  <div className="frame-tool-card space-y-4 rounded-2xl p-4">
-                    <Field name="name" label="Codename">
-                      {({ value }) => (
-                        <TextInput
-                          placeholder="e.g. searchTerm"
-                          value={value}
-                          onChange={(value) => {
-                            setFields(
-                              (scene?.fields ?? []).map((field, i) => {
-                                if (i !== index) {
-                                  return field
-                                }
-                                const currentGeneratedLabel = codenameToLabel(field.name ?? '')
-                                const labelWasGenerated = field.label === currentGeneratedLabel
-                                return {
-                                  ...field,
-                                  name: value,
-                                  label: labelWasGenerated ? codenameToLabel(value) : field.label,
-                                }
-                              })
-                            )
-                          }}
-                        />
-                      )}
-                    </Field>
-                    <Field name="label" label="Label">
-                      <TextInput placeholder="e.g. Search Term" />
-                    </Field>
-                    <Field name="type" label="Field type">
-                      <Select
-                        options={appConfigFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))}
-                      />
-                    </Field>
-                    {field.type === 'select' ? (
-                      <Field name="options" label="Options (one per line)">
-                        <TextArea
-                          value={(field.options ?? []).join('\n')}
-                          rows={3}
-                          onChange={(value) =>
-                            setFields(
-                              (scene?.fields ?? []).map((field, i) =>
-                                i === index ? { ...field, options: value.split('\n') } : field
-                              )
-                            )
-                          }
-                        />
-                      </Field>
-                    ) : null}
-                    <Field name="value" label="Initial value">
-                      <TextInput />
-                    </Field>
-                    <Field name="placeholder" label="Placeholder">
-                      <TextInput />
-                    </Field>
-                    <Field
-                      name="persist"
-                      label="Persist on disk"
-                      tooltip={
-                        <>
-                          Do not persist to disk values that change rapidly, as this will noticably impact the lifetime
-                          of your SD card.
-                        </>
-                      }
-                    >
-                      {({ value, onChange }) => (
-                        <Switch
-                          aria-label="Persist on disk"
-                          value={value === 'disk'}
-                          onChange={(enabled) => onChange(enabled ? 'disk' : 'memory')}
-                        />
-                      )}
-                    </Field>
-                    <Field
-                      name="access"
-                      label="Can be set by user"
-                      tooltip={
-                        <>
-                          When enabled, this field becomes part of the scene options that can be controlled externally.
-                          When disabled, it is only accessible inside the scene.
-                        </>
-                      }
-                    >
-                      {({ value, onChange }) => (
-                        <Switch
-                          aria-label="Can be set by user"
-                          value={value === 'public'}
-                          onChange={(enabled) => onChange(enabled ? 'public' : 'private')}
-                        />
-                      )}
-                    </Field>
-                    <div className="flex w-full items-center justify-between gap-2">
-                      <Button
-                        onClick={() => {
-                          closeField(index)
-                        }}
-                        disabled={!field.name?.trim()}
-                        color="secondary"
-                        size="small"
-                      >
-                        Save & Close
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          removeField(index)
-                        }}
-                        size="small"
-                        color="secondary"
-                      >
-                        <span className="text-red-300">Remove field</span>
-                      </Button>
-                    </div>
-                  </div>
+                  <FieldDefinitionForm
+                    field={field}
+                    fields={scene?.fields ?? []}
+                    index={index}
+                    setFields={setFields}
+                    closeField={closeField}
+                    removeField={removeField}
+                    includeStateOptions
+                  />
                 ) : (
                   <div
                     className="frame-tool-row frameos-primary-hover-border dndnode cursor-move rounded-2xl p-3 transition"
@@ -329,12 +210,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                 ) : (
                   <>
                     Use the <code>state</code> object of type{' '}
-                    <a
-                      href="https://nim-lang.org/docs/json.html"
-                      className="underline"
-                      target="_blank"
-                      rel="noreferer"
-                    >
+                    <a href="https://nim-lang.org/docs/json.html" className="underline" target="_blank" rel="noreferer">
                       <code>JsonNode</code>
                     </a>{' '}
                     to share data between nodes.

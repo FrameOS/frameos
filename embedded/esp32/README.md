@@ -33,8 +33,8 @@ components/
                           builds a stub when nimcache/ is absent
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
-partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (7872K each) + 512K state
-partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (15296K each) + 2M state
+partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
+partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 ```
 

@@ -8,7 +8,6 @@ import {
   CodeNodeData,
   AppConfigField,
   DiagramNode,
-  FrameEvent,
   MarkdownField,
   OutputField,
   ConfigFieldCondition,
@@ -21,7 +20,6 @@ import {
 } from '../../../../types'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
-import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
 import {
@@ -31,7 +29,8 @@ import {
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
 import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
-const events: FrameEvent[] = _events as any
+import { frameEventForScene } from '../../../../utils/frameEvents'
+import type { RuntimeNodeError } from '../../../../utils/frameRuntimeErrors'
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
   nodeId: string
@@ -47,7 +46,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       appsModel,
       ['apps'],
       diagramLogic({ frameId, sceneId }),
-      ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage', 'effectiveApps'],
+      ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage', 'effectiveApps', 'runtimeNodeErrorsByNodeId'],
       frameLogic({ frameId }),
       ['frameForm', 'scenes'],
     ],
@@ -114,6 +113,11 @@ export const appNodeLogic = kea<appNodeLogicType>([
       { resultEqualityCheck: equal },
     ],
     isSelected: [(s) => [s.node], (node) => node?.selected ?? false],
+    runtimeNodeError: [
+      (s) => [s.runtimeNodeErrorsByNodeId, s.nodeId],
+      (runtimeNodeErrorsByNodeId: Record<string, RuntimeNodeError>, nodeId): RuntimeNodeError | null =>
+        runtimeNodeErrorsByNodeId[nodeId] ?? null,
+    ],
     sources: [
       (s) => [s.currentScene, s.node],
       (currentScene, node): Record<string, string> | null => {
@@ -163,10 +167,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
       { resultEqualityCheck: equal },
     ],
     event: [
-      (s) => [s.node],
-      (node): AppConfig | null => {
+      (s) => [s.node, s.currentScene],
+      (node, currentScene): AppConfig | null => {
         if (node && node.type === 'dispatch' && node.data && 'keyword' in node.data && node.data.keyword) {
-          return events.find((e) => 'keyword' in node.data && e.name == node.data.keyword) ?? null
+          return frameEventForScene(node.data.keyword, currentScene) ?? null
         }
         return null
       },

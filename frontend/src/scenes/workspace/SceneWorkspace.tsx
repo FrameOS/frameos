@@ -739,7 +739,7 @@ function UtilityDrawer({
       return scene ? <SceneState sceneId={scene.id} /> : <div>Select a scene first.</div>
     }
     if (utilityPanel === 'apps') return <Apps />
-    if (utilityPanel === 'events') return <Events />
+    if (utilityPanel === 'events') return <Events frameId={frameId} sceneId={scene?.id ?? null} />
     if (utilityPanel === 'source') return <SceneSource />
     if (utilityPanel === 'json') return scene ? <SceneJSON sceneId={scene.id} /> : <div>Select a scene first.</div>
     return null

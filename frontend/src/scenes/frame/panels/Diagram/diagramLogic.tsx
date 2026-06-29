@@ -33,7 +33,6 @@ import {
   DiagramNode,
   DispatchNodeData,
   EventNodeData,
-  FrameEvent,
   FrameScene,
   FrameSceneSettings,
   MarkdownField,
@@ -46,7 +45,6 @@ import { appsModel } from '../../../../models/appsModel'
 import { arrangeSceneGraph } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
-import _events from '../../../../../schema/events.json'
 import {
   installSceneAppForKeyword,
   mergeSceneAndCatalogApps,
@@ -57,8 +55,9 @@ import {
   updateSceneAppsInScenes,
 } from '../../../../utils/sceneApps'
 import { sceneExecutionForFrame, sceneIsCompiledForFrame } from '../../../../utils/sceneExecution'
-
-const events = _events as FrameEvent[]
+import { frameEventForScene } from '../../../../utils/frameEvents'
+import { logsLogic } from '../Logs/logsLogic'
+import { runtimeNodeErrorsByNodeId } from '../../../../utils/frameRuntimeErrors'
 
 function fieldOrderFromFields(fields?: (AppConfigField | MarkdownField)[] | null): string[] {
   return (fields ?? []).filter((field): field is AppConfigField => 'name' in field).map((field) => field.name)
@@ -592,7 +591,7 @@ export const diagramLogic = kea<diagramLogicType>([
   props({} as DiagramLogicProps),
   key((props) => `${props.frameId}/${props.sceneId}`),
   connect(({ frameId }: DiagramLogicProps) => ({
-    values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps']],
+    values: [frameLogic({ frameId }), ['frame', 'frameForm'], appsModel, ['apps'], logsLogic({ frameId }), ['logs']],
     actions: [frameLogic({ frameId }), ['setFrameFormValues', 'applyTemplate']],
   })),
   actions({
@@ -834,6 +833,11 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.scene, s.editingFrame],
       (scene: FrameScene | null, editingFrame): CodeNodeLanguage =>
         sceneExecutionForFrame(scene, editingFrame?.mode) === 'interpreted' ? 'js' : 'nim',
+    ],
+    runtimeNodeErrorsByNodeId: [
+      (s) => [s.logs, s.editingFrame, s.sceneId],
+      (logs, editingFrame, sceneId) => runtimeNodeErrorsByNodeId(logs, editingFrame?.scenes ?? [], sceneId),
+      { resultEqualityCheck: equal },
     ],
     canUndo: [(s) => [s.history], (history) => history.past.length > 1],
     canRedo: [(s) => [s.history], (history) => history.future.length > 0],
@@ -1162,7 +1166,7 @@ export const diagramLogic = kea<diagramLogicType>([
           fields = keyword ? (values.effectiveApps[keyword] as AppConfig | undefined)?.fields ?? null : null
         } else if (node.type === 'dispatch' || node.type === 'event') {
           const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
-          const event = keyword ? events.find((event) => event.name === keyword) ?? null : null
+          const event = frameEventForScene(keyword, values.scene)
           fields = event?.name === 'setSceneState' ? values.scene?.fields ?? null : event?.fields ?? null
         } else if (node.type === 'scene') {
           fields = values.scene?.fields ?? null

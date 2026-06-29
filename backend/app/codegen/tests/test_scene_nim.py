@@ -188,6 +188,72 @@ def test_native_app_output_field_input_keeps_native_return_type():
     assert "self.node2.get(context).asString()" not in source
 
 
+def test_custom_event_dispatch_uses_scene_event_fields():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
+            {
+                "id": "dispatch",
+                "type": "dispatch",
+                "data": {"keyword": "photoSelected", "config": {"message": "hello", "count": "3"}},
+                "position": {"x": 1, "y": 1},
+            },
+        ],
+        "edges": [
+            {"source": "event", "sourceHandle": "next", "target": "dispatch", "targetHandle": "prev"},
+        ],
+        "fields": [],
+        "customEvents": [
+            {
+                "name": "photoSelected",
+                "description": "Photo selected",
+                "fields": [
+                    {"name": "message", "label": "Message", "type": "string"},
+                    {"name": "count", "label": "Count", "type": "integer"},
+                ],
+            }
+        ],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, scene)
+
+    assert 'sendEvent("photoSelected", %*{' in source
+    assert 'message: "hello"' in source
+    assert "count: 3" in source
+
+
+def test_event_listener_filters_match_configured_payload_fields():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {
+                "id": "event",
+                "type": "event",
+                "data": {"keyword": "keyUp", "config": {"key": "Enter", "code": "13"}},
+                "position": {"x": 0, "y": 0},
+            },
+            {"id": "clock", "type": "app", "data": {"keyword": "data/clock", "config": {}}, "position": {"x": 1, "y": 1}},
+        ],
+        "edges": [
+            {"source": "event", "sourceHandle": "next", "target": "clock", "targetHandle": "prev"},
+        ],
+        "fields": [],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, scene)
+
+    assert 'of "keyUp":' in source
+    assert 'frameosEventPayloadValueMatches(context.payload, "key", "Enter")' in source
+    assert 'frameosEventPayloadValueMatches(context.payload, "code", "13")' in source
+
+
 def test_shared_scene_registry_loads_scene_libraries():
     frame = SimpleNamespace(
         scenes=[

@@ -58,6 +58,7 @@ typedef struct {
     char api_key[FOS_STR_LEN];     /* frame server_api_key */
     uint32_t frame_id;
     char hostname[FOS_STR_LEN];    /* DHCP hostname, e.g. "kitchen" */
+    char hardware_preset[FOS_STR_LEN]; /* e.g. waveshare_esp32_s3_photopainter */
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */

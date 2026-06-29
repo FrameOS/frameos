@@ -88,6 +88,26 @@ async def test_new_embedded_frame_rejects_unknown_platform(async_client):
 
 
 @pytest.mark.asyncio
+async def test_new_embedded_photopainter_frame_adds_gpio_buttons(async_client):
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'PhotoPainter',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'esp32-s3',
+        'device_config': {'hardwarePreset': 'waveshare_esp32_s3_photopainter'},
+    })
+
+    assert response.status_code == 200, response.text
+    frame = response.json()['frame']
+    assert frame['device'] == 'waveshare.EPD_7in3e'
+    assert frame['gpio_buttons'] == [
+        {'pin': 0, 'label': 'BOOT'},
+        {'pin': 4, 'label': 'KEY1'},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_update_frame_to_embedded_applies_defaults(async_client, db):
     response = await async_client.post('/api/frames/new', json={
         'name': 'Pi Frame',
@@ -164,10 +184,16 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['flash']['partitionTable'] == 'partitions_ota_32mb.csv'
     ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
     ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
     assert ota_0['offset'] == 0x20000
-    assert ota_0['size'] == 0xEF0000
+    assert ota_0['size'] == 0x3F0000
     assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['offset'] == 0x410000
+    assert ota_1['size'] == 0x3F0000
     assert ota_1['usedBytes'] is None
+    assert state['offset'] == 0x800000
+    assert state['size'] == 24 * 1024 * 1024
+    assert state['end'] == 32 * 1024 * 1024
     assert layout['ram']['psramBytes'] == 16 * 1024 * 1024
     assert layout['ram']['width'] == 1200
     assert layout['ram']['height'] == 1600
@@ -175,6 +201,30 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['ram']['rgbaBufferBytes'] == 1200 * 1600 * 4
     assert layout['ram']['packedBufferBytes'] == 960_000
     assert layout['ram']['renderWorkingBytes'] > layout['ram']['rgbaBufferBytes']
+
+
+def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
+    frame = Frame(
+        mode='embedded',
+        embedded={'platform': 'esp32-s3', 'flashSize': '16MB'},
+    )
+
+    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000})
+
+    assert layout['flash']['flashBytes'] == 16 * 1024 * 1024
+    assert layout['flash']['partitionTable'] == 'partitions_ota_16mb.csv'
+    ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
+    ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
+    assert ota_0['offset'] == 0x20000
+    assert ota_0['size'] == 0x3F0000
+    assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['offset'] == 0x410000
+    assert ota_1['size'] == 0x3F0000
+    assert ota_1['usedBytes'] is None
+    assert state['offset'] == 0x800000
+    assert state['size'] == 8 * 1024 * 1024
+    assert state['end'] == 16 * 1024 * 1024
 
 
 @pytest.mark.asyncio
@@ -632,9 +682,16 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
         "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
         "maxFrequencyKHz": 20_000,
     }
+    assert frame.gpio_buttons == [
+        {"pin": 0, "label": "BOOT"},
+        {"pin": 4, "label": "KEY1"},
+    ]
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (4, "KEY1")]
     check_embedded_panel_fits_memory(frame)
 
     header = _generated_config_header(frame)
+    assert '#define FRAMEOS_DEFAULT_GPIO_BUTTONS "0:BOOT\\n4:KEY1"' in header
+    assert '#define FRAMEOS_DEFAULT_HARDWARE_PRESET "waveshare_esp32_s3_photopainter"' in header
     assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in3e"' in header
     assert "#define FRAMEOS_DEFAULT_PIN_RST 12" in header
     assert "#define FRAMEOS_DEFAULT_PIN_DC 8" in header
@@ -649,6 +706,30 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 39" in header
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 40" in header
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
+
+
+def test_embedded_hardware_preset_keeps_explicit_gpio_buttons():
+    frame = Frame(
+        id=8,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+        gpio_buttons=[{"pin": 14, "label": "Custom"}],
+    )
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.gpio_buttons == [{"pin": 14, "label": "Custom"}]
+    assert embedded_gpio_buttons_for_frame(frame) == [(14, "Custom")]
+
+    no_buttons = Frame(
+        id=9,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+        gpio_buttons=[],
+    )
+
+    ensure_embedded_frame_defaults(no_buttons)
+
+    assert no_buttons.gpio_buttons == []
+    assert embedded_gpio_buttons_for_frame(no_buttons) == []
 
 
 def test_large_spectra_panel_can_use_thin_client_on_8mb():

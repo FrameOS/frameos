@@ -16,7 +16,6 @@ import {
   toFieldType,
   SceneNodeData,
   EventNodeData,
-  FrameEvent,
   DispatchNodeData,
   FrameType,
 } from '../../../../types'
@@ -27,7 +26,6 @@ import { diagramLogic } from './diagramLogic'
 import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
-import _events from '../../../../../schema/events.json'
 import {
   appLabel,
   installSceneAppForKeyword,
@@ -36,14 +34,12 @@ import {
   javascriptCatalogAppLabel,
 } from '../../../../utils/sceneApps'
 import { appCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { frameEventsForScene } from '../../../../utils/frameEvents'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
 export const CANVAS_NODE_ID = '__canvas__'
 const INLINE_CODE_OPTION_LABEL = 'Code: new inline node'
-
-const events: FrameEvent[] = _events as any
-const dispatchableEvents: FrameEvent[] = events.filter((event) => event.canDispatch)
 
 export interface NewNodePickerLogicProps {
   frameId: number
@@ -301,6 +297,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           })
           options.push({ label: INLINE_CODE_OPTION_LABEL, value: 'code', type: 'string', keyword: 'code' })
           addJavaScriptCatalogAppOptions(options, effectiveApps, mode, frameForm)
+          const events = frameEventsForScene(scene)
+          const dispatchableEvents = events.filter((event) => event.canDispatch)
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,
@@ -447,6 +445,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+          const dispatchableEvents = frameEventsForScene(scene).filter((event) => event.canDispatch)
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,

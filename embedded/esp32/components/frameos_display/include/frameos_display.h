@@ -26,6 +26,7 @@ typedef enum {
 
 typedef struct {
     const char *panel;  /* e.g. "EPD_7in5_V2", "none" */
+    const char *hardware_preset; /* e.g. "waveshare_esp32_s3_photopainter" */
     int8_t rst, dc, cs, cs2, busy, sck, mosi, pwr;
 } fos_display_config_t;
 

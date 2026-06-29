@@ -151,6 +151,22 @@ proc mapJsErrorText*(ctx: ptr JSContext, text: string): string =
 proc mapJsErrorText*(text: string, sourceMap: SourceLineMap): string =
   text.rewriteQuickJsLocations(sourceMap)
 
+proc sourceNodeIdForLog(scene: InterpretedFrameScene, nodeId: NodeId): string =
+  if not scene.nodes.hasKey(nodeId):
+    return ""
+  let node = scene.nodes[nodeId]
+  if node.data.isNil or node.data.kind != JObject:
+    return ""
+  if node.data.hasKey("__frameosSourceNodeId") and node.data["__frameosSourceNodeId"].kind == JString:
+    return node.data["__frameosSourceNodeId"].getStr()
+  ""
+
+proc logNodeErrorPayload(scene: InterpretedFrameScene, nodeId: NodeId, payload: JsonNode) =
+  let sourceNodeId = sourceNodeIdForLog(scene, nodeId)
+  if sourceNodeId.len > 0:
+    payload["sourceNodeId"] = %sourceNodeId
+  scene.logger.log(payload)
+
 proc logCompileError(
   scene: InterpretedFrameScene,
   nodeId: NodeId,
@@ -159,7 +175,7 @@ proc logCompileError(
   snippet: string,
   error: ref CatchableError
 ) =
-  scene.logger.log(%*{
+  scene.logNodeErrorPayload(nodeId, %*{
     "event": "interpreter:jsCompileError",
     "sceneId": scene.id.string,
     "nodeId": nodeId.int,
@@ -179,7 +195,7 @@ proc logCompileError(
   error: ref CatchableError,
   sourceMap: SourceLineMap
 ) =
-  scene.logger.log(%*{
+  scene.logNodeErrorPayload(nodeId, %*{
     "event": "interpreter:jsCompileError",
     "sceneId": scene.id.string,
     "nodeId": nodeId.int,
@@ -767,7 +783,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
   if kind == "error":
     let message = mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr())
     let stack = mapJsErrorText(scene.js.context, parsed{"v"}{"stack"}.getStr())
-    scene.logger.log(%*{
+    scene.logNodeErrorPayload(nodeId, %*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
       "nodeId": nodeId.int,

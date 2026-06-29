@@ -1,8 +1,6 @@
-import { AppConfig, AppNodeData, DispatchNodeData, FrameEvent, FrameScene, SceneNodeData } from '../types'
+import { AppConfig, AppNodeData, DispatchNodeData, FrameScene, SceneNodeData } from '../types'
 import { v4 as uuidv4 } from 'uuid'
-
-import _events from '../../schema/events.json'
-const frameEvents = _events as FrameEvent[]
+import { frameEventsForScene } from './frameEvents'
 
 /** Duplicate scenes, giving each a new unique ID */
 export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
@@ -27,7 +25,7 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
         } else if (node.type === 'dispatch') {
           const data = node.data as DispatchNodeData
           const { keyword, config } = data
-          const frameEvent = frameEvents.find((event) => event.name === keyword)
+          const frameEvent = frameEventsForScene(scene).find((event) => event.name === keyword)
           if (!frameEvent?.fields?.find((field) => field.type === 'scene')) {
             return node
           }
@@ -81,6 +79,15 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
         }
         return field
       }),
+      customEvents: scene.customEvents?.map((event) => ({
+        ...event,
+        fields: event.fields?.map((field) => {
+          if (field.type === 'scene') {
+            return { ...field, value: field.value ? getNewSceneId(field.value) : field.value }
+          }
+          return field
+        }),
+      })),
     }
     return structuredClone(frameScene)
   })

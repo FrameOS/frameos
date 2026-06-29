@@ -13,8 +13,8 @@ CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
 
 # 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
 # The default table gives each OTA slot 3520K (3.44MiB) and keeps a 1M
-# SPIFFS state partition for scenes/user data. Production 16MB builds can use
-# partitions_ota_16mb.csv for two 7872K app slots.
+# SPIFFS state partition for scenes/user data. Larger flash profiles keep
+# roughly 4MB OTA slots and dedicate the remaining flash to state storage.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

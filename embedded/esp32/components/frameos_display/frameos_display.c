@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 
 #include "DEV_Config.h"
+#include "photo_painter_pmic.h"
 
 static const char *TAG = "fos_display";
 
@@ -18,9 +19,16 @@ int fos_selected_panel_driver_init(void);
 void fos_selected_panel_clear(void);
 void fos_selected_panel_display(uint8_t *buf);
 void fos_selected_panel_sleep(void);
+void EPD_7IN3E_SetPhotoPainterMode(int enabled) __attribute__((weak));
 
 static bool s_panel_present = false;
 static bool s_module_ready = false;
+
+static bool is_photo_painter_hardware(const fos_display_config_t *config)
+{
+    return config && config->hardware_preset &&
+           strcmp(config->hardware_preset, "waveshare_esp32_s3_photopainter") == 0;
+}
 
 static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format)
 {
@@ -63,6 +71,19 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     if (fos_selected_panel_requires_cs2() && config->cs2 < 0) {
         ESP_LOGE(TAG, "panel %s requires pins.cs2 for the second chip-select", selected);
         return ESP_ERR_INVALID_ARG;
+    }
+
+    bool photo_painter = is_photo_painter_hardware(config);
+    if (EPD_7IN3E_SetPhotoPainterMode) {
+        EPD_7IN3E_SetPhotoPainterMode(photo_painter ? 1 : 0);
+    }
+
+    if (photo_painter) {
+        esp_err_t pmic_err = fos_photo_painter_enable_epd_power();
+        if (pmic_err != ESP_OK) {
+            ESP_LOGW(TAG, "PhotoPainter PMIC EPD power init failed: %s",
+                     esp_err_to_name(pmic_err));
+        }
     }
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,

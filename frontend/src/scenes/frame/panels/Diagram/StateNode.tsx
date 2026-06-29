@@ -14,19 +14,24 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
   const { frameId, sceneId } = useValues(diagramLogic)
   const { copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, stateFieldType, stateFieldTitle } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, stateFieldType, stateFieldTitle, runtimeNodeError } = useValues(
+    appNodeLogic(appNodeLogicProps)
+  )
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-[#7f6e1d]'
+  const runtimeErrorTitle = runtimeNodeError ? `${runtimeNodeError.event}: ${runtimeNodeError.message}` : undefined
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
+        title={runtimeErrorTitle}
         className={clsx(
           'frameos-diagram-node shadow-lg border-2 h-full flex flex-col relative',
-          isSelected ? 'frameos-diagram-node-selected' : 'border-[#81701d] shadow-[#81701d]/50'
+          isSelected ? 'frameos-diagram-node-selected' : 'border-[#81701d] shadow-[#81701d]/50',
+          runtimeNodeError ? 'border-red-500 shadow-red-500/80 ring-2 ring-red-500/70' : null
         )}
       >
         <div className={clsx('frameos-node-title text-xl p-2 gap-2', titleBackground, 'flex w-full items-center')}>
