@@ -1460,6 +1460,48 @@ async def test_api_frame_sync_status_reports_frame_and_scene_changes(async_clien
     assert sync['sections'][1]['frame_updated_at'] == '2026-06-28T10:01:00Z'
 
 
+@pytest.mark.asyncio
+async def test_api_frame_sync_status_ignores_backend_only_changes_since_last_deploy(async_client, db, redis):
+    frame = await new_frame(db, redis, 'Baseline Name', 'localhost', 'localhost')
+    frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    frame.scenes = [{'id': 'scene-1', 'name': 'Baseline scene', 'nodes': [], 'edges': []}]
+    baseline = frame.to_dict()
+    frame.last_successful_deploy = baseline
+    frame.last_successful_deploy_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    frame.name = 'Backend Name'
+    frame.scenes = [
+        {'id': 'scene-1', 'name': 'Baseline scene', 'nodes': [], 'edges': []},
+        {'id': 'scene-2', 'name': 'Custom events', 'nodes': [], 'edges': []},
+    ]
+    db.add(frame)
+    db.commit()
+
+    remote_frame = {
+        **baseline,
+        'id': 1,
+        'frame_sync': {
+            'frame_config_modified_at': '2026-06-28T10:00:00Z',
+            'scenes_modified_at': '2026-06-28T10:01:00Z',
+        },
+    }
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path == '/api/frames/1'
+        return 200, json.dumps({'frame': remote_frame}).encode(), {'content-type': 'application/json'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.get(f'/api/frames/{frame.id}/sync')
+
+    assert response.status_code == 200
+    sync = response.json()['sync']
+    assert sync['has_changes'] is False
+    assert sync['sections'][0]['changes'] == []
+    assert sync['sections'][1]['changes'] == []
+
+
 def test_frame_sync_scene_diff_ignores_editor_layout_noise():
     backend_scene = {
         'id': 'scene-1',

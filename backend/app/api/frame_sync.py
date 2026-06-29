@@ -785,11 +785,25 @@ async def _frame_admin_session_headers(
     return {"Cookie": cookie}
 
 
-def _build_frame_sync_section(backend_frame: dict[str, Any], remote_frame: dict[str, Any]) -> dict[str, Any]:
+def _frame_sync_baseline(frame: Frame, backend_frame: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(frame.last_successful_deploy, dict):
+        return frame.last_successful_deploy
+    return backend_frame
+
+
+def _build_frame_sync_section(
+    backend_frame: dict[str, Any],
+    remote_frame: dict[str, Any],
+    baseline_frame: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    baseline_frame = baseline_frame or backend_frame
     changes: list[dict[str, Any]] = []
     for key in FRAME_SYNC_FRAME_KEYS:
         backend_value = _sync_frame_value(key, backend_frame.get(key))
         frame_value = _sync_frame_value(key, remote_frame.get(key))
+        baseline_value = _sync_frame_value(key, baseline_frame.get(key))
+        if _sync_values_equal(frame_value, baseline_value):
+            continue
         if _sync_values_equal(backend_value, frame_value):
             continue
         changes.append(
@@ -827,13 +841,27 @@ def _scenes_by_id(scenes: Any) -> dict[str, Any]:
     return result
 
 
-def _build_scene_sync_section(backend_frame: dict[str, Any], remote_frame: dict[str, Any]) -> dict[str, Any]:
+def _scene_sync_values_equal(first: Any, second: Any) -> bool:
+    return _sync_values_equal(_scene_compare_value(first), _scene_compare_value(second))
+
+
+def _build_scene_sync_section(
+    backend_frame: dict[str, Any],
+    remote_frame: dict[str, Any],
+    baseline_frame: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     backend_scenes = _scenes_by_id(backend_frame.get("scenes"))
     frame_scenes = _scenes_by_id(remote_frame.get("scenes"))
+    baseline_scenes = _scenes_by_id((baseline_frame or backend_frame).get("scenes"))
     changes: list[dict[str, Any]] = []
-    for scene_id in sorted(set(backend_scenes.keys()) | set(frame_scenes.keys())):
+    for scene_id in sorted(set(backend_scenes.keys()) | set(frame_scenes.keys()) | set(baseline_scenes.keys())):
         backend_scene = backend_scenes.get(scene_id)
         frame_scene = frame_scenes.get(scene_id)
+        baseline_scene = baseline_scenes.get(scene_id)
+        if _scene_sync_values_equal(frame_scene, baseline_scene):
+            continue
+        if _scene_sync_values_equal(frame_scene, backend_scene):
+            continue
         if backend_scene is None:
             changes.append(
                 {
@@ -885,18 +913,26 @@ def _build_scene_sync_section(backend_frame: dict[str, Any], remote_frame: dict[
     }
 
 
-def _changed_frame_sync_keys(backend_frame: dict[str, Any], remote_frame: dict[str, Any]) -> set[str]:
+def _changed_frame_sync_keys(
+    backend_frame: dict[str, Any],
+    remote_frame: dict[str, Any],
+    baseline_frame: dict[str, Any] | None = None,
+) -> set[str]:
     return {
         str(change["choice_key"])
-        for change in _build_frame_sync_section(backend_frame, remote_frame)["changes"]
+        for change in _build_frame_sync_section(backend_frame, remote_frame, baseline_frame)["changes"]
         if change.get("choice_key")
     }
 
 
-def _changed_scene_sync_keys(backend_frame: dict[str, Any], remote_frame: dict[str, Any]) -> set[str]:
+def _changed_scene_sync_keys(
+    backend_frame: dict[str, Any],
+    remote_frame: dict[str, Any],
+    baseline_frame: dict[str, Any] | None = None,
+) -> set[str]:
     return {
         str(change["choice_key"])
-        for change in _build_scene_sync_section(backend_frame, remote_frame)["changes"]
+        for change in _build_scene_sync_section(backend_frame, remote_frame, baseline_frame)["changes"]
         if change.get("choice_key")
     }
 
@@ -1005,9 +1041,10 @@ def _apply_scene_sync_choices(
 
 def _build_frame_sync_status(frame: Frame, remote_frame: dict[str, Any]) -> dict[str, Any]:
     backend_frame = frame.to_dict()
+    baseline_frame = _frame_sync_baseline(frame, backend_frame)
     remote_meta = remote_frame.get("frame_sync") if isinstance(remote_frame.get("frame_sync"), dict) else {}
-    frame_section = _build_frame_sync_section(backend_frame, remote_frame)
-    scenes_section = _build_scene_sync_section(backend_frame, remote_frame)
+    frame_section = _build_frame_sync_section(backend_frame, remote_frame, baseline_frame)
+    scenes_section = _build_scene_sync_section(backend_frame, remote_frame, baseline_frame)
     frame_section["backend_updated_at"] = None
     frame_section["frame_updated_at"] = remote_meta.get("frame_config_modified_at")
     scenes_section["backend_updated_at"] = None
@@ -1163,15 +1200,16 @@ async def apply_frame_sync(
 ) -> dict[str, Any]:
     remote_frame = await _load_live_frame_api_payload(frame, redis, fetch_frame_http_bytes)
     backend_frame = frame.to_dict()
+    baseline_frame = _frame_sync_baseline(frame, backend_frame)
     frame_json_choices = _sync_item_choices(
         data.frame_json_choices,
         data.frame_json or "ignore",
-        _changed_frame_sync_keys(backend_frame, remote_frame),
+        _changed_frame_sync_keys(backend_frame, remote_frame, baseline_frame),
     )
     scenes_json_choices = _sync_item_choices(
         data.scenes_json_choices,
         data.scenes_json or "ignore",
-        _changed_scene_sync_keys(backend_frame, remote_frame),
+        _changed_scene_sync_keys(backend_frame, remote_frame, baseline_frame),
     )
     if not frame_json_choices and not scenes_json_choices:
         _bad_request("Choose at least one change to sync")
