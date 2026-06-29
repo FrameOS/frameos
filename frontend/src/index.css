@@ -520,14 +520,20 @@ html[data-frameos-theme='dark'] .frameos-divider {
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
-.frameos-theme-dark .frameos-import-target {
+.frameos-theme-dark .frameos-import-target,
+html[data-frameos-theme='dark'] .frameos-card,
+html[data-frameos-theme='dark'] .frameos-inset,
+html[data-frameos-theme='dark'] .frameos-form-control,
+html[data-frameos-theme='dark'] .frameos-import-target {
   background: rgba(38, 40, 47, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
 }
 
 .frameos-theme-dark .frameos-card-media,
-.frameos-theme-dark .frameos-empty {
+.frameos-theme-dark .frameos-empty,
+html[data-frameos-theme='dark'] .frameos-card-media,
+html[data-frameos-theme='dark'] .frameos-empty {
   background: rgba(22, 24, 29, 0.78);
   border-color: rgba(255, 255, 255, 0.1);
 }
@@ -761,14 +767,20 @@ html[data-frameos-theme='dark'] .frameos-blank-frame-scene-hint {
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
-.frameos-theme-dark .frameos-import-target {
+.frameos-theme-dark .frameos-import-target,
+html[data-frameos-theme='dark'] .frameos-card,
+html[data-frameos-theme='dark'] .frameos-inset,
+html[data-frameos-theme='dark'] .frameos-form-control,
+html[data-frameos-theme='dark'] .frameos-import-target {
   background: rgba(38, 40, 47, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
 }
 
 .frameos-theme-dark .frameos-card-media,
-.frameos-theme-dark .frameos-empty {
+.frameos-theme-dark .frameos-empty,
+html[data-frameos-theme='dark'] .frameos-card-media,
+html[data-frameos-theme='dark'] .frameos-empty {
   background: rgba(22, 24, 29, 0.78);
   border-color: rgba(255, 255, 255, 0.1);
 }
