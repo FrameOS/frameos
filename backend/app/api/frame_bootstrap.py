@@ -297,6 +297,7 @@ need_cmd find
 need_cmd systemctl
 need_cmd install
 need_cmd gzip
+need_cmd awk
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this bootstrap script as root, for example: curl -fsSL <url> | sudo sh" >&2

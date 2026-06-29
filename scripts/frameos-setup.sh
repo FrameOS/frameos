@@ -784,6 +784,7 @@ need_cmd gzip
 need_cmd install
 need_cmd mktemp
 need_cmd systemctl
+need_cmd awk
 
 target="$(detect_os_target)"
 if ! command -v python3 >/dev/null 2>&1; then
@@ -1034,6 +1035,19 @@ TTYReset=yes
 ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
 fi
 
+# Memory caps for frameos.service: everything except a small OS reserve, so a
+# leak OOM-kills frameos instead of swap-thrashing the device. Computed from
+# MemTotal because percentages cannot express a fixed reserve on 128MB..8GB.
+mem_total_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+mem_reserve_kb=$((mem_total_kb / 8))
+if [ "$mem_reserve_kb" -lt 40960 ]; then mem_reserve_kb=40960; fi
+if [ "$mem_reserve_kb" -gt 262144 ]; then mem_reserve_kb=262144; fi
+mem_max_kb=$((mem_total_kb - mem_reserve_kb))
+if [ "$mem_max_kb" -lt 32768 ]; then mem_max_kb=32768; fi
+mem_high_margin_kb=$((mem_max_kb / 16))
+if [ "$mem_high_margin_kb" -lt 16384 ]; then mem_high_margin_kb=16384; fi
+mem_high_kb=$((mem_max_kb - mem_high_margin_kb))
+
 cat > "$frameos_release_dir/frameos.service" <<EOF
 [Unit]
 Description=FrameOS Service
@@ -1046,6 +1060,17 @@ WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
 RestartSec=5
+Type=notify
+TimeoutStartSec=300
+# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+WatchdogSec=900
+# If FrameOS leaks memory, OOM-kill and restart it instead of letting the
+# device swap itself into an unreachable state.
+MemoryHigh=${mem_high_kb}K
+MemoryMax=${mem_max_kb}K
+MemorySwapMax=64M
+ExecStopPost=-+/bin/sh -lc 'mkdir -p "$FRAMEOS_DIR/runtime"; umask 022; printf "serviceResult=%s\nexitCode=%s\nexitStatus=%s\n" "\$SERVICE_RESULT" "\$EXIT_CODE" "\$EXIT_STATUS" > "$FRAMEOS_DIR/runtime/frameos-last-exit"'
 $frameos_service_tty
 
 [Install]

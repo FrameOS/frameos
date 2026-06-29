@@ -42,6 +42,7 @@ type Driver* = ref object of FrameOSDriver
   screenInfo*: ScreenInfo
   logger*: DriverLogger
   sizeMismatchLogged*: bool
+  renderBuffer: seq[uint8]
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
   if not logger.isNil and not logger.log.isNil:
@@ -286,7 +287,11 @@ proc render*(self: Driver, image: Image) =
   let lineLength = if self.screenInfo.lineLength.int >= rowBytes: self.screenInfo.lineLength.int
     else: rowBytes
   try:
-    var buffer: seq[uint8] = newSeq[uint8](lineLength * height)
+    let bufferLen = lineLength * height
+    if self.renderBuffer.len != bufferLen:
+      self.renderBuffer = newSeq[uint8](bufferLen)
+    else:
+      zeroMem(addr self.renderBuffer[0], bufferLen)
     if bitsPerPixel == 16:
       for y in 0 ..< height:
         var j = y * lineLength
@@ -294,8 +299,8 @@ proc render*(self: Driver, image: Image) =
           let color = imageData[y * width + x]
           let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(
               color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
-          buffer[j] = uint8(pixel and 0xff)
-          buffer[j + 1] = uint8(pixel shr 8)
+          self.renderBuffer[j] = uint8(pixel and 0xff)
+          self.renderBuffer[j + 1] = uint8(pixel shr 8)
           j += 2
     else:
       let redByte = int(self.screenInfo.redOffset) div 8
@@ -306,19 +311,21 @@ proc render*(self: Driver, image: Image) =
         var j = y * lineLength
         for x in 0 ..< width:
           let color = imageData[y * width + x]
-          buffer[j + redByte] = color.r
-          buffer[j + greenByte] = color.g
-          buffer[j + blueByte] = color.b
+          self.renderBuffer[j + redByte] = color.r
+          self.renderBuffer[j + greenByte] = color.g
+          self.renderBuffer[j + blueByte] = color.b
 
           # Framebuffer could be 32bpp with 0 length alpha (effectively 24bpp)
           # or 24bpp with 0 length alpha
           if self.screenInfo.alphaLength > 0:
-            buffer[j + alphaByte] = color.a
+            self.renderBuffer[j + alphaByte] = color.a
           j += bytesPerPixel
 
-    var fb = open(DEVICE, fmWrite, buffer.len)
-    discard fb.writeBuffer(addr buffer[0], buffer.len)
-    fb.close()
+    var fb = open(DEVICE, fmWrite, self.renderBuffer.len)
+    try:
+      discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
+    finally:
+      fb.close()
     claimConsoleAfterSuccessfulRender(self.logger)
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
