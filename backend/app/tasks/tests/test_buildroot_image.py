@@ -324,12 +324,17 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_UTIL_LINUX=y" in config
     assert "BR2_PACKAGE_UTIL_LINUX_BINARIES=y" in config
     assert "BR2_PACKAGE_UTIL_LINUX_PARTX=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX_RFKILL=y" in config
     assert "BR2_PACKAGE_E2FSPROGS=y" in config
     assert "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y" in config
     assert "BR2_PACKAGE_DOSFSTOOLS=y" in config
     assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
     assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
+    assert "BR2_PACKAGE_IPTABLES=y" in config
+    assert "BR2_PACKAGE_IPTABLES_NFTABLES=y" in config
+    assert "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y" in config
+    assert "BR2_PACKAGE_NFTABLES=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config

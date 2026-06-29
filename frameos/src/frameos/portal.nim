@@ -10,6 +10,7 @@ import frameos/utils/process
 const
   nmHotspotName = "frameos-hotspot"
   nmConnectionName = "frameos-wifi"
+  nmHotspotAddress = "10.42.0.1/24"
   # nmcli is invoked with --wait 15; anything slower than this is wedged
   portalCommandTimeoutMs = 60 * 1000
   clockSyncTimeoutMs = 120 * 1000
@@ -183,20 +184,21 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
   let maskedHotspotPassword = masked(wifiHotspotPassword)
 
-  proc buildHotspotCmd(password, wifiDevice: string, withIfname: bool): string =
-    result = "sudo nmcli device wifi hotspot "
-    if withIfname:
-      result &= fmt"ifname {shQuote(wifiDevice)} "
-    result &= fmt"con-name {shQuote(nmHotspotName)} ssid {shQuote(wifiHotspotSsid)} password {shQuote(password)}"
+  proc buildHotspotAddCmd(wifiDevice: string): string =
+    fmt"sudo nmcli connection add type wifi ifname {shQuote(wifiDevice)} " &
+      fmt"con-name {shQuote(nmHotspotName)} autoconnect no ssid {shQuote(wifiHotspotSsid)}"
 
-  proc finishStartedHotspot(wifiDevice: string): bool =
-    if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
-      frameOS.network.hotspotStatus = HotspotStatus.error
-      pLog("portal:startAp:managedFailed", %*{"device": wifiDevice})
-      pLog("portal:startAp:error")
-      return false
+  proc buildHotspotModifyCmd(password: string): string =
+    fmt"sudo nmcli connection modify {shQuote(nmHotspotName)} " &
+      "802-11-wireless.mode ap 802-11-wireless.band bg " &
+      fmt"802-11-wireless-security.key-mgmt wpa-psk " &
+      fmt"802-11-wireless-security.psk {shQuote(password)} " &
+      fmt"ipv4.method shared ipv4.addresses {shQuote(nmHotspotAddress)} ipv6.method ignore"
 
-    discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
+  proc buildHotspotUpCmd(): string =
+    fmt"sudo nmcli --wait 15 connection up {shQuote(nmHotspotName)}"
+
+  proc finishStartedHotspot(): bool =
     discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
 
     frameOS.network.hotspotStatus = HotspotStatus.enabled
@@ -210,6 +212,28 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
       spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
     true
 
+  proc startConfiguredHotspot(wifiDevice: string): bool =
+    if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
+      frameOS.network.hotspotStatus = HotspotStatus.error
+      pLog("portal:startAp:managedFailed", %*{"device": wifiDevice})
+      pLog("portal:startAp:error")
+      return false
+
+    if run(buildHotspotAddCmd(wifiDevice))[1] != 0:
+      pLog("portal:startAp:addFailed", %*{"device": wifiDevice})
+      return false
+
+    if run(buildHotspotModifyCmd(wifiHotspotPassword),
+           loggedCmd = buildHotspotModifyCmd(maskedHotspotPassword))[1] != 0:
+      pLog("portal:startAp:modifyFailed", %*{"device": wifiDevice})
+      return false
+
+    if run(buildHotspotUpCmd())[1] != 0:
+      pLog("portal:startAp:activateFailed", %*{"device": wifiDevice})
+      return false
+
+    return finishStartedHotspot()
+
   for attempt in 1..hotspotStartAttempts:
     discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
     let wifiDevice = waitForReadyWifiDevice()
@@ -219,17 +243,7 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
       pLog("portal:startAp:error")
       return
 
-    if run(buildHotspotCmd(wifiHotspotPassword, wifiDevice, true),
-           loggedCmd = buildHotspotCmd(maskedHotspotPassword, wifiDevice, true))[1] == 0:
-      if finishStartedHotspot(wifiDevice):
-        return
-      return
-
-    pLog("portal:startAp:ifnameRetry", %*{"device": wifiDevice, "attempt": attempt})
-    if run(buildHotspotCmd(wifiHotspotPassword, wifiDevice, false),
-           loggedCmd = buildHotspotCmd(maskedHotspotPassword, wifiDevice, false))[1] == 0:
-      if finishStartedHotspot(wifiDevice):
-        return
+    if startConfiguredHotspot(wifiDevice):
       return
 
     pLog("portal:startAp:retry", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
