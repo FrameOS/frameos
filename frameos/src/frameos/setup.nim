@@ -574,6 +574,15 @@ proc setupFrameOSDrivers*(configPath = ""): SetupResult =
     setupLog("FrameOS setup: driver setup: reboot required")
   setupLog("FrameOS setup: driver setup: complete")
 
+proc scheduleSetupRebootIfRequired*(setupResult: SetupResult, reason = "FrameOS setup", delaySeconds = 2): bool =
+  if not setupResult.rebootRequired:
+    return false
+  setupLog(reason & ": reboot required; scheduling reboot")
+  let command =
+    "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
+  discard runSetupCommand(privilegedCommand("sh -c " & shellQuote(command)))
+  true
+
 proc writeSetupReleasePayload*(
   configPath: string,
   frameosCurrentDir = "/srv/frameos/current",

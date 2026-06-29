@@ -24,6 +24,8 @@ var runManagedCalls {.global.}: int
 var runDownCalls {.global.}: int
 var runDeleteCalls {.global.}: int
 var runDeleteConnectionCalls {.global.}: int
+var runDriverSetupCalls {.global.}: int
+var sawDriverSetupRebootArg {.global.}: bool
 var nmcliConnectCalls {.global.}: int
 var sawExpectedNmcliArgs {.global.}: bool
 var sawFallbackNmcliArgs {.global.}: bool
@@ -42,6 +44,8 @@ proc resetHookState() =
   runDownCalls = 0
   runDeleteCalls = 0
   runDeleteConnectionCalls = 0
+  runDriverSetupCalls = 0
+  sawDriverSetupRebootArg = false
   nmcliConnectCalls = 0
   sawExpectedNmcliArgs = false
   sawFallbackNmcliArgs = false
@@ -87,6 +91,10 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
   if cmd.contains("nmcli connection delete 'frameos-wifi'"):
     inc runDeleteConnectionCalls
     return ("", 0)
+  if cmd.contains("driver-setup"):
+    inc runDriverSetupCalls
+    sawDriverSetupRebootArg = cmd.contains("driver-setup --reboot-if-required")
+    return ("FrameOS setup: driver setup: complete", 0)
   ("", 0)
 
 proc nmcliHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.} =
@@ -178,6 +186,22 @@ suite "portal network orchestration":
 
     check html.contains("http://frame.local:8787/")
     check html.contains("http://frame.local:8787/admin")
+    check html.contains("restarts automatically")
+
+  test "driver setup delegates reboot decision to setup command":
+    let frame = makeFrameOS()
+    let ok = runDriverSetupFromSavedConfig(frame, PortalSetupOptions(runDriverSetup: true))
+
+    check ok
+    check runDriverSetupCalls == 1
+    check sawDriverSetupRebootArg
+
+  test "driver setup is skipped when disabled":
+    let frame = makeFrameOS()
+    let ok = runDriverSetupFromSavedConfig(frame, PortalSetupOptions(runDriverSetup: false))
+
+    check ok
+    check runDriverSetupCalls == 0
 
   test "postSetupFrameUrl uses https proxy port when enabled":
     let frame = makeFrameOS()

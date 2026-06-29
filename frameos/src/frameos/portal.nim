@@ -618,7 +618,7 @@ proc writeHostnameBestEffort(hostname: string) =
   discard run("printf " & shQuote(base & "\n") & " | sudo tee /boot/frameos-hostname >/dev/null 2>/dev/null || true")
   discard run("sudo hostname " & shQuote(base) & " || true")
 
-proc runDriverSetupFromSavedConfig(frameOS: FrameOS, options: PortalSetupOptions): bool {.gcsafe.} =
+proc runDriverSetupFromSavedConfig*(frameOS: FrameOS, options: PortalSetupOptions): bool {.gcsafe.} =
   if not options.runDriverSetup:
     return true
   let binary = getAppFilename()
@@ -627,12 +627,10 @@ proc runDriverSetupFromSavedConfig(frameOS: FrameOS, options: PortalSetupOptions
     rememberError("Display setup failed: runtime path not available.")
     return false
   pLog("portal:setup:driverSetup:start", %*{"device": frameOS.frameConfig.device})
-  let command = "cd " & shQuote(appDir) & " && sudo -n " & shQuote(binary) & " driver-setup"
+  let command = "cd " & shQuote(appDir) & " && sudo -n " & shQuote(binary) & " driver-setup --reboot-if-required"
   let (output, rc) = run(command)
-  if rc == 0 or rc == 2:
+  if rc == 0:
     pLog("portal:setup:driverSetup:done", %*{"device": frameOS.frameConfig.device})
-    if rc == 2:
-      pLog("portal:setup:driverSetup:rebootRequired", %*{"device": frameOS.frameConfig.device})
     return true
   let message = output.strip()
   rememberError("Display setup failed" & (if message.len > 0: ": " & message else: "."))
@@ -981,10 +979,6 @@ proc syncClock*() =
 
 proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
-  if not runDriverSetupFromSavedConfig(frameOS, options):
-    frameOS.network.status = NetworkStatus.error
-    sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
-    return
 
   stopAp(frameOS) # close hotspot before connecting
 
@@ -1000,8 +994,9 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
                %*{"serverHost": frameConfig.serverHost, "serverPort": frameConfig.serverPort,
                    "frameHost": frameConfig.frameHost, "device": frameConfig.device})
           log(%*{"event": "networkCheck", "status": "success"})
-          sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
           rememberError("")
+          discard runDriverSetupFromSavedConfig(frameOS, options)
+          sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
           return
         else:
           log(%*{"event": "networkCheck", "status": "failed", "response": response.status})
@@ -1407,7 +1402,7 @@ proc confirmHtml*(frameOS: FrameOS): string =
     "<p>The frame is now attempting to connect to Wi-Fi. After your computer reconnects to the same network, look for the frame at <a href=\"" &
       htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
     "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
-    "<p>If you left display setup enabled, the frame applies driver setup before joining Wi-Fi. A reboot may still be required before that display is active.</p>\n" &
+    "<p>If you left display setup enabled, the frame applies driver setup after joining Wi-Fi. If setup requires a reboot, the frame restarts automatically.</p>\n" &
     """
 <h2>Troubleshooting</h2>
 <ul>
