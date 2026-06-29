@@ -9,8 +9,9 @@ import strutils
 import strformat
 import uri
 
-import frameos/utils/font
 import frameos/utils/http_client
+when not defined(frameosEmbedded):
+  import frameos/utils/font
 when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
@@ -519,30 +520,53 @@ proc previewSourceIndex*(x, y, width, height, rotate: int, flip: string): int =
 
   sourceY * width + sourceX
 
+when defined(frameosEmbedded):
+  proc fillPixelRect(image: Image, x, y, w, h: int, color: ColorRGBX) =
+    let x0 = max(0, x)
+    let y0 = max(0, y)
+    let x1 = min(image.width, x + w)
+    let y1 = min(image.height, y + h)
+    if x0 >= x1 or y0 >= y1:
+      return
+    for py in y0 ..< y1:
+      for px in x0 ..< x1:
+        image.data[image.dataIndex(px, py)] = color
+
+  proc writeEmbeddedErrorMarker(image: Image, width, height: int) =
+    let black = rgbx(0, 0, 0, 255)
+    let border = max(4, min(width, height) div 80)
+    let bar = max(6, min(width, height) div 35)
+    fillPixelRect(image, 0, 0, width, border, black)
+    fillPixelRect(image, 0, height - border, width, border, black)
+    fillPixelRect(image, 0, 0, border, height, black)
+    fillPixelRect(image, width - border, 0, border, height, black)
+    fillPixelRect(image, width div 8, height div 2 - bar div 2, width * 3 div 4, bar, black)
+    fillPixelRect(image, width div 2 - bar div 2, height div 8, bar, height * 3 div 4, black)
+
 proc writeError*(image: Image, width, height: int, message: string) =
-  let typeface = getDefaultTypeface()
-  let font = newFont(typeface, 32, parseHtmlColor("#000000"))
-  let padding = 10.0
-  let types = typeset(
-      spans = [newSpan(message, font)],
-      bounds = vec2(width.toFloat() - 2 * padding,
-      height.toFloat() - 2 * padding),
-      hAlign = CenterAlign,
-      vAlign = MiddleAlign,
-    )
-  let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
-  let borderTypes = typeset(
-      spans = [newSpan(message, borderFont)],
-      bounds = vec2(width.toFloat() - 2 * padding,
-      height.toFloat() - 2 * padding),
-      hAlign = CenterAlign,
-      vAlign = MiddleAlign,
-    )
   when defined(frameosEmbedded):
-    image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2, lineJoin = RoundJoin)
+    writeEmbeddedErrorMarker(image, width, height)
   else:
+    let typeface = getDefaultTypeface()
+    let font = newFont(typeface, 32, parseHtmlColor("#000000"))
+    let padding = 10.0
+    let types = typeset(
+        spans = [newSpan(message, font)],
+        bounds = vec2(width.toFloat() - 2 * padding,
+        height.toFloat() - 2 * padding),
+        hAlign = CenterAlign,
+        vAlign = MiddleAlign,
+      )
+    let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+    let borderTypes = typeset(
+        spans = [newSpan(message, borderFont)],
+        bounds = vec2(width.toFloat() - 2 * padding,
+        height.toFloat() - 2 * padding),
+        hAlign = CenterAlign,
+        vAlign = MiddleAlign,
+      )
     image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
-  image.fillText(types, translate(vec2(padding, padding)))
+    image.fillText(types, translate(vec2(padding, padding)))
 
 proc renderError*(width, height: int, message: string): Image =
   when defined(frameosEmbedded):

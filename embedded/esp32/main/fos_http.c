@@ -35,6 +35,8 @@ static const char *TAG = "fos_http";
 #define FOS_HTTPS_WARN_INTERNAL_FREE (96 * 1024)
 #define FOS_HTTPS_MIN_INTERNAL_FREE (48 * 1024)
 #define FOS_HTTPS_MIN_INTERNAL_BLOCK (40 * 1024)
+#define FOS_HTTP_MUTATION_KEEP_AWAKE_MS (3 * 60 * 1000u)
+#define FOS_HTTP_UPLOAD_SCENE_ID_LEN 128
 
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
@@ -45,6 +47,11 @@ static fos_action_cb s_ota_cb = NULL;
 static esp_err_t scenes_post_handler(httpd_req_t *req);
 static void log_http_command(httpd_req_t *req, const char *event_name, size_t body_len);
 static void log_http_command_from_path(httpd_req_t *req, size_t body_len);
+
+static void keep_awake_for_http_mutation(void)
+{
+    fos_client_keep_awake_ms(FOS_HTTP_MUTATION_KEEP_AWAKE_MS);
+}
 
 void fos_http_set_actions(fos_action_cb render_now, fos_action_cb ota_now)
 {
@@ -316,6 +323,7 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
 {
     const char *payload = body;
     size_t payload_len = len;
+    char requested_scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN] = "";
     char *owned_payload = NULL;
     cJSON *root = body ? cJSON_Parse(body) : NULL;
 
@@ -330,9 +338,25 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
             payload = owned_payload;
             payload_len = strlen(owned_payload);
         }
+
+        cJSON *scene_id = cJSON_GetObjectItem(root, "sceneId");
+        if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
+            if (strlen(scene_id->valuestring) >= sizeof(requested_scene_id)) {
+                if (owned_payload) cJSON_free(owned_payload);
+                cJSON_Delete(root);
+                return ESP_ERR_INVALID_ARG;
+            }
+            strlcpy(requested_scene_id, scene_id->valuestring, sizeof(requested_scene_id));
+        }
     }
 
     esp_err_t err = fos_scenes_set_json(payload, payload_len);
+    if (err == ESP_OK && requested_scene_id[0]) {
+        err = fos_scenes_select(requested_scene_id);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "uploaded scenes requested scene: %s", requested_scene_id);
+        }
+    }
     if (owned_payload) cJSON_free(owned_payload);
     cJSON_Delete(root);
     return err;
@@ -1053,6 +1077,7 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
 static esp_err_t action_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
 
     fos_action_cb cb = (fos_action_cb)req->user_ctx;
     if (!cb) {
@@ -1391,6 +1416,8 @@ static void update_backend_url_from_frame_payload(fos_config_t *config, const cJ
 
 static esp_err_t frame_update_post_handler(httpd_req_t *req)
 {
+    keep_awake_for_http_mutation();
+
     char *body = NULL;
     esp_err_t read_err = read_request_body(req, 512 * 1024, true, &body);
     if (read_err == ESP_ERR_INVALID_SIZE) {
@@ -1517,6 +1544,7 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
 static esp_err_t reload_post_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
 
     log_http_command(req, "reload", 0);
     fos_scenes_request_sync();
@@ -1565,6 +1593,7 @@ static esp_err_t handle_event_post(httpd_req_t *req, const char *event_name)
     if (!event_name || !event_name[0]) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing event");
     }
+    keep_awake_for_http_mutation();
 
     char *body = NULL;
     esp_err_t err = read_request_body(req, 64 * 1024, true, &body);
@@ -1704,6 +1733,7 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
 static esp_err_t scene_select_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
 
     int total = req->content_len;
     if (total <= 0 || total > 512) {
@@ -1744,6 +1774,7 @@ static esp_err_t scene_select_handler(httpd_req_t *req)
 static esp_err_t scenes_post_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
 
     int total = req->content_len;
     if (total <= 0 || total > 512 * 1024) {
@@ -1778,6 +1809,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
 static esp_err_t scenes_sync_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
 
     log_http_command(req, "scenes_sync", 0);
     fos_scenes_request_sync();
@@ -1884,7 +1916,9 @@ static void configure_httpd_defaults(httpd_config_t *config)
     config->lru_purge_enable = true;
     config->stack_size = 8192;
 #if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    config->task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    /* HTTP handlers update SPIFFS state. SPI flash operations disable cache,
+     * so the httpd task stack must remain in internal RAM. */
+    config->task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
 #endif
     config->uri_match_fn = httpd_uri_match_wildcard;
 }

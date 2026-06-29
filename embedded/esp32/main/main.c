@@ -110,6 +110,7 @@ void app_main(void)
 
     fos_display_config_t display_config = {
         .panel = config->panel,
+        .hardware_preset = config->hardware_preset,
         .rst = config->pins.rst, .dc = config->pins.dc,
         .cs = config->pins.cs, .cs2 = config->pins.cs2,
         .busy = config->pins.busy, .sck = config->pins.sck,

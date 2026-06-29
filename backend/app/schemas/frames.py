@@ -141,6 +141,7 @@ class FrameCreateRequest(BaseModel):
     ssh_keys: Optional[List[str]] = None
     platform: Optional[str] = None
     network: Optional[Dict[str, Any]] = None
+    gpio_buttons: Optional[List[Dict[str, Any]]] = None
     agent: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
     timezone: Optional[str] = None

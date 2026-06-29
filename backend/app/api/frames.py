@@ -92,12 +92,8 @@ from app.utils.remote_exec import (
     _use_remote,
 )
 from app.utils.frame_http import (
-    _build_frame_path,
-    _build_frame_url,
-    _auth_headers,
     _fetch_frame_http_bytes,
     _frame_scheme_port,
-    _httpx_verify,
 )
 from app.api.frame_sync import (
     apply_frame_sync,
@@ -111,7 +107,6 @@ from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import close_redis_connection, create_redis_connection, get_redis
 from app.websockets import publish_message
 from app.ws.remote_ws import (
-    http_get_on_frame,
     number_of_connections_for_frame,
     file_md5_on_frame,
     file_read_on_frame,
@@ -757,24 +752,6 @@ def _ascii_safe(name: str) -> str:
     return _ascii_re.sub("_", name)[:150] or "download"
 
 
-def _normalise_remote_response(resp: Any) -> tuple[int, Any]:
-    """
-    Remote “http” command returns {"status": int, "body": str}.
-    Convert that (or a normal HTTPX Response) into (status-code, payload).
-    """
-    if isinstance(resp, dict) and {"status", "body"} <= resp.keys():
-        status = int(resp.get("status", 0))
-        body_raw = resp.get("body", "")
-        try:
-            payload = json.loads(body_raw)
-        except (TypeError, json.JSONDecodeError):
-            payload = body_raw
-        return status, payload
-
-    # already a JSON-payload (e.g. other remote commands)
-    return 200, resp
-
-
 def _bytes_or_json(blob: bytes | str):
     """
     • If *blob* is str → return it as-is (already JSON-decoded upstream).
@@ -882,88 +859,37 @@ async def _forward_frame_request(
 
         raise HTTPException(status_code=400, detail="Unable to reach frame")
 
-    # The remote HTTP command wants a *string* while httpx needs either
-    #   • json=<obj>   for real JSON payloads
-    #   • content=<bytes> for arbitrary binary bodies.
-    body_for_remote: str | None = None
+    body_text: str | None = None
     if json_body is not None:
         if isinstance(json_body, (bytes, bytearray)):
-            # keep the bytes unchanged – use latin-1 for a 1-to-1 mapping
-            body_for_remote = json_body.decode("latin1")
+            body_text = json_body.decode("latin1")
         else:
-            body_for_remote = json.dumps(json_body)
+            body_text = json.dumps(json_body)
 
-    if await _use_remote(frame, redis):
-        remote_resp = await http_get_on_frame(
-            frame.id,
-            _build_frame_path(frame, path, method),
-            method=method.upper(),
-            body=body_for_remote,
-            headers=_auth_headers(frame),
-            redis=redis,
-        )
-        status, payload = _normalise_remote_response(remote_resp)
-        if status == 200:
-            if cache_key:
-                if isinstance(payload, (bytes, bytearray)):
-                    await redis.set(cache_key, payload, ex=cache_ttl)
-                else:
-                    try:
-                        await redis.set(
-                            cache_key, json.dumps(payload).encode(), ex=cache_ttl
-                        )
-                    except TypeError:
-                        pass
-            return payload
+    body: bytes | str | None
+    headers: dict[str, str] | None = None
+    if isinstance(json_body, (bytes, bytearray)):
+        body = bytes(json_body)
+    else:
+        body = body_text
+        headers = {"Content-Type": "application/json"}
 
-        raise HTTPException(status_code=400, detail=f"Remote error: {status} {payload}")
+    status, body_bytes, response_headers = await _fetch_frame_http_bytes(
+        frame,
+        redis,
+        path=path,
+        method=method,
+        body=body,
+        headers=headers,
+    )
 
-    url = _build_frame_url(frame, path, method)
-    hdrs = _auth_headers(frame)
-    verify = _httpx_verify(frame)
-    async with httpx.AsyncClient(verify=verify) as client:
-        try:
-            if isinstance(json_body, (bytes, bytearray)):
-                # binary/event bodies
-                response = await client.request(
-                    method,
-                    url,
-                    content=json_body,
-                    headers=hdrs,
-                    timeout=60.0,
-                )
-            elif json_body is not None:
-                # normal JSON payload
-                response = await client.request(
-                    method,
-                    url,
-                    json=json_body,
-                    headers=hdrs,
-                    timeout=60.0,
-                )
-            else:
-                # no body at all
-                response = await client.request(
-                    method,
-                    url,
-                    headers=hdrs,
-                    timeout=60.0,
-                )
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
-
-    if response.status_code == 200:
+    if status == 200:
         if cache_key:
-            await redis.set(cache_key, response.content, ex=cache_ttl)
-        if response.headers.get("content-type", "").startswith("application/json"):
-            return response.json()
-        return response.text
+            await redis.set(cache_key, body_bytes, ex=cache_ttl)
+        payload = _bytes_or_json(body_bytes)
+        if response_headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
+            return payload
+        return _decode_bytes(body_bytes)
 
     # last-ditch: serve stale cache (JSON or bytes) ------------------------
     if cache_key and (cached := await redis.get(cache_key)):
@@ -3279,6 +3205,8 @@ async def api_frame_new(
             frame.device_config = dict(data.device_config)
         if data.embedded is not None:
             frame.embedded = dict(data.embedded)
+        if data.gpio_buttons is not None:
+            frame.gpio_buttons = list(data.gpio_buttons)
 
         if data.ssh_keys is not None:
             frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))

@@ -19,7 +19,13 @@ import {
   rpiOSPlatforms,
 } from '../../devices'
 import { newFrameForm } from './newFrameForm'
-import { FrameEmbeddedHardwarePreset, FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
+import {
+  FrameEmbeddedHardwarePreset,
+  FrameInstallMethod,
+  FrameOSSettings,
+  GPIOButton,
+  NewFrameFormType,
+} from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
 import { normalizedTimezone } from '../../utils/timezone'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -173,6 +179,10 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   mosi: 11,
   pwr: -1,
 }
+const WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS: GPIOButton[] = [
+  { pin: 0, label: 'BOOT' },
+  { pin: 4, label: 'KEY1' },
+]
 const WAVESHARE_13IN3E6_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 10,
   dc: 7,
@@ -217,6 +227,7 @@ function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePrese
   flashSize: NonNullable<NonNullable<NewFrameFormType['embedded']>['flashSize']>
   psramMB: number
   pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
+  gpioButtons: GPIOButton[]
   sdCardAssets: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
 } | null {
   if (hardwarePreset === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
@@ -225,6 +236,7 @@ function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePrese
       flashSize: '16MB',
       psramMB: 8,
       pins: { ...WAVESHARE_PHOTOPAINTER_PINS },
+      gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS.map((button) => ({ ...button })),
       sdCardAssets: {
         ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
         pins: { ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS.pins },
@@ -237,6 +249,7 @@ function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePrese
       flashSize: '32MB',
       psramMB: 16,
       pins: { ...WAVESHARE_13IN3E6_PINS },
+      gpioButtons: [],
       sdCardAssets: {
         ...WAVESHARE_13IN3E6_SD_CARD_ASSETS,
         pins: { ...WAVESHARE_13IN3E6_SD_CARD_ASSETS.pins },
@@ -475,6 +488,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         pins: { ...presetConfig.pins },
         sdCardAssets: presetConfig.sdCardAssets,
       },
+      gpio_buttons: presetConfig.gpioButtons.map((button) => ({ ...button })),
     })
   }
 

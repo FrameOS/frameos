@@ -52,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 26  # Optional SD-card assets mount at /srv/assets
+EMBEDDED_FIRMWARE_VERSION = 28  # PhotoPainter default GPIO buttons
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -80,6 +80,13 @@ EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS = {
     "mosi": 11,
     "pwr": -1,
 }
+# Waveshare ESP32-S3 PhotoPainter back buttons:
+# BOOT is ESP32 GPIO0, USER_KEY1 is GPIO4. The power key is handled by the PMIC
+# power-on path and is not a plain GPIO input for the existing button driver.
+EMBEDDED_WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS = [
+    {"pin": 0, "label": "BOOT"},
+    {"pin": 4, "label": "KEY1"},
+]
 # Waveshare ESP32-S3 ePaper 13.3E6 schematic pinout:
 # CSB_M=GPIO1, CSB_S=GPIO4, SDA=GPIO5, SCL=GPIO6, D/C=GPIO7,
 # BUSY_N=GPIO8, RST_N=GPIO10, EPD_PWR=GPIO16.
@@ -126,6 +133,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "flashSize": "16MB",
         "psramMB": 8,
         "pins": EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS,
+        "gpioButtons": EMBEDDED_WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
         "sdCardAssets": {
             "enabled": True,
             "preset": "waveshare_esp32_s3_photopainter",
@@ -445,6 +453,9 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
     preset = EMBEDDED_HARDWARE_PRESETS[preset_key]
 
     frame.device = preset["device"]
+    preset_gpio_buttons = preset.get("gpioButtons")
+    if frame.gpio_buttons is None and isinstance(preset_gpio_buttons, list):
+        frame.gpio_buttons = [dict(button) for button in preset_gpio_buttons]
 
     embedded = dict(frame.embedded or {})
     embedded["hardwarePreset"] = preset_key
@@ -796,7 +807,11 @@ def embedded_hostname_for_frame(frame: Frame) -> str:
 
 def embedded_gpio_buttons_for_frame(frame: Frame) -> list[tuple[int, str]]:
     buttons: list[tuple[int, str]] = []
-    for raw_button in frame.gpio_buttons or []:
+    raw_buttons = frame.gpio_buttons
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if raw_buttons is None and preset_key:
+        raw_buttons = EMBEDDED_HARDWARE_PRESETS[preset_key].get("gpioButtons")
+    for raw_button in raw_buttons or []:
         if not isinstance(raw_button, dict):
             continue
         try:
@@ -862,6 +877,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_FRAME_ID {int(frame.id)}",
         f"#define FRAMEOS_DEFAULT_HOSTNAME {c_str(embedded_hostname_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_GPIO_BUTTONS {c_str(embedded_gpio_buttons_config(frame))}",
+        f"#define FRAMEOS_DEFAULT_HARDWARE_PRESET {c_str(embedded_hardware_preset_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",

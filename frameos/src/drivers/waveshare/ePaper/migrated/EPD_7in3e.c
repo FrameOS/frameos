@@ -77,6 +77,26 @@ static void log_debug_action(const char *action)
 static int data_log_counter = 0;
 static int data_bytes_current_command = 0;
 
+/* FrameOS divergence from the Waveshare driver:
+ * PhotoPainter uses the same 7.3e controller command set, but its board-level
+ * power sequencing is handled by the ESP32-S3 PhotoPainter PMIC integration.
+ * Keep this as a runtime switch so the normal 7.3e path can stay close to
+ * upstream while PhotoPainter skips the panel command that leaves it blank.
+ */
+static int photo_painter_mode = 0;
+
+/* FrameOS divergence:
+ * Upstream waits indefinitely for BUSY to return HIGH. On embedded FrameOS this
+ * can wedge the render loop permanently if the board/panel misses the BUSY
+ * transition, so cap the wait and log the timeout explicitly.
+ */
+#define BUSY_WAIT_TIMEOUT_MS 120000
+
+void EPD_7IN3E_SetPhotoPainterMode(int enabled)
+{
+    photo_painter_mode = enabled ? 1 : 0;
+}
+
 static void log_command(UBYTE reg)
 {
     data_log_counter = 0;
@@ -131,12 +151,19 @@ parameter:
 static void EPD_7IN3E_Reset(void)
 {
     log_debug_action("reset:start");
+
+    /* FrameOS divergence:
+     * Waveshare's sample reset pulse is very short. The PhotoPainter board was
+     * observed to need a more conservative high/low/high sequence after PMIC
+     * power-up. The longer pulse is harmless for the normal 7.3e panel path and
+     * avoids a separate duplicate reset implementation.
+     */
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(20);
+    DEV_Delay_ms(50);
     DEV_Digital_Write(EPD_RST_PIN, 0);
-    DEV_Delay_ms(2);
-    DEV_Digital_Write(EPD_RST_PIN, 1);
     DEV_Delay_ms(20);
+    DEV_Digital_Write(EPD_RST_PIN, 1);
+    DEV_Delay_ms(50);
     log_debug_action("reset:done");
 }
 
@@ -169,12 +196,41 @@ static void EPD_7IN3E_SendData(UBYTE Data)
     log_data(Data);
 }
 
+static void EPD_7IN3E_SendDataBuffer(UBYTE *Data, uint32_t Len)
+{
+    if (Data == NULL || Len == 0) {
+        return;
+    }
+
+    /* FrameOS divergence:
+     * Upstream writes the framebuffer byte-by-byte through EPD_7IN3E_SendData.
+     * ESP32 SPI can transfer the whole 192 KB 7.3e framebuffer in one CS window,
+     * which keeps refresh latency reasonable while preserving the command flow.
+     */
+    DEV_Digital_Write(EPD_DC_PIN, 1);
+    DEV_Digital_Write(EPD_CS_PIN, 0);
+    DEV_SPI_Write_nByte(Data, Len);
+    DEV_Digital_Write(EPD_CS_PIN, 1);
+
+    data_bytes_current_command += (int)Len;
+    char buffer[160];
+    snprintf(buffer, sizeof(buffer),
+             "message=\"Bulk data transfer\" bytesSent=%lu",
+             (unsigned long)data_bytes_current_command);
+    log_with_timestamp("driver:waveshare:data", buffer);
+}
+
 /******************************************************************************
 function :  Wait until the busy_pin goes LOW
 parameter:
 ******************************************************************************/
-static void EPD_7IN3E_ReadBusyH(void)
+static int EPD_7IN3E_ReadBusyH(void)
 {
+    /* FrameOS divergence:
+     * Return whether the BUSY line was actually observed LOW before going idle.
+     * The caller uses this to detect panels/boards that acknowledge the command
+     * too quickly for the sampled BUSY line and need a fixed refresh delay.
+     */
     struct timeval start_tv;
     gettimeofday(&start_tv, NULL);
 
@@ -188,6 +244,7 @@ static void EPD_7IN3E_ReadBusyH(void)
     int observed_low = (state == 0);
     struct timeval low_start_tv = start_tv;
     struct timeval last_log_tv = start_tv;
+    int timed_out_waiting_for_high = 0;
 
     if (!observed_low && state == 0) {
         observed_low = 1;
@@ -203,10 +260,15 @@ static void EPD_7IN3E_ReadBusyH(void)
         DEV_Delay_ms(1);
         ++loop_count;
 
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        long elapsed = elapsed_ms(&start_tv, &now);
+        if (elapsed >= BUSY_WAIT_TIMEOUT_MS) {
+            timed_out_waiting_for_high = 1;
+            break;
+        }
+
         if (loop_count % 1000 == 0) {
-            struct timeval now;
-            gettimeofday(&now, NULL);
-            long elapsed = elapsed_ms(&start_tv, &now);
             long since_last = elapsed_ms(&last_log_tv, &now);
             if (since_last >= 1000) {
                 char buffer[160];
@@ -234,14 +296,16 @@ static void EPD_7IN3E_ReadBusyH(void)
 
     char end_buffer[256];
     snprintf(end_buffer, sizeof(end_buffer),
-             "durationMs=%ld loops=%ld finalState=%u observedLow=%s waitedForLowMs=%ld waitedForHighMs=%ld timedOutWaitingForLow=false",
+             "durationMs=%ld loops=%ld finalState=%u observedLow=%s waitedForLowMs=%ld waitedForHighMs=%ld timedOutWaitingForLow=false timedOutWaitingForHigh=%s",
              duration,
              loop_count,
              (unsigned int)state,
              observed_low ? "true" : "false",
              waited_for_low_ms,
-             waited_for_high_ms);
+             waited_for_high_ms,
+             timed_out_waiting_for_high ? "true" : "false");
     log_debug_action_extra("busy:wait:end", end_buffer);
+    return timed_out_waiting_for_high ? -1 : observed_low;
 }
 
 /******************************************************************************
@@ -267,7 +331,20 @@ static void EPD_7IN3E_TurnOnDisplay(void)
     log_debug_action("turnOnDisplay:refresh");
     EPD_7IN3E_SendCommand(0x12); // DISPLAY_REFRESH
     EPD_7IN3E_SendData(0x00);
-    EPD_7IN3E_ReadBusyH();
+
+    /* FrameOS divergence:
+     * The PhotoPainter path can miss the LOW BUSY pulse after DISPLAY_REFRESH.
+     * When that happens, upstream would continue immediately and power off while
+     * the panel is still refreshing. Give the controller a short settle window,
+     * then fall back to the measured full-refresh duration if BUSY never went
+     * LOW.
+     */
+    DEV_Delay_ms(100);
+    int refresh_busy_observed = EPD_7IN3E_ReadBusyH();
+    if (!refresh_busy_observed) {
+        log_debug_action_extra("turnOnDisplay:refreshFixedWait", "durationMs=25000");
+        DEV_Delay_ms(25000);
+    }
 
     log_debug_action("turnOnDisplay:powerOff");
     EPD_7IN3E_SendCommand(0x02); // POWER_OFF
@@ -519,11 +596,12 @@ void EPD_7IN3E_Display(UBYTE *Image)
     }
 
     EPD_7IN3E_SendCommand(0x10);
-    for (UWORD j = 0; j < Height; j++) {
-        for (UWORD i = 0; i < Width; i++) {
-            EPD_7IN3E_SendData(Image[i + j * Width]);
-        }
-    }
+
+    /* FrameOS divergence:
+     * See EPD_7IN3E_SendDataBuffer above. This replaces only the framebuffer
+     * write loop; the surrounding 0x10/write/refresh sequence remains upstream.
+     */
+    EPD_7IN3E_SendDataBuffer(Image, (uint32_t)total_bytes);
     char end_buffer[128];
     snprintf(end_buffer, sizeof(end_buffer), "totalBytes=%lu", total_bytes);
     log_debug_action_extra("display:dataWritten", end_buffer);
@@ -537,6 +615,19 @@ parameter:
 void EPD_7IN3E_Sleep(void)
 {
     log_debug_action("sleep:start");
+
+    /* FrameOS divergence:
+     * On PhotoPainter, sending the final 0x07/0xA5 deep-sleep sequence after
+     * POWER_OFF leaves the display white/blank on the next refresh. The normal
+     * 7.3e path keeps the Waveshare deep-sleep sequence below.
+     */
+    if (photo_painter_mode) {
+        log_debug_action_extra("sleep:skipDeepSleep",
+                               "reason=\"turnOnDisplay already powers off the PhotoPainter panel\"");
+        log_debug_action("sleep:done");
+        return;
+    }
+
     EPD_7IN3E_SendCommand(0X02); // DEEP_SLEEP
     EPD_7IN3E_SendData(0x00);
     EPD_7IN3E_ReadBusyH();
@@ -545,4 +636,3 @@ void EPD_7IN3E_Sleep(void)
     EPD_7IN3E_SendData(0XA5);
     log_debug_action("sleep:done");
 }
-

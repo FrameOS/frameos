@@ -49,6 +49,7 @@ idf_component_register(
     SRCS
         "DEV_Config_esp.c"
         "frameos_display.c"
+        "photo_painter_pmic.c"
         "${FRAMEOS_GENERATED_DIR}/frameos_selected_panel.c"
         ${vendor_srcs}
     INCLUDE_DIRS

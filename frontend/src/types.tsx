@@ -254,6 +254,7 @@ export interface NewFrameFormType {
   server_host?: string | null
   ssh_pass?: string | null
   ssh_keys?: string[]
+  gpio_buttons?: GPIOButton[]
   platform?: string | null
   agent?: {
     agentEnabled?: boolean

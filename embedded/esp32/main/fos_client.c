@@ -61,6 +61,7 @@ typedef struct {
 
 static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_snapshot_lock;
+static portMUX_TYPE s_keep_awake_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_render_count = 0;
 static int64_t s_last_render_ms = 0;
 static uint8_t *s_last_frame = NULL;
@@ -70,6 +71,7 @@ static int s_last_frame_height = 0;
 static fos_pixel_format_t s_last_frame_format = FOS_PIXEL_1BPP;
 static uint32_t s_last_frame_render_count = 0;
 static int64_t s_last_frame_render_ms = 0;
+static int64_t s_keep_awake_until_us = 0;
 static bool s_display_state_loaded = false;
 static bool s_display_state_valid = false;
 static bool s_last_refresh_skipped = false;
@@ -190,6 +192,30 @@ void fos_client_render_now(void)
     if (s_events) {
         xEventGroupSetBits(s_events, RENDER_NOW_BIT);
     }
+}
+
+void fos_client_keep_awake_ms(uint32_t ms)
+{
+    if (ms == 0) return;
+    int64_t until_us = esp_timer_get_time() + (int64_t)ms * 1000;
+    portENTER_CRITICAL(&s_keep_awake_lock);
+    if (until_us > s_keep_awake_until_us) {
+        s_keep_awake_until_us = until_us;
+    }
+    portEXIT_CRITICAL(&s_keep_awake_lock);
+}
+
+static uint32_t keep_awake_remaining_seconds(void)
+{
+    int64_t until_us;
+    portENTER_CRITICAL(&s_keep_awake_lock);
+    until_us = s_keep_awake_until_us;
+    portEXIT_CRITICAL(&s_keep_awake_lock);
+
+    int64_t now_us = esp_timer_get_time();
+    if (until_us <= now_us) return 0;
+    int64_t remaining_us = until_us - now_us;
+    return (uint32_t)((remaining_us + 999999) / 1000000);
 }
 
 static bool json_string_value(const char *json, const char *key, char *out, size_t out_len)
@@ -569,11 +595,17 @@ static void client_task(void *arg)
         }
 
         uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
-        if (config->deep_sleep && fos_display_present()) {
+        uint32_t keep_awake_s = keep_awake_remaining_seconds();
+        if (config->deep_sleep && fos_display_present() && keep_awake_s == 0) {
             ESP_LOGI(TAG, "deep sleeping for %lu s%s", (unsigned long)sleep_s,
                      config->wake_schedule ? " (wake-on-schedule)" : "");
             /* USB console drops in deep sleep; that's the point (battery). */
             esp_deep_sleep((uint64_t)sleep_s * 1000000ULL);
+        }
+        if (config->deep_sleep && fos_display_present() && keep_awake_s > 0) {
+            ESP_LOGI(TAG, "staying awake for %lu s after HTTP activity",
+                     (unsigned long)keep_awake_s);
+            if (sleep_s > keep_awake_s) sleep_s = keep_awake_s;
         }
         /* Wait in 1s slices so scene-dispatched "render" events (QuickJS
          * setting the redraw flag) take effect promptly. */

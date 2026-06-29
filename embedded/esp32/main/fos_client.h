@@ -19,6 +19,8 @@ void fos_client_start(void);
 void fos_client_resume(void);
 /* Trigger an immediate render from another task (HTTP action, console). */
 void fos_client_render_now(void);
+/* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
+void fos_client_keep_awake_ms(uint32_t ms);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
 int64_t fos_client_last_render_ms(void);

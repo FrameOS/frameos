@@ -1218,6 +1218,32 @@ async def test_forward_frame_request_get_uses_bounded_frame_http(db, redis):
 
 
 @pytest.mark.asyncio
+async def test_forward_frame_request_json_uses_bounded_frame_http(db, redis):
+    frame = await new_frame(db, redis, 'BoundedHttpJsonFrame', '10.8.0.159', 'localhost')
+    payload = {"scenes": [{"id": "scene-a", "nodes": []}], "sceneId": "scene-a"}
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        assert frame_obj.id == frame.id
+        assert path == "/event/uploadScenes"
+        assert method == "POST"
+        assert json.loads(body) == payload
+        assert headers == {"Content-Type": "application/json"}
+        return 200, b"OK", {"content-type": "text/plain"}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch) as fetch_frame:
+        response = await frames_api._forward_frame_request(
+            frame,
+            redis,
+            path="/event/uploadScenes",
+            method="POST",
+            json_body=payload,
+        )
+
+    assert response == "OK"
+    assert fetch_frame.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):
     """
     Patch post to return 200. The route then returns "OK", which we check via response.text.
