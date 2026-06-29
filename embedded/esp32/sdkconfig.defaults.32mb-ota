@@ -1,4 +1,4 @@
-# 32MB production profile with larger OTA slots and state partition.
+# 32MB production profile with larger state storage.
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 # CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_32mb.csv"

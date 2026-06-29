@@ -164,10 +164,16 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['flash']['partitionTable'] == 'partitions_ota_32mb.csv'
     ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
     ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
     assert ota_0['offset'] == 0x20000
-    assert ota_0['size'] == 0xEF0000
+    assert ota_0['size'] == 0x3F0000
     assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['offset'] == 0x410000
+    assert ota_1['size'] == 0x3F0000
     assert ota_1['usedBytes'] is None
+    assert state['offset'] == 0x800000
+    assert state['size'] == 24 * 1024 * 1024
+    assert state['end'] == 32 * 1024 * 1024
     assert layout['ram']['psramBytes'] == 16 * 1024 * 1024
     assert layout['ram']['width'] == 1200
     assert layout['ram']['height'] == 1600
@@ -175,6 +181,30 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['ram']['rgbaBufferBytes'] == 1200 * 1600 * 4
     assert layout['ram']['packedBufferBytes'] == 960_000
     assert layout['ram']['renderWorkingBytes'] > layout['ram']['rgbaBufferBytes']
+
+
+def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
+    frame = Frame(
+        mode='embedded',
+        embedded={'platform': 'esp32-s3', 'flashSize': '16MB'},
+    )
+
+    layout = embedded_firmware_layout_for_frame(frame, {'appSize': 2_900_000})
+
+    assert layout['flash']['flashBytes'] == 16 * 1024 * 1024
+    assert layout['flash']['partitionTable'] == 'partitions_ota_16mb.csv'
+    ota_0 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_0')
+    ota_1 = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'ota_1')
+    state = next(partition for partition in layout['flash']['partitions'] if partition['name'] == 'state')
+    assert ota_0['offset'] == 0x20000
+    assert ota_0['size'] == 0x3F0000
+    assert ota_0['usedBytes'] == 2_900_000
+    assert ota_1['offset'] == 0x410000
+    assert ota_1['size'] == 0x3F0000
+    assert ota_1['usedBytes'] is None
+    assert state['offset'] == 0x800000
+    assert state['size'] == 8 * 1024 * 1024
+    assert state['end'] == 16 * 1024 * 1024
 
 
 @pytest.mark.asyncio
