@@ -116,6 +116,31 @@ async function fillLogsSearch(page: Page): Promise<void> {
   await page.getByText('18 of 45 lines').waitFor()
 }
 
+async function scrollLogsToLatest(page: Page): Promise<void> {
+  const latestTimestamp = page.getByText('2026-05-23 12:00:00')
+  const scrollButton = page.getByRole('button', { name: /^Scroll to latest$/ })
+
+  await page.getByPlaceholder(/Search logs/i).waitFor()
+  await page.getByText('45 lines').waitFor()
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (await latestTimestamp.isVisible().catch(() => false)) {
+      break
+    }
+    if (await scrollButton.isVisible().catch(() => false)) {
+      await scrollButton.click()
+    }
+    await page.evaluate(() => {
+      const scrollElement = document.scrollingElement ?? document.documentElement
+      window.scrollTo(0, scrollElement.scrollHeight)
+    })
+    await page.waitForTimeout(150)
+  }
+
+  await latestTimestamp.waitFor({ state: 'visible' })
+  await scrollButton.waitFor({ state: 'hidden' })
+}
+
 async function closeSecondaryPanel(page: Page): Promise<void> {
   const activeNavigationButton = page.locator('.frameos-nav-button[title^="Hide "]').first()
   if (await activeNavigationButton.isVisible().catch(() => false)) {
@@ -222,7 +247,7 @@ export const visualCases: VisualCase[] = [
     id: 'frame-logs',
     title: 'Frame logs',
     path: '/frames/1?tool=logs',
-    variants: [{ id: 'default' }, { id: 'filtered-render', prepare: fillLogsSearch }],
+    variants: [{ id: 'default', prepare: scrollLogsToLatest }, { id: 'filtered-render', prepare: fillLogsSearch }],
   },
   {
     id: 'frame-metrics',
