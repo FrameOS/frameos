@@ -8,6 +8,7 @@ type HookMode = enum
   hmWifiList
   hmStartApOk
   hmStartApFail
+  hmStartApTransientFail
   hmStopAp
   hmAttemptSuccess
   hmAttemptFail
@@ -16,12 +17,15 @@ var hookMode {.global.}: HookMode
 var runWifiListCalls {.global.}: int
 var runWifiStatusCalls {.global.}: int
 var runShowActiveCalls {.global.}: int
-var runHotspotCalls {.global.}: int
-var runModifySharedCalls {.global.}: int
+var runHotspotAddCalls {.global.}: int
+var runHotspotModifyCalls {.global.}: int
+var runHotspotUpCalls {.global.}: int
 var runManagedCalls {.global.}: int
 var runDownCalls {.global.}: int
 var runDeleteCalls {.global.}: int
 var runDeleteConnectionCalls {.global.}: int
+var runDriverSetupCalls {.global.}: int
+var sawDriverSetupRebootArg {.global.}: bool
 var nmcliConnectCalls {.global.}: int
 var sawExpectedNmcliArgs {.global.}: bool
 var sawFallbackNmcliArgs {.global.}: bool
@@ -33,12 +37,15 @@ proc resetHookState() =
   runWifiListCalls = 0
   runWifiStatusCalls = 0
   runShowActiveCalls = 0
-  runHotspotCalls = 0
-  runModifySharedCalls = 0
+  runHotspotAddCalls = 0
+  runHotspotModifyCalls = 0
+  runHotspotUpCalls = 0
   runManagedCalls = 0
   runDownCalls = 0
   runDeleteCalls = 0
   runDeleteConnectionCalls = 0
+  runDriverSetupCalls = 0
+  sawDriverSetupRebootArg = false
   nmcliConnectCalls = 0
   sawExpectedNmcliArgs = false
   sawFallbackNmcliArgs = false
@@ -57,13 +64,20 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
     if hookMode == hmStopAp:
       return ("frameos-hotspot\n", 0)
     return ("", 0)
-  if cmd.contains("device wifi hotspot"):
-    inc runHotspotCalls
-    if hookMode == hmStartApFail:
-      return ("failed", 2)
+  if cmd.contains("connection add type wifi"):
+    inc runHotspotAddCalls
     return ("ok", 0)
-  if cmd.contains("connection modify 'frameos-hotspot' ipv4.method shared"):
-    inc runModifySharedCalls
+  if cmd.contains("connection modify 'frameos-hotspot' 802-11-wireless.mode ap"):
+    inc runHotspotModifyCalls
+    return ("", 0)
+  if cmd.contains("--wait 15 connection up 'frameos-hotspot'"):
+    inc runHotspotUpCalls
+    if hookMode == hmStartApFail:
+      return ("failed", 4)
+    if hookMode == hmStartApTransientFail and runHotspotUpCalls == 1:
+      return ("failed", 4)
+    return ("ok", 0)
+  if cmd.contains("connection modify 'frameos-hotspot' 802-11-wireless.ap-isolation"):
     return ("", 0)
   if cmd.contains("device set 'wlan0' managed yes || true"):
     inc runManagedCalls
@@ -77,6 +91,10 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
   if cmd.contains("nmcli connection delete 'frameos-wifi'"):
     inc runDeleteConnectionCalls
     return ("", 0)
+  if cmd.contains("driver-setup"):
+    inc runDriverSetupCalls
+    sawDriverSetupRebootArg = cmd.contains("driver-setup --reboot-if-required")
+    return ("FrameOS setup: driver setup: complete", 0)
   ("", 0)
 
 proc nmcliHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.} =
@@ -109,6 +127,8 @@ proc makeFrameOS(timeoutSeconds = 0.0): FrameOS =
     frameConfig: FrameConfig(
       serverHost: "frame.local",
       serverPort: 8989,
+      frameHost: "frame.local",
+      framePort: 8787,
       network: NetworkConfig(
         wifiHotspotSsid: "FrameOS-Setup",
         wifiHotspotPassword: "secret1234",
@@ -160,6 +180,35 @@ suite "portal network orchestration":
           @["-n", "nmcli", "password", "se********", "name", "x"]
     check maskedPasswordArgs(@["password"]) == @["password"]
 
+  test "confirmHtml tells user the post-WiFi frame URL":
+    let frame = makeFrameOS()
+    let html = confirmHtml(frame)
+
+    check html.contains("http://frame.local:8787/")
+    check html.contains("http://frame.local:8787/admin")
+    check html.contains("restarts automatically")
+
+  test "driver setup delegates reboot decision to setup command":
+    let frame = makeFrameOS()
+    let ok = runDriverSetupFromSavedConfig(frame, PortalSetupOptions(runDriverSetup: true))
+
+    check ok
+    check runDriverSetupCalls == 1
+    check sawDriverSetupRebootArg
+
+  test "driver setup is skipped when disabled":
+    let frame = makeFrameOS()
+    let ok = runDriverSetupFromSavedConfig(frame, PortalSetupOptions(runDriverSetup: false))
+
+    check ok
+    check runDriverSetupCalls == 0
+
+  test "postSetupFrameUrl uses https proxy port when enabled":
+    let frame = makeFrameOS()
+    frame.frameConfig.httpsProxy = HttpsProxyConfig(enable: true, port: 8443, exposeOnlyPort: true)
+
+    check postSetupFrameUrl(frame) == "https://frame.local:8443/"
+
   test "availableNetworks deduplicates and drops empty ssids":
     hookMode = hmWifiList
     let networks = availableNetworks(makeFrameOS())
@@ -173,8 +222,9 @@ suite "portal network orchestration":
 
     check frame.network.hotspotStatus == HotspotStatus.enabled
     check runShowActiveCalls == 1
-    check runHotspotCalls == 1
-    check runModifySharedCalls == 1
+    check runHotspotAddCalls == 1
+    check runHotspotModifyCalls == 1
+    check runHotspotUpCalls == 1
     check runWifiStatusCalls == 1
     check runManagedCalls == 1
 
@@ -189,11 +239,31 @@ suite "portal network orchestration":
     startAp(frame)
 
     check frame.network.hotspotStatus == HotspotStatus.error
-    check runHotspotCalls == 2
-    check runModifySharedCalls == 0
+    check runHotspotAddCalls == 6
+    check runHotspotModifyCalls == 6
+    check runHotspotUpCalls == 6
+    check sleepCallCount == 5
+    check lastSleepMs == 5000
 
     let (ok, _) = eventChannel.tryRecv()
     check not ok
+
+  test "startAp retries transient hotspot command failures":
+    hookMode = hmStartApTransientFail
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    startAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    check runHotspotAddCalls == 2
+    check runHotspotModifyCalls == 2
+    check runHotspotUpCalls == 2
+    check sleepCallCount == 1
+    check lastSleepMs == 5000
+
+    let (ok, ev) = eventChannel.tryRecv()
+    check ok
+    check ev[1] == "setCurrentScene"
+    check ev[2]["sceneId"].getStr() == "system/wifiHotspot"
 
   test "stopAp runs down and delete when hotspot is active":
     hookMode = hmStopAp

@@ -8,6 +8,7 @@ from app.codegen.drivers_nim import (
     compiled_drivers,
     driver_context_helpers_nim,
     driver_library_filename,
+    nim_string_seq_literal,
     setup_helpers_nim,
     write_driver_library_nim,
 )
@@ -91,6 +92,12 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
         setup_proc_exported=False,
         include_setup_driver_names=False,
     )
+    available_driver_names = [
+        driver.name
+        for driver in drivers.values()
+        if driver.import_path or driver.setup_import_path or driver.lines
+    ]
+    available_driver_names_source = nim_string_seq_literal(available_driver_names)
 
     return f"""
 import std/[dynlib, json, options, os, strutils]
@@ -125,6 +132,9 @@ let availableDriverSpecs: seq[DriverSpec] = @[{spec_lines}]
 var loadedDrivers: seq[LoadedDriver] = @[]
 var setupLibraries: seq[LibHandle] = @[]
 {driver_context_helpers_nim()}
+
+proc availableDriverNames*(): seq[string] =
+  return {available_driver_names_source}
 
 proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
   hostChannels.log(event)

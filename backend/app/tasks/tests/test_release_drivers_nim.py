@@ -40,6 +40,9 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     source = write_release_shared_drivers_nim(release_driver_specs())
 
     assert "proc shouldLoadDriver(spec: DriverSpec, frameOS: FrameOS): bool" in source
+    assert "proc availableDriverNames*(): seq[string]" in source
+    assert '"frameBuffer"' in source
+    assert '"waveshare_EPD_7in3e"' in source
     assert 'return spec.name == ("waveshare_" & normalizedWaveshareVariant(device))' in source
     assert 'device == "framebuffer"' in source
     assert 'frameOS.frameConfig.gpioButtons.len > 0' in source

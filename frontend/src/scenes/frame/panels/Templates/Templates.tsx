@@ -34,9 +34,6 @@ interface CompatibleTemplateRow {
 }
 
 function sortCompatibleTemplates(a: CompatibleTemplateRow, b: CompatibleTemplateRow): number {
-  if (a.compatibility.supported !== b.compatibility.supported) {
-    return a.compatibility.supported ? -1 : 1
-  }
   return a.template.name.localeCompare(b.template.name)
 }
 

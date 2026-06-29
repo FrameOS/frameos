@@ -38,9 +38,21 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
-import { workspaceLogic } from './workspaceLogic'
+import { SceneDependencyConnector } from './SceneDependencyConnector'
+import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
+import {
+  sceneChildExpansionKey,
+  sceneChildExpansionPath,
+  sceneDependencyGroupingIsEnabled,
+  workspaceLogic,
+} from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import {
+  buildSceneDependencyEntries,
+  buildSceneDependencyGraph,
+  flatSceneDependencyEntries,
+} from './sceneDependencyGrouping'
 
 const uploadedScenePrefix = 'uploaded/'
 const livePreviewSceneId = '__live_preview__'
@@ -373,6 +385,10 @@ function FrameSceneTile({
   active,
   highlighted,
   showMenu,
+  childSceneCount,
+  childrenExpanded,
+  nested,
+  onToggleChildren,
 }: {
   frame: FrameType
   scene: FrameScene
@@ -380,10 +396,15 @@ function FrameSceneTile({
   active: boolean
   highlighted: boolean
   showMenu?: boolean
+  childSceneCount?: number
+  childrenExpanded?: boolean
+  nested?: boolean
+  onToggleChildren?: () => void
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const compiled = sceneIsCompiled(scene, frame.mode)
+  const hasChildScenes = (childSceneCount ?? 0) > 0
 
   const handleOpenSceneControl = (): void => {
     hideForm()
@@ -411,14 +432,15 @@ function FrameSceneTile({
     </>
   )
 
-  return (
+  const tile = (
     <div
       draggable
       data-workspace-scene-tile={scene.id}
       data-workspace-scene-tile-frame={frame.id}
       onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
-        'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
+        'frameos-card group relative z-[1] h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
+        nested && 'frameos-scene-child-tile',
         highlighted
           ? selectedSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
@@ -441,6 +463,23 @@ function FrameSceneTile({
           ) : null}
         </div>
       ) : null}
+      {hasChildScenes ? (
+        <button
+          type="button"
+          aria-label={`${childrenExpanded ? 'Hide' : 'Show'} ${childSceneCount} nested ${
+            childSceneCount === 1 ? 'scene' : 'scenes'
+          }`}
+          aria-expanded={childrenExpanded}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleChildren?.()
+          }}
+          className="frameos-scene-child-toggle absolute right-2 top-2 z-20 flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          {childrenExpanded ? '-' : '+'}
+          {childSceneCount}
+        </button>
+      ) : null}
       {showMenu ? (
         <WorkspaceSceneDropDown
           frame={frame}
@@ -448,9 +487,23 @@ function FrameSceneTile({
           scenes={scenes}
           horizontal
           buttonColor="none"
-          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
+          className={clsx(
+            'absolute right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700',
+            hasChildScenes ? 'top-11' : 'top-2'
+          )}
         />
       ) : null}
+    </div>
+  )
+
+  if (!nested) {
+    return tile
+  }
+
+  return (
+    <div className="relative h-36 w-36 shrink-0">
+      <SceneDependencyConnector />
+      {tile}
     </div>
   )
 }
@@ -508,10 +561,25 @@ function FrameScenesBlock({
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
 }): JSX.Element {
-  const { sceneControlSelection, search } = useValues(workspaceLogic)
-  const { openSceneControl } = useActions(workspaceLogic)
+  const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
+  const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const searchIsActive = search.trim().length > 0
+  const allScenes = searchIsActive ? frame.scenes ?? scenes : scenes
+  const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
+  const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
+  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
+  const sceneOverviewEntries = groupingEnabled
+    ? buildSceneDependencyEntries({
+        childrenBySceneId,
+        frameId: frame.id,
+        matchingSceneIds,
+        sceneById,
+        sceneChildExpansion: frameAssetFolderExpansion,
+        scenes: allScenes,
+      })
+    : flatSceneDependencyEntries(scenes)
   const visibleSceneToolButtons = isInFrameAdminMode()
     ? sceneToolButtons.filter(({ panel }) => !frameAdminUnsupportedSceneToolPanels.has(panel))
     : sceneToolButtons
@@ -548,35 +616,46 @@ function FrameScenesBlock({
 
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
-          <A
-            key={panel}
-            href={urls.frame(frame.id, panel)}
-            className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </A>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
+            <A
+              key={panel}
+              href={urls.frame(frame.id, panel)}
+              className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </A>
+          ))}
+        </div>
+        <SceneDependencyFormatMenu frameId={frame.id} surface="overview" />
       </div>
-      {scenes.length > 0 ? (
+      {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">
-          {scenes.map((scene) => {
+          {sceneOverviewEntries.map(({ scene, key, nested }) => {
             const active = sceneIsActive(scene, frame.active_scene_id)
             const selected =
               sceneControlSelection?.frameId === frame.id &&
               sceneControlSelection.sceneId === scene.id &&
               sceneControlSelection.source !== 'preview'
+            const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+            const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
             return (
               <FrameSceneTile
-                key={scene.id}
+                key={key}
                 frame={frame}
                 scene={scene}
-                scenes={scenes}
+                scenes={allScenes}
                 active={active}
                 highlighted={selected}
                 showMenu={showSceneMenus}
+                childSceneCount={childSceneCount}
+                childrenExpanded={childrenExpanded}
+                nested={nested}
+                onToggleChildren={() =>
+                  setFrameAssetFolderExpanded(frame.id, sceneChildExpansionPath(scene.id), !childrenExpanded)
+                }
               />
             )
           })}

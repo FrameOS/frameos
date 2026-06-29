@@ -1,13 +1,32 @@
 import unittest
 import json
 import strutils
-import sequtils
+import mummy/routers
 
 import ../../types
 import ../state
 import ../routes
 
 suite "Server routes composition":
+  proc routeDebugs(router: Router): seq[string] =
+    for route in router.routes:
+      result.add(repr(route))
+
+  proc hasRoute(routeDump: seq[string], httpMethod: string, pathParts: openArray[string]): bool =
+    let methodToken = "httpMethod: \"" & httpMethod & "\""
+    for debug in routeDump:
+      if methodToken notin debug:
+        continue
+
+      var allPartsPresent = true
+      for part in pathParts:
+        if "\"" & part & "\"" notin debug:
+          allPartsPresent = false
+          break
+
+      if allPartsPresent:
+        return true
+
   test "router registers expected route surface":
     globalFrameConfig = FrameConfig(
       frameAdminAuth: %*{},
@@ -20,30 +39,33 @@ suite "Server routes composition":
     let router = buildRouter(publicState, adminState)
 
     check router.notFoundHandler != nil
-    check router.routes.len == 67
+    let routes = routeDebugs(router)
 
-    var getCount = 0
-    var postCount = 0
-    var routeDump: seq[string] = @[]
-    for route in router.routes:
-      let debug = repr(route)
-      routeDump.add(debug)
-      if "httpMethod: \"GET\"" in debug:
-        inc getCount
-      elif "httpMethod: \"POST\"" in debug:
-        inc postCount
+    # Key paths from public web, frame API, admin API, assets, and repository
+    # surfaces should all be present without freezing the exact route count.
+    check routes.hasRoute("GET", ["ping"])
+    check routes.hasRoute("GET", ["img", "**"])
+    check routes.hasRoute("GET", ["ws", "admin"])
+    check routes.hasRoute("POST", ["setup"])
+    check routes.hasRoute("POST", ["event", "@name"])
 
-    check getCount == 47
-    check postCount == 20
+    check routes.hasRoute("GET", ["api", "apps"])
+    check routes.hasRoute("GET", ["api", "frames", "@id", "metrics", "recent"])
+    check routes.hasRoute("GET", ["api", "frames", "@id", "states"])
+    check routes.hasRoute("POST", ["api", "frames", "@id", "scene_images", "@sceneId"])
+    check routes.hasRoute("POST", ["api", "frames", "@id", "upload_scenes"])
 
-    # Key paths from public, frame API, and admin surfaces should all be present.
-    check routeDump.anyIt("\"ping\"" in it)
-    check routeDump.anyIt("\"img\"" in it)
-    check routeDump.anyIt("\"states\"" in it)
-    check routeDump.anyIt("\"api\"" in it and "\"admin\"" in it and "\"session\"" in it)
-    check routeDump.anyIt("\"api\"" in it and "\"settings\"" in it)
-    check routeDump.anyIt("\"api\"" in it and "\"upgrade\"" in it)
-    check routeDump.anyIt("\"api\"" in it and "\"frames\"" in it and "\"event\"" in it)
+    check routes.hasRoute("GET", ["api", "admin", "session"])
+    check routes.hasRoute("POST", ["api", "admin", "login"])
+    check routes.hasRoute("GET", ["api", "settings"])
+    check routes.hasRoute("POST", ["api", "settings"])
+    check routes.hasRoute("GET", ["api", "upgrade", "status"])
+    check routes.hasRoute("POST", ["api", "upgrade"])
+    check routes.hasRoute("GET", ["api", "admin", "frames", "@id", "assets"])
+    check routes.hasRoute("POST", ["api", "admin", "frames", "@id", "assets", "upload"])
+
+    check routes.hasRoute("GET", ["api", "repositories", "system"])
+    check routes.hasRoute("GET", ["api", "repositories", "system", "@repositorySlug", "templates", "@templateSlug", "image"])
 
   test "not found logging suppresses stale frontend asset paths":
     check not shouldLogRouteNotFound("/img/logo-2/logo-white-colors.svg")

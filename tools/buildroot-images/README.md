@@ -38,6 +38,9 @@ R2_ACCOUNT_ID    # or R2_ENDPOINT
 # Build the reusable base image for the current FrameOS version.
 python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w build
 
+# Force a clean rebuild of the selected cached /build/output entry.
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w build --clean-output-cache
+
 # Upload it to R2 and update buildroot-images/manifest.json in the bucket.
 python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w upload --yes
 
@@ -135,6 +138,32 @@ FRAMEOS_BUILDROOT_VERSION=2025.02.13
 FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1    # ignore remote cache and build locally
 FRAMEOS_BUILDROOT_SKIP_PULL=1            # do not pull from Docker Hub
 ```
+
+The manual base-image helper keeps three local caches by default:
+
+```text
+build/buildroot-images/cache         # Buildroot download cache mounted at /cache
+build/buildroot-images/cache/ccache  # Buildroot compiler cache, capped at 10 GiB
+build/buildroot-images/source-cache  # extracted Buildroot source mounted at /build/buildroot
+build/buildroot-images/output-cache  # keyed /build/output cache for repeated local builds
+```
+
+The output cache key includes the generated Buildroot config, kernel fragment,
+post-build scripts, overlay, boot logo, Buildroot version, helper image, and
+bootstrap script version. Re-running the same base build can therefore copy the
+cached `sdcard.img`; changing those inputs selects a new output cache entry. Use
+`--no-output-cache` to force ephemeral output or `--clean-output-cache` to delete
+the selected entry before rebuilding.
+
+Each base build writes timing details into the generated metadata:
+
+```text
+phase_timings     # apt install, source preparation, Buildroot make, image copy, etc.
+package_timings   # top package directories by stamp-file elapsed time
+```
+
+When using the prebuilt helper image directly, pass `--skip-apt-install` or set
+`FRAMEOS_BUILDROOT_SKIP_APT_INSTALL=1` to avoid the container apt step.
 
 To verify a local or pulled helper image has the required composition tools:
 

@@ -32,6 +32,31 @@ def test_release_image_frame_uses_hotspot_without_wifi_credentials():
     assert frame_json["device"] == "framebuffer"
 
 
+def test_base_bootstrap_overlay_enables_frameos_service(tmp_path):
+    module = load_buildroot_images_module()
+
+    module.write_base_bootstrap_overlay(tmp_path)
+
+    service = tmp_path / "etc" / "systemd" / "system" / "frameos.service"
+    wants_link = tmp_path / "etc" / "systemd" / "system" / "multi-user.target.wants" / "frameos.service"
+
+    assert service.is_file()
+    service_text = service.read_text(encoding="utf-8")
+    assert "User=root" in service_text
+    assert "ExecStart=/srv/frameos/current/frameos" in service_text
+    assert "Environment=FRAMEOS_HOME=/srv/frameos/current" in service_text
+    assert wants_link.is_symlink()
+    assert wants_link.readlink().as_posix() == "../frameos.service"
+    nm_connections_dir = tmp_path / module.BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
+    assert nm_connections_dir.is_dir()
+    nm_state_dir = tmp_path / module.BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
+    assert nm_state_dir.is_dir()
+    assert oct(nm_state_dir.stat().st_mode & 0o777) == "0o700"
+    assert module.BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in (
+        tmp_path / "etc" / "fstab"
+    ).read_text(encoding="utf-8")
+
+
 def test_find_precompiled_artifact_root_prefers_matching_metadata(tmp_path):
     module = load_buildroot_images_module()
     artifact_root = tmp_path / "frameos-2026.6.2-debian-bookworm-arm64"

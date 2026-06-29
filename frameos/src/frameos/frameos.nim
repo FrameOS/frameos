@@ -187,7 +187,11 @@ proc start*(self: FrameOS) {.async.} =
         netportal.stopAp(self)
       else:
         netportal.startAp(self)
-        firstSceneId = some("system/wifiHotspot".SceneId)
+        if self.network.hotspotStatus == HotspotStatus.enabled:
+          firstSceneId = some("system/wifiHotspot".SceneId)
+        else:
+          self.logger.log(%*{"event": "portal:startAp:startupFailed",
+                             "status": $self.network.hotspotStatus})
   else:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
 

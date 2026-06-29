@@ -96,6 +96,23 @@ block test_setup_apt_packages_installs_only_missing_packages:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_schedule_setup_reboot_only_when_setup_requires_it:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    doAssert not scheduleSetupRebootIfRequired(setupOk(), "FrameOS driver setup", delaySeconds = 7)
+    doAssert commands.len == 0
+
+    doAssert scheduleSetupRebootIfRequired(setupNeedsReboot(), "FrameOS driver setup", delaySeconds = 7)
+    doAssert commands.len == 1
+    doAssert commands[0].contains("sleep 7")
+    doAssert commands[0].contains("systemctl reboot || reboot")
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_frameos_service_contents_uses_detected_user:
   let service = frameosServiceContents("frame-user")
 

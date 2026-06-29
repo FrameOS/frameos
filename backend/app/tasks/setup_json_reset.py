@@ -87,7 +87,7 @@ fi
 
 if [ -f {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} ]; then
   echo "Installing NetworkManager WiFi connection from {shlex.quote(BOOT_WIFI_CONNECTION_FILE)}"
-  if install -d -m 755 /etc/NetworkManager/system-connections; then
+  if install -d -m 700 /etc/NetworkManager/system-connections; then
     if ! install -m 600 {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} /etc/NetworkManager/system-connections/frameos-wifi.nmconnection; then
       echo "Warning: failed to install NetworkManager WiFi connection"
     fi

@@ -9,12 +9,24 @@ import { FrameImage } from '../../../../components/FrameImage'
 import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
 import { CalendarDaysIcon } from '@heroicons/react/24/outline'
-import { PlusIcon } from '@heroicons/react/24/solid'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { FrameScene, ScheduledEvent, StateField } from '../../../../types'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from '../../../workspace/sceneDrag'
+import { SceneDependencyConnector } from '../../../workspace/SceneDependencyConnector'
+import { SceneDependencyFormatMenu } from '../../../workspace/SceneDependencyFormatMenu'
+import {
+  buildSceneDependencyEntries,
+  buildSceneDependencyGraph,
+  flatSceneDependencyEntries,
+} from '../../../workspace/sceneDependencyGrouping'
+import {
+  sceneChildExpansionKey,
+  sceneChildExpansionPath,
+  sceneDependencyGroupingIsEnabled,
+  workspaceLogic,
+} from '../../../workspace/workspaceLogic'
 
 const weekDayOptions = [
   { value: 0, label: 'Every day' },
@@ -59,6 +71,10 @@ interface SceneScheduleCardProps {
   scene: FrameScene
   eventCount: number
   layout: 'strip' | 'grid' | 'responsive'
+  nested?: boolean
+  childSceneCount?: number
+  childrenExpanded?: boolean
+  onToggleChildren?: () => void
   addEventForScene: (sceneId: string) => void
   showDropZone: () => void
   hideDropZone: () => void
@@ -69,52 +85,75 @@ function SceneScheduleCard({
   scene,
   eventCount,
   layout,
+  nested,
+  childSceneCount = 0,
+  childrenExpanded,
+  onToggleChildren,
   addEventForScene,
   showDropZone,
   hideDropZone,
 }: SceneScheduleCardProps): JSX.Element {
+  const hasChildScenes = childSceneCount > 0
+  const sizeClassName =
+    layout === 'grid'
+      ? 'min-w-0'
+      : layout === 'responsive'
+      ? 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
+      : 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
+
   return (
-    <button
-      type="button"
-      draggable={Boolean(scene.id)}
-      onDragStart={(dragEvent) => {
-        if (scene.id) {
-          setFrameosSceneDragData(dragEvent.dataTransfer, scene.id)
-          showDropZone()
-        }
-      }}
-      onDragEnd={hideDropZone}
-      onClick={() => addEventForScene(scene.id)}
-      className={clsx(
-        'frameos-primary-hover-border group relative flex overflow-hidden rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        layout === 'grid'
-          ? 'min-w-0'
-          : layout === 'responsive'
-          ? 'min-w-[8.5rem] max-w-[9.5rem] flex-none @5xl:min-w-0 @5xl:max-w-none @5xl:flex-1'
-          : 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
-      )}
-      title={`Add ${sceneName(scene)} to the schedule`}
-    >
-      <div className="flex w-full flex-col">
-        <div className="relative aspect-[4/3] overflow-hidden bg-slate-200/60">
-          <FrameImage
-            frameId={frameId}
-            sceneId={scene.id}
-            thumb
-            refreshable={false}
-            objectFit="cover"
-            className="h-full w-full rounded-none transition duration-200 group-hover:scale-[1.03]"
-          />
-          <span className="frameos-primary-text absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow-sm">
-            <PlusIcon className="h-4 w-4" />
-          </span>
-        </div>
-        <div className="min-w-0 px-3 py-2">
-          <div className="truncate text-sm font-semibold">{sceneName(scene)}</div>
-          <div className="frame-tool-muted mt-0.5 text-xs">{entryCountLabel(eventCount)}</div>
-        </div>
+    <div className={clsx('relative', sizeClassName)}>
+      {nested ? <SceneDependencyConnector compact /> : null}
+      <div
+        draggable={Boolean(scene.id)}
+        onDragStart={(dragEvent) => {
+          if (scene.id) {
+            setFrameosSceneDragData(dragEvent.dataTransfer, scene.id)
+            showDropZone()
+          }
+        }}
+        onDragEnd={hideDropZone}
+        className={clsx(
+          'frameos-primary-hover-border frameos-scene-picker-card group relative z-[1] flex w-full overflow-hidden rounded-lg border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus-within:ring-2 focus-within:ring-blue-400',
+          nested && 'frameos-scene-child-tile'
+        )}
+        title={`Add ${sceneName(scene)} to the schedule`}
+      >
+        <button type="button" onClick={() => addEventForScene(scene.id)} className="flex w-full flex-col text-left">
+          <div className="relative aspect-[4/3] overflow-hidden bg-slate-200/60">
+            <FrameImage
+              frameId={frameId}
+              sceneId={scene.id}
+              thumb
+              refreshable={false}
+              objectFit="cover"
+              className="h-full w-full rounded-none transition duration-200 group-hover:scale-[1.03]"
+            />
+          </div>
+          <div className="min-w-0 px-3 py-2">
+            <div className="truncate text-sm font-semibold">{sceneName(scene)}</div>
+            <div className="frame-tool-muted mt-0.5 text-xs">{entryCountLabel(eventCount)}</div>
+          </div>
+        </button>
+        {hasChildScenes ? (
+          <button
+            type="button"
+            aria-label={`${childrenExpanded ? 'Hide' : 'Show'} ${childSceneCount} nested ${
+              childSceneCount === 1 ? 'scene' : 'scenes'
+            }`}
+            aria-expanded={childrenExpanded}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleChildren?.()
+            }}
+            className="frameos-scene-child-toggle frameos-scene-child-toggle--compact absolute right-2 top-2 z-20 flex h-7 min-w-7 items-center justify-center rounded-lg px-1.5 text-[11px] font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            {childrenExpanded ? '-' : '+'}
+            {childSceneCount}
+          </button>
+        ) : null}
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -427,6 +466,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     disabled,
     eventCountsByScene,
   } = useValues(scheduleLogic({ frameId }))
+  const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const {
     editEvent,
     addEventForScene,
@@ -437,7 +477,20 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     setSceneSearch,
     showDropZone,
   } = useActions(scheduleLogic({ frameId }))
+  const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const scenesById = Object.fromEntries(sortedScenes.map((scene) => [scene.id, scene]))
+  const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(sortedScenes)
+  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frameId, 'schedule')
+  const scenePickerEntries = groupingEnabled
+    ? buildSceneDependencyEntries({
+        childrenBySceneId,
+        frameId,
+        matchingSceneIds: sceneSearch.trim() ? new Set(filteredScenes.map((scene) => scene.id)) : null,
+        sceneById,
+        sceneChildExpansion: frameAssetFolderExpansion,
+        scenes: sortedScenes,
+      })
+    : flatSceneDependencyEntries(filteredScenes)
 
   const dragIsInsidePanel = (event: DragEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -495,30 +548,43 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
             placeholder="Find scenes..."
             className="h-9 rounded-xl"
           />
-          <div className="frame-tool-muted shrink-0 text-xs">
-            {filteredScenes.length}/{sortedScenes.length}
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="frame-tool-muted text-xs">
+              {filteredScenes.length}/{sortedScenes.length}
+            </div>
+            <SceneDependencyFormatMenu frameId={frameId} surface="schedule" />
           </div>
         </div>
-        {filteredScenes.length ? (
+        {scenePickerEntries.length ? (
           <div
             className={clsx(
               drawerMode
                 ? '-mx-1 flex gap-3 overflow-x-auto px-1 pb-1'
-                : '-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 @5xl:mx-0 @5xl:grid @5xl:grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] @5xl:overflow-visible @5xl:px-0 @5xl:pb-0'
+                : '-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 @5xl:mx-0 @5xl:flex-wrap @5xl:overflow-visible @5xl:px-0 @5xl:pb-0'
             )}
           >
-            {filteredScenes.map((scene) => (
-              <SceneScheduleCard
-                key={scene.id}
-                frameId={frameId}
-                scene={scene}
-                eventCount={eventCountsByScene[scene.id] ?? 0}
-                layout={sceneCardLayout}
-                addEventForScene={addEventForScene}
-                showDropZone={showDropZone}
-                hideDropZone={hideDropZone}
-              />
-            ))}
+            {scenePickerEntries.map(({ scene, key, nested }) => {
+              const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+              const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frameId, scene.id)]
+              return (
+                <SceneScheduleCard
+                  key={key}
+                  frameId={frameId}
+                  scene={scene}
+                  eventCount={eventCountsByScene[scene.id] ?? 0}
+                  layout={sceneCardLayout}
+                  nested={nested}
+                  childSceneCount={childSceneCount}
+                  childrenExpanded={childrenExpanded}
+                  onToggleChildren={() =>
+                    setFrameAssetFolderExpanded(frameId, sceneChildExpansionPath(scene.id), !childrenExpanded)
+                  }
+                  addEventForScene={addEventForScene}
+                  showDropZone={showDropZone}
+                  hideDropZone={hideDropZone}
+                />
+              )
+            })}
           </div>
         ) : sortedScenes.length ? (
           <div className="rounded-2xl border border-dashed border-[var(--tool-border)] px-4 py-5 text-center">

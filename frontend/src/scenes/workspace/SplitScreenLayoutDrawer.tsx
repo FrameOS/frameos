@@ -27,8 +27,21 @@ import {
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { SceneDependencyConnector } from './SceneDependencyConnector'
+import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
+import {
+  buildSceneDependencyEntries,
+  buildSceneDependencyGraph,
+  flatSceneDependencyEntries,
+  sortScenesAlphabetically,
+} from './sceneDependencyGrouping'
 import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
-import { workspaceLogic } from './workspaceLogic'
+import {
+  sceneChildExpansionKey,
+  sceneChildExpansionPath,
+  sceneDependencyGroupingIsEnabled,
+  workspaceLogic,
+} from './workspaceLogic'
 
 const DEFAULT_SPLIT_SCENE_NAME = 'Split screen'
 const INITIAL_SPLIT_PRESET_COUNT = 3
@@ -155,11 +168,25 @@ function SceneSourceStrip({
   onSearchChange: (search: string) => void
   search: string
 }): JSX.Element {
-  const scenes = frame.scenes ?? []
+  const { frameAssetFolderExpansion } = useValues(workspaceLogic)
+  const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
+  const scenes = sortScenesAlphabetically(frame.scenes ?? [])
   const searchTerm = search.trim().toLowerCase()
   const filteredScenes = searchTerm
     ? scenes.filter((scene) => `${scene.name || ''} ${scene.id}`.toLowerCase().includes(searchTerm))
     : scenes
+  const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(scenes)
+  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'split')
+  const sceneEntries = groupingEnabled
+    ? buildSceneDependencyEntries({
+        childrenBySceneId,
+        frameId: frame.id,
+        matchingSceneIds: searchTerm ? new Set(filteredScenes.map((scene) => scene.id)) : null,
+        sceneById,
+        sceneChildExpansion: frameAssetFolderExpansion,
+        scenes,
+      })
+    : flatSceneDependencyEntries(filteredScenes)
 
   return (
     <div className="min-w-0">
@@ -172,42 +199,69 @@ function SceneSourceStrip({
           placeholder="Search"
           className="frameos-form-control h-7 min-w-0 flex-1 rounded-md border px-2 text-xs font-medium outline-none transition focus:ring-1 focus:ring-blue-400 sm:max-w-44"
         />
+        <SceneDependencyFormatMenu frameId={frame.id} surface="split" className="!h-7 !w-7" />
       </div>
       {scenes.length === 0 ? (
         <div className="frameos-muted frameos-inset rounded-lg border px-3 py-3 text-center text-xs font-semibold">
           No scenes available
         </div>
-      ) : filteredScenes.length === 0 ? (
+      ) : sceneEntries.length === 0 ? (
         <div className="frameos-muted frameos-inset rounded-lg border px-3 py-3 text-center text-xs font-semibold">
           No matching scenes
         </div>
       ) : (
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {filteredScenes.map((scene) => (
-            <button
-              key={scene.id}
-              type="button"
-              draggable
-              onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
-              onClick={() => onPickScene(scene.id)}
-              title={scene.name || 'Untitled'}
-              className="frameos-card group w-36 shrink-0 overflow-hidden rounded-lg border text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:w-32"
-            >
-              <div className="frameos-card-media relative h-16">
-                <FrameImage
-                  frameId={frame.id}
-                  sceneId={scene.id}
-                  thumb
-                  refreshable={false}
-                  objectFit="cover"
-                  className="h-full w-full rounded-none"
-                />
+          {sceneEntries.map(({ scene, key, nested }) => {
+            const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+            const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
+            return (
+              <div key={key} className="relative w-36 shrink-0 sm:w-32">
+                {nested ? <SceneDependencyConnector compact /> : null}
+                <div
+                  draggable
+                  onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
+                  title={scene.name || 'Untitled'}
+                  className={clsx(
+                    'frameos-card group relative z-[1] w-full overflow-hidden rounded-lg border text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:ring-2 focus-within:ring-blue-400',
+                    nested && 'frameos-scene-child-tile'
+                  )}
+                >
+                  <button type="button" onClick={() => onPickScene(scene.id)} className="block h-full w-full text-left">
+                    <div className="frameos-card-media relative h-16">
+                      <FrameImage
+                        frameId={frame.id}
+                        sceneId={scene.id}
+                        thumb
+                        refreshable={false}
+                        objectFit="cover"
+                        className="h-full w-full rounded-none"
+                      />
+                    </div>
+                    <div className="frameos-scene-source-title frameos-strong px-2 py-1.5 text-xs font-semibold leading-snug">
+                      {scene.name || 'Untitled'}
+                    </div>
+                  </button>
+                  {childSceneCount > 0 ? (
+                    <button
+                      type="button"
+                      aria-label={`${childrenExpanded ? 'Hide' : 'Show'} ${childSceneCount} nested ${
+                        childSceneCount === 1 ? 'scene' : 'scenes'
+                      }`}
+                      aria-expanded={childrenExpanded}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setFrameAssetFolderExpanded(frame.id, sceneChildExpansionPath(scene.id), !childrenExpanded)
+                      }}
+                      className="frameos-scene-child-toggle frameos-scene-child-toggle--compact absolute right-1.5 top-1.5 z-20 flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 text-[11px] font-bold shadow-sm backdrop-blur-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      {childrenExpanded ? '-' : '+'}
+                      {childSceneCount}
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              <div className="frameos-scene-source-title frameos-strong px-2 py-1.5 text-xs font-semibold leading-snug">
-                {scene.name || 'Untitled'}
-              </div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

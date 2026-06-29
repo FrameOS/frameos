@@ -128,8 +128,8 @@ BUILDROOT_DOCKER_APT_DEPS = (
     "xz-utils",
 )
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
-BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
-BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel")
+BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel", "debugfs")
+BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel", "debugfs")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 LEGACY_PLATFORM_ALIASES = {
@@ -185,6 +185,12 @@ BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
     # Keep a small firmware framebuffer reserve for standard HDMI output while
     # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
     "gpu_mem=32",
+)
+BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
+BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR = "/srv/frameos/state/NetworkManager/system-connections"
+BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
+    f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
+    "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
 )
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
@@ -433,6 +439,71 @@ def _service_runtime_lines(
             "StandardError=journal+console",
         ])
     return lines
+
+
+def render_systemd_service(
+    source: Path,
+    *,
+    user: str,
+    console_output: bool = False,
+    environment: dict[str, str] | None = None,
+) -> str:
+    service = source.read_text(encoding="utf-8").replace("%I", user)
+    service_lines = service.splitlines()
+    rendered_lines: list[str] = []
+    in_service = False
+    inserted = False
+    for line in service_lines:
+        if line == "[Service]":
+            in_service = True
+            rendered_lines.append(line)
+            continue
+        if in_service and line.startswith("[") and line.endswith("]"):
+            if not inserted:
+                rendered_lines.extend(_service_runtime_lines(console_output, environment))
+                inserted = True
+            in_service = False
+        rendered_lines.append(line)
+    if in_service and not inserted:
+        rendered_lines.extend(_service_runtime_lines(console_output, environment))
+    return "\n".join(rendered_lines) + "\n"
+
+
+def render_buildroot_frameos_service() -> str:
+    service = render_systemd_service(
+        REPO_ROOT / "frameos" / "frameos.service",
+        user="root",
+        environment={
+            "FRAMEOS_HOME": "/srv/frameos/current",
+            "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
+        },
+    )
+    return service.replace(
+        "After=network.target\n",
+        "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n",
+        1,
+    )
+
+
+def stage_buildroot_frameos_service(root: Path) -> None:
+    systemd_dir = root / "etc" / "systemd" / "system"
+    wants_dir = systemd_dir / "multi-user.target.wants"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    wants_dir.mkdir(parents=True, exist_ok=True)
+    (systemd_dir / "frameos.service").write_text(render_buildroot_frameos_service(), encoding="utf-8")
+    link = wants_dir / "frameos.service"
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to("../frameos.service")
+
+
+def stage_buildroot_network_manager_state(root: Path) -> None:
+    state_dir = root / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
+    connections_dir = root / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    connections_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    os.chmod(connections_dir, 0o700)
 
 
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
@@ -1209,6 +1280,7 @@ class BuildrootImageBuilder:
             wants_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+        stage_buildroot_network_manager_state(overlay_dir)
 
         if not frameos_build.binary_path:
             raise RuntimeError("FrameOS cross compilation did not produce a binary")
@@ -1359,25 +1431,15 @@ class BuildrootImageBuilder:
         console_output: bool = False,
         environment: dict[str, str] | None = None,
     ) -> None:
-        service = source.read_text(encoding="utf-8").replace("%I", user)
-        service_lines = service.splitlines()
-        rendered_lines: list[str] = []
-        in_service = False
-        inserted = False
-        for line in service_lines:
-            if line == "[Service]":
-                in_service = True
-                rendered_lines.append(line)
-                continue
-            if in_service and line.startswith("[") and line.endswith("]"):
-                if not inserted:
-                    rendered_lines.extend(_service_runtime_lines(console_output, environment))
-                    inserted = True
-                in_service = False
-            rendered_lines.append(line)
-        if in_service and not inserted:
-            rendered_lines.extend(_service_runtime_lines(console_output, environment))
-        destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
+        destination.write_text(
+            render_systemd_service(
+                source,
+                user=user,
+                console_output=console_output,
+                environment=environment,
+            ),
+            encoding="utf-8",
+        )
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = _get_frame_settings(self.db, self.frame)
@@ -1456,12 +1518,17 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_UTIL_LINUX=y",
                     "BR2_PACKAGE_UTIL_LINUX_BINARIES=y",
                     "BR2_PACKAGE_UTIL_LINUX_PARTX=y",
+                    "BR2_PACKAGE_UTIL_LINUX_RFKILL=y",
                     "BR2_PACKAGE_E2FSPROGS=y",
                     "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y",
                     "BR2_PACKAGE_DOSFSTOOLS=y",
                     "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y",
                     "BR2_PACKAGE_NANO=y",
                     "BR2_PACKAGE_IPROUTE2=y",
+                    "BR2_PACKAGE_IPTABLES=y",
+                    "BR2_PACKAGE_IPTABLES_NFTABLES=y",
+                    "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y",
+                    "BR2_PACKAGE_NFTABLES=y",
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
                     "BR2_PACKAGE_ZLIB=y",
@@ -1477,13 +1544,17 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_WPA_SUPPLICANT=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y",
                     "BR2_PACKAGE_IW=y",
                     "BR2_PACKAGE_WIRELESS_TOOLS=y",
+                    "BR2_PACKAGE_WIRELESS_REGDB=y",
                     "BR2_PACKAGE_LINUX_FIRMWARE=y",
                     "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
                     "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
                     "BR2_PACKAGE_LIBEVDEV=y",
-                    "# BR2_CCACHE is not set",
+                    "BR2_CCACHE=y",
+                    'BR2_CCACHE_DIR="/cache/ccache"',
+                    'BR2_CCACHE_INITIAL_SETUP="--max-size=10G"',
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
@@ -1616,6 +1687,26 @@ class BuildrootImageBuilder:
 set -euo pipefail
 
 ulimit -n {BUILDROOT_DOCKER_NOFILE_LIMIT} || true
+mkdir -p /artifacts
+
+timing_file="/artifacts/buildroot-timings.tsv"
+package_timing_file="/artifacts/buildroot-package-timings.json"
+: > "$timing_file"
+
+now_ns() {{
+  date +%s%N
+}}
+
+phase_start() {{
+  frameos_phase_name="$1"
+  frameos_phase_start="$(now_ns)"
+  printf '==> %s\\n' "$frameos_phase_name"
+}}
+
+phase_end() {{
+  frameos_phase_end="$(now_ns)"
+  printf '%s\\t%s\\t%s\\n' "$frameos_phase_name" "$frameos_phase_start" "$frameos_phase_end" >> "$timing_file"
+}}
 
 export DEBIAN_FRONTEND=noninteractive
 export CC="/usr/bin/gcc"
@@ -1629,15 +1720,26 @@ export CXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 export HOSTCXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 unset TERMINFO TERMINFO_DIRS
 
+phase_start apt_install
 if [ "${{BUILDROOT_SKIP_APT_INSTALL:-0}}" != "1" ]; then
   apt-get update
   apt-get install -y --no-install-recommends \\
     {BUILDROOT_DOCKER_APT_DEPS_LINE}
 fi
+phase_end
 
 mkdir -p /cache /work /artifacts /build/buildroot /build/output
+phase_start prepare_buildroot_source
 source_tarball="/frameos-buildroot/{tarball}"
 cache_tarball="/cache/{tarball}"
+if [ -f /build/buildroot/.frameos-buildroot-version ] && \\
+  [ "$(cat /build/buildroot/.frameos-buildroot-version)" != "{BUILDROOT_VERSION}" ]; then
+  find /build/buildroot -mindepth 1 -maxdepth 1 -exec rm -rf {{}} +
+fi
+if [ -f /build/buildroot/.frameos-bootstrap-script-version ] && \\
+  [ "$(cat /build/buildroot/.frameos-bootstrap-script-version)" != "{BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}" ]; then
+  find /build/buildroot -mindepth 1 -maxdepth 1 -exec rm -rf {{}} +
+fi
 if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   if [ -f "$source_tarball" ]; then
     tarball_path="$source_tarball"
@@ -1650,6 +1752,10 @@ if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   tar -C /build/buildroot --strip-components=1 -xzf "$tarball_path"
   printf '%s\\n' '{BUILDROOT_VERSION}' > /build/buildroot/.frameos-buildroot-version
 fi
+printf '%s\\n' '{BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}' > /build/buildroot/.frameos-bootstrap-script-version
+phase_end
+
+phase_start patch_buildroot_source
 ncurses_mk="/build/buildroot/package/ncurses/ncurses.mk"
 if [ -f "$ncurses_mk" ] && ! grep -q "FRAMEOS_NCURSES_TERMINFO_LINKS" "$ncurses_mk"; then
   cat >> "$ncurses_mk" <<'EOF'
@@ -1686,14 +1792,22 @@ if needle not in text:
 path.write_text(text.replace(needle, replacement, 1) + marker)
 PY
 fi
+phase_end
+
+phase_start clean_output
 if [ "${{FRAMEOS_BUILDROOT_CLEAN:-0}}" = "1" ] && [ -f /build/output/Makefile ]; then
   make -C /build/buildroot O=/build/output clean
 fi
+phase_end
+
 if [ -s /build/output/images/sdcard.img ]; then
+  phase_start reuse_cached_sdcard
   cp /build/output/images/sdcard.img /artifacts/{shlex.quote(output_filename)}
   chmod a+r /artifacts/{shlex.quote(output_filename)}
+  phase_end
   exit 0
 fi
+phase_start configure_buildroot
 if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/null \\
   && ! find /build/output/host -path "*/sysroot/usr/share/terminfo/a/ansi" -print -quit | grep -q .; then
   for stamp in /build/output/build/ncurses-*/.stamp_staging_installed; do
@@ -1705,9 +1819,76 @@ make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
+phase_end
+
+phase_start buildroot_make
 make -C /build/buildroot O=/build/output
+phase_end
+
+phase_start summarize_package_timings
+python3 - "/build/output/build" "$package_timing_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+build_dir = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+stamp_names = [
+    ".stamp_downloaded",
+    ".stamp_extracted",
+    ".stamp_patched",
+    ".stamp_configured",
+    ".stamp_built",
+    ".stamp_staging_installed",
+    ".stamp_target_installed",
+    ".stamp_images_installed",
+    ".stamp_host_installed",
+]
+step_pairs = [
+    (".stamp_downloaded", ".stamp_extracted", "extract_seconds"),
+    (".stamp_extracted", ".stamp_patched", "patch_seconds"),
+    (".stamp_patched", ".stamp_configured", "configure_seconds"),
+    (".stamp_configured", ".stamp_built", "build_seconds"),
+    (".stamp_built", ".stamp_staging_installed", "staging_install_seconds"),
+    (".stamp_built", ".stamp_target_installed", "target_install_seconds"),
+    (".stamp_built", ".stamp_images_installed", "images_install_seconds"),
+    (".stamp_built", ".stamp_host_installed", "host_install_seconds"),
+]
+
+records = []
+if build_dir.is_dir():
+    for package_dir in sorted(path for path in build_dir.iterdir() if path.is_dir()):
+        stamps = {{}}
+        for name in stamp_names:
+            path = package_dir / name
+            if path.exists():
+                stamps[name] = path.stat().st_mtime_ns
+        if len(stamps) < 2:
+            continue
+        first = min(stamps.values())
+        last = max(stamps.values())
+        record = {{
+            "package": package_dir.name,
+            "elapsed_seconds": round(max(0, last - first) / 1_000_000_000, 3),
+        }}
+        for start_name, end_name, key in step_pairs:
+            if start_name in stamps and end_name in stamps:
+                record[key] = round(max(0, stamps[end_name] - stamps[start_name]) / 1_000_000_000, 3)
+        records.append(record)
+
+records.sort(key=lambda item: item.get("elapsed_seconds", 0), reverse=True)
+payload = {{
+    "package_count": len(records),
+    "top_elapsed": records[:30],
+}}
+output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+PY
+phase_end
+
+phase_start copy_artifact
 dd if=/build/output/images/sdcard.img of=/artifacts/{shlex.quote(output_filename)} bs=4M conv=fsync status=none
 chmod a+r /artifacts/{shlex.quote(output_filename)}
+phase_end
 """,
             encoding="utf-8",
         )
@@ -1874,6 +2055,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 images_dir / "assets.vfat",
             ),
         )
+        await self._patch_root_partition(output_path, partitions, image=image)
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     @staticmethod
@@ -1921,6 +2103,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
                 output_path,
             ),
         )
+        await self._patch_root_partition(output_path, partitions, image=image)
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     @staticmethod
@@ -1935,6 +2118,207 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         # Release composition may grow those partitions beyond the minimum
         # defaults, and this path only patches BOOT files.
         return partitions
+
+    async def _patch_root_partition(
+        self,
+        output_path: Path,
+        partitions: list[dict[str, int]],
+        *,
+        image: str | None,
+    ) -> None:
+        if len(partitions) < 2:
+            raise RuntimeError("Cannot patch root partition; SD image has fewer than two partitions")
+
+        root_partition = partitions[1]
+        compose_dir = output_path.parent / f".{output_path.stem}-root-patch"
+        service_root = compose_dir / "root-service"
+        if compose_dir.exists():
+            shutil.rmtree(compose_dir)
+        compose_dir.mkdir(parents=True, exist_ok=True)
+        stage_buildroot_frameos_service(service_root)
+        (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+
+        script_path = compose_dir / "patch-root.sh"
+        script_path.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
+service_root="${{FRAMEOS_ROOT_SERVICE_ROOT:-/root-service}}"
+if ! command -v debugfs >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends e2fsprogs
+fi
+disk="$image_dir"/{shlex.quote(output_path.name)}
+rootfs="$(mktemp)"
+cmds="$(mktemp)"
+firmware_tmp="$(mktemp -d)"
+cleanup_root_patch() {{
+  rm -rf "$rootfs" "$cmds" "$firmware_tmp"
+}}
+trap cleanup_root_patch EXIT
+python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
+import sys
+
+disk_path, rootfs_path, start, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+with open(disk_path, "rb") as disk, open(rootfs_path, "wb") as rootfs:
+    disk.seek(start)
+    remaining = size
+    while remaining:
+        chunk = disk.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise SystemExit("root partition ended unexpectedly")
+        rootfs.write(chunk)
+        remaining -= len(chunk)
+PY
+cat > "$cmds" <<EOF
+mkdir /etc
+mkdir /etc/systemd
+mkdir /etc/systemd/system
+mkdir /etc/systemd/system/multi-user.target.wants
+rm /etc/systemd/system/frameos.service
+write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service
+rm /etc/systemd/system/multi-user.target.wants/frameos.service
+symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
+rm /etc/hostname
+write $service_root/etc/hostname /etc/hostname
+EOF
+if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \
+   ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" "$rootfs" >/dev/null 2>&1; then
+python3 - "$firmware_tmp" <<'PY'
+import hashlib
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+destination = Path(sys.argv[1])
+base_url = (
+    "https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/"
+    "c91cd2804cf7463aab913e7247c176049f16bbd6/debian/config/brcm80211/brcm"
+)
+firmware_files = [
+    ("510a7dd1e056199b309425548ee0bd846993a1837ac7fa1e4d3e641f05a1327a", "brcmfmac43436-sdio.bin"),
+    ("fce7cbb62ffa6a5a65ca97b13f6fbf28d06c02d986c2072d65bf72164755fc34", "brcmfmac43436-sdio.clm_blob"),
+    ("4cda90facd8844cff60d80b34b24ecbae76adb9a62508a109461b8bf42b478d1", "brcmfmac43436-sdio.txt"),
+    ("68b9bcc9855d91733cd44c21de4cb507c91b0d32d838c0696def5eb96c99e2de", "brcmfmac43436s-sdio.bin"),
+    ("37a8b85a5a9742761101b764a07bc4d0c8b09f2e180eaea3b503a834277ad595", "brcmfmac43436s-sdio.txt"),
+]
+for expected_sha, name in firmware_files:
+    url = f"{{base_url}}/{{urllib.parse.quote(name, safe='')}}"
+    data = urllib.request.urlopen(url, timeout=60).read()
+    actual_sha = hashlib.sha256(data).hexdigest()
+    if actual_sha != expected_sha:
+        raise SystemExit(f"Checksum mismatch for {{name}}: {{actual_sha}}")
+    (destination / name).write_bytes(data)
+PY
+cat >> "$cmds" <<EOF
+mkdir /usr
+mkdir /usr/lib
+mkdir /usr/lib/firmware
+mkdir /usr/lib/firmware/brcm
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin
+write $firmware_tmp/brcmfmac43436-sdio.bin /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.clm_blob
+write $firmware_tmp/brcmfmac43436-sdio.clm_blob /usr/lib/firmware/brcm/brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.txt
+write $firmware_tmp/brcmfmac43436-sdio.txt /usr/lib/firmware/brcm/brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.bin
+write $firmware_tmp/brcmfmac43436s-sdio.bin /usr/lib/firmware/brcm/brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.txt
+write $firmware_tmp/brcmfmac43436s-sdio.txt /usr/lib/firmware/brcm/brcmfmac43436s-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+rm /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436s-sdio.txt
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436s-sdio.bin
+rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt
+symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436s-sdio.txt
+EOF
+fi
+debugfs -w -f "$cmds" "$rootfs"
+python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
+import sys
+
+disk_path, rootfs_path, start = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(disk_path, "r+b") as disk, open(rootfs_path, "rb") as rootfs:
+    disk.seek(start)
+    while True:
+        chunk = rootfs.read(1024 * 1024)
+        if not chunk:
+            break
+        disk.write(chunk)
+PY
+""",
+            encoding="utf-8",
+        )
+        os.chmod(script_path, 0o755)
+
+        try:
+            if image:
+                if self.executor is None:
+                    raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
+                status, _, err = await self._with_progress_updates(
+                    "Still patching Buildroot SD image root partition",
+                    self.executor.docker_run(
+                        image=image,
+                        mounts=[
+                            DockerMount(output_path.resolve(), f"/image/{output_path.name}"),
+                            DockerMount(service_root.resolve(), "/root-service", read_only=True),
+                            DockerMount(script_path.resolve(), "/patch-root.sh", read_only=True),
+                        ],
+                        args=["bash", "/patch-root.sh"],
+                        workspace="root-patch",
+                        log_command="docker run (buildroot root partition patch)",
+                        stderr_log_tag="stdout",
+                    ),
+                )
+            else:
+                patch_cmd = " ".join(
+                    [
+                        f"FRAMEOS_IMAGE_DIR={shlex.quote(str(output_path.parent))}",
+                        f"FRAMEOS_ROOT_SERVICE_ROOT={shlex.quote(str(service_root))}",
+                        "bash",
+                        shlex.quote(str(script_path)),
+                    ]
+                )
+                status, _, err = await self._with_progress_updates(
+                    "Still patching Buildroot SD image root partition",
+                    self._run_command(
+                        patch_cmd,
+                        log_command="buildroot root partition patch",
+                        stderr_log_tag="stdout",
+                    ),
+                )
+            if status != 0:
+                raise RuntimeError(f"Buildroot root partition patch failed: {err or 'see logs'}")
+        finally:
+            shutil.rmtree(compose_dir, ignore_errors=True)
 
     async def _patch_boot_partition(
         self,
@@ -2202,6 +2586,7 @@ fi
                         " && command -v mkfs.vfat >/dev/null 2>&1"
                         " && command -v mcopy >/dev/null 2>&1"
                         " && command -v mlabel >/dev/null 2>&1"
+                        " && command -v debugfs >/dev/null 2>&1"
                     ),
                 ]
             ),
@@ -2366,9 +2751,17 @@ target_dir="${TARGET_DIR:?TARGET_DIR is required}"
 chmod 0755 "$target_dir/srv/frameos/current/frameos" || true
 chmod 0755 "$target_dir/srv/frameos/remote/current/frameos_remote" || true
 mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/etc/cron.d"
+if [ -f "$target_dir/srv/frameos/current/frameos.service" ]; then
+  install -m 0644 "$target_dir/srv/frameos/current/frameos.service" "$target_dir/etc/systemd/system/frameos.service"
+  rm -f "$target_dir/etc/systemd/system/multi-user.target.wants/frameos.service"
+  ln -s ../frameos.service "$target_dir/etc/systemd/system/multi-user.target.wants/frameos.service"
+fi
+if [ -f "$target_dir/boot/frameos-hostname" ]; then
+  install -m 0644 "$target_dir/boot/frameos-hostname" "$target_dir/etc/hostname"
+fi
 
-if [ -d "$target_dir/lib/firmware/brcm" ]; then
-  cd "$target_dir/lib/firmware/brcm"
+if [ -d "$target_dir/usr/lib/firmware/brcm" ]; then
+  cd "$target_dir/usr/lib/firmware/brcm"
   for base in brcmfmac43436-sdio brcmfmac43436s-sdio brcmfmac43430-sdio; do
     for model in raspberrypi,model-zero-2-w raspberrypi,model-zero-2-2; do
       if [ -e "${base}.bin" ] && [ ! -e "${base}.${model}.bin" ]; then
@@ -2380,6 +2773,60 @@ if [ -d "$target_dir/lib/firmware/brcm" ]; then
     done
   done
 fi
+
+rpi_wifi_firmware_commit="c91cd2804cf7463aab913e7247c176049f16bbd6"
+rpi_wifi_firmware_base_url="https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/${rpi_wifi_firmware_commit}/debian/config/brcm80211/brcm"
+rpi_wifi_firmware_dir="$target_dir/usr/lib/firmware/brcm"
+mkdir -p "$rpi_wifi_firmware_dir"
+rpi_wifi_tmp="$(mktemp -d)"
+trap 'rm -rf "$rpi_wifi_tmp"' EXIT
+
+while read -r expected_sha firmware_name; do
+  [ -n "$firmware_name" ] || continue
+  destination="$rpi_wifi_firmware_dir/$firmware_name"
+  if [ -f "$destination" ]; then
+    actual_sha="$(sha256sum "$destination" | awk '{print $1}')"
+    if [ "$actual_sha" = "$expected_sha" ]; then
+      continue
+    fi
+  fi
+
+  encoded_firmware_name="${firmware_name//,/%2C}"
+  curl -fsSL --retry 3 --retry-delay 2 \
+    -o "$rpi_wifi_tmp/$firmware_name" \
+    "$rpi_wifi_firmware_base_url/$encoded_firmware_name"
+  printf '%s  %s\n' "$expected_sha" "$rpi_wifi_tmp/$firmware_name" | sha256sum -c -
+  install -m 0644 "$rpi_wifi_tmp/$firmware_name" "$destination"
+done <<'EOF'
+510a7dd1e056199b309425548ee0bd846993a1837ac7fa1e4d3e641f05a1327a brcmfmac43436-sdio.bin
+fce7cbb62ffa6a5a65ca97b13f6fbf28d06c02d986c2072d65bf72164755fc34 brcmfmac43436-sdio.clm_blob
+4cda90facd8844cff60d80b34b24ecbae76adb9a62508a109461b8bf42b478d1 brcmfmac43436-sdio.txt
+68b9bcc9855d91733cd44c21de4cb507c91b0d32d838c0696def5eb96c99e2de brcmfmac43436s-sdio.bin
+37a8b85a5a9742761101b764a07bc4d0c8b09f2e180eaea3b503a834277ad595 brcmfmac43436s-sdio.txt
+EOF
+
+while read -r firmware_link firmware_target; do
+  [ -n "$firmware_link" ] || continue
+  rm -f "$rpi_wifi_firmware_dir/$firmware_link"
+  ln -s "$firmware_target" "$rpi_wifi_firmware_dir/$firmware_link"
+done <<'EOF'
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43430b0-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436-sdio.bin
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436-sdio.txt
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436-sdio.bin
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.clm_blob brcmfmac43436-sdio.clm_blob
+brcmfmac43436-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436-sdio.txt
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.bin brcmfmac43436s-sdio.bin
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-w.txt brcmfmac43436s-sdio.txt
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.bin brcmfmac43436s-sdio.bin
+brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436s-sdio.txt
+EOF
 """
 
 
@@ -2406,15 +2853,21 @@ if ! find "$assets_root" -mindepth 1 -maxdepth 1 | grep -q .; then
   touch "$assets_root/frameos-assets-placeholder"
 fi
 
-mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
+mkdir -p "$frameos_root/state/NetworkManager/system-connections"
+chown 0:0 "$frameos_root/state/NetworkManager" "$frameos_root/state/NetworkManager/system-connections"
+chmod 700 "$frameos_root/state/NetworkManager/system-connections"
+mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections"
+chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
+chmod 700 "$target_dir/etc/NetworkManager/system-connections"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
 LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
 LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
+/srv/frameos/state/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0
 EOF
 mv "$tmp_fstab" "$fstab"
 """
@@ -3126,6 +3579,7 @@ def _replace_partition(image_path: Path, partitions: list[dict[str, int]], parti
 
 
 def _hostname_for_frame(frame: Frame) -> str:
-    host = (frame.frame_host or f"frame{frame.id}").split(".", 1)[0]
+    frame_id = getattr(frame, "id", "")
+    host = (getattr(frame, "frame_host", "") or f"frame{frame_id}").split(".", 1)[0]
     safe = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in host.lower()).strip("-")
-    return safe or f"frame{frame.id}"
+    return safe or f"frame{frame_id}" or "frameos"

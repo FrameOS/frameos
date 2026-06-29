@@ -77,6 +77,7 @@ def test_shared_driver_registry_types_empty_sequence():
     source = write_shared_drivers_nim({})
 
     assert "let driverSpecs: seq[DriverSpec] = @[]" in source
+    assert "proc availableDriverNames*(): seq[string]" in source
 
 
 def test_shared_drivers_run_compiled_driver_setup_from_library():
@@ -102,6 +103,9 @@ def test_shared_drivers_run_compiled_driver_setup_from_library():
     assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
     assert "import i2c/i2c as i2cSetupDriver" in source
     assert 'runSetupStep("i2c"' in source
+    assert "proc availableDriverNames*(): seq[string]" in source
+    assert '"inkyPython"' in source
+    assert '"i2c"' in source
 
 
 def test_driver_library_exports_setup_symbol_when_driver_has_setup():
@@ -140,3 +144,6 @@ def test_static_drivers_setup_uses_generated_driver_list():
     assert ".setup(driverCtx)" in source
     assert "syncDriverContext(frameOS, driverCtx)" in source
     assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in source
+    assert "proc availableDriverNames*(): seq[string]" in source
+    assert '"inkyPython"' in source
+    assert '"i2c"' in source

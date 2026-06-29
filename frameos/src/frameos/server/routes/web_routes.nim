@@ -155,18 +155,16 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http400, body = "Not in setup mode")
         return
       let params = parseUrlEncoded(request.body)
-      log(%*{"event": "portal:http", "post": request.path, "params": params})
+      log(%*{"event": "portal:http", "post": request.path, "params": netportal.loggableSetupParams(params)})
       if not params.hasKey("ssid"):
         request.respond(Http400, body = "Missing ssid")
         return
-      spawn netportal.connectToWifi(
-        globalFrameOS,
-        params["ssid"],
-        params.getOrDefault("password", ""),
-        params.getOrDefault("serverHost", globalFrameOS.frameConfig.serverHost),
-        params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
-      )
-      request.respond(Http200, body = netportal.confirmHtml())
+      let options = netportal.parseSetupOptions(params, globalFrameOS.frameConfig)
+      if not netportal.persistPortalSetup(globalFrameOS, options):
+        request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
+        return
+      spawn netportal.connectToWifi(globalFrameOS, options)
+      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS))
   )
 
   router.get("/ping", proc(request: Request) {.gcsafe.} =

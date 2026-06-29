@@ -92,6 +92,32 @@ export function frameAssetFolderExpansionKey(frameId: number, path: string): str
   return `${frameId}:${path}`
 }
 
+export function sceneChildExpansionKey(frameId: number, sceneId: string): string {
+  return frameAssetFolderExpansionKey(frameId, sceneChildExpansionPath(sceneId))
+}
+
+export function sceneChildExpansionPath(sceneId: string): string {
+  return `scene-children:${sceneId}`
+}
+
+export type SceneDependencyGroupingSurface = 'overview' | 'split' | 'schedule'
+
+export function sceneDependencyGroupingDisabledPath(surface: SceneDependencyGroupingSurface): string {
+  return `scene-dependency-grouping-disabled:${surface}`
+}
+
+export function sceneDependencyGroupingDisabledKey(frameId: number, surface: SceneDependencyGroupingSurface): string {
+  return frameAssetFolderExpansionKey(frameId, sceneDependencyGroupingDisabledPath(surface))
+}
+
+export function sceneDependencyGroupingIsEnabled(
+  expansion: Record<string, boolean>,
+  frameId: number,
+  surface: SceneDependencyGroupingSurface
+): boolean {
+  return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
+}
+
 function drawerFrameIdFromSearch(search: Record<string, unknown>): number | null {
   return searchNumberValue(search, 'frameId')
 }

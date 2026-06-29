@@ -520,14 +520,20 @@ html[data-frameos-theme='dark'] .frameos-divider {
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
-.frameos-theme-dark .frameos-import-target {
+.frameos-theme-dark .frameos-import-target,
+html[data-frameos-theme='dark'] .frameos-card,
+html[data-frameos-theme='dark'] .frameos-inset,
+html[data-frameos-theme='dark'] .frameos-form-control,
+html[data-frameos-theme='dark'] .frameos-import-target {
   background: rgba(38, 40, 47, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
 }
 
 .frameos-theme-dark .frameos-card-media,
-.frameos-theme-dark .frameos-empty {
+.frameos-theme-dark .frameos-empty,
+html[data-frameos-theme='dark'] .frameos-card-media,
+html[data-frameos-theme='dark'] .frameos-empty {
   background: rgba(22, 24, 29, 0.78);
   border-color: rgba(255, 255, 255, 0.1);
 }
@@ -761,14 +767,20 @@ html[data-frameos-theme='dark'] .frameos-blank-frame-scene-hint {
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
-.frameos-theme-dark .frameos-import-target {
+.frameos-theme-dark .frameos-import-target,
+html[data-frameos-theme='dark'] .frameos-card,
+html[data-frameos-theme='dark'] .frameos-inset,
+html[data-frameos-theme='dark'] .frameos-form-control,
+html[data-frameos-theme='dark'] .frameos-import-target {
   background: rgba(38, 40, 47, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
 }
 
 .frameos-theme-dark .frameos-card-media,
-.frameos-theme-dark .frameos-empty {
+.frameos-theme-dark .frameos-empty,
+html[data-frameos-theme='dark'] .frameos-card-media,
+html[data-frameos-theme='dark'] .frameos-empty {
   background: rgba(22, 24, 29, 0.78);
   border-color: rgba(255, 255, 255, 0.1);
 }
@@ -1520,6 +1532,109 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   justify-items: start;
   gap: clamp(0.75rem, 1.5cqw, 1rem);
+}
+
+.frameos-scene-child-tile {
+  animation: frameos-scene-child-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: left center;
+}
+
+.frameos-scene-dependency-connector {
+  pointer-events: none;
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  z-index: 0;
+  display: inline-flex;
+  height: 6rem;
+  width: 1.5em;
+  transform: translate(-50%, -50%);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #475569;
+  box-shadow: 0 8px 18px rgba(100, 116, 139, 0.14);
+}
+
+.frameos-scene-dependency-connector--compact {
+  left: -6px;
+  height: 4.5rem;
+  width: 1.5em;
+}
+
+.frameos-scene-dependency-dot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 3px);
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+}
+
+.frameos-scene-dependency-connector--compact .frameos-scene-dependency-dot-grid {
+  gap: 3px 2px;
+}
+
+.frameos-scene-dependency-dot {
+  height: 3px;
+  width: 3px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.72;
+}
+
+.frameos-theme-dark .frameos-scene-dependency-connector,
+html[data-frameos-theme='dark'] .frameos-scene-dependency-connector {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(29, 31, 37, 0.88);
+  color: #cbd5e1;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.frameos-scene-child-toggle {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  color: #0f172a;
+}
+
+.frameos-scene-child-toggle:hover,
+.frameos-scene-child-toggle[aria-expanded='true'] {
+  background: var(--frameos-primary);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 10px 22px var(--frameos-primary-shadow);
+}
+
+.frameos-theme-dark .frameos-scene-child-toggle {
+  background: rgba(29, 31, 37, 0.84);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f8fafc;
+}
+
+.frameos-scene-child-toggle--compact {
+  letter-spacing: 0;
+}
+
+.frameos-scene-picker-card .frameos-card-media {
+  min-height: 0;
+}
+
+@keyframes frameos-scene-child-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frameos-scene-child-tile {
+    animation: none;
+  }
 }
 
 .workspace-main {
