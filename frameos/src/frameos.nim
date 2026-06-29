@@ -7,7 +7,7 @@ import std/times
 from ./frameos/boot_guard import clearBootCrashCount, updateBootGuardFailureDetails, BOOT_GUARD_FALLBACK_SCENE_ID
 from ./frameos/frameos import startFrameOS, describeFatalStartupError, fatalStartupRetryAction,
   loadFatalErrorBehavior, renderFatalStartupError
-from ./frameos/setup import setupFrameOS, startFrameOSSystemdServices, writeSetupReleasePayload
+from ./frameos/setup import setupFrameOS, setupFrameOSDrivers, startFrameOSSystemdServices, writeSetupReleasePayload
 from ./frameos/upgrade import runFrameOSUpgrade, parseFrameOSUpgradeOptions
 from ./frameos/version import compiledFrameOSVersion
 
@@ -19,6 +19,8 @@ proc printHelp() =
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
   echo "         --with-setup=/boot/frameos-setup.json[.gz] to install from first-boot setup JSON"
+  echo "  driver-setup"
+  echo "          Run display driver setup for the current frame.json"
   echo "  upgrade Upgrade this installed frame to the latest GitHub release"
   echo "          --dry-run to validate and print the upgrade plan without changing files"
   echo "  help    Show this help"
@@ -55,6 +57,13 @@ when isMainModule:
         quit(2)
       if activateServices:
         startFrameOSSystemdServices(setupFromFile)
+      quit(0)
+    elif args.len > 0 and args[0] == "driver-setup":
+      if args.len > 1:
+        raise newException(ValueError, "FrameOS driver-setup does not accept arguments")
+      let setupResult = setupFrameOSDrivers()
+      if setupResult.rebootRequired:
+        quit(2)
       quit(0)
     elif args.len > 0 and args[0] == "upgrade":
       let upgradeArgs = if args.len > 1: args[1 .. ^1] else: @[]

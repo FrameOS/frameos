@@ -93,6 +93,9 @@ proc turnOff*() =
 proc setupDriverNames*(): seq[string] =
   result = @[]
 
+proc availableDriverNames*(): seq[string] =
+  result = @[]
+
 proc setup*(frameOS: FrameOS): SetupResult =
   discard frameOS
   result = setupOk()

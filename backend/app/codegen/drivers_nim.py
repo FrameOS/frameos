@@ -283,6 +283,12 @@ def write_static_drivers_nim(drivers: dict[str, Driver]) -> str:
     on_drivers = []
     off_drivers = []
     setup_imports, setup_code, _setup_names = setup_helpers_nim(drivers)
+    available_driver_names = [
+        driver.name
+        for driver in drivers.values()
+        if driver.import_path or driver.setup_import_path or driver.lines
+    ]
+    available_driver_names_source = nim_string_seq_literal(available_driver_names)
 
     for driver in drivers.values():
         if driver.import_path:
@@ -326,6 +332,9 @@ proc turnOn*() =
 proc turnOff*() =
   {(newline + '  ').join(off_drivers or ["discard"])}
 
+proc availableDriverNames*(): seq[string] =
+  return {available_driver_names_source}
+
 {setup_code}
     """
 
@@ -359,6 +368,12 @@ def write_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
     )
     setup_names = [driver.name for driver in setup_drivers(drivers)]
     setup_names_source = nim_string_seq_literal(setup_names)
+    available_driver_names = [
+        driver.name
+        for driver in drivers.values()
+        if driver.import_path or driver.setup_import_path or driver.lines
+    ]
+    available_driver_names_source = nim_string_seq_literal(available_driver_names)
 
     code = f"""
 import std/[dynlib, json, options, os]
@@ -393,6 +408,9 @@ let driverSpecs: seq[DriverSpec] = @[{spec_lines}]
 var loadedDrivers: seq[LoadedDriver] = @[]
 var setupLibraries: seq[LibHandle] = @[]
 {driver_context_helpers_nim()}
+
+proc availableDriverNames*(): seq[string] =
+  return {available_driver_names_source}
 
 proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
   hostChannels.log(event)

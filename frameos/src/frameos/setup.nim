@@ -561,6 +561,19 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupLog("FrameOS setup: reboot required")
   setupLog("FrameOS setup: complete")
 
+proc setupFrameOSDrivers*(configPath = ""): SetupResult =
+  setupLog("FrameOS setup: driver setup: starting")
+  let frameOS = FrameOS(frameConfig: loadConfig(configPath))
+  setupLog("FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")")
+  addSetupResult(result, drivers.setup(frameOS))
+  addSetupResult(result, runSetupStep("frame config dimensions", proc(): SetupResult =
+    discard writeFrameConfigDimensions(configPath, frameOS.frameConfig)
+    setupOk()
+  ))
+  if result.rebootRequired:
+    setupLog("FrameOS setup: driver setup: reboot required")
+  setupLog("FrameOS setup: driver setup: complete")
+
 proc writeSetupReleasePayload*(
   configPath: string,
   frameosCurrentDir = "/srv/frameos/current",
