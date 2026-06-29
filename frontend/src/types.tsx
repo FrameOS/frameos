@@ -527,6 +527,7 @@ export interface StateNodeData {
 
 export interface EventNodeData {
   keyword: string
+  config?: Record<string, any>
 }
 
 export interface ButtonEventNodeData extends EventNodeData {
@@ -652,6 +653,7 @@ export interface FrameScene {
   edges: DiagramEdge[]
   apps?: Record<string, SceneApp>
   fields?: StateField[]
+  customEvents?: FrameEvent[]
   default?: boolean
   settings?: FrameSceneSettings
 }

@@ -970,6 +970,69 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
     if payload.hasKey(key) and payload[key] != scene.state{key}:
       scene.state[key] = copy(payload[key])
 
+proc eventFilterValue(value: JsonNode): string =
+  if value.isNil:
+    return ""
+  case value.kind
+  of JString:
+    return strip(value.getStr())
+  of JInt:
+    return $value.getInt()
+  of JFloat:
+    return $value.getFloat()
+  of JBool:
+    if value.getBool():
+      return "true"
+    return "false"
+  of JNull:
+    return "null"
+  else:
+    return $value
+
+proc eventPayloadValueMatches(payload: JsonNode, key: string, expected: string): bool =
+  if expected.len == 0:
+    return true
+  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
+    return false
+  let value = payload[key]
+  case value.kind
+  of JString:
+    return value.getStr() == expected
+  of JInt:
+    return $value.getInt() == expected
+  of JFloat:
+    return $value.getFloat() == expected
+  of JBool:
+    if value.getBool():
+      return expected == "true"
+    return expected == "false"
+  of JNull:
+    return expected == "null"
+  else:
+    return $value == expected
+
+proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
+  if node.data.isNil or node.data.kind != JObject:
+    return true
+
+  var hasLabelFilter = false
+  if node.data.hasKey("config") and node.data["config"].kind == JObject:
+    let config = node.data["config"]
+    for key, value in config.pairs:
+      let expected = eventFilterValue(value)
+      if expected.len > 0:
+        if key == "label":
+          hasLabelFilter = true
+        if not eventPayloadValueMatches(payload, key, expected):
+          return false
+
+  if not hasLabelFilter and node.data.hasKey("label"):
+    let expected = eventFilterValue(node.data["label"])
+    if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
+      return false
+
+  true
+
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
@@ -996,16 +1059,8 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
-        if context.event == "button":
-          if scene.nodes.hasKey(nodeId):
-            let node = scene.nodes[nodeId]
-            if not node.data.isNil and node.data.hasKey("label"):
-              let buttonFilter = strip(node.data["label"].getStr())
-              if buttonFilter.len > 0:
-                if context.payload.isNil or context.payload.kind != JObject:
-                  continue
-                if not context.payload.hasKey("label") or context.payload["label"].getStr() != buttonFilter:
-                  continue
+        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
+          continue
         try:
           discard scene.runNode(nextNode, context)
         except Exception as e:
@@ -1070,6 +1125,36 @@ proc dumpHook*(s: var string, v: Color) =
   s.add(toHtmlHex(v))
   s.add('"')
 
+proc jsonNodeIdString(value: JsonNode): string =
+  if value.isNil:
+    return ""
+  case value.kind
+  of JString:
+    return value.getStr()
+  of JInt:
+    return $value.getInt()
+  else:
+    return ""
+
+proc annotateInterpretedSceneSourceNodeIds(data: string): string =
+  let scenes = parseJson(data)
+  if scenes.kind != JArray:
+    return data
+  for scene in scenes:
+    if scene.kind != JObject or not scene.hasKey("nodes") or scene["nodes"].kind != JArray:
+      continue
+    for node in scene["nodes"]:
+      if node.kind != JObject or not node.hasKey("id"):
+        continue
+      let sourceNodeId = jsonNodeIdString(node["id"])
+      if sourceNodeId.len == 0:
+        continue
+      if not node.hasKey("data") or node["data"].kind != JObject:
+        node["data"] = newJObject()
+      if not node["data"].hasKey("__frameosSourceNodeId"):
+        node["data"]["__frameosSourceNodeId"] = %sourceNodeId
+  $scenes
+
 # -------------------------
 # Scene registry (loader)
 # -------------------------
@@ -1094,7 +1179,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
 proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
   if data == "":
     return @[]
-  data.fromJson(seq[FrameSceneInput])
+  annotateInterpretedSceneSourceNodeIds(data).fromJson(seq[FrameSceneInput])
 
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()

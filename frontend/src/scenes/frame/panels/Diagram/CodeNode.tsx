@@ -22,7 +22,7 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { theme } = useValues(workspaceLogic)
   const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, nodeEdges, codeNodeLanguage, runtimeNodeError } = useValues(appNodeLogic(appNodeLogicProps))
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -152,16 +152,20 @@ declare const context: {
 
   const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900'
   const outputLabel = data.codeOutputs?.find((output) => output.name.trim())?.name ?? 'output'
+  const runtimeErrorTitle = runtimeNodeError ? `${runtimeNodeError.event}: ${runtimeNodeError.message}` : undefined
+  const runtimeErrorClassName = runtimeNodeError ? 'border-red-500 shadow-red-500/80 ring-2 ring-red-500/70' : null
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
+        title={runtimeErrorTitle}
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
             ? 'frameos-diagram-node frameos-diagram-node-selected'
-            : 'frameos-diagram-node border-green-900 shadow-green-700/50 '
+            : 'frameos-diagram-node border-green-900 shadow-green-700/50 ',
+          runtimeErrorClassName
         )}
       >
         <NodeResizer minWidth={200} minHeight={119} />

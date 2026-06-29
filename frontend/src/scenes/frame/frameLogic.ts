@@ -51,6 +51,7 @@ import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
+import { builtinFrameEventNames, normalizeCustomEvent } from '../../utils/frameEvents'
 import {
   cloneSplitScreenSceneLayout,
   defaultSplitScreenBackground,
@@ -1261,6 +1262,7 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
   const normalizedFrame = {
     ...frame,
     timezone_updater: compactTimezoneUpdaterForSubmit(frame.timezone_updater),
+    scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)),
   }
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
@@ -1534,6 +1536,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     edges: arranged.edges,
     apps: normalizeSceneApps(scene.apps),
     fields: scene.fields ?? [],
+    customEvents: (scene.customEvents ?? []).map((event) => normalizeCustomEvent(event)),
     settings: {
       ...settings,
       ...(frameRunsInterpreted ? { execution: 'interpreted' as const } : {}),
@@ -1625,12 +1628,33 @@ export const frameLogic = kea<frameLogicType>([
               pass: state.frame_admin_auth?.pass ? undefined : 'Password is required',
             }
           : undefined,
-        scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
-          fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
-            name: String(field.name ?? '').trim() ? '' : 'Codename is required',
-            type: field.type ? '' : 'Type is required',
-          })),
-        })),
+        scenes: (state.scenes ?? []).map((scene: Record<string, any>) => {
+          const customEventNames = (scene.customEvents ?? []).map((event: Record<string, any>) =>
+            String(event.name ?? '').trim()
+          )
+          return {
+            fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
+              name: String(field.name ?? '').trim() ? '' : 'Codename is required',
+              type: field.type ? '' : 'Type is required',
+            })),
+            customEvents: (scene.customEvents ?? []).map((event: Record<string, any>, eventIndex: number) => {
+              const name = String(event.name ?? '').trim()
+              return {
+                name: !name
+                  ? 'Event name is required'
+                  : builtinFrameEventNames.has(name)
+                  ? 'Event name must not match a built-in event'
+                  : customEventNames.findIndex((candidate: string) => candidate === name) !== eventIndex
+                  ? 'Event name must be unique'
+                  : '',
+                fields: (event.fields ?? []).map((field: Record<string, any>) => ({
+                  name: String(field.name ?? '').trim() ? '' : 'Codename is required',
+                  type: field.type ? '' : 'Type is required',
+                })),
+              }
+            }),
+          }
+        }),
         mountpoints: state.mountpoints?.enabled
           ? {
               items: (state.mountpoints.items ?? []).map((item) =>

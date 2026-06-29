@@ -3,10 +3,9 @@ import { NodeProps, Handle, Position } from 'reactflow'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import copy from 'copy-to-clipboard'
-import { ButtonEventNodeData, EventNodeData, FrameEvent, FrameSceneSettings, StateField } from '../../../../types'
+import { EventNodeData, FrameSceneSettings, StateField } from '../../../../types'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 
-import _events from '../../../../../schema/events.json'
 import { ClipboardIcon, InformationCircleIcon } from '@heroicons/react/24/solid'
 import { frameLogic } from '../../frameLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
@@ -19,8 +18,7 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { NodeZoomLabel } from './NodeZoomLabel'
-
-const events: FrameEvent[] = _events as any
+import { frameEventForScene } from '../../../../utils/frameEvents'
 
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -30,17 +28,35 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { updateScene } = useActions(frameLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { node, nodeEdges, isSelected } = useValues(appNodeLogic(appNodeLogicProps))
+  const { node, nodeEdges, isSelected, runtimeNodeError } = useValues(appNodeLogic(appNodeLogicProps))
   const keyword = (node?.data as EventNodeData | undefined)?.keyword ?? ''
   const data = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
 
   const isEventWithStateFields = keyword === 'init' || keyword === 'setSceneState' || keyword === 'render'
 
-  const fields = isEventWithStateFields ? scene?.fields ?? [] : events?.find((e) => e.name == keyword)?.fields ?? []
+  const eventFields = frameEventForScene(keyword, scene)?.fields ?? []
+  const fields = isEventWithStateFields ? scene?.fields ?? [] : eventFields
+  const eventFilterConfig = { ...(data.config ?? {}) }
+  if (keyword === 'button' && eventFilterConfig.label === undefined && 'label' in data) {
+    eventFilterConfig.label = data.label
+  }
 
   const refreshInterval = scene?.settings?.refreshInterval
   const backgroundColor = scene?.settings?.backgroundColor ?? '#000000'
+
+  const updateEventFilter = (fieldName: string, value: string): void => {
+    const config = { ...(data.config ?? {}) }
+    if (value === '') {
+      delete config[fieldName]
+    } else {
+      config[fieldName] = value
+    }
+    updateNodeData(id, {
+      config,
+      ...(keyword === 'button' && fieldName === 'label' ? { label: value } : {}),
+    })
+  }
 
   const updateSceneSetting = <K extends keyof FrameSceneSettings>(key: K, value: FrameSceneSettings[K] | undefined) => {
     if (!sceneId) {
@@ -68,8 +84,10 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
 
   const backgroundClassName = clsx(
     'frameos-diagram-node shadow-lg border-2',
-    isSelected ? 'frameos-diagram-node-selected' : 'border-red-900 shadow-red-700/50 '
+    isSelected ? 'frameos-diagram-node-selected' : 'border-red-900 shadow-red-700/50 ',
+    runtimeNodeError ? 'border-red-500 shadow-red-500/80 ring-2 ring-red-500/70' : null
   )
+  const runtimeErrorTitle = runtimeNodeError ? `${runtimeNodeError.event}: ${runtimeNodeError.message}` : undefined
 
   const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-red-900'
 
@@ -82,20 +100,32 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
 
   const configRows: JSX.Element[] = []
 
-  if (keyword === 'button') {
+  if (eventFields.length > 0) {
     configRows.push(
-      <tr key="button-label">
+      <tr key="event-filter-helper">
+        <td className="font-sm frameos-node-muted-text w-full text-xs">
+          Leave empty to match any value for this event field.
+        </td>
+      </tr>
+    )
+  }
+
+  for (const field of eventFields) {
+    configRows.push(
+      <tr key={`event-filter-${field.name}`}>
         <td className="font-sm frameos-node-muted-text w-full">
           <div className="flex items-center gap-2">
-            <div className="flex-1">Label</div>
+            {field.type ? <FieldTypeTag type={field.type} /> : null}
+            <div className="flex-1" title={field.label}>
+              {field.label || field.name}
+            </div>
             <TextInput
-              value={(data as ButtonEventNodeData).label ?? ''}
-              onChange={(value) => updateNodeData(id, { label: value })}
-              placeholder="e.g. A"
+              value={String(eventFilterConfig[field.name] ?? '')}
+              onChange={(value) => updateEventFilter(field.name, value)}
+              placeholder="any"
               theme="node"
             />
           </div>
-          <div className="frameos-node-muted-text mt-1 text-xs">Leave empty to match all buttons.</div>
         </td>
       </tr>
     )
@@ -158,6 +188,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           selectNode(id)
         }
       }}
+      title={runtimeErrorTitle}
       className={clsx(backgroundClassName, 'relative')}
     >
       <div className={titleClassName}>
