@@ -31,6 +31,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
+    BUILDROOT_BOOTSTRAP_SCRIPT_VERSION,
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
@@ -83,7 +84,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir",
         default=os.environ.get("FRAMEOS_BUILDROOT_CACHE_DIR"),
-        help="Optional host directory mounted at /cache for Buildroot downloads",
+        help="Host cache root mounted at /cache for Buildroot downloads. Defaults to build/buildroot-images/cache.",
+    )
+    parser.add_argument(
+        "--source-cache-dir",
+        default=os.environ.get("FRAMEOS_BUILDROOT_SOURCE_CACHE_DIR"),
+        help="Optional host directory mounted at /build/buildroot for the extracted Buildroot source tree.",
+    )
+    parser.add_argument(
+        "--output-cache-dir",
+        default=os.environ.get("FRAMEOS_BUILDROOT_OUTPUT_CACHE_DIR"),
+        help="Optional host directory root for cached /build/output directories.",
+    )
+    parser.add_argument(
+        "--no-output-cache",
+        action="store_true",
+        default=os.environ.get("FRAMEOS_BUILDROOT_NO_OUTPUT_CACHE", "").lower() in {"1", "true", "yes", "on"},
+        help="Disable the persistent /build/output cache.",
+    )
+    parser.add_argument(
+        "--clean-output-cache",
+        action="store_true",
+        help="Delete the selected /build/output cache entry before building.",
+    )
+    parser.add_argument(
+        "--skip-apt-install",
+        action="store_true",
+        default=os.environ.get("FRAMEOS_BUILDROOT_SKIP_APT_INSTALL", "").lower() in {"1", "true", "yes", "on"},
+        help="Skip apt dependency installation inside the build container. Use only with a prebuilt helper image.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -201,6 +229,36 @@ def build_inputs_digest(paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def read_phase_timings(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    timings: list[dict[str, Any]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        parts = raw_line.split("\t")
+        if len(parts) != 3:
+            continue
+        phase, started_raw, ended_raw = parts
+        try:
+            started_ns = int(started_raw)
+            ended_ns = int(ended_raw)
+        except ValueError:
+            continue
+        duration = max(0.0, (ended_ns - started_ns) / 1_000_000_000)
+        timings.append(
+            {
+                "phase": phase,
+                "seconds": round(duration, 3),
+            }
+        )
+    return timings
+
+
+def read_json_file(path: Path) -> Any:
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def safe_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
@@ -297,12 +355,57 @@ def local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / frameos_version()
 
 
+def default_buildroot_cache_dir() -> Path:
+    return BUILD_DIR / "cache"
+
+
+def default_buildroot_source_cache_root() -> Path:
+    return BUILD_DIR / "source-cache"
+
+
+def default_buildroot_output_cache_root() -> Path:
+    return BUILD_DIR / "output-cache"
+
+
+def resolve_host_dir(path: str | Path | None, default: Path | None = None) -> Path:
+    resolved = Path(path).expanduser() if path else default
+    if resolved is None:
+        raise ValueError("A host directory path is required")
+    return resolved.resolve()
+
+
+def docker_mount_arg(source: Path, target: str) -> list[str]:
+    source.mkdir(parents=True, exist_ok=True)
+    return ["--volume", f"{source}:{target}"]
+
+
 def docker_cache_mount_args(cache_dir: str | None) -> list[str]:
-    if not cache_dir:
-        return []
-    path = Path(cache_dir).expanduser().resolve()
+    path = resolve_host_dir(cache_dir, default_buildroot_cache_dir())
     path.mkdir(parents=True, exist_ok=True)
-    return ["--volume", f"{path}:/cache"]
+    return docker_mount_arg(path, "/cache")
+
+
+def buildroot_source_cache_dir(args: argparse.Namespace, cache_root: Path) -> Path:
+    default = default_buildroot_source_cache_root() / f"buildroot-{BUILDROOT_VERSION}-bootstrap-{BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}"
+    return resolve_host_dir(args.source_cache_dir, default)
+
+
+def buildroot_output_cache_root(args: argparse.Namespace, cache_root: Path) -> Path:
+    return resolve_host_dir(args.output_cache_dir, default_buildroot_output_cache_root())
+
+
+def base_build_cache_key(paths: list[Path], *, platform: str, docker_image: str, skip_apt_install: bool) -> str:
+    digest = hashlib.sha256()
+    digest.update(f"platform={platform}\n".encode("utf-8"))
+    digest.update(f"build-host-machine={os.uname().machine}\n".encode("utf-8"))
+    digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
+    digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+    digest.update(f"bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
+    digest.update(f"docker-image={docker_image}\n".encode("utf-8"))
+    digest.update(f"skip-apt-install={skip_apt_install}\n".encode("utf-8"))
+    digest.update(f"apt-deps={BUILDROOT_DOCKER_APT_DEPS_LINE}\n".encode("utf-8"))
+    digest.update(build_inputs_digest(paths).encode("ascii"))
+    return digest.hexdigest()
 
 
 def legacy_local_dir(platform: str) -> Path:
@@ -377,18 +480,49 @@ def build(args: argparse.Namespace) -> None:
     out_dir = local_dir(args.platform)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_path = out_dir / "base.img"
+    timings_path = out_dir / "buildroot-timings.tsv"
+    package_timings_path = out_dir / "buildroot-package-timings.json"
     image_path.unlink(missing_ok=True)
+    timings_path.unlink(missing_ok=True)
+    package_timings_path.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="frameos-buildroot-base-") as tmp:
         tmp_path = Path(tmp)
         overlay = tmp_path / "overlay"
         write_base_bootstrap_overlay(overlay)
-        BuildrootImageBuilder._write_buildroot_config(tmp_path / "frameos-buildroot.config")
-        BuildrootImageBuilder._write_kernel_config_fragment(tmp_path / "linux-fragment.config")
-        BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
-        BuildrootImageBuilder._write_partition_post_build_script(tmp_path / "partition-post-build.sh")
-        BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh")
-        BuildrootImageBuilder._write_boot_logo(tmp_path / "frameos-boot-logo.png")
-        BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img")
+        config_path = tmp_path / "frameos-buildroot.config"
+        kernel_fragment_path = tmp_path / "linux-fragment.config"
+        post_build_path = tmp_path / "post-build.sh"
+        partition_post_build_path = tmp_path / "partition-post-build.sh"
+        post_image_path = tmp_path / "post-image.sh"
+        boot_logo_path = tmp_path / "frameos-boot-logo.png"
+        build_script_path = tmp_path / "buildroot-build.sh"
+        BuildrootImageBuilder._write_buildroot_config(config_path)
+        BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path)
+        BuildrootImageBuilder._write_post_build_script(post_build_path)
+        BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
+        BuildrootImageBuilder._write_post_image_script(post_image_path)
+        BuildrootImageBuilder._write_boot_logo(boot_logo_path)
+        BuildrootImageBuilder._write_build_script(build_script_path, "base.img")
+        cache_root = resolve_host_dir(args.cache_dir, default_buildroot_cache_dir())
+        source_cache = buildroot_source_cache_dir(args, cache_root)
+        cache_key = base_build_cache_key(
+            [
+                overlay,
+                config_path,
+                kernel_fragment_path,
+                post_build_path,
+                partition_post_build_path,
+                post_image_path,
+                boot_logo_path,
+                build_script_path,
+            ],
+            platform=args.platform,
+            docker_image=BUILDROOT_DOCKER_IMAGE,
+            skip_apt_install=args.skip_apt_install,
+        )
+        output_cache = buildroot_output_cache_root(args, cache_root) / cache_key[:24]
+        if args.clean_output_cache and output_cache.exists():
+            shutil.rmtree(output_cache)
         container_name = f"frameos-buildroot-base-{uuid.uuid4().hex[:12]}"
         container_id = subprocess.check_output(
             [
@@ -400,7 +534,10 @@ def build(args: argparse.Namespace) -> None:
                 f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
                 "-e",
                 "FORCE_UNSAFE_CONFIGURE=1",
+                *(["-e", "BUILDROOT_SKIP_APT_INSTALL=1"] if args.skip_apt_install else []),
                 *docker_cache_mount_args(args.cache_dir),
+                *docker_mount_arg(source_cache, "/build/buildroot"),
+                *([] if args.no_output_cache else docker_mount_arg(output_cache, "/build/output")),
                 BUILDROOT_DOCKER_IMAGE,
                 "bash",
                 "/work/buildroot-build.sh",
@@ -411,8 +548,27 @@ def build(args: argparse.Namespace) -> None:
             subprocess.run(["docker", "cp", f"{tmp_path}/.", f"{container_id}:/work"], check=True)
             subprocess.run(["docker", "start", "--attach", container_id], check=True)
             subprocess.run(["docker", "cp", f"{container_id}:/artifacts/base.img", str(image_path)], check=True)
+            subprocess.run(
+                ["docker", "cp", f"{container_id}:/artifacts/buildroot-timings.tsv", str(timings_path)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                [
+                    "docker",
+                    "cp",
+                    f"{container_id}:/artifacts/buildroot-package-timings.json",
+                    str(package_timings_path),
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         finally:
             subprocess.run(["docker", "rm", "--force", container_id], check=False)
+    phase_timings = read_phase_timings(timings_path)
+    package_timings = read_json_file(package_timings_path) or {}
     metadata = {
         "platform": args.platform,
         "frameos_version": frameos_version(),
@@ -425,6 +581,16 @@ def build(args: argparse.Namespace) -> None:
         "sha256": sha256(image_path),
         "size": image_path.stat().st_size,
         "partitions": _mbr_partitions(image_path),
+        "cache": {
+            "cache_dir": str(cache_root),
+            "source_cache_dir": str(source_cache),
+            "output_cache_enabled": not args.no_output_cache,
+            "output_cache_dir": None if args.no_output_cache else str(output_cache),
+            "output_cache_key": cache_key,
+            "skip_apt_install": args.skip_apt_install,
+        },
+        "phase_timings": phase_timings,
+        "package_timings": package_timings,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")

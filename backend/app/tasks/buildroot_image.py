@@ -1552,7 +1552,9 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
                     "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
                     "BR2_PACKAGE_LIBEVDEV=y",
-                    "# BR2_CCACHE is not set",
+                    "BR2_CCACHE=y",
+                    'BR2_CCACHE_DIR="/cache/ccache"',
+                    'BR2_CCACHE_INITIAL_SETUP="--max-size=10G"',
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
@@ -1685,6 +1687,26 @@ class BuildrootImageBuilder:
 set -euo pipefail
 
 ulimit -n {BUILDROOT_DOCKER_NOFILE_LIMIT} || true
+mkdir -p /artifacts
+
+timing_file="/artifacts/buildroot-timings.tsv"
+package_timing_file="/artifacts/buildroot-package-timings.json"
+: > "$timing_file"
+
+now_ns() {{
+  date +%s%N
+}}
+
+phase_start() {{
+  frameos_phase_name="$1"
+  frameos_phase_start="$(now_ns)"
+  printf '==> %s\\n' "$frameos_phase_name"
+}}
+
+phase_end() {{
+  frameos_phase_end="$(now_ns)"
+  printf '%s\\t%s\\t%s\\n' "$frameos_phase_name" "$frameos_phase_start" "$frameos_phase_end" >> "$timing_file"
+}}
 
 export DEBIAN_FRONTEND=noninteractive
 export CC="/usr/bin/gcc"
@@ -1698,15 +1720,26 @@ export CXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 export HOSTCXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 unset TERMINFO TERMINFO_DIRS
 
+phase_start apt_install
 if [ "${{BUILDROOT_SKIP_APT_INSTALL:-0}}" != "1" ]; then
   apt-get update
   apt-get install -y --no-install-recommends \\
     {BUILDROOT_DOCKER_APT_DEPS_LINE}
 fi
+phase_end
 
 mkdir -p /cache /work /artifacts /build/buildroot /build/output
+phase_start prepare_buildroot_source
 source_tarball="/frameos-buildroot/{tarball}"
 cache_tarball="/cache/{tarball}"
+if [ -f /build/buildroot/.frameos-buildroot-version ] && \\
+  [ "$(cat /build/buildroot/.frameos-buildroot-version)" != "{BUILDROOT_VERSION}" ]; then
+  find /build/buildroot -mindepth 1 -maxdepth 1 -exec rm -rf {{}} +
+fi
+if [ -f /build/buildroot/.frameos-bootstrap-script-version ] && \\
+  [ "$(cat /build/buildroot/.frameos-bootstrap-script-version)" != "{BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}" ]; then
+  find /build/buildroot -mindepth 1 -maxdepth 1 -exec rm -rf {{}} +
+fi
 if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   if [ -f "$source_tarball" ]; then
     tarball_path="$source_tarball"
@@ -1719,6 +1752,10 @@ if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   tar -C /build/buildroot --strip-components=1 -xzf "$tarball_path"
   printf '%s\\n' '{BUILDROOT_VERSION}' > /build/buildroot/.frameos-buildroot-version
 fi
+printf '%s\\n' '{BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}' > /build/buildroot/.frameos-bootstrap-script-version
+phase_end
+
+phase_start patch_buildroot_source
 ncurses_mk="/build/buildroot/package/ncurses/ncurses.mk"
 if [ -f "$ncurses_mk" ] && ! grep -q "FRAMEOS_NCURSES_TERMINFO_LINKS" "$ncurses_mk"; then
   cat >> "$ncurses_mk" <<'EOF'
@@ -1755,14 +1792,22 @@ if needle not in text:
 path.write_text(text.replace(needle, replacement, 1) + marker)
 PY
 fi
+phase_end
+
+phase_start clean_output
 if [ "${{FRAMEOS_BUILDROOT_CLEAN:-0}}" = "1" ] && [ -f /build/output/Makefile ]; then
   make -C /build/buildroot O=/build/output clean
 fi
+phase_end
+
 if [ -s /build/output/images/sdcard.img ]; then
+  phase_start reuse_cached_sdcard
   cp /build/output/images/sdcard.img /artifacts/{shlex.quote(output_filename)}
   chmod a+r /artifacts/{shlex.quote(output_filename)}
+  phase_end
   exit 0
 fi
+phase_start configure_buildroot
 if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/null \\
   && ! find /build/output/host -path "*/sysroot/usr/share/terminfo/a/ansi" -print -quit | grep -q .; then
   for stamp in /build/output/build/ncurses-*/.stamp_staging_installed; do
@@ -1774,9 +1819,76 @@ make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
+phase_end
+
+phase_start buildroot_make
 make -C /build/buildroot O=/build/output
+phase_end
+
+phase_start summarize_package_timings
+python3 - "/build/output/build" "$package_timing_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+build_dir = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+stamp_names = [
+    ".stamp_downloaded",
+    ".stamp_extracted",
+    ".stamp_patched",
+    ".stamp_configured",
+    ".stamp_built",
+    ".stamp_staging_installed",
+    ".stamp_target_installed",
+    ".stamp_images_installed",
+    ".stamp_host_installed",
+]
+step_pairs = [
+    (".stamp_downloaded", ".stamp_extracted", "extract_seconds"),
+    (".stamp_extracted", ".stamp_patched", "patch_seconds"),
+    (".stamp_patched", ".stamp_configured", "configure_seconds"),
+    (".stamp_configured", ".stamp_built", "build_seconds"),
+    (".stamp_built", ".stamp_staging_installed", "staging_install_seconds"),
+    (".stamp_built", ".stamp_target_installed", "target_install_seconds"),
+    (".stamp_built", ".stamp_images_installed", "images_install_seconds"),
+    (".stamp_built", ".stamp_host_installed", "host_install_seconds"),
+]
+
+records = []
+if build_dir.is_dir():
+    for package_dir in sorted(path for path in build_dir.iterdir() if path.is_dir()):
+        stamps = {{}}
+        for name in stamp_names:
+            path = package_dir / name
+            if path.exists():
+                stamps[name] = path.stat().st_mtime_ns
+        if len(stamps) < 2:
+            continue
+        first = min(stamps.values())
+        last = max(stamps.values())
+        record = {{
+            "package": package_dir.name,
+            "elapsed_seconds": round(max(0, last - first) / 1_000_000_000, 3),
+        }}
+        for start_name, end_name, key in step_pairs:
+            if start_name in stamps and end_name in stamps:
+                record[key] = round(max(0, stamps[end_name] - stamps[start_name]) / 1_000_000_000, 3)
+        records.append(record)
+
+records.sort(key=lambda item: item.get("elapsed_seconds", 0), reverse=True)
+payload = {{
+    "package_count": len(records),
+    "top_elapsed": records[:30],
+}}
+output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+PY
+phase_end
+
+phase_start copy_artifact
 dd if=/build/output/images/sdcard.img of=/artifacts/{shlex.quote(output_filename)} bs=4M conv=fsync status=none
 chmod a+r /artifacts/{shlex.quote(output_filename)}
+phase_end
 """,
             encoding="utf-8",
         )

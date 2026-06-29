@@ -342,7 +342,9 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y" in config
     assert "BR2_PACKAGE_WIRELESS_REGDB=y" in config
-    assert "# BR2_CCACHE is not set" in config
+    assert "BR2_CCACHE=y" in config
+    assert 'BR2_CCACHE_DIR="/cache/ccache"' in config
+    assert 'BR2_CCACHE_INITIAL_SETUP="--max-size=10G"' in config
     assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
     assert "/work/partition-post-build.sh" in config
 
@@ -391,6 +393,11 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     assert ".stamp_staging_installed" in script
     assert "usr/share/terminfo/a/ansi" in script
     assert "ulimit -n 65535" in script
+    assert 'timing_file="/artifacts/buildroot-timings.tsv"' in script
+    assert 'package_timing_file="/artifacts/buildroot-package-timings.json"' in script
+    assert "phase_start buildroot_make" in script
+    assert "phase_start summarize_package_timings" in script
+    assert ".frameos-bootstrap-script-version" in script
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
     assert "cp /work/output/images/sdcard.img" not in script
