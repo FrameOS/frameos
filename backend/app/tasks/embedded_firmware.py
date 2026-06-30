@@ -52,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 32  # ESP32 USB baud reset and palette render fill fixes
+EMBEDDED_FIRMWARE_VERSION = 33  # ESP32 scene upload storage diagnostics
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -250,6 +250,8 @@ EMBEDDED_REQUIRED_SDKCONFIG = {
     # Formatting an empty SPIFFS state partition happens inside app_main on
     # first boot. The ESP-IDF default stack is too small for that path.
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
+    # Scene-upload and deploy diagnostics rely on readable ESP-IDF error names.
+    "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
 }
 
 # idf.py builds are not safe to run concurrently in the same build directory

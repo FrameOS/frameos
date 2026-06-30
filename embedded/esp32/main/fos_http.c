@@ -1808,7 +1808,11 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
+        const char *detail = fos_scenes_last_error();
+        return httpd_resp_send_err(
+            req,
+            HTTPD_500_INTERNAL_SERVER_ERROR,
+            (detail && detail[0]) ? detail : esp_err_to_name(err));
     }
     if (s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");

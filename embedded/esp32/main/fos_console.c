@@ -575,7 +575,8 @@ static int cmd_usb_api(int argc, char **argv)
         esp_err_t err = fos_http_store_uploaded_scenes_payload((const char *)body, len);
         free(body);
         if (err != ESP_OK) {
-            usb_api_error(subcommand, err, "scene upload failed");
+            const char *detail = fos_scenes_last_error();
+            usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene upload failed");
             return 1;
         }
         fos_client_render_now();
