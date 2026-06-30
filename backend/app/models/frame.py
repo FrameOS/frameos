@@ -9,7 +9,13 @@ from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
-from app.drivers.devices import device_dimensions
+from app.drivers.devices import (
+    apply_device_config_defaults,
+    apply_device_gpio_button_defaults,
+    device_config_with_defaults,
+    device_dimensions,
+    device_gpio_button_defaults,
+)
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone, stored_timezone
@@ -49,11 +55,24 @@ def _optional_config_int(cfg: dict, key: str) -> dict:
 
 def serialize_device_config(cfg: Optional[dict]) -> dict:
     cfg = dict(cfg or {}) if isinstance(cfg, dict) else {}
+    pins = cfg.get("pins") if isinstance(cfg.get("pins"), dict) else {}
+    serialized_pins = {}
+    for key in ("rst", "dc", "cs", "busy", "sclk", "mosi", "pwr"):
+        value = pins.get(key)
+        if key == "sclk" and value is None:
+            value = pins.get("sck")
+        if value in (None, ""):
+            continue
+        try:
+            serialized_pins[key] = int(value)
+        except (TypeError, ValueError):
+            continue
     return {
         **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
         "partial": _config_bool(cfg.get('partial', False)),
         **_optional_config_float(cfg, "partialMaxAreaPercent"),
         **_optional_config_int(cfg, "partialMaxRefreshesBeforeFull"),
+        **({"pins": serialized_pins} if serialized_pins else {}),
         **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
         **({"uploadHeaders": [
             {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}
@@ -387,7 +406,7 @@ class Frame(Base):
             'reboot': normalize_reboot_config(self.reboot),
             'control_code': self.control_code,
             'schedule': self.schedule,
-            'gpio_buttons': self.gpio_buttons,
+            'gpio_buttons': device_gpio_button_defaults(self.device) or self.gpio_buttons,
             'network': self.network,
             'agent': self.agent,
             'mountpoints': normalize_mountpoints(self.mountpoints),
@@ -504,6 +523,8 @@ async def new_frame(
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "0 4 * * *"}
     )
+    apply_device_config_defaults(frame)
+    apply_device_gpio_button_defaults(frame)
     db.add(frame)
     db.commit()
     await publish_message(redis, "new_frame", frame.to_dict())
@@ -572,6 +593,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     explicit_timezone = stored_timezone(frame.timezone)
     timezone_updater = resolve_timezone_updater(frame.timezone_updater)
     fallback_dimensions = device_dimensions(frame.device)
+    device_config = device_config_with_defaults(frame.device, frame.device_config)
+    gpio_buttons = device_gpio_button_defaults(frame.device) or frame.gpio_buttons or []
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
@@ -594,7 +617,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "width": frame.width or (fallback_dimensions[0] if fallback_dimensions else 0),
         "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
-        "deviceConfig": serialize_device_config(frame.device_config),
+        "deviceConfig": serialize_device_config(device_config),
         "interval": frame.interval or 300.0,
         "metricsInterval": frame.metrics_interval or 60.0,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -612,7 +635,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                 "pin": int(button.get("pin", 0)),
                 "label": str(button.get("label", "Pin " + str(button.get("pin"))))
             }
-            for button in (frame.gpio_buttons or [])
+            for button in gpio_buttons
             if int(button.get("pin", 0)) > 0
         ],
         "palette": frame.palette or {},

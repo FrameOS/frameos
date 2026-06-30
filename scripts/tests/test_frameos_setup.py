@@ -140,6 +140,36 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertNotIn("TTYVHangup=yes", service)
         self.assertNotIn("TTYVTDisallocate=yes", service)
 
+    def test_photopainter_install_writes_waveshare_pin_overrides(self) -> None:
+        self._run_setup(
+            {
+                "FRAMEOS_NAME": "PhotoPainter Frame",
+                "FRAMEOS_DEVICE": "waveshare.rpi_zero_photopainter_7in3e",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_BACKEND_ENABLED": "false",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+            }
+        )
+
+        frame_json = self._installed_frame_json()
+        self.assertEqual(frame_json["device"], "waveshare.rpi_zero_photopainter_7in3e")
+        self.assertEqual(frame_json["width"], 800)
+        self.assertEqual(frame_json["height"], 480)
+        self.assertEqual(frame_json["deviceConfig"]["pins"], {
+            "rst": 17,
+            "dc": 25,
+            "cs": 8,
+            "busy": 24,
+            "sclk": 11,
+            "mosi": 10,
+            "pwr": 27,
+        })
+        self.assertEqual(frame_json["gpioButtons"], [])
+
     def test_existing_frame_json_defaults_enable_backend_agent(self) -> None:
         existing_dir = self.out_dir / "srv" / "frameos" / "current"
         existing_dir.mkdir(parents=True)
@@ -243,6 +273,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertIn("6) waveshare.EPD_7in3e", menu.stderr)
         self.assertIn("7) waveshare.EPD_13in3e", menu.stderr)
         self.assertIn("8) waveshare.EPD_7in5_V2", menu.stderr)
+        self.assertIn("9) waveshare.rpi_zero_photopainter_7in3e", menu.stderr)
         self.assertNotIn("\\nDevice choices", menu.stderr)
         self.assertNotIn("custom device key\\nDevice", menu.stderr)
 

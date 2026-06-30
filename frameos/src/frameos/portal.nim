@@ -197,6 +197,8 @@ proc frameHostFromHostname(hostname: string): string =
 
 proc normalizedWaveshareVariant(device: string): string =
   const prefix = "waveshare."
+  if device == "waveshare.rpi_zero_photopainter_7in3e":
+    return "EPD_7in3e"
   if not device.startsWith(prefix) or device.len <= prefix.len:
     return ""
   result = device[prefix.len .. ^1]
@@ -390,6 +392,8 @@ proc nativeDeviceDimensions(device: string): tuple[width: int, height: int] =
     (width: 400, height: 300)
   of "pimoroni.hyperpixel2r", "pimoroni.hyperpixel2r_native":
     (width: 480, height: 480)
+  of "waveshare.rpi_zero_photopainter_7in3e":
+    (width: 800, height: 480)
   else:
     (width: 0, height: 0)
 
@@ -407,6 +411,8 @@ proc labelForDevice(device: string): string =
     "Pimoroni HyperPixel 2.1 Round"
   of "pimoroni.hyperpixel2r_native":
     "Pimoroni HyperPixel 2.1 Round (native)"
+  of "waveshare.rpi_zero_photopainter_7in3e":
+    "Waveshare RPi Zero PhotoPainter - 7.3\""
   else:
     if device.startsWith("waveshare."):
       "Waveshare " & normalizedWaveshareVariant(device).replace("_", " ")
@@ -502,6 +508,8 @@ proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
     if driver.startsWith("waveshare_") and driver.len > "waveshare_".len:
       let variant = driver["waveshare_".len .. ^1]
       result.addDisplayOption(makeDisplayOption("waveshare." & variant, driver))
+      if variant == "EPD_7in3e":
+        result.addDisplayOption(makeDisplayOption("waveshare.rpi_zero_photopainter_7in3e", driver))
 
   if result.len == 0 and frameOS.frameConfig.device.len > 0:
     result.addDisplayOption(makeDisplayOption(frameOS.frameConfig.device, currentDriver))
@@ -543,18 +551,53 @@ proc ensureDeviceConfig(frameConfig: FrameConfig): DeviceConfig =
   if result.pins.isNil:
     result.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
 
+proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode, runtimeDeviceConfig: DeviceConfig = nil) =
+  if device != "waveshare.rpi_zero_photopainter_7in3e" or deviceConfig == nil or deviceConfig.kind != JObject:
+    return
+
+  var pins = deviceConfig{"pins"}
+  if pins == nil or pins.kind != JObject:
+    pins = newJObject()
+
+  proc pinValue(key: string, fallback: int): int =
+    if pins{key} == nil:
+      pins[key] = %fallback
+      return fallback
+    pins{key}.getInt(fallback)
+
+  let rst = pinValue("rst", 17)
+  let dc = pinValue("dc", 25)
+  let cs = pinValue("cs", 8)
+  let busy = pinValue("busy", 24)
+  let sclk = pinValue("sclk", 11)
+  let mosi = pinValue("mosi", 10)
+  let pwr = pinValue("pwr", 27)
+  deviceConfig["pins"] = pins
+
+  if not runtimeDeviceConfig.isNil:
+    if runtimeDeviceConfig.pins.isNil:
+      runtimeDeviceConfig.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
+    runtimeDeviceConfig.pins.rst = rst
+    runtimeDeviceConfig.pins.dc = dc
+    runtimeDeviceConfig.pins.cs = cs
+    runtimeDeviceConfig.pins.busy = busy
+    runtimeDeviceConfig.pins.sclk = sclk
+    runtimeDeviceConfig.pins.mosi = mosi
+    runtimeDeviceConfig.pins.pwr = pwr
+
 proc gpioButtonsForDeviceJson(device: string): JsonNode =
   result = newJArray()
-  if not isInkyButtonDevice(device):
-    return
-  let cPin = if device in ["pimoroni.inky_impression_13", "pimoroni.inky_impression_13_2025"]: 25 else: 16
-  for pair in [(5, "A"), (6, "B"), (cPin, "C"), (24, "D")]:
+  var pairs: seq[tuple[pin: int, label: string]] = @[]
+  if isInkyButtonDevice(device):
+    let cPin = if device in ["pimoroni.inky_impression_13", "pimoroni.inky_impression_13_2025"]: 25 else: 16
+    pairs = @[(5, "A"), (6, "B"), (cPin, "C"), (24, "D")]
+  for pair in pairs:
     result.add(%*{"pin": pair[0], "label": pair[1]})
 
 proc applyGpioButtonsForDevice(frameConfig: FrameConfig, data: JsonNode, device: string) =
-  if not isInkyButtonDevice(device):
-    return
   let buttons = gpioButtonsForDeviceJson(device)
+  if buttons.len == 0:
+    return
   data["gpioButtons"] = buttons
   frameConfig.gpioButtons = @[]
   for item in buttons.items:
@@ -695,9 +738,10 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     deviceConfig["partialMaxAreaPercent"] = %options.partialMaxAreaPercent
     deviceConfig["partialMaxRefreshesBeforeFull"] = %options.partialMaxRefreshesBeforeFull
     deviceConfig["uploadUrl"] = %options.httpUploadUrl.strip()
-    data["deviceConfig"] = deviceConfig
 
     let runtimeDeviceConfig = ensureDeviceConfig(frameConfig)
+    applyDeviceConfigDefaults(device, deviceConfig, runtimeDeviceConfig)
+    data["deviceConfig"] = deviceConfig
     runtimeDeviceConfig.vcom = options.vcom
     runtimeDeviceConfig.partial = options.partial
     runtimeDeviceConfig.partialMaxAreaPercent = options.partialMaxAreaPercent

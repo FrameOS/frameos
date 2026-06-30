@@ -87,13 +87,32 @@ WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS = {
     "mosi": 10,
     "pwr": 27,
 }
-
+INKY_GPIO_BUTTONS = [
+    {"pin": 5, "label": "A"},
+    {"pin": 6, "label": "B"},
+    {"pin": 16, "label": "C"},
+    {"pin": 24, "label": "D"},
+]
+INKY_13_GPIO_BUTTONS = [
+    {"pin": 5, "label": "A"},
+    {"pin": 6, "label": "B"},
+    {"pin": 25, "label": "C"},
+    {"pin": 24, "label": "D"},
+]
 WAVESHARE_DEVICE_VARIANTS = {
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE: WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_VARIANT,
 }
 
 WAVESHARE_DEVICE_PIN_DEFAULTS = {
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE: WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+}
+DEVICE_GPIO_BUTTON_DEFAULTS = {
+    **{
+        device: INKY_13_GPIO_BUTTONS
+        if device in {"pimoroni.inky_impression_13", "pimoroni.inky_impression_13_2025"}
+        else INKY_GPIO_BUTTONS
+        for device in INKY_BUTTON_DEVICES
+    },
 }
 
 NATIVE_DEVICE_DIMENSIONS = {
@@ -196,8 +215,39 @@ def device_config_with_defaults(
     return config
 
 
+def device_gpio_button_defaults(device: str | None) -> list[dict] | None:
+    defaults = DEVICE_GPIO_BUTTON_DEFAULTS.get(device or "")
+    return [dict(button) for button in defaults] if defaults is not None else None
+
+
+def _normalized_gpio_buttons(buttons: list[dict] | None) -> list[dict]:
+    normalized: list[dict] = []
+    for button in buttons or []:
+        if not isinstance(button, dict):
+            continue
+        try:
+            pin = int(button.get("pin"))
+        except (TypeError, ValueError):
+            continue
+        normalized.append({"pin": pin, "label": str(button.get("label") or f"Pin {pin}")})
+    return normalized
+
+
+def apply_device_gpio_button_defaults(frame: Frame, previous_device: str | None = None) -> None:
+    defaults = device_gpio_button_defaults(frame.device)
+    if defaults is not None:
+        frame.gpio_buttons = defaults
+        return
+
+    previous_defaults = device_gpio_button_defaults(previous_device)
+    if previous_defaults is not None and _normalized_gpio_buttons(frame.gpio_buttons) == previous_defaults:
+        frame.gpio_buttons = None
+
+
 def apply_device_config_defaults(frame: Frame, previous_device: str | None = None) -> None:
-    frame.device_config = device_config_with_defaults(frame.device, frame.device_config, previous_device)
+    config = device_config_with_defaults(frame.device, frame.device_config, previous_device)
+    if config or isinstance(frame.device_config, dict):
+        frame.device_config = config
 
 
 def device_dimensions(device: str | None) -> tuple[int, int] | None:
@@ -265,24 +315,11 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     if device not in INKY_BUTTON_DEVICES and not device.startswith("waveshare.") and device not in VIRTUAL_OUTPUT_DEVICES:
         device_drivers["evdev"] = DRIVERS["evdev"]
 
+    default_gpio_buttons = device_gpio_button_defaults(frame.device)
+    if default_gpio_buttons is not None:
+        frame.gpio_buttons = default_gpio_buttons
+
     if frame.device in INKY_BUTTON_DEVICES:
-        if frame.device in {
-            "pimoroni.inky_impression_13",
-            "pimoroni.inky_impression_13_2025",
-        }:
-            frame.gpio_buttons = [
-                {"pin": 5, "label": "A"},
-                {"pin": 6, "label": "B"},
-                {"pin": 25, "label": "C"},
-                {"pin": 24, "label": "D"},
-            ]
-        else:
-            frame.gpio_buttons = [
-                {"pin": 5, "label": "A"},
-                {"pin": 6, "label": "B"},
-                {"pin": 16, "label": "C"},
-                {"pin": 24, "label": "D"},
-            ]
         if "bootconfig" not in device_drivers:
             device_drivers["bootconfig"] = replace(DRIVERS["bootConfig"], lines=["dtoverlay=spi0-0cs"])
 

@@ -23,6 +23,10 @@ from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
 from app.codegen.drivers_nim import frame_compilation_mode
+from app.drivers.devices import (
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+)
 
 
 def set_buildroot_sd_image_config_fingerprint(frame: Frame) -> None:
@@ -2108,6 +2112,28 @@ async def test_api_frame_new_embedded_waveshare_photopainter_preset(async_client
         'pins': {'cs': 38, 'sck': 39, 'miso': 40, 'mosi': 41},
         'maxFrequencyKHz': 20000,
     }
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_rpios_waveshare_photopainter_profile(async_client):
+    payload = {
+        "mode": "rpios",
+        "name": "RPi PhotoPainter",
+        "frame_host": "pi@photopainter.local",
+        "server_host": "backend.local",
+        "device": WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'rpios'
+    assert frame['device'] == WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE
+    assert frame['width'] == 800
+    assert frame['height'] == 480
+    assert frame['device_config']['pins'] == WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS
+    assert frame['gpio_buttons'] is None
 
 
 @pytest.mark.asyncio

@@ -151,6 +151,7 @@ from app.tasks.buildroot_image import (
     validate_buildroot_wifi_credentials,
 )
 from app.codegen.drivers_nim import frame_compilation_mode
+from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_button_defaults
 from app.api.project_scope import project_get_or_404
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
@@ -454,10 +455,14 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         ensure_embedded_frame_defaults(preview, (preview.embedded or {}).get("platform"))
     elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
         preview.ssh_user = "pi"
+    apply_device_config_defaults(preview, frame.device)
+    apply_device_gpio_button_defaults(preview, frame.device)
 
     def _preview_to_dict():
         result = {**frame.to_dict(), **preview_data}
         result["mode"] = preview.mode
+        result["device_config"] = preview.device_config
+        result["gpio_buttons"] = preview.gpio_buttons
         result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
         result["error_behavior"] = normalize_error_behavior(preview.error_behavior)
         result["ssh_user"] = preview.ssh_user
@@ -3093,6 +3098,7 @@ async def api_frame_update_endpoint(
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
 
     old_mode = frame.mode
+    old_device = frame.device
     for field, value in update_data.items():
         setattr(frame, field, value)
 
@@ -3119,6 +3125,8 @@ async def api_frame_update_endpoint(
             _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
+    apply_device_config_defaults(frame, old_device)
+    apply_device_gpio_button_defaults(frame, old_device)
 
     if (
         (frame.mode or "rpios") == "buildroot"
@@ -3207,6 +3215,8 @@ async def api_frame_new(
             frame.embedded = dict(data.embedded)
         if data.gpio_buttons is not None:
             frame.gpio_buttons = list(data.gpio_buttons)
+        apply_device_config_defaults(frame)
+        apply_device_gpio_button_defaults(frame)
 
         if data.ssh_keys is not None:
             frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))

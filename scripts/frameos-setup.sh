@@ -481,6 +481,7 @@ waveshare.EPD_5in83bc:600x448
 waveshare.EPD_5in83c:600x448
 waveshare.EPD_5in84:768x256
 waveshare.EPD_7in3e:800x480
+waveshare.rpi_zero_photopainter_7in3e:800x480
 waveshare.EPD_7in3f:800x480
 waveshare.EPD_7in3g:800x480
 waveshare.EPD_7in5:640x384
@@ -554,6 +555,7 @@ print_waveshare_devices() {
   waveshare.EPD_5in83
   waveshare.EPD_5in83_V2
   waveshare.EPD_7in3e
+  waveshare.rpi_zero_photopainter_7in3e
   waveshare.EPD_7in3f
   waveshare.EPD_7in3g
   waveshare.EPD_7in5
@@ -580,6 +582,7 @@ choose_device() {
     prompt_line "  6) waveshare.EPD_7in3e"
     prompt_line "  7) waveshare.EPD_13in3e"
     prompt_line "  8) waveshare.EPD_7in5_V2"
+    prompt_line "  9) waveshare.rpi_zero_photopainter_7in3e"
     prompt_line "  p) list Pimoroni devices"
     prompt_line "  w) list Waveshare examples"
     prompt_line "  c) custom device key"
@@ -593,6 +596,7 @@ choose_device() {
       6) echo "waveshare.EPD_7in3e"; return ;;
       7) echo "waveshare.EPD_13in3e"; return ;;
       8) echo "waveshare.EPD_7in5_V2"; return ;;
+      9) echo "waveshare.rpi_zero_photopainter_7in3e"; return ;;
       p|P)
         print_pimoroni_devices >&2
         ;;
@@ -678,6 +682,13 @@ else:
     data = {}
 
 device_config = dict(data.get("deviceConfig") or {})
+photopainter_device = "waveshare.rpi_zero_photopainter_7in3e"
+photopainter_pins = {"rst": 17, "dc": 25, "cs": 8, "busy": 24, "sclk": 11, "mosi": 10, "pwr": 27}
+if env("FRAMEOS_DEVICE") == photopainter_device:
+    pins = dict(device_config.get("pins") or {})
+    for key, value in photopainter_pins.items():
+        pins.setdefault(key, value)
+    device_config["pins"] = pins
 if env("FRAMEOS_DEVICE") == "http.upload":
     device_config["uploadUrl"] = env("FRAMEOS_HTTP_UPLOAD_URL")
 else:
