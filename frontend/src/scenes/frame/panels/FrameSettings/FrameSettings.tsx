@@ -461,14 +461,14 @@ const ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT: Esp32PinLayout = {
 }
 
 const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
-  rst: 10,
-  dc: 7,
-  cs: 1,
-  cs2: 4,
-  busy: 8,
-  sck: 6,
-  mosi: 5,
-  pwr: 16,
+  rst: 2,
+  dc: 11,
+  cs: 10,
+  cs2: 3,
+  busy: 12,
+  sck: 9,
+  mosi: 46,
+  pwr: 1,
 }
 
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
@@ -493,10 +493,10 @@ const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
 }
 
 const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
-  cs: 3,
-  sck: 44,
-  miso: 43,
-  mosi: 2,
+  cs: 15,
+  sck: 6,
+  miso: 5,
+  mosi: 7,
 }
 
 const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [

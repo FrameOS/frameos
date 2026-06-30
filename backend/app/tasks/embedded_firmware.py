@@ -52,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 28  # PhotoPainter default GPIO buttons
+EMBEDDED_FIRMWARE_VERSION = 29  # Waveshare ESP32-S3 ePaper 13.3E6 GPIO defaults
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -87,18 +87,18 @@ EMBEDDED_WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS = [
     {"pin": 0, "label": "BOOT"},
     {"pin": 4, "label": "KEY1"},
 ]
-# Waveshare ESP32-S3 ePaper 13.3E6 schematic pinout:
-# CSB_M=GPIO1, CSB_S=GPIO4, SDA=GPIO5, SCL=GPIO6, D/C=GPIO7,
-# BUSY_N=GPIO8, RST_N=GPIO10, EPD_PWR=GPIO16.
+# Waveshare ESP32-S3 ePaper 13.3E6 GPIO table / vendor example pinout:
+# EPD_PWR=GPIO1, RST_N=GPIO2, CSB_S=GPIO3, SCL=GPIO9,
+# CSB_M=GPIO10, D/C=GPIO11, BUSY_N=GPIO12, SDA=GPIO46.
 EMBEDDED_WAVESHARE_13IN3E6_PINS = {
-    "rst": 10,
-    "dc": 7,
-    "cs": 1,
-    "cs2": 4,
-    "busy": 8,
-    "sck": 6,
-    "mosi": 5,
-    "pwr": 16,
+    "rst": 2,
+    "dc": 11,
+    "cs": 10,
+    "cs2": 3,
+    "busy": 12,
+    "sck": 9,
+    "mosi": 46,
+    "pwr": 1,
 }
 EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
@@ -110,8 +110,9 @@ EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
 # Waveshare ESP32-S3 PhotoPainter TF socket, from the vendor schematic:
 # TF pin 2 (DAT3/CS)=GPIO38, pin 5 (CLK)=GPIO39, pin 7 (DAT0/MISO)=GPIO40,
 # pin 3 (CMD/MOSI)=GPIO41.
-# Waveshare ESP32-S3 ePaper 13.3E6 TF socket: SD_CS=GPIO3,
-# SD_CLK=GPIO44, SD_MISO=GPIO43, SD_MOSI=GPIO2.
+# Waveshare ESP32-S3 ePaper 13.3E6 TF socket: SD_D1=GPIO4,
+# SD_MISO=GPIO5, SD_CLK=GPIO6, SD_MOSI=GPIO7, SD_CS=GPIO15,
+# SD_D2=GPIO16. FrameOS uses SPI mode.
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -120,10 +121,10 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
         "mosi": 41,
     },
     "waveshare_esp32_s3_epaper_13_3e6": {
-        "cs": 3,
-        "sck": 44,
-        "miso": 43,
-        "mosi": 2,
+        "cs": 15,
+        "sck": 6,
+        "miso": 5,
+        "mosi": 7,
     },
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000

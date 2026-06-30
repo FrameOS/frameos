@@ -2050,20 +2050,20 @@ async def test_api_frame_new_embedded_waveshare_13in3e6_preset(async_client):
     assert frame['device_config']['hardwarePreset'] == 'waveshare_esp32_s3_epaper_13_3e6'
     assert frame['device_config']['psramMB'] == 16
     assert frame['device_config']['pins'] == {
-        'rst': 10,
-        'dc': 7,
-        'cs': 1,
-        'cs2': 4,
-        'busy': 8,
-        'sck': 6,
-        'mosi': 5,
-        'pwr': 16,
+        'rst': 2,
+        'dc': 11,
+        'cs': 10,
+        'cs2': 3,
+        'busy': 12,
+        'sck': 9,
+        'mosi': 46,
+        'pwr': 1,
     }
     assert frame['device_config']['sdCardAssets'] == {
         'enabled': True,
         'preset': 'waveshare_esp32_s3_epaper_13_3e6',
         'mountPath': '/srv/assets',
-        'pins': {'cs': 3, 'sck': 44, 'miso': 43, 'mosi': 2},
+        'pins': {'cs': 15, 'sck': 6, 'miso': 5, 'mosi': 7},
         'maxFrequencyKHz': 20000,
     }
 
