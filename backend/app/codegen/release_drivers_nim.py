@@ -13,6 +13,7 @@ from app.codegen.drivers_nim import (
     write_driver_library_nim,
 )
 from app.drivers.drivers import DRIVERS, Driver
+from app.drivers.devices import WAVESHARE_DEVICE_VARIANTS
 from app.drivers.waveshare import get_variant_keys, write_waveshare_driver_nim
 
 
@@ -98,6 +99,10 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
         if driver.import_path or driver.setup_import_path or driver.lines
     ]
     available_driver_names_source = nim_string_seq_literal(available_driver_names)
+    custom_waveshare_variant_lines = "\n".join(
+        f'  if device == "{device}":\n    return "{variant}"'
+        for device, variant in sorted(WAVESHARE_DEVICE_VARIANTS.items())
+    )
 
     return f"""
 import std/[dynlib, json, options, os, strutils]
@@ -209,6 +214,7 @@ proc evdevEnabledDevice(device: string): bool =
 
 proc normalizedWaveshareVariant(device: string): string =
   const prefix = "waveshare."
+{custom_waveshare_variant_lines}
   if not device.startsWith(prefix) or device.len <= prefix.len:
     return ""
   result = device[prefix.len .. ^1]

@@ -616,39 +616,39 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     assert embedded_module_psram_bytes(frame) == 16 * 1024 * 1024
     assert frame.device_config["psramMB"] == 16
     assert embedded_pins_for_frame(frame) == {
-        "rst": 10,
-        "dc": 7,
-        "cs": 1,
-        "cs2": 4,
-        "busy": 8,
-        "sck": 6,
-        "mosi": 5,
-        "pwr": 16,
+        "rst": 2,
+        "dc": 11,
+        "cs": 10,
+        "cs2": 3,
+        "busy": 12,
+        "sck": 9,
+        "mosi": 46,
+        "pwr": 1,
     }
     assert embedded_sd_card_assets_for_frame(frame) == {
         "enabled": True,
         "preset": "waveshare_esp32_s3_epaper_13_3e6",
         "mountPath": "/srv/assets",
-        "pins": {"cs": 3, "sck": 44, "miso": 43, "mosi": 2},
+        "pins": {"cs": 15, "sck": 6, "miso": 5, "mosi": 7},
         "maxFrequencyKHz": 20_000,
     }
     check_embedded_panel_fits_memory(frame)
 
     header = _generated_config_header(frame)
     assert '#define FRAMEOS_DEFAULT_PANEL "EPD_13in3e"' in header
-    assert "#define FRAMEOS_DEFAULT_PIN_RST 10" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_DC 7" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS 1" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_CS2 4" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 8" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_SCK 6" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 5" in header
-    assert "#define FRAMEOS_DEFAULT_PIN_PWR 16" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_RST 2" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_DC 11" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS 10" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_CS2 3" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_BUSY 12" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_SCK 9" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_MOSI 46" in header
+    assert "#define FRAMEOS_DEFAULT_PIN_PWR 1" in header
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 1" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 3" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 44" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 43" in header
-    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 2" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS 15" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 6" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 5" in header
+    assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 7" in header
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():

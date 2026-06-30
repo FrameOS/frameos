@@ -1,4 +1,5 @@
 import json
+from app.drivers.devices import WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE
 from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 
 
@@ -74,6 +75,11 @@ if __name__ == '__main__':
             "label": f'Waveshare {v.size}"{code} {dim} {color}',
         }
         waveshare_devices.append(output)
+        if v.key == "EPD_7in3e":
+            waveshare_devices.append({
+                "value": WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+                "label": 'Waveshare 7.3" RPi Zero PhotoPainter -800x480 Spectra 6 Color',
+            })
 
     print_group("Waveshare", waveshare_devices)
 

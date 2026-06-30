@@ -47,6 +47,7 @@ import {
   FrameErrorBehaviorMode,
   FrameMountpointConfig,
   FrameType,
+  GPIOButton,
   Palette,
 } from '../../../../types'
 import { A } from 'kea-router'
@@ -432,6 +433,47 @@ const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
 const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
   'waveshare_esp32_s3_photopainter'
 const ESP32_WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
+const INKY_GPIO_BUTTONS: GPIOButton[] = [
+  { pin: 5, label: 'A' },
+  { pin: 6, label: 'B' },
+  { pin: 16, label: 'C' },
+  { pin: 24, label: 'D' },
+]
+const INKY_13_GPIO_BUTTONS: GPIOButton[] = [
+  { pin: 5, label: 'A' },
+  { pin: 6, label: 'B' },
+  { pin: 25, label: 'C' },
+  { pin: 24, label: 'D' },
+]
+const INKY_AUTO_BUTTON_DEVICES = new Set([
+  'pimoroni.inky_impression',
+  'pimoroni.inky_impression_7_3',
+  'pimoroni.inky_impression_7_color',
+  'pimoroni.inky_impression_5_7',
+  'pimoroni.inky_impression_5_7_color',
+  'pimoroni.inky_impression_4_7_color',
+  'pimoroni.inky_impression_4',
+  'pimoroni.inky_impression_4_2025',
+  'pimoroni.inky_impression_4_spectra6',
+  'pimoroni.inky_impression_7',
+  'pimoroni.inky_impression_7_2025',
+  'pimoroni.inky_impression_13',
+  'pimoroni.inky_impression_13_2025',
+])
+const INKY_13_AUTO_BUTTON_DEVICES = new Set(['pimoroni.inky_impression_13', 'pimoroni.inky_impression_13_2025'])
+
+function configuredGpioButtonsForDevice(device?: string | null): GPIOButton[] | null {
+  if (!device) {
+    return null
+  }
+  if (INKY_13_AUTO_BUTTON_DEVICES.has(device)) {
+    return INKY_13_GPIO_BUTTONS
+  }
+  if (INKY_AUTO_BUTTON_DEVICES.has(device)) {
+    return INKY_GPIO_BUTTONS
+  }
+  return null
+}
 
 const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
@@ -461,14 +503,14 @@ const ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT: Esp32PinLayout = {
 }
 
 const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
-  rst: 10,
-  dc: 7,
-  cs: 1,
-  cs2: 4,
-  busy: 8,
-  sck: 6,
-  mosi: 5,
-  pwr: 16,
+  rst: 2,
+  dc: 11,
+  cs: 10,
+  cs2: 3,
+  busy: 12,
+  sck: 9,
+  mosi: 46,
+  pwr: 1,
 }
 
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
@@ -493,10 +535,10 @@ const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
 }
 
 const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
-  cs: 3,
-  sck: 44,
-  miso: 43,
-  mosi: 2,
+  cs: 15,
+  sck: 6,
+  miso: 5,
+  mosi: 7,
 }
 
 const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
@@ -817,24 +859,6 @@ export function FrameSettings({
   }
 
   const palette = withCustomPalette[frame.device || '']
-  const inkyAutoButtonDevice = [
-    'pimoroni.inky_impression',
-    'pimoroni.inky_impression_7_3',
-    'pimoroni.inky_impression_7_color',
-    'pimoroni.inky_impression_5_7',
-    'pimoroni.inky_impression_5_7_color',
-    'pimoroni.inky_impression_4_7_color',
-    'pimoroni.inky_impression_4',
-    'pimoroni.inky_impression_4_2025',
-    'pimoroni.inky_impression_4_spectra6',
-    'pimoroni.inky_impression_7',
-    'pimoroni.inky_impression_7_2025',
-    'pimoroni.inky_impression_13',
-    'pimoroni.inky_impression_13_2025',
-  ].includes(frameForm.device || '')
-  const inkyThirteenDevice = ['pimoroni.inky_impression_13', 'pimoroni.inky_impression_13_2025'].includes(
-    frameForm.device || ''
-  )
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
@@ -848,6 +872,7 @@ export function FrameSettings({
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
   const isEmbeddedMode = mode === 'embedded'
+  const configuredGpioButtons = !isEmbeddedMode ? configuredGpioButtonsForDevice(frameForm.device) : null
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
   const maxHttpResponsePlaceholder = String(
     isEmbeddedMode ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
@@ -2944,7 +2969,9 @@ export function FrameSettings({
         ) : null}
         <H6 id="frame-settings-gpio" className="flex items-center gap-2">
           GPIO buttons
-          {!(!isEmbeddedMode && inkyAutoButtonDevice) ? (
+          {configuredGpioButtons ? (
+            <Tag color="gray">Configured</Tag>
+          ) : (
             <Button
               size="small"
               color="secondary"
@@ -2954,13 +2981,23 @@ export function FrameSettings({
               <PlusIcon className="w-4 h-4" />
               Add button
             </Button>
-          ) : null}
+          )}
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
-          {!isEmbeddedMode && inkyAutoButtonDevice ? (
-            <div>
-              Inky Impression boards automatically configure pins 5, 6, {inkyThirteenDevice ? '25' : '16'} and 24 as
-              buttons A, B, C and D
+          {configuredGpioButtons ? (
+            <div className="space-y-2">
+              {configuredGpioButtons.map((button) => (
+                <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+                  <div className="space-y-1 @md:flex @md:gap-2">
+                    <Label className="@md:w-1/3">Pin</Label>
+                    <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
+                  </div>
+                  <div className="space-y-1 @md:flex @md:gap-2">
+                    <Label className="@md:w-1/3">Label</Label>
+                    <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             frameForm.gpio_buttons?.map((_, index) => (

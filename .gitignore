@@ -95,3 +95,5 @@ files/
 nimcache/
 e2e/scenes/*.so
 *.rdb
+tmp/
+release-assets/

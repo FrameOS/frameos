@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.drivers.devices import drivers_for_frame
+from app.drivers.devices import (
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+    device_config_with_defaults,
+    device_dimensions,
+    drivers_for_frame,
+)
 from app.drivers.waveshare import (
     BOOT_CONFIG_LINES_BY_VARIANT,
     BOOT_CONFIG_SPI_VARIANTS,
@@ -10,8 +16,12 @@ from app.drivers.waveshare import (
 )
 
 
-def frame(device: str, gpio_buttons: list[dict] | None = None) -> SimpleNamespace:
-    return SimpleNamespace(device=device, gpio_buttons=gpio_buttons or [])
+def frame(
+    device: str,
+    gpio_buttons: list[dict] | None = None,
+    device_config: dict | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(device=device, gpio_buttons=gpio_buttons or [], device_config=device_config)
 
 
 def test_web_only_frame_has_no_native_drivers():
@@ -52,6 +62,43 @@ def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():
     assert "spi" not in drivers
     assert "noSpi" not in drivers
     assert drivers["bootconfig"].lines == ["dtoverlay=spi0-0cs", "#dtparam=spi=on"]
+
+
+def test_waveshare_rpi_zero_photopainter_uses_7in3e_driver_and_pin_defaults():
+    test_frame = frame(WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE)
+
+    drivers = drivers_for_frame(test_frame)
+
+    assert device_dimensions(WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE) == (800, 480)
+    assert "waveshare" in drivers
+    assert "spi" in drivers
+    assert "evdev" not in drivers
+    assert "gpioButton" not in drivers
+    assert drivers["waveshare"].variant == "EPD_7in3e"
+    assert test_frame.device_config == {"pins": WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS}
+
+
+def test_waveshare_rpi_zero_photopainter_preserves_explicit_pin_overrides():
+    test_frame = frame(
+        WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+        device_config={"pins": {"pwr": 18, "sck": 9}},
+    )
+
+    drivers_for_frame(test_frame)
+
+    assert test_frame.device_config["pins"] == {
+        **WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+        "pwr": 18,
+        "sclk": 9,
+    }
+
+
+def test_waveshare_rpi_zero_photopainter_defaults_are_removed_when_switching_away():
+    assert device_config_with_defaults(
+        "waveshare.EPD_7in3e",
+        {"pins": dict(WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS)},
+        previous_device=WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    ) == {}
 
 
 def test_native_inky_2025_frame_uses_nim_driver_and_gpio_buttons():

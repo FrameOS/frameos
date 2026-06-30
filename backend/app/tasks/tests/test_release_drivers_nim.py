@@ -44,6 +44,7 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert '"frameBuffer"' in source
     assert '"waveshare_EPD_7in3e"' in source
     assert 'return spec.name == ("waveshare_" & normalizedWaveshareVariant(device))' in source
+    assert 'if device == "waveshare.rpi_zero_photopainter_7in3e":\n    return "EPD_7in3e"' in source
     assert 'device == "framebuffer"' in source
     assert 'frameOS.frameConfig.gpioButtons.len > 0' in source
     assert "proc isNativeInkyDevice(device: string): bool" in source

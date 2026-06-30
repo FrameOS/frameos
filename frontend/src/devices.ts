@@ -121,6 +121,10 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_5in83b_V2', label: 'Waveshare 5.83" (B V2) 648x480 Black/White/Red' },
       { value: 'waveshare.EPD_5in84', label: 'Waveshare 5.84" 768x256 Black/White' },
       { value: 'waveshare.EPD_7in3e', label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' },
+      {
+        value: 'waveshare.rpi_zero_photopainter_7in3e',
+        label: 'Waveshare 7.3" RPi Zero PhotoPainter - 800x480 Spectra 6 Color',
+      },
       { value: 'waveshare.EPD_7in3f', label: 'Waveshare 7.3" (F) 800x480 7 Color' },
       { value: 'waveshare.EPD_7in3g', label: 'Waveshare 7.3" (G) 800x480 Black/White/Yellow/Red' },
       { value: 'waveshare.EPD_7in5', label: 'Waveshare 7.5" 640x384 Black/White' },
@@ -218,6 +222,7 @@ export const spectraPalettes: Palette[] = [
 export const withCustomPalette: Record<string, Palette> = {
   'waveshare.EPD_13in3e': spectraPalettes[0],
   'waveshare.EPD_7in3e': spectraPalettes[0],
+  'waveshare.rpi_zero_photopainter_7in3e': spectraPalettes[0],
   'waveshare.EPD_4in0e': spectraPalettes[0],
   'pimoroni.inky_impression_4': spectraPalettes[0],
   'pimoroni.inky_impression_4_2025': spectraPalettes[0],

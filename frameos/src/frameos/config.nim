@@ -111,7 +111,7 @@ proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
       result.dc = data{"dc"}.getInt(-1)
       result.cs = data{"cs"}.getInt(-1)
       result.busy = data{"busy"}.getInt(-1)
-      result.sclk = data{"sclk"}.getInt(-1)
+      result.sclk = data{"sclk"}.getInt(data{"sck"}.getInt(-1))
       result.mosi = data{"mosi"}.getInt(-1)
       result.pwr = data{"pwr"}.getInt(-1)
 

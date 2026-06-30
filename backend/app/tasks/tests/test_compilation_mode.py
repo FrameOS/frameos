@@ -80,6 +80,18 @@ def test_shared_driver_registry_types_empty_sequence():
     assert "proc availableDriverNames*(): seq[string]" in source
 
 
+def test_generated_driver_context_copies_pin_overrides():
+    source = write_static_drivers_nim({})
+
+    assert "pins: driverContext.PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)" in source
+    assert "deviceConfig.pins = driverContext.PinOverrides(" in source
+    assert "sclk: sourceDeviceConfig.pins.sclk" in source
+
+    library_source = write_driver_library_nim(Driver(name="frameBuffer", import_path="frameBuffer/frameBuffer"))
+    assert "pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)" in library_source
+    assert "deviceConfig.pins = PinOverrides(" in library_source
+
+
 def test_shared_drivers_run_compiled_driver_setup_from_library():
     source = write_shared_drivers_nim(
         {

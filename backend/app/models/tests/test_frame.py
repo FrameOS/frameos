@@ -12,6 +12,10 @@ from app.models.frame import (
     normalize_reboot_crontab,
     update_frame,
 )
+from app.drivers.devices import (
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+)
 from app.database import SessionLocal
 from app.models.settings import Settings
 from app.schemas.frames import FrameErrorBehavior
@@ -281,6 +285,27 @@ async def test_get_frame_json_includes_partial_device_config(_mock_publish, db, 
     device_config = get_frame_json(db, frame)["deviceConfig"]
     assert "partialMaxAreaPercent" not in device_config
     assert "partialMaxRefreshesBeforeFull" not in device_config
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_waveshare_photopainter_pin_defaults(_mock_publish, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        "PhotoPainter",
+        "host",
+        "server_host.com",
+        WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
+    )
+
+    data = get_frame_json(db, frame)
+
+    assert data["device"] == WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE
+    assert data["width"] == 800
+    assert data["height"] == 480
+    assert data["deviceConfig"]["pins"] == WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS
+    assert data["gpioButtons"] == []
 
 
 @pytest.mark.asyncio

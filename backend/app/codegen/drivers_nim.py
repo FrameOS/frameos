@@ -85,6 +85,7 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
     partialMaxRefreshesBeforeFull: 0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
+    pins: driverContext.PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
   if not sourceDeviceConfig.isNil:
     deviceConfig.vcom = sourceDeviceConfig.vcom
@@ -92,6 +93,16 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
     deviceConfig.partialMaxAreaPercent = sourceDeviceConfig.partialMaxAreaPercent
     deviceConfig.partialMaxRefreshesBeforeFull = sourceDeviceConfig.partialMaxRefreshesBeforeFull
     deviceConfig.httpUploadUrl = sourceDeviceConfig.httpUploadUrl
+    if not sourceDeviceConfig.pins.isNil:
+      deviceConfig.pins = driverContext.PinOverrides(
+        rst: sourceDeviceConfig.pins.rst,
+        dc: sourceDeviceConfig.pins.dc,
+        cs: sourceDeviceConfig.pins.cs,
+        busy: sourceDeviceConfig.pins.busy,
+        sclk: sourceDeviceConfig.pins.sclk,
+        mosi: sourceDeviceConfig.pins.mosi,
+        pwr: sourceDeviceConfig.pins.pwr,
+      )
     for header in sourceDeviceConfig.httpUploadHeaders:
       deviceConfig.httpUploadHeaders.add(driverContext.HttpHeaderPair(
         name: header.name,
@@ -217,6 +228,7 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
     partialMaxRefreshesBeforeFull: 0,
     httpUploadUrl: "",
     httpUploadHeaders: @[],
+    pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
   var palette = PaletteConfig(colors: @[])
   var config = DriverFrameConfig(
@@ -248,6 +260,16 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
         deviceConfig.partialMaxAreaPercent = sourceConfig.deviceConfig.partialMaxAreaPercent
         deviceConfig.partialMaxRefreshesBeforeFull = sourceConfig.deviceConfig.partialMaxRefreshesBeforeFull
         deviceConfig.httpUploadUrl = sourceConfig.deviceConfig.httpUploadUrl
+        if not sourceConfig.deviceConfig.pins.isNil:
+          deviceConfig.pins = PinOverrides(
+            rst: sourceConfig.deviceConfig.pins.rst,
+            dc: sourceConfig.deviceConfig.pins.dc,
+            cs: sourceConfig.deviceConfig.pins.cs,
+            busy: sourceConfig.deviceConfig.pins.busy,
+            sclk: sourceConfig.deviceConfig.pins.sclk,
+            mosi: sourceConfig.deviceConfig.pins.mosi,
+            pwr: sourceConfig.deviceConfig.pins.pwr,
+          )
         for header in sourceConfig.deviceConfig.httpUploadHeaders:
           deviceConfig.httpUploadHeaders.add(HttpHeaderPair(name: header.name, value: header.value))
       if not sourceConfig.palette.isNil:
