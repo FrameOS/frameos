@@ -58,6 +58,28 @@ function isFlashDataDumpLine(line: string): boolean {
   return trimmed.length > 160 && trimmed.includes('|') && hexChars / compact.length > 0.65
 }
 
+function flashTraceLogMessage(message: string): string | null {
+  const commandDataMatch = message.match(/^(command\s+op:0x[0-9a-f]+\s+data\s+len=(\d+)\b.*?)(?:\s+data=|$)/i)
+  if (commandDataMatch) {
+    return `${commandDataMatch[1]} (raw data hidden)`
+  }
+
+  const readWriteMatch = message.match(/^(Read|Write)\s+(\d+)\s+bytes:/i)
+  if (readWriteMatch) {
+    return `${readWriteMatch[1]} ${readWriteMatch[2]} bytes (raw data hidden)`
+  }
+
+  if (/^Received full packet:/i.test(message)) {
+    return 'Received full packet (raw data hidden)'
+  }
+
+  if (isFlashDataDumpLine(message)) {
+    return null
+  }
+
+  return message
+}
+
 function createUsbLogTerminal(frameId: number): FlashLogTerminal {
   let pendingLine = ''
   let flushTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -112,7 +134,10 @@ function mirrorTransportTrace(frameId: number, transport: EspTransport): void {
   const originalTrace = traceableTransport.trace.bind(traceableTransport)
   traceableTransport.trace = (message: string): void => {
     const delta = Date.now() - (traceableTransport.lastTraceTime ?? Date.now())
-    appendEmbeddedUsbLogLine(frameId, `TRACE ${delta.toFixed(3)} ${message}`)
+    const logMessage = flashTraceLogMessage(message)
+    if (logMessage) {
+      appendEmbeddedUsbLogLine(frameId, `TRACE ${delta.toFixed(3)} ${logMessage}`)
+    }
     originalTrace(message)
   }
 }
