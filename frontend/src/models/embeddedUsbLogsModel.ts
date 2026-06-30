@@ -23,6 +23,8 @@ export interface EmbeddedUsbApiCommandResult {
 const USB_SERIAL_BAUD_RATE = 115200
 const USB_LOG_BUFFER_SIZE = 65536
 const MAX_USB_LOG_LINES = 50000
+const USB_PAYLOAD_READY_TIMEOUT_MS = 1500
+const USB_PAYLOAD_CHUNK_SIZE = 4096
 const OPEN_RETRY_DELAY_MS = 250
 const OPEN_RETRY_ATTEMPTS = 20
 
@@ -145,6 +147,12 @@ function usbApiResponseCommand(command: string): string {
   return command.trim().split(/\s+/, 1)[0] || command
 }
 
+function parseUsbCommandReady(command: string, text: string): boolean {
+  const expectedCommand = usbApiResponseCommand(command)
+  const readyMatch = text.match(/__FRAMEOS_USB_READY__\s+(\S+)/)
+  return readyMatch?.[1] === expectedCommand
+}
+
 function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCommandResult | null {
   const expectedCommand = usbApiResponseCommand(command)
   const errorMatch = text.match(/__FRAMEOS_USB_ERROR__\s+(\S+)\s+(\S+)\s*([^\r\n]*)/)
@@ -190,6 +198,12 @@ function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCom
   return { command: responseCommand, text: payload, metadata }
 }
 
+async function writeUsbPayload(writer: WritableStreamDefaultWriter<Uint8Array>, payload: Uint8Array): Promise<void> {
+  for (let offset = 0; offset < payload.byteLength; offset += USB_PAYLOAD_CHUNK_SIZE) {
+    await writer.write(payload.slice(offset, Math.min(payload.byteLength, offset + USB_PAYLOAD_CHUNK_SIZE)))
+  }
+}
+
 async function readWithTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number
@@ -229,7 +243,28 @@ async function runUsbApiCommandOnPort(
   try {
     await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
     if (payload) {
-      await writer.write(payload)
+      const readyDeadline = Date.now() + Math.min(timeoutMs, USB_PAYLOAD_READY_TIMEOUT_MS)
+      while (Date.now() < readyDeadline) {
+        const remaining = Math.max(1, readyDeadline - Date.now())
+        const chunk = await readWithTimeout(reader, remaining)
+        if (chunk === null) {
+          break
+        }
+        if (chunk.done) {
+          throw new Error('USB serial command stream ended')
+        }
+        if (chunk.value) {
+          received += decoder.decode(chunk.value, { stream: true })
+          const result = parseUsbCommandResult(command, received)
+          if (result) {
+            return result
+          }
+          if (parseUsbCommandReady(command, received)) {
+            break
+          }
+        }
+      }
+      await writeUsbPayload(writer, payload)
     }
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {

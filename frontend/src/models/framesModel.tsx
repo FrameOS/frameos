@@ -109,7 +109,17 @@ const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.s
 const embeddedUsbImageRefreshesInFlight = new Set<number>()
 const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
 const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
+const EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS = 45000
+const EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS = 30000
+const EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB = 250
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
+
+function embeddedUsbUploadTimeoutMs(payloadBytes: number): number {
+  return Math.max(
+    EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS,
+    EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS + Math.ceil(payloadBytes / 1024) * EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB
+  )
+}
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
   try {
@@ -676,7 +686,7 @@ export const framesModel = kea<framesModelType>([
             throw new Error('Failed to fetch frame before USB deploy')
           }
           const currentFrame = (await frameResponse.json())?.frame as FrameType
-          const scenesPayload = JSON.stringify(currentFrame.scenes ?? [])
+          const scenesPayload = new TextEncoder().encode(JSON.stringify(currentFrame.scenes ?? []))
           longRunningTasksModel.actions.updateTaskProgress({
             taskId,
             frameId: id,
@@ -687,7 +697,7 @@ export const framesModel = kea<framesModelType>([
           })
           await runEmbeddedUsbApiCommand(id, 'upload-scenes', {
             payload: scenesPayload,
-            timeoutMs: 45000,
+            timeoutMs: embeddedUsbUploadTimeoutMs(scenesPayload.byteLength),
           })
           const completeResponse = await apiFetch(
             `/api/frames/${id}/embedded/usb_deploy_complete${taskIdQuery(taskId)}`,

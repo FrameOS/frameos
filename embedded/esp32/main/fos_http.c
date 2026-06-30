@@ -325,9 +325,19 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
     size_t payload_len = len;
     char requested_scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN] = "";
     char *owned_payload = NULL;
-    cJSON *root = body ? cJSON_Parse(body) : NULL;
+    cJSON *root = NULL;
 
-    if (cJSON_IsObject(root)) {
+    if (body != NULL) {
+        const char *first = body;
+        while (*first == ' ' || *first == '\n' || *first == '\r' || *first == '\t') {
+            first++;
+        }
+        if (*first == '{') {
+            root = cJSON_Parse(body);
+        }
+    }
+
+    if (root != NULL && cJSON_IsObject(root)) {
         cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
         if (cJSON_IsArray(scenes)) {
             owned_payload = cJSON_PrintUnformatted(scenes);
@@ -350,6 +360,7 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
         }
     }
 
+    cJSON_Delete(root);
     esp_err_t err = fos_scenes_set_json(payload, payload_len);
     if (err == ESP_OK && requested_scene_id[0]) {
         err = fos_scenes_select(requested_scene_id);
@@ -358,7 +369,6 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
         }
     }
     if (owned_payload) cJSON_free(owned_payload);
-    cJSON_Delete(root);
     return err;
 }
 
@@ -1798,7 +1808,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
     }
     if (s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");

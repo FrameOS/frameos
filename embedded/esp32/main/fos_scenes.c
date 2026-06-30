@@ -90,7 +90,14 @@ static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
         ESP_LOGE(TAG, "open %s for write failed", tmp_path);
         return ESP_FAIL;
     }
-    size_t written = fwrite(data, 1, len, f);
+    size_t written = 0;
+    while (written < len) {
+        size_t chunk = len - written;
+        if (chunk > 2048) chunk = 2048;
+        size_t chunk_written = fwrite(data + written, 1, chunk, f);
+        if (chunk_written == 0) break;
+        written += chunk_written;
+    }
     fclose(f);
     if (written != len) {
         ESP_LOGE(TAG, "short write to %s (%u/%u)", tmp_path, (unsigned)written, (unsigned)len);
@@ -119,7 +126,14 @@ static esp_err_t write_file_replace(const char *path, const char *tmp_path,
         ESP_LOGE(TAG, "open %s for retry write failed", tmp_path);
         return ESP_FAIL;
     }
-    size_t written = fwrite(data, 1, len, f);
+    size_t written = 0;
+    while (written < len) {
+        size_t chunk = len - written;
+        if (chunk > 2048) chunk = 2048;
+        size_t chunk_written = fwrite(data + written, 1, chunk, f);
+        if (chunk_written == 0) break;
+        written += chunk_written;
+    }
     fclose(f);
     if (written != len) {
         ESP_LOGE(TAG, "retry short write to %s (%u/%u)", tmp_path, (unsigned)written, (unsigned)len);

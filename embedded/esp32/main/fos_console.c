@@ -30,9 +30,11 @@ static const char *TAG = "fos_console";
 #define FOS_USB_API_MAX_UPLOAD (512 * 1024)
 #define FOS_USB_API_MAX_SCENE_ID 256
 #define FOS_USB_API_RAW_CHUNK 384
+#define FOS_USB_API_PAYLOAD_TIMEOUT_MS 180000
 
 static const char *USB_API_OK = "__FRAMEOS_USB_OK__";
 static const char *USB_API_ERROR = "__FRAMEOS_USB_ERROR__";
+static const char *USB_API_READY = "__FRAMEOS_USB_READY__";
 static const char *USB_API_BEGIN = "__FRAMEOS_USB_BEGIN__";
 static const char *USB_API_END = "__FRAMEOS_USB_END__";
 
@@ -364,12 +366,22 @@ static void usb_api_error(const char *name, esp_err_t err, const char *message)
     fflush(stdout);
 }
 
-static bool usb_api_read_exact(uint8_t *buf, size_t len)
+static void usb_api_ready(const char *name)
+{
+    printf("%s %s\n", USB_API_READY, name);
+    fflush(stdout);
+}
+
+static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_ticks)
 {
     size_t off = 0;
+    TickType_t start = xTaskGetTickCount();
     while (off < len) {
         int ch = fgetc(stdin);
         if (ch == EOF) {
+            if ((xTaskGetTickCount() - start) >= timeout_ticks) {
+                return false;
+            }
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
@@ -515,7 +527,11 @@ static int cmd_usb_api(int argc, char **argv)
             return 1;
         }
         char scene_id[FOS_USB_API_MAX_SCENE_ID];
-        usb_api_read_exact((uint8_t *)scene_id, len);
+        usb_api_ready(subcommand);
+        if (!usb_api_read_exact((uint8_t *)scene_id, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS))) {
+            usb_api_error(subcommand, ESP_ERR_TIMEOUT, "payload read timed out");
+            return 1;
+        }
         scene_id[len] = '\0';
         esp_err_t err = fos_scenes_select(scene_id);
         if (err != ESP_OK) {
@@ -543,7 +559,12 @@ static int cmd_usb_api(int argc, char **argv)
             usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
             return 1;
         }
-        usb_api_read_exact(body, len);
+        usb_api_ready(subcommand);
+        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS))) {
+            free(body);
+            usb_api_error(subcommand, ESP_ERR_TIMEOUT, "payload read timed out");
+            return 1;
+        }
         body[len] = '\0';
         esp_err_t err = fos_http_store_uploaded_scenes_payload((const char *)body, len);
         free(body);
