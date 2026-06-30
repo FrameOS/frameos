@@ -1328,7 +1328,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
           frameActions.showDeployPlanModal()
         }
       },
-      closeFrameChangeDrawer: preserveFramesScroll,
+      closeFrameChangeDrawer: () => {
+        if (searchValue(router.values.searchParams, 'drawer') === 'deployPlan') {
+          cache.skipNextDeployDrawerPreserve = true
+        }
+        preserveFramesScroll()
+      },
       retargetOpenFrameDrawers: ({ frameId, previousFrameChangeDrawerSelection }) => {
         if (
           !previousFrameChangeDrawerSelection ||
@@ -1448,7 +1453,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     }
   }),
-  urlToAction(({ actions, values }) => {
+  urlToAction(({ actions, cache, values }) => {
     const syncSecondarySidebarFromHashForMobile = (hash: Record<string, unknown> = router.values.hashParams) => {
       if (!isMobileWorkspaceViewport()) {
         return
@@ -1583,7 +1588,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
       syncSecondarySidebarFromHashForMobile(hash)
       const frameId = parseInt(String(id), 10)
       const validFrameId = Number.isFinite(frameId) ? frameId : null
-      const preservedSearch = validFrameId
+      const skipDeployDrawerPreserve = Boolean(cache.skipNextDeployDrawerPreserve)
+      cache.skipNextDeployDrawerPreserve = false
+      const preservedSearch = validFrameId && !skipDeployDrawerPreserve
         ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
         : null
       const effectiveSearch =
