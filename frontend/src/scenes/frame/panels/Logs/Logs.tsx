@@ -347,12 +347,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     usbLogStreamState?.status === 'selecting'
       ? 'Select USB port'
       : usbLogStreamState?.status === 'connecting'
-      ? 'Opening USB logs'
+      ? 'Connecting USB'
       : usbLogStreamState?.status === 'stopping'
-      ? 'Stopping USB logs'
+      ? 'Disconnecting USB'
       : usbLogStreamOpen
-      ? 'Stop USB logs'
-      : 'Stream USB logs'
+      ? 'Disconnect USB'
+      : 'Connect USB'
 
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })

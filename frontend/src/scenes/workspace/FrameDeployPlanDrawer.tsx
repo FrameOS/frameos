@@ -52,7 +52,7 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
-import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
+import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -1928,6 +1928,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
+  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
   const hasSuccessfulDeploy = Boolean(
     frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady
@@ -2151,6 +2152,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                         <div className="frame-tool-muted text-sm leading-5">
                           <RecommendationDescription recommendation={deployRecommendation} />
                         </div>
+                      </div>
+                    </section>
+                  ) : null}
+                  {isEmbeddedFrame && webSerialSupported ? (
+                    <section className="space-y-2">
+                      <DrawerHeading>USB connection</DrawerHeading>
+                      <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
+                        <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
+                          Connect this browser to the board over USB for browser flashing, previews, logs, and fast
+                          deploys when HTTP is unavailable.
+                        </div>
+                        <EmbeddedUsbConnectionButton frame={frame} className="shrink-0" />
                       </div>
                     </section>
                   ) : null}

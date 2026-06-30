@@ -43,6 +43,13 @@ interface UsbLogSession {
 const sessions = new Map<number, UsbLogSession>()
 const lastPorts = new Map<number, SerialPort>()
 
+interface EmbeddedUsbApiCommandOptions {
+  payload?: string | Uint8Array
+  timeoutMs?: number
+  promptIfNeeded?: boolean
+  port?: SerialPort
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
@@ -80,6 +87,10 @@ function appendUsbLine(frameId: number, line: string, type = 'usb'): void {
     return
   }
   embeddedUsbLogsModel.actions.appendUsbLog(usbLog(line, frameId, type))
+}
+
+export function appendEmbeddedUsbLogLine(frameId: number, line: string, type = 'usb'): void {
+  appendUsbLine(frameId, line, type)
 }
 
 function appendUsbText(session: UsbLogSession, text: string): void {
@@ -227,7 +238,8 @@ async function runUsbApiCommandOnPort(
   port: SerialPort,
   command: string,
   payload?: Uint8Array,
-  timeoutMs = 30000
+  timeoutMs = 30000,
+  onText?: (text: string) => void
 ): Promise<EmbeddedUsbApiCommandResult> {
   await openPort(port)
   if (!port.readable || !port.writable) {
@@ -240,6 +252,11 @@ async function runUsbApiCommandOnPort(
   const writer = port.writable.getWriter()
   let received = ''
   let timedOut = false
+  const appendReceived = (value: Uint8Array): void => {
+    const decoded = decoder.decode(value, { stream: true })
+    received += decoded
+    onText?.(decoded)
+  }
   try {
     await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
     if (payload) {
@@ -254,7 +271,7 @@ async function runUsbApiCommandOnPort(
           throw new Error('USB serial command stream ended')
         }
         if (chunk.value) {
-          received += decoder.decode(chunk.value, { stream: true })
+          appendReceived(chunk.value)
           const result = parseUsbCommandResult(command, received)
           if (result) {
             return result
@@ -278,7 +295,7 @@ async function runUsbApiCommandOnPort(
         throw new Error('USB serial command stream ended')
       }
       if (chunk.value) {
-        received += decoder.decode(chunk.value, { stream: true })
+        appendReceived(chunk.value)
         const result = parseUsbCommandResult(command, received)
         if (result) {
           return result
@@ -304,14 +321,15 @@ async function runUsbApiCommandOnPort(
 export async function runEmbeddedUsbApiCommand(
   frameId: number,
   command: string,
-  options?: { payload?: string | Uint8Array; timeoutMs?: number; promptIfNeeded?: boolean }
+  options?: EmbeddedUsbApiCommandOptions
 ): Promise<EmbeddedUsbApiCommandResult> {
   if (!webSerialSupported()) {
+    appendUsbLine(frameId, `[USB API] ${command} failed: Web Serial is not supported in this browser.`)
     throw new Error('Web Serial is not supported in this browser. Use Chrome or Edge.')
   }
   const hadLogStream = sessions.has(frameId)
   const stoppedPort = hadLogStream ? await stopEmbeddedUsbLogStream(frameId) : null
-  let port = stoppedPort || lastPorts.get(frameId) || null
+  let port = options?.port || stoppedPort || lastPorts.get(frameId) || null
   if (!port && options?.promptIfNeeded) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       message: 'Choose the board USB serial port.',
@@ -320,6 +338,7 @@ export async function runEmbeddedUsbApiCommand(
     port = await navigator.serial.requestPort()
   }
   if (!port) {
+    appendUsbLine(frameId, `[USB API] ${command} failed: No USB serial port selected for this frame`)
     throw new Error('No USB serial port selected for this frame')
   }
   appendSelectedUsbPort(frameId, port)
@@ -327,12 +346,38 @@ export async function runEmbeddedUsbApiCommand(
     typeof options?.payload === 'string'
       ? new TextEncoder().encode(options.payload)
       : options?.payload
+  appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
+  const mirrorSerialText = usbApiResponseCommand(command) !== 'image'
+  let pendingCommandLogLine = ''
+  const appendCommandLogText = mirrorSerialText
+    ? (text: string): void => {
+        pendingCommandLogLine += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const lines = pendingCommandLogLine.split('\n')
+        pendingCommandLogLine = lines.pop() ?? ''
+        for (const line of lines) {
+          appendUsbLine(frameId, line)
+        }
+      }
+    : undefined
+  const flushCommandLogText = (): void => {
+    if (pendingCommandLogLine) {
+      appendUsbLine(frameId, pendingCommandLogLine)
+      pendingCommandLogLine = ''
+    }
+  }
   try {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       message: `Sending USB command: ${command}`,
       status: 'connecting',
     })
-    return await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs)
+    const result = await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs, appendCommandLogText)
+    flushCommandLogText()
+    appendUsbLine(frameId, `[USB API] ${command} complete`)
+    return result
+  } catch (error) {
+    flushCommandLogText()
+    appendUsbLine(frameId, `[USB API] ${command} failed: ${serialErrorMessage(error)}`)
+    throw error
   } finally {
     if (hadLogStream) {
       await startEmbeddedUsbLogStream(frameId, port)
