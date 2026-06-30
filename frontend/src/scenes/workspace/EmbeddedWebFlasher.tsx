@@ -27,6 +27,9 @@ type TraceableTransportInternals = { trace: (message: string) => void; lastTrace
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
 const POST_FLASH_BOOT_WAIT_MS = 7000
+const POST_FLASH_USB_READY_TIMEOUT_MS = 120000
+const POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS = 8000
+const POST_FLASH_USB_READY_POLL_MS = 2500
 const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
 const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
@@ -220,6 +223,65 @@ async function uploadScenesOverUsbAfterFlash(
   throw lastError instanceof Error ? lastError : new Error('Failed to upload scenes over USB')
 }
 
+function usbStatusSummary(text: string | undefined): string {
+  if (!text) {
+    return 'USB API ready'
+  }
+  try {
+    const status = JSON.parse(text)
+    const parts = ['USB API ready']
+    if (status.version) {
+      parts.push(`version=${status.version}`)
+    }
+    if (status.config?.panel) {
+      parts.push(`panel=${status.config.panel}`)
+    }
+    if (status.render?.count !== undefined) {
+      parts.push(`renders=${status.render.count}`)
+    }
+    if (status.scenes?.loaded !== undefined) {
+      parts.push(`scenes=${status.scenes.loaded}`)
+    }
+    return parts.join(' ')
+  } catch (error) {
+    return 'USB API ready'
+  }
+}
+
+async function waitForUsbApiReadyAfterFlash(
+  frame: FrameType,
+  port: SerialPort,
+  onStatus: (message: string) => void
+): Promise<void> {
+  const deadline = Date.now() + POST_FLASH_USB_READY_TIMEOUT_MS
+  let attempt = 0
+  let lastError: unknown = null
+  onStatus('Waiting for board USB API')
+
+  while (Date.now() < deadline) {
+    attempt += 1
+    try {
+      const result = await runEmbeddedUsbApiCommand(frame.id, 'status', {
+        port,
+        timeoutMs: Math.min(POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS, Math.max(1000, deadline - Date.now())),
+        mirrorOutput: false,
+      })
+      appendBrowserFlashLog(frame.id, usbStatusSummary(result.text))
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt === 1 || attempt % 4 === 0) {
+        const detail = error instanceof Error ? error.message : String(error)
+        appendBrowserFlashLog(frame.id, `USB API not ready yet: ${detail}`)
+      }
+      await sleep(Math.min(POST_FLASH_USB_READY_POLL_MS, Math.max(0, deadline - Date.now())))
+    }
+  }
+
+  const detail = lastError instanceof Error ? lastError.message : lastError ? String(lastError) : 'no response'
+  throw new Error(`Timed out waiting for board USB API after reboot: ${detail}`)
+}
+
 function usbConnectionButtonLabel(usbLogStreamState: { status?: string } | undefined, usbLogStreamOpen: boolean): string {
   return usbLogStreamState?.status === 'selecting'
     ? 'Select USB port'
@@ -406,6 +468,7 @@ export function EmbeddedWebFlasher({
       if (streamLogsAfterFlash && port) {
         try {
           await sleep(POST_FLASH_BOOT_WAIT_MS)
+          await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
           const scenesUploaded = await uploadScenesOverUsbAfterFlash(frame, port, setFlashMessage)
           if (scenesUploaded) {
             const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {

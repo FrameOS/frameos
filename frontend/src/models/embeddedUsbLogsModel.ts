@@ -23,7 +23,7 @@ export interface EmbeddedUsbApiCommandResult {
 const USB_SERIAL_BAUD_RATE = 115200
 const USB_LOG_BUFFER_SIZE = 65536
 const MAX_USB_LOG_LINES = 50000
-const USB_PAYLOAD_READY_TIMEOUT_MS = 5000
+const USB_PAYLOAD_READY_TIMEOUT_MS = 30000
 const USB_PAYLOAD_CHUNK_SIZE = 4096
 const OPEN_RETRY_DELAY_MS = 250
 const OPEN_RETRY_ATTEMPTS = 20
@@ -49,6 +49,7 @@ interface EmbeddedUsbApiCommandOptions {
   timeoutMs?: number
   promptIfNeeded?: boolean
   port?: SerialPort
+  mirrorOutput?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -448,7 +449,7 @@ async function runEmbeddedUsbApiCommandLocked(
   if (payload) {
     appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
   }
-  const mirrorSerialText = usbApiResponseCommand(command) !== 'image'
+  const mirrorSerialText = options?.mirrorOutput !== false && usbApiResponseCommand(command) !== 'image'
   let pendingCommandLogLine = ''
   const appendCommandLogText = mirrorSerialText
     ? (text: string): void => {
