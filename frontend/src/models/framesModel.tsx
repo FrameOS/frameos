@@ -13,10 +13,8 @@ import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
 import {
-  embeddedUsbApiCanPrompt,
   embeddedUsbApiCanUse,
   embeddedUsbLogsModel,
-  ensureEmbeddedUsbApiPort,
   runEmbeddedUsbApiCommand,
 } from './embeddedUsbLogsModel'
 
@@ -685,64 +683,11 @@ export const framesModel = kea<framesModelType>([
         detail: 'Deploy request sent',
       })
       try {
-        const frame = values.frames[id]
-        const useEmbeddedUsbFastDeploy =
-          fastDeploy && (frame?.mode ?? 'rpios') === 'embedded' && (embeddedUsbApiCanUse(id) || embeddedUsbApiCanPrompt())
-        if (useEmbeddedUsbFastDeploy) {
-          if (!embeddedUsbApiCanUse(id)) {
-            longRunningTasksModel.actions.updateTaskProgress({
-              taskId,
-              frameId: id,
-              kind: 'deploy',
-              progressCurrent: null,
-              progressTotal: null,
-              detail: 'Choose USB port',
-            })
-            const portSelected = await ensureEmbeddedUsbApiPort(id)
-            if (!portSelected) {
-              throw new Error('USB connection required for embedded fast deploy')
-            }
-          }
-          const frameResponse = await apiFetch(`/api/frames/${id}`)
-          if (!frameResponse.ok) {
-            throw new Error('Failed to fetch frame before USB deploy')
-          }
-          const currentFrame = (await frameResponse.json())?.frame as FrameType
-          const scenesPayload = new TextEncoder().encode(JSON.stringify(currentFrame.scenes ?? []))
-          longRunningTasksModel.actions.updateTaskProgress({
-            taskId,
-            frameId: id,
-            kind: 'deploy',
-            progressCurrent: null,
-            progressTotal: null,
-            detail: 'Uploading scenes over USB',
-          })
-          await runEmbeddedUsbApiCommand(id, 'upload-scenes', {
-            payload: scenesPayload,
-            timeoutMs: embeddedUsbUploadTimeoutMs(scenesPayload.byteLength),
-          })
-          const completeResponse = await apiFetch(
-            `/api/frames/${id}/embedded/usb_deploy_complete${taskIdQuery(taskId)}`,
-            { method: 'POST' }
-          )
-          if (!completeResponse.ok) {
-            throw new Error('USB deploy completed, but backend deploy state update failed')
-          }
-          actions.loadFrame(id)
-          longRunningTasksModel.actions.finishTask({
-            taskId,
-            frameId: id,
-            kind: 'deploy',
-            status: 'success',
-            detail: 'Fast deploy completed over USB',
-          })
-        } else {
-          const response = fastDeploy
-            ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-            : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-          if (!response.ok) {
-            throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
-          }
+        const response = fastDeploy
+          ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+          : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
