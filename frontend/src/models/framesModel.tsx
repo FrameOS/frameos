@@ -114,7 +114,7 @@ const EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS = 30000
 const EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB = 250
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
-function embeddedUsbUploadTimeoutMs(payloadBytes: number): number {
+export function embeddedUsbUploadTimeoutMs(payloadBytes: number): number {
   return Math.max(
     EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS,
     EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS + Math.ceil(payloadBytes / 1024) * EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB
@@ -234,7 +234,7 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
   }
 }
 
-function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
+export function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
   if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
     return
   }

@@ -8,10 +8,11 @@ import {
   embeddedUsbLogStreamSessionPort,
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
+  runEmbeddedUsbApiCommand,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
 } from '../../models/embeddedUsbLogsModel'
-import { framesModel } from '../../models/framesModel'
+import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { frameLogic } from '../frame/frameLogic'
@@ -22,6 +23,9 @@ type EspFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
 
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
+const POST_FLASH_BOOT_WAIT_MS = 3000
+const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
+const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
 
 function sleep(ms: number): Promise<void> {
@@ -118,6 +122,40 @@ async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+async function uploadScenesOverUsbAfterFlash(
+  frame: FrameType,
+  onStatus: (message: string) => void
+): Promise<boolean> {
+  const scenes = frame.scenes ?? []
+  if (scenes.length === 0) {
+    return false
+  }
+
+  const payload = new TextEncoder().encode(JSON.stringify(scenes))
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= POST_FLASH_SCENE_UPLOAD_ATTEMPTS; attempt += 1) {
+    onStatus(
+      attempt === 1
+        ? `Uploading ${scenes.length} scene(s) over USB`
+        : `Retrying scene upload over USB (${attempt}/${POST_FLASH_SCENE_UPLOAD_ATTEMPTS})`
+    )
+    try {
+      await runEmbeddedUsbApiCommand(frame.id, 'upload-scenes', {
+        payload,
+        timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
+      })
+      return true
+    } catch (error) {
+      lastError = error
+      if (attempt < POST_FLASH_SCENE_UPLOAD_ATTEMPTS) {
+        await sleep(POST_FLASH_SCENE_UPLOAD_RETRY_MS)
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to upload scenes over USB')
+}
+
 export function EmbeddedWebFlasher({
   frame,
   onBusyChange,
@@ -212,9 +250,9 @@ export function EmbeddedWebFlasher({
       await transport.setRTS(false)
       await transport.setDTR(false)
 
-      setPhase('done')
+      setPhase('preparing')
       setProgress(null)
-      setMessage('Firmware flashed. The board is rebooting.')
+      setMessage('Firmware flashed. Waiting for the board to reboot.')
       streamLogsAfterFlash = true
     } catch (error) {
       setPhase('error')
@@ -237,8 +275,36 @@ export function EmbeddedWebFlasher({
         } catch (error) {}
       }
       if (streamLogsAfterFlash && port) {
-        await startEmbeddedUsbLogStream(frame.id, port)
+        const logStreamStarted = await startEmbeddedUsbLogStream(frame.id, port)
         openFrameToolBehindDrawer(frame.id, 'logs')
+        if (!logStreamStarted) {
+          setPhase('error')
+          setMessage('Firmware flashed, but the USB serial port could not be reopened to upload scenes.')
+        } else {
+          try {
+            await sleep(POST_FLASH_BOOT_WAIT_MS)
+            const scenesUploaded = await uploadScenesOverUsbAfterFlash(frame, setMessage)
+            if (scenesUploaded) {
+              const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {
+                method: 'POST',
+              })
+              if (!completeResponse.ok) {
+                throw new Error('Scene upload completed, but backend deploy state update failed')
+              }
+              framesModel.actions.loadFrame(frame.id)
+              scheduleEmbeddedUsbFrameImageRefresh(frame.id)
+              setPhase('done')
+              setMessage(`Firmware flashed and ${frame.scenes?.length ?? 0} scene(s) uploaded.`)
+            } else {
+              setPhase('done')
+              setMessage('Firmware flashed. No scenes configured to upload.')
+            }
+          } catch (error) {
+            setPhase('error')
+            const detail = error instanceof Error ? error.message : String(error)
+            setMessage(`Firmware flashed, but scene upload failed: ${detail}`)
+          }
+        }
       }
     }
   }
