@@ -1,10 +1,14 @@
 #include "fos_console.h"
 
+#include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -31,6 +35,8 @@ static const char *TAG = "fos_console";
 #define FOS_USB_API_MAX_SCENE_ID 256
 #define FOS_USB_API_RAW_CHUNK 384
 #define FOS_USB_API_PAYLOAD_TIMEOUT_MS 180000
+#define FOS_CONSOLE_MAX_CMDLINE_LENGTH 512
+#define FOS_CONSOLE_TASK_STACK_SIZE 8192
 
 static const char *USB_API_OK = "__FRAMEOS_USB_OK__";
 static const char *USB_API_ERROR = "__FRAMEOS_USB_ERROR__";
@@ -595,30 +601,8 @@ static int cmd_factory_reset(int argc, char **argv)
     return 0;
 }
 
-esp_err_t fos_console_start(void)
+static esp_err_t register_frameos_console_commands(void)
 {
-    esp_console_repl_t *repl = NULL;
-    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    repl_config.prompt = "frameos>";
-    repl_config.max_cmdline_length = 512;
-    repl_config.task_stack_size = 8192;
-
-    esp_err_t err = ESP_OK;
-#if CONFIG_ESP_CONSOLE_UART
-    esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    err = esp_console_new_repl_uart(&hw_config, &repl_config, &repl);
-#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    esp_console_dev_usb_serial_jtag_config_t hw_config =
-        ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
-    err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
-#else
-    err = ESP_ERR_NOT_SUPPORTED;
-#endif
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
-        return err;
-    }
-
     const esp_console_cmd_t commands[] = {
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
@@ -637,6 +621,135 @@ esp_err_t fos_console_start(void)
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         ESP_ERROR_CHECK(esp_console_cmd_register(&commands[i]));
     }
+    return ESP_OK;
+}
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+static void console_prompt(void)
+{
+    printf("frameos>");
+    fflush(stdout);
+}
+
+static void run_console_line(char *line)
+{
+    char *start = line;
+    while (*start && isspace((unsigned char)*start)) start++;
+    if (!*start) return;
+
+    int cmd_ret = 0;
+    esp_err_t err = esp_console_run(start, &cmd_ret);
+    if (err == ESP_ERR_NOT_FOUND) {
+        printf("unknown command: %s\n", start);
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        /* Empty/whitespace lines are filtered above; treat the rest as parse errors. */
+        printf("invalid command: %s\n", start);
+    } else if (err != ESP_OK) {
+        printf("command failed: %s\n", esp_err_to_name(err));
+    } else if (cmd_ret != 0 && strncmp(start, "usb_api", 7) != 0) {
+        printf("command returned %d\n", cmd_ret);
+    }
+    fflush(stdout);
+}
+
+static void fos_console_usb_task(void *arg)
+{
+    (void)arg;
+    char line[FOS_CONSOLE_MAX_CMDLINE_LENGTH];
+    size_t len = 0;
+
+    console_prompt();
+    while (true) {
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        if (ch == '\r' || ch == '\n') {
+            line[len] = '\0';
+            run_console_line(line);
+            len = 0;
+            console_prompt();
+            continue;
+        }
+
+        if (ch == 0x08 || ch == 0x7f) {
+            if (len > 0) len--;
+            continue;
+        }
+
+        if (len < sizeof(line) - 1) {
+            line[len++] = (char)ch;
+        } else {
+            line[sizeof(line) - 1] = '\0';
+            printf("command too long\n");
+            len = 0;
+            console_prompt();
+        }
+    }
+}
+
+static esp_err_t fos_console_start_usb_serial_jtag(void)
+{
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CRLF);
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+
+    fcntl(fileno(stdout), F_SETFL, 0);
+    fcntl(fileno(stdin), F_SETFL, 0);
+
+    usb_serial_jtag_driver_config_t usb_serial_jtag_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    esp_err_t err = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+    if (err != ESP_OK) return err;
+    usb_serial_jtag_vfs_use_driver();
+
+    esp_console_config_t console_config = ESP_CONSOLE_CONFIG_DEFAULT();
+    console_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
+    err = esp_console_init(&console_config);
+    if (err != ESP_OK) return err;
+    ESP_ERROR_CHECK(esp_console_register_help_command());
+    ESP_ERROR_CHECK(register_frameos_console_commands());
+
+    if (xTaskCreate(fos_console_usb_task, "console_usb", FOS_CONSOLE_TASK_STACK_SIZE, NULL, 2, NULL) != pdTRUE) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+#endif
+
+esp_err_t fos_console_start(void)
+{
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    esp_err_t err = fos_console_start_usb_serial_jtag();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
+    }
+    return err;
+#else
+    esp_console_repl_t *repl = NULL;
+    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_config.prompt = "frameos>";
+    repl_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
+    repl_config.task_stack_size = FOS_CONSOLE_TASK_STACK_SIZE;
+
+    esp_err_t err = ESP_OK;
+#if CONFIG_ESP_CONSOLE_UART
+    esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    err = esp_console_new_repl_uart(&hw_config, &repl_config, &repl);
+#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    esp_console_dev_usb_serial_jtag_config_t hw_config =
+        ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
+    err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
+#else
+    err = ESP_ERR_NOT_SUPPORTED;
+#endif
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_ERROR_CHECK(register_frameos_console_commands());
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     return ESP_OK;
+#endif
 }
