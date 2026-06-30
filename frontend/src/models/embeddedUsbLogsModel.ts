@@ -310,9 +310,10 @@ async function runUsbApiCommandOnPort(
     onText?.(decoded)
   }
   try {
-    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
+    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\r\n`))
     if (payload) {
       const readyDeadline = Date.now() + Math.min(timeoutMs, USB_PAYLOAD_READY_TIMEOUT_MS)
+      let payloadReady = false
       while (Date.now() < readyDeadline) {
         const remaining = Math.max(1, readyDeadline - Date.now())
         const chunk = await readWithTimeout(reader, remaining)
@@ -329,9 +330,13 @@ async function runUsbApiCommandOnPort(
             return result
           }
           if (parseUsbCommandReady(command, received)) {
+            payloadReady = true
             break
           }
         }
+      }
+      if (!payloadReady) {
+        throw new Error(`Timed out waiting for USB command ready: ${command}`)
       }
       await writeUsbPayload(writer, payload)
     }
@@ -399,6 +404,9 @@ export async function runEmbeddedUsbApiCommand(
       ? new TextEncoder().encode(options.payload)
       : options?.payload
   appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
+  if (payload) {
+    appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
+  }
   const mirrorSerialText = usbApiResponseCommand(command) !== 'image'
   let pendingCommandLogLine = ''
   const appendCommandLogText = mirrorSerialText
