@@ -23,7 +23,7 @@ export interface EmbeddedUsbApiCommandResult {
 const USB_SERIAL_BAUD_RATE = 115200
 const USB_LOG_BUFFER_SIZE = 65536
 const MAX_USB_LOG_LINES = 50000
-const USB_PAYLOAD_READY_TIMEOUT_MS = 1500
+const USB_PAYLOAD_READY_TIMEOUT_MS = 5000
 const USB_PAYLOAD_CHUNK_SIZE = 4096
 const OPEN_RETRY_DELAY_MS = 250
 const OPEN_RETRY_ATTEMPTS = 20
@@ -42,6 +42,7 @@ interface UsbLogSession {
 
 const sessions = new Map<number, UsbLogSession>()
 const lastPorts = new Map<number, SerialPort>()
+const usbApiCommandLocks = new Map<number, Promise<void>>()
 
 interface EmbeddedUsbApiCommandOptions {
   payload?: string | Uint8Array
@@ -139,6 +140,30 @@ async function openPort(port: SerialPort): Promise<void> {
 
 function appendSelectedUsbPort(frameId: number, port: SerialPort): void {
   lastPorts.set(frameId, port)
+}
+
+async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promise<T>): Promise<T> {
+  const previousLock = usbApiCommandLocks.get(frameId)
+  if (previousLock) {
+    appendUsbLine(frameId, '[USB API] waiting for previous USB command to finish')
+  }
+  const previousDone = previousLock?.catch(() => {}) ?? Promise.resolve()
+  let releaseLock: () => void = () => {}
+  const currentLock = new Promise<void>((resolve) => {
+    releaseLock = resolve
+  })
+  const queuedLock = previousDone.then(() => currentLock)
+  usbApiCommandLocks.set(frameId, queuedLock)
+
+  await previousDone
+  try {
+    return await operation()
+  } finally {
+    releaseLock()
+    if (usbApiCommandLocks.get(frameId) === queuedLock) {
+      usbApiCommandLocks.delete(frameId)
+    }
+  }
 }
 
 export function embeddedUsbApiCanUse(frameId: number): boolean {
@@ -293,15 +318,10 @@ async function runUsbApiCommandOnPort(
   timeoutMs = 30000,
   onText?: (text: string) => void
 ): Promise<EmbeddedUsbApiCommandResult> {
-  await openPort(port)
-  if (!port.readable || !port.writable) {
-    throw new Error('USB serial port is not open')
-  }
-
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
-  const reader = port.readable.getReader()
-  const writer = port.writable.getWriter()
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  let writer: WritableStreamDefaultWriter<Uint8Array> | null = null
   let received = ''
   let timedOut = false
   const appendReceived = (value: Uint8Array): void => {
@@ -310,6 +330,15 @@ async function runUsbApiCommandOnPort(
     onText?.(decoded)
   }
   try {
+    await openPort(port)
+    if (!port.readable || !port.writable) {
+      throw new Error('USB serial port is not open')
+    }
+    if (port.readable.locked || port.writable.locked) {
+      throw new Error('USB serial port is already in use by another command or log stream')
+    }
+    reader = port.readable.getReader()
+    writer = port.writable.getWriter()
     await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\r\n`))
     if (payload) {
       const readyDeadline = Date.now() + Math.min(timeoutMs, USB_PAYLOAD_READY_TIMEOUT_MS)
@@ -361,21 +390,33 @@ async function runUsbApiCommandOnPort(
     }
     throw new Error(`Timed out waiting for USB command response: ${command}`)
   } finally {
-    try {
-      writer.releaseLock()
-    } catch (error) {}
-    if (timedOut) {
+    if (writer) {
       try {
-        await reader.cancel()
+        writer.releaseLock()
       } catch (error) {}
     }
-    try {
-      reader.releaseLock()
-    } catch (error) {}
+    if (reader) {
+      if (timedOut) {
+        try {
+          await reader.cancel()
+        } catch (error) {}
+      }
+      try {
+        reader.releaseLock()
+      } catch (error) {}
+    }
   }
 }
 
 export async function runEmbeddedUsbApiCommand(
+  frameId: number,
+  command: string,
+  options?: EmbeddedUsbApiCommandOptions
+): Promise<EmbeddedUsbApiCommandResult> {
+  return await withUsbApiCommandLock(frameId, () => runEmbeddedUsbApiCommandLocked(frameId, command, options))
+}
+
+async function runEmbeddedUsbApiCommandLocked(
   frameId: number,
   command: string,
   options?: EmbeddedUsbApiCommandOptions
