@@ -146,6 +146,19 @@ static bool display_state_matches(const fos_display_state_t *a, const fos_displa
         memcmp(a->sha256, b->sha256, FOS_DISPLAY_HASH_LEN) == 0;
 }
 
+static uint8_t white_fill_for_format(fos_pixel_format_t format)
+{
+    switch (format) {
+        case FOS_PIXEL_2BPP_BWYR:
+            return 0x55; /* palette index 1 (white) */
+        case FOS_PIXEL_4BPP_7COLOR:
+        case FOS_PIXEL_4BPP_SPECTRA6:
+            return 0x11; /* palette index 1 (white) */
+        default:
+            return 0xFF;
+    }
+}
+
 static void load_display_state(void)
 {
     if (s_display_state_loaded) return;
@@ -532,7 +545,7 @@ static esp_err_t render_once(void)
         frameos_nim_flush_logs();
         return ESP_ERR_NO_MEM;
     }
-    memset(buf, 0xFF, buf_len); /* white */
+    memset(buf, white_fill_for_format(format), buf_len);
 
     esp_err_t err;
     if (local_render) {

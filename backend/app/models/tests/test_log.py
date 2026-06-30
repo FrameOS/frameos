@@ -113,6 +113,34 @@ async def test_process_log_bootup(mock_pub, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_preserves_hostname_frame_host(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BootFrame", "espframe.local", "server_host")
+    frame.mode = "embedded"
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"})
+
+    updated = db.get(Frame, frame.id)
+    assert updated.frame_host == "espframe.local"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_updates_ip_frame_host(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BootFrame", "10.8.0.100", "server_host")
+    frame.mode = "embedded"
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"})
+
+    updated = db.get(Frame, frame.id)
+    assert updated.frame_host == "10.8.0.204"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup_does_not_override_configured_resolution(mock_pub, db, redis):
     frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
     frame.width = 800

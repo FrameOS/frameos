@@ -120,7 +120,10 @@ async function closePort(port: SerialPort): Promise<void> {
   } catch (error) {}
 }
 
-async function openPort(port: SerialPort): Promise<void> {
+async function openPort(port: SerialPort, options?: { resetBaud?: boolean }): Promise<void> {
+  if (options?.resetBaud && (port.readable || port.writable) && !port.readable?.locked && !port.writable?.locked) {
+    await closePort(port)
+  }
   if (port.readable || port.writable) {
     return
   }
@@ -331,7 +334,7 @@ async function runUsbApiCommandOnPort(
     onText?.(decoded)
   }
   try {
-    await openPort(port)
+    await openPort(port, { resetBaud: true })
     if (!port.readable || !port.writable) {
       throw new Error('USB serial port is not open')
     }
@@ -598,7 +601,7 @@ export async function startEmbeddedUsbLogStream(frameId: number, port?: SerialPo
       message: 'Opening USB serial log stream.',
       status: 'connecting',
     })
-    await openPort(selectedPort)
+    await openPort(selectedPort, { resetBaud: true })
     appendSelectedUsbPort(frameId, selectedPort)
 
     const session: UsbLogSession = {

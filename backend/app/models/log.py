@@ -40,6 +40,16 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     return _aware_utc(parsed)
 
 
+def _is_ip_literal(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _frameos_version_from_boot(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -269,7 +279,7 @@ async def process_log(
                 ip_address(boot_ip)
             except ValueError:
                 boot_ip = None
-            if boot_ip and boot_ip != frame.frame_host:
+            if boot_ip and _is_ip_literal(frame.frame_host) and boot_ip != frame.frame_host:
                 changes["frame_host"] = boot_ip
         for key in ['width', 'height', 'color']:
             # Width/height left empty means "autodetect": fill them in from the device's bootup
