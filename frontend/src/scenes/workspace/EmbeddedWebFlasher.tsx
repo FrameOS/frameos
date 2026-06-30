@@ -44,6 +44,20 @@ function appendBrowserFlashLog(frameId: number, message: string): void {
   appendEmbeddedUsbLogLine(frameId, `[browser flash] ${message}`)
 }
 
+function isFlashDataDumpLine(line: string): boolean {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return false
+  }
+  if (/(?:^|\s)[0-9a-f]{8,16}\s+[0-9a-f]{8,16}\s+\|/i.test(trimmed)) {
+    return true
+  }
+
+  const compact = trimmed.replace(/\s+/g, '')
+  const hexChars = compact.match(/[0-9a-f]/gi)?.length ?? 0
+  return trimmed.length > 160 && trimmed.includes('|') && hexChars / compact.length > 0.65
+}
+
 function createUsbLogTerminal(frameId: number): FlashLogTerminal {
   let pendingLine = ''
   let flushTimer: ReturnType<typeof window.setTimeout> | null = null
@@ -60,7 +74,9 @@ function createUsbLogTerminal(frameId: number): FlashLogTerminal {
     if (!pendingLine) {
       return
     }
-    appendEmbeddedUsbLogLine(frameId, pendingLine)
+    if (!isFlashDataDumpLine(pendingLine)) {
+      appendEmbeddedUsbLogLine(frameId, pendingLine)
+    }
     pendingLine = ''
   }
 
@@ -74,7 +90,9 @@ function createUsbLogTerminal(frameId: number): FlashLogTerminal {
     const lines = pendingLine.split('\n')
     pendingLine = lines.pop() ?? ''
     for (const line of lines) {
-      appendEmbeddedUsbLogLine(frameId, line)
+      if (!isFlashDataDumpLine(line)) {
+        appendEmbeddedUsbLogLine(frameId, line)
+      }
     }
     if (pendingLine) {
       scheduleFlush()
