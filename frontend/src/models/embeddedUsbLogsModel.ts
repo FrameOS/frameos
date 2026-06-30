@@ -145,6 +145,58 @@ export function embeddedUsbApiCanUse(frameId: number): boolean {
   return webSerialSupported() && (sessions.has(frameId) || lastPorts.has(frameId))
 }
 
+export function embeddedUsbApiCanPrompt(): boolean {
+  return webSerialSupported()
+}
+
+export async function ensureEmbeddedUsbApiPort(frameId: number): Promise<boolean> {
+  if (!webSerialSupported()) {
+    appendUsbLine(frameId, '[USB API] USB port selection failed: Web Serial is not supported in this browser.')
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      error: 'Web Serial is not supported in this browser. Use Chrome or Edge.',
+      status: 'error',
+      stoppedAt: new Date().toISOString(),
+    })
+    return false
+  }
+
+  if (embeddedUsbApiCanUse(frameId)) {
+    return true
+  }
+
+  try {
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: 'Choose the board USB serial port.',
+      status: 'selecting',
+    })
+    const port = await navigator.serial.requestPort()
+    appendSelectedUsbPort(frameId, port)
+    appendUsbLine(frameId, '[USB API] USB port selected for this frame')
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: null,
+      status: 'idle',
+      stoppedAt: new Date().toISOString(),
+    })
+    return true
+  } catch (error) {
+    if (isPortSelectionCanceled(error)) {
+      embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+        message: null,
+        status: 'idle',
+        stoppedAt: new Date().toISOString(),
+      })
+      return false
+    }
+    appendUsbLine(frameId, `[USB API] USB port selection failed: ${serialErrorMessage(error)}`)
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      error: serialErrorMessage(error),
+      status: 'error',
+      stoppedAt: new Date().toISOString(),
+    })
+    throw error
+  }
+}
+
 function base64ToBytes(base64: string): Uint8Array {
   const binary = window.atob(base64)
   const bytes = new Uint8Array(binary.length)

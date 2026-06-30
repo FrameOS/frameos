@@ -12,7 +12,13 @@ import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
+import {
+  embeddedUsbApiCanPrompt,
+  embeddedUsbApiCanUse,
+  embeddedUsbLogsModel,
+  ensureEmbeddedUsbApiPort,
+  runEmbeddedUsbApiCommand,
+} from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -680,7 +686,23 @@ export const framesModel = kea<framesModelType>([
       })
       try {
         const frame = values.frames[id]
-        if (fastDeploy && (frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
+        const useEmbeddedUsbFastDeploy =
+          fastDeploy && (frame?.mode ?? 'rpios') === 'embedded' && (embeddedUsbApiCanUse(id) || embeddedUsbApiCanPrompt())
+        if (useEmbeddedUsbFastDeploy) {
+          if (!embeddedUsbApiCanUse(id)) {
+            longRunningTasksModel.actions.updateTaskProgress({
+              taskId,
+              frameId: id,
+              kind: 'deploy',
+              progressCurrent: null,
+              progressTotal: null,
+              detail: 'Choose USB port',
+            })
+            const portSelected = await ensureEmbeddedUsbApiPort(id)
+            if (!portSelected) {
+              throw new Error('USB connection required for embedded fast deploy')
+            }
+          }
           const frameResponse = await apiFetch(`/api/frames/${id}`)
           if (!frameResponse.ok) {
             throw new Error('Failed to fetch frame before USB deploy')
