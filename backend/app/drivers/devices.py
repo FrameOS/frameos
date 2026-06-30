@@ -76,6 +76,26 @@ VIRTUAL_OUTPUT_DEVICES = {
     "web_only",
 }
 
+WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE = "waveshare.rpi_zero_photopainter_7in3e"
+WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_VARIANT = "EPD_7in3e"
+WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS = {
+    "rst": 17,
+    "dc": 25,
+    "cs": 8,
+    "busy": 24,
+    "sclk": 11,
+    "mosi": 10,
+    "pwr": 27,
+}
+
+WAVESHARE_DEVICE_VARIANTS = {
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE: WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_VARIANT,
+}
+
+WAVESHARE_DEVICE_PIN_DEFAULTS = {
+    WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE: WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS,
+}
+
 NATIVE_DEVICE_DIMENSIONS = {
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
@@ -117,17 +137,76 @@ NATIVE_DEVICE_DIMENSIONS = {
 }
 
 
+def waveshare_variant_for_device(device: str | None) -> str | None:
+    if not device:
+        return None
+    if device in WAVESHARE_DEVICE_VARIANTS:
+        return WAVESHARE_DEVICE_VARIANTS[device]
+    if not device.startswith("waveshare."):
+        return None
+    variant = device.split(".", 1)[1]
+    if variant == "epd7in5_V2":
+        return "EPD_7in5_V2"
+    if variant == "epd2in13_V3":
+        return "EPD_2in13_V3"
+    return variant
+
+
+def _merged_pin_defaults(pins: dict | None, defaults: dict[str, int]) -> dict[str, int]:
+    merged = dict(defaults)
+    if isinstance(pins, dict):
+        for key in defaults:
+            if pins.get(key) is not None:
+                merged[key] = pins[key]
+        if pins.get("sck") is not None and pins.get("sclk") is None and "sclk" in defaults:
+            merged["sclk"] = pins["sck"]
+    return merged
+
+
+def _remove_matching_pin_defaults(pins: dict | None, defaults: dict[str, int]) -> dict | None:
+    if not isinstance(pins, dict):
+        return pins
+    remaining = dict(pins)
+    for key, value in defaults.items():
+        if remaining.get(key) == value:
+            remaining.pop(key, None)
+    if remaining.get("sck") == defaults.get("sclk"):
+        remaining.pop("sck", None)
+    return remaining or None
+
+
+def device_config_with_defaults(
+    device: str | None,
+    device_config: dict | None,
+    previous_device: str | None = None,
+) -> dict:
+    config = dict(device_config or {})
+    pin_defaults = WAVESHARE_DEVICE_PIN_DEFAULTS.get(device or "")
+    if pin_defaults is not None:
+        config["pins"] = _merged_pin_defaults(config.get("pins"), pin_defaults)
+        return config
+
+    previous_pin_defaults = WAVESHARE_DEVICE_PIN_DEFAULTS.get(previous_device or "")
+    if previous_pin_defaults is not None:
+        remaining_pins = _remove_matching_pin_defaults(config.get("pins"), previous_pin_defaults)
+        if remaining_pins:
+            config["pins"] = remaining_pins
+        else:
+            config.pop("pins", None)
+    return config
+
+
+def apply_device_config_defaults(frame: Frame, previous_device: str | None = None) -> None:
+    frame.device_config = device_config_with_defaults(frame.device, frame.device_config, previous_device)
+
+
 def device_dimensions(device: str | None) -> tuple[int, int] | None:
     if not device:
         return None
     if device in NATIVE_DEVICE_DIMENSIONS:
         return NATIVE_DEVICE_DIMENSIONS[device]
-    if device.startswith("waveshare."):
-        variant = device.split(".", 1)[1]
-        if variant == "epd7in5_V2":
-            variant = "EPD_7in5_V2"
-        elif variant == "epd2in13_V3":
-            variant = "EPD_2in13_V3"
+    variant = waveshare_variant_for_device(device)
+    if variant:
         try:
             source = convert_waveshare_source(variant)
         except Exception:
@@ -165,13 +244,9 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     elif device == "http.upload":
         device_drivers = {"httpUpload": DRIVERS["httpUpload"]}
     elif device.startswith("waveshare."):
-        waveshare = DRIVERS["waveshare"]
-        waveshare.variant = device.split(".")[1]
-        # backwards compatibility
-        if waveshare.variant == "epd7in5_V2":
-            waveshare.variant = "EPD_7in5_V2"
-        if waveshare.variant == "epd2in13_V3":
-            waveshare.variant = "EPD_2in13_V3"
+        apply_device_config_defaults(frame)
+        waveshare = replace(DRIVERS["waveshare"])
+        waveshare.variant = waveshare_variant_for_device(device)
         if waveshare.variant not in get_variant_keys():
             raise Exception(f"Unknown waveshare driver variant {waveshare.variant}")
 
@@ -184,8 +259,7 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
 
         boot_config_lines = BOOT_CONFIG_LINES_BY_VARIANT.get(waveshare.variant)
         if boot_config_lines:
-            device_drivers["bootconfig"] = DRIVERS["bootConfig"]
-            device_drivers["bootconfig"].lines = list(boot_config_lines)
+            device_drivers["bootconfig"] = replace(DRIVERS["bootConfig"], lines=list(boot_config_lines))
 
     # Enable evdev for devices that can have local input attached.
     if device not in INKY_BUTTON_DEVICES and not device.startswith("waveshare.") and device not in VIRTUAL_OUTPUT_DEVICES:
