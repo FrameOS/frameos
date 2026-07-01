@@ -2,6 +2,7 @@ import pixie
 import pixie/fileformats/svg
 import base64
 import json
+import math
 import os
 import options
 import sequtils
@@ -27,11 +28,13 @@ const MaxImageMagickOutputBytes = 50 * 1024 * 1024
 const MaxExifOutputBytes = 1024 * 1024
 const ImageMagickTimeoutMs = 30_000
 const ExifToolTimeoutMs = 10_000
+const DisplayDecodeMaxEdge* = 2048
+const DisplayDecodeMaxPixels* = DisplayDecodeMaxEdge * DisplayDecodeMaxEdge
 const ImageEngineImageMagick* = "imagemagick"
 when defined(frameosEmbedded):
   const EmbeddedSmallDecodeCopyBytes = 512 * 1024
   const EmbeddedMaxDirectDecodeCopyBytes = 2 * 1024 * 1024
-  const EmbeddedMaxDirectPngBytes = 768 * 1024
+  const EmbeddedMaxDirectPngBytes = 6 * 1024 * 1024
   const EmbeddedMaxDirectRgbaBytes = 5 * 1024 * 1024
   const EmbeddedMaxRemoteSourceWidth = 800
 
@@ -58,6 +61,33 @@ proc getEffectiveRuntimeImageEngine*(): string =
 
 proc useImageMagick(): bool =
   runtimeImageEngine == ImageEngineImageMagick
+
+proc displayDecodeDimensions*(sourceWidth, sourceHeight: int,
+    maxEdge = DisplayDecodeMaxEdge,
+    maxPixels = DisplayDecodeMaxPixels): tuple[width: int, height: int] =
+  if sourceWidth <= 0 or sourceHeight <= 0:
+    raise newException(PixieError, "Invalid image dimensions")
+
+  var scaleRatio = 1.0
+  if maxEdge > 0:
+    scaleRatio = min(scaleRatio, maxEdge.float / max(sourceWidth, sourceHeight).float)
+  if maxPixels > 0:
+    let sourcePixels = sourceWidth.int64 * sourceHeight.int64
+    if sourcePixels > maxPixels.int64:
+      scaleRatio = min(scaleRatio, sqrt(maxPixels.float / sourcePixels.float))
+
+  if scaleRatio >= 1.0:
+    return (sourceWidth, sourceHeight)
+
+  (
+    max(1, floor(sourceWidth.float * scaleRatio).int),
+    max(1, floor(sourceHeight.float * scaleRatio).int)
+  )
+
+proc displayDecodeDimensions*(dimensions: ImageDimensions,
+    maxEdge = DisplayDecodeMaxEdge,
+    maxPixels = DisplayDecodeMaxPixels): tuple[width: int, height: int] =
+  displayDecodeDimensions(dimensions.width, dimensions.height, maxEdge, maxPixels)
 
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
@@ -103,6 +133,13 @@ proc decodeImageWithImageMagick(data: string): Option[Image] =
     return decodeImageMagickOutput(output.get())
   return none(Image)
 
+proc decodeImageWithImageMagick(data: string, width, height: int): Option[Image] =
+  let sizeArg = &"{width}x{height}>"
+  let output = runImageMagick(@["-quiet", "-", "-auto-orient", "-resize", sizeArg, "bmp:-"], input = data)
+  if output.isSome:
+    return decodeImageMagickOutput(output.get())
+  return none(Image)
+
 proc readImageWithImageMagick(path: string): Option[Image] =
   let output = runImageMagick(@["-quiet", path, "-auto-orient", "bmp:-"])
   if output.isSome:
@@ -133,6 +170,23 @@ proc decodeImageWithFallback*(data: string): Image =
     if converted.isSome:
       return converted.get()
   return decodeImage(data)
+
+proc decodeImageWithDisplayBounds*(data: var string,
+    maxEdge = DisplayDecodeMaxEdge,
+    maxPixels = DisplayDecodeMaxPixels): Image =
+  let dimensions = decodeImageDimensions(data)
+  let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
+  if target.width != dimensions.width or target.height != dimensions.height:
+    if useImageMagick():
+      let converted = decodeImageWithImageMagick(data, target.width, target.height)
+      if converted.isSome:
+        data = ""
+        GC_fullCollect()
+        return converted.get()
+    return decodeImageScaled(data, target.width, target.height)
+
+  result = decodeImageWithFallback(data)
+  data = ""
 
 when defined(frameosEmbedded):
   proc copyImageBuffer(data: pointer, len: int): string =
@@ -210,6 +264,18 @@ when defined(frameosEmbedded):
           return target
         raise newException(PixieError,
           &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {len div 1024}K")
+    if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
+      if len > EmbeddedMaxDirectPngBytes:
+        raise newException(PixieError,
+          &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {len div 1024}K")
+      guardEmbeddedDirectDecode(data, len, format)
+      GC_fullCollect()
+      when compiles(decodePngScaledInto(data, len, target)):
+        decodePngScaledInto(data, len, target)
+        return target
+      else:
+        target.scaleAndDrawImage(decodeImageWithFallback(data, len), "cover")
+        return target
     decodeImageWithFallback(data, len)
 
   proc decodeImageWithFallback*(data: var string, target: Image): Image =
@@ -227,6 +293,18 @@ when defined(frameosEmbedded):
           return target
         raise newException(PixieError,
           &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {data.len div 1024}K")
+    if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
+      if data.len > EmbeddedMaxDirectPngBytes:
+        raise newException(PixieError,
+          &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {data.len div 1024}K")
+      guardEmbeddedDirectDecode(data.cstring, data.len, format)
+      GC_fullCollect()
+      when compiles(decodePngScaledInto(data, target)):
+        decodePngScaledInto(data, target)
+        return target
+      else:
+        target.scaleAndDrawImage(decodeImageWithFallback(data), "cover")
+        return target
     decodeImageWithFallback(data)
 
   proc httpErrorDetail(response: BoundedHttpBufferResponse): string =
@@ -240,12 +318,31 @@ when defined(frameosEmbedded):
       snippet.add("...")
     ": " & snippet
 
+when not defined(frameosEmbedded):
+  proc decodeImageWithFallback*(data: var string, target: Image): Image =
+    if not target.isNil and target.width > 0 and target.height > 0:
+      if useImageMagick():
+        let converted = decodeImageWithImageMagick(data, target.width, target.height)
+        if converted.isSome:
+          target.scaleAndDrawImage(converted.get(), "stretch")
+          data = ""
+          GC_fullCollect()
+          return target
+      return decodeImageScaledInto(data, target)
+    decodeImageWithFallback(data)
+
 proc readImageWithFallback*(path: string): Image =
   if useImageMagick():
     let converted = readImageWithImageMagick(path)
     if converted.isSome:
       return converted.get()
   return readImage(path)
+
+proc readImageWithDisplayBounds*(path: string,
+    maxEdge = DisplayDecodeMaxEdge,
+    maxPixels = DisplayDecodeMaxPixels): Image =
+  var data = readFile(path)
+  decodeImageWithDisplayBounds(data, maxEdge, maxPixels)
 
 proc decodeDataUrl*(dataUrl: string): Image =
   if not dataUrl.startsWith("data:"):
@@ -279,9 +376,8 @@ proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
       dataBody.decode
     else:
       decodeUrl(dataBody)
-  when defined(frameosEmbedded):
-    if not target.isNil and decodedData.len > 0:
-      return decodeImageWithFallback(decodedData, target)
+  if not target.isNil and decodedData.len > 0:
+    return decodeImageWithFallback(decodedData, target)
   return decodeImageWithFallback(decodedData)
 
 when defined(frameosEmbedded):
@@ -377,7 +473,11 @@ proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadB
   when defined(frameosEmbedded):
     return downloadImageFromBuffer(url, maxBytes, target, headers).image
   else:
-    return downloadImage(url, maxBytes = maxBytes, headers = headers)
+    var response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    var content = response.body
+    return decodeImageWithFallback(content, target)
 
 proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
@@ -386,7 +486,12 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
   when defined(frameosEmbedded):
     return downloadImageFromBuffer(url, maxBytes, target, headers)
   else:
-    return downloadImageWithData(url, maxBytes = maxBytes, headers = headers)
+    let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    let content = response.body
+    var decodeContent = content
+    return (decodeImageWithFallback(decodeContent, target), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:
