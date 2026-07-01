@@ -37,9 +37,8 @@ proc contextImageTarget*(self: AppRoot, context: ExecutionContext,
 
 proc downloadImageForTarget*(url: string, maxBytes: int, target: Image = nil,
     headers: seq[SimpleHttpHeader] = @[]): Image =
-  when defined(frameosEmbedded):
-    if not target.isNil:
-      return downloadImageInto(url, target, maxBytes = maxBytes, headers = headers)
+  if not target.isNil:
+    return downloadImageInto(url, target, maxBytes = maxBytes, headers = headers)
   downloadImage(url, maxBytes = maxBytes, headers = headers)
 
 proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, url: string,
@@ -48,12 +47,9 @@ proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, 
   let byteLimit =
     if maxBytes > 0: maxBytes
     else: self.maxImageResponseBytes()
-  when defined(frameosEmbedded):
-    downloadImageWithDataInto(
-      url,
-      self.contextImageTarget(context, fallbackWidth, fallbackHeight),
-      maxBytes = byteLimit,
-      headers = headers
-    )
-  else:
-    downloadImageWithData(url, maxBytes = byteLimit, headers = headers)
+  downloadImageWithDataInto(
+    url,
+    self.contextImageTarget(context, fallbackWidth, fallbackHeight),
+    maxBytes = byteLimit,
+    headers = headers
+  )

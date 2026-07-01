@@ -151,8 +151,8 @@
     },
     "pixie": {
       "version": "6.1.0",
-      "vcsRevision": "9d060309db0c22ee2eb217d99bc26ecb53f919b1",
-      "url": "https://github.com/mariusandra/pixie",
+      "vcsRevision": "2d99f1d9764147626648e83e13391b22c123e456",
+      "url": "https://github.com/FrameOS/pixie",
       "downloadMethod": "git",
       "dependencies": [
         "vmath",
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "ed7a66aea39c41c12ffbe851faa9f02b2f9ed6c7"
+        "sha1": "9df0650559de85fdd592f995fb73a695ab79d6f1"
       }
     }
   },

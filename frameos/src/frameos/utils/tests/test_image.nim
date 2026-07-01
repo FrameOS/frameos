@@ -30,6 +30,28 @@ suite "image helpers":
 
     setRuntimeImageEngine("")
 
+  test "display decode dimensions cap oversized images while preserving aspect":
+    let square = displayDecodeDimensions(10_000, 10_000)
+    check square.width == DisplayDecodeMaxEdge
+    check square.height == DisplayDecodeMaxEdge
+
+    let landscape = displayDecodeDimensions(9214, 6143)
+    check landscape.width == DisplayDecodeMaxEdge
+    check landscape.height < DisplayDecodeMaxEdge
+    check landscape.width * landscape.height <= DisplayDecodeMaxPixels
+
+    let pixelCapped = displayDecodeDimensions(4000, 4000, maxEdge = 10_000, maxPixels = 1_000_000)
+    check pixelCapped.width == 1000
+    check pixelCapped.height == 1000
+
+  test "display-bounded decode scales PNGs and releases source bytes":
+    let source = testImage(32, 16)
+    var data = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+    let image = decodeImageWithDisplayBounds(data, maxEdge = 8, maxPixels = 64)
+    check image.width == 8
+    check image.height == 4
+    check data.len == 0
+
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
     source.fill(rgba(255, 0, 0, 255))
