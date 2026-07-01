@@ -54,15 +54,17 @@ suite "data/localImage app":
     discard app.get(ExecutionContext(hasImage: false))
     check scene.state["meta"]["filename"].getStr() == "zeta.ppm"
 
-  test "discovery excludes thumbs and non-images and metadata/counter are updated":
+  test "discovery excludes internal dirs and non-images and metadata/counter are updated":
     let root = uniqueTempDir("frameos-local-image")
     defer: removeDir(root)
 
     createDir(root / "sub")
     createDir(root / ".thumbs")
+    createDir(root / ".frameos" / "scene_images")
     writePpm(root / "first.PPM", 255, 0, 0)
     writePpm(root / "sub" / "second.ppm", 0, 255, 0)
     writePpm(root / ".thumbs" / "ignored.ppm", 0, 0, 255)
+    writePpm(root / ".frameos" / "scene_images" / "ignored.ppm", 255, 255, 0)
     writeFile(root / "not-image.txt", "hello")
 
     let logs = LogStore(items: @[])

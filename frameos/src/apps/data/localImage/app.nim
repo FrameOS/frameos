@@ -7,6 +7,7 @@ import strutils
 import strformat
 import random
 import frameos/utils/image
+import frameos/utils/app_images
 import frameos/apps
 import frameos/types
 import frameos/hal/entropy
@@ -36,9 +37,12 @@ proc isImage(file: string): bool =
       return true
   return false
 
-proc isInThumbsDir(path: string): bool =
+proc isInIgnoredDir(path: string): bool =
   let normalized = path.replace('\\', '/')
-  return normalized.startsWith(".thumbs/") or normalized.contains("/.thumbs/")
+  for dir in [".thumbs", ".frameos"]:
+    if normalized.startsWith(dir & "/") or normalized.contains("/" & dir & "/"):
+      return true
+  return false
 
 proc compareImagePaths(a, b: string): int =
   result = cmpIgnoreCase(a, b)
@@ -71,7 +75,7 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   let searchQuery = search.toLower()
   var images: seq[string] = @[]
   for file in walkDirRec(folder, relative = true):
-    if isInThumbsDir(file):
+    if isInIgnoredDir(file):
       continue
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       images.add(file)
@@ -137,6 +141,20 @@ proc refreshImages(self: App) =
   elif self.counter >= self.images.len:
     self.counter = self.counter mod self.images.len
 
+proc decodeBoundsForContext(self: App, context: ExecutionContext):
+    tuple[maxEdge: int, maxPixels: int] =
+  let
+    targetWidth = max(1, self.contextImageWidth(context))
+    targetHeight = max(1, self.contextImageHeight(context))
+    targetPixels64 = targetWidth.int64 * targetHeight.int64
+    targetPixels =
+      if targetPixels64 > high(int).int64: high(int)
+      else: targetPixels64.int
+  (
+    max(DisplayDecodeMaxEdge, max(targetWidth, targetHeight)),
+    max(DisplayDecodeMaxPixels, targetPixels)
+  )
+
 proc get*(self: App, context: ExecutionContext): Image =
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init() # re-init if the query changes
@@ -159,7 +177,12 @@ proc get*(self: App, context: ExecutionContext): Image =
     self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
   try:
-    nextImage = some(readImageWithDisplayBounds(path))
+    let decodeBounds = self.decodeBoundsForContext(context)
+    nextImage = some(readImageWithDisplayBounds(
+      path,
+      maxEdge = decodeBounds.maxEdge,
+      maxPixels = decodeBounds.maxPixels
+    ))
   except CatchableError as e:
     return self.error(context, "An error occurred while loading the image: " & path & "\n" & e.msg)
 
