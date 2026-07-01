@@ -261,6 +261,14 @@ function metricRebootValue(metricValues: unknown): unknown {
   return null
 }
 
+function isRebootRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isExplicitMetricReboot(reboot: unknown): boolean {
+  return reboot === true || (isRebootRecord(reboot) && Boolean(reboot.new))
+}
+
 function metricRebootMarker(
   metric: MetricsType,
   bootId: string | null,
@@ -290,23 +298,34 @@ function metricRebootMarker(
   return marker
 }
 
+function metricRebootIdentity(marker: RebootMarker): string {
+  return JSON.stringify([
+    marker.bootId ?? '',
+    marker.previousBootId ?? '',
+    marker.kind ?? '',
+    marker.reason ?? '',
+    marker.source ?? '',
+    marker.message ?? '',
+    marker.error ?? '',
+    marker.serviceResult ?? '',
+    marker.exitCode ?? '',
+    marker.exitStatus ?? '',
+  ])
+}
+
 function rebootMarkersFromMetrics(metrics: MetricsType[]): RebootMarker[] {
   const markers: RebootMarker[] = []
+  const seenExplicitReboots = new Set<string>()
   let previousBootId: string | null = null
 
   metrics.forEach((metric) => {
     const reboot = metricRebootValue(metric.metrics)
     const bootId = metricBootId(metric.metrics)
-    const explicitReboot =
-      reboot === true ||
-      (Boolean(reboot) &&
-        typeof reboot === 'object' &&
-        !Array.isArray(reboot) &&
-        Boolean((reboot as Record<string, unknown>).new))
-    const bootChanged = bootId !== null && previousBootId !== null && bootId !== previousBootId
-    if (explicitReboot || bootChanged) {
+    if (isExplicitMetricReboot(reboot)) {
       const marker = metricRebootMarker(metric, bootId, previousBootId)
-      if (marker) {
+      const identity = marker ? metricRebootIdentity(marker) : null
+      if (marker && identity !== null && !seenExplicitReboots.has(identity)) {
+        seenExplicitReboots.add(identity)
         markers.push(marker)
       }
     }
