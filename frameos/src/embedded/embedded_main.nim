@@ -258,6 +258,24 @@ proc packImageForFormat(
     log(&"pack: unsupported pixel format {pixelFormat}")
     false
 
+proc packedLenForFormat(width, height, pixelFormat: int): int =
+  if width <= 0 or height <= 0:
+    return 0
+  case pixelFormat:
+  of 1:
+    ((width + 7) div 8) * height
+  of 2, 3:
+    ((width + 7) div 8) * height * 2
+  of 4:
+    ((width + 3) div 4) * height
+  of 5, 6, 7, 8:
+    ((width + 1) div 2) * height
+  else:
+    0
+
+proc renderBufferAlloc(len: csize_t): pointer {.importc: "frameos_nim_alloc_render_buffer".}
+proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
+
 # ------------------------------------------------------------------ C API
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
@@ -299,10 +317,14 @@ proc fos_nim_render_impl(
     # this render can schedule another pass.
     discard takeRenderRequested()
     let start = getMonoTime()
-    let (image, source) = renderFrameImage()
+    let rendered = renderFrameImage()
+    var image = rendered.image
+    let source = rendered.source
     let renderedAt = getMonoTime()
     if not packImageForFormat(image, buf, bufLen.int, pixelFormat.int):
       return 1
+    image = nil
+    GC_fullCollect()
     let packed = getMonoTime()
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
@@ -315,6 +337,58 @@ proc fos_nim_render_impl(
     0
   except CatchableError as e:
     log("render failed: " & e.msg)
+    1
+
+proc fos_nim_render_alloc_impl(
+    outBuf: var pointer;
+    outLen: var csize_t;
+    pixelFormat: cint
+  ): cint {.exportc, cdecl.} =
+  outBuf = nil
+  outLen = 0
+  try:
+    discard takeRenderRequested()
+    let start = getMonoTime()
+    let rendered = renderFrameImage()
+    var image = rendered.image
+    let source = rendered.source
+    let renderedAt = getMonoTime()
+    let packedLen = packedLenForFormat(image.width, image.height, pixelFormat.int)
+    if packedLen <= 0:
+      log(&"pack: unsupported pixel format {pixelFormat}")
+      image = nil
+      GC_fullCollect()
+      return 1
+    let raw = renderBufferAlloc(packedLen.csize_t)
+    if raw == nil:
+      log(&"render failed: out of memory for {packedLen} byte packed framebuffer")
+      image = nil
+      GC_fullCollect()
+      return 1
+    let packedBuf = cast[ptr UncheckedArray[uint8]](raw)
+    if not packImageForFormat(image, packedBuf, packedLen, pixelFormat.int):
+      renderBufferFree(raw)
+      image = nil
+      GC_fullCollect()
+      return 1
+    image = nil
+    GC_fullCollect()
+    let packed = getMonoTime()
+    outBuf = raw
+    outLen = packedLen.csize_t
+    inc renderCount
+    lastRenderMs = ((packed - start).inMilliseconds).int
+    log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
+        &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+    discard takeRenderRequested()
+    0
+  except CatchableError as e:
+    log("render failed: " & e.msg)
+    if outBuf != nil:
+      renderBufferFree(outBuf)
+      outBuf = nil
+    outLen = 0
+    GC_fullCollect()
     1
 
 proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): cint {.exportc, cdecl.} =

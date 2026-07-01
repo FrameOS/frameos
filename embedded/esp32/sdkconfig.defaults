@@ -14,7 +14,8 @@ CONFIG_ESP_ERR_TO_NAME_LOOKUP=y
 # 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
 # The default table gives each OTA slot 3520K (3.44MiB) and keeps a 1M
 # SPIFFS state partition for scenes/user data. Larger flash profiles keep
-# roughly 4MB OTA slots and dedicate the remaining flash to state storage.
+# roughly 4MB OTA slots and dedicate the remaining flash to state storage; the
+# 32MB profile also raises SPIFFS page size so its 24M state partition mounts.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

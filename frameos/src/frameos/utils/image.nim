@@ -13,6 +13,7 @@ import frameos/utils/http_client
 when not defined(frameosEmbedded):
   import frameos/utils/font
 when defined(frameosEmbedded):
+  import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
@@ -568,12 +569,66 @@ proc writeError*(image: Image, width, height: int, message: string) =
     image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
     image.fillText(types, translate(vec2(padding, padding)))
 
+proc renderErrorInto*(image: Image, width, height: int, message: string) =
+  image.fill(parseHtmlColor("#ffffff"))
+  writeError(image, width, height, message)
+
 proc renderError*(width, height: int, message: string): Image =
   when defined(frameosEmbedded):
     GC_fullCollect()
   result = newImage(width, height)
-  result.fill(parseHtmlColor("#ffffff"))
-  writeError(result, width, height, message)
+  result.renderErrorInto(width, height, message)
+
+when defined(frameosEmbedded):
+  proc drawScaledNearest(targetImage: Image, srcImage: Image, scalingMode: string,
+      offsetX: int, offsetY: int, blendMode: BlendMode): bool =
+    if targetImage.isNil or srcImage.isNil or srcImage.width <= 0 or srcImage.height <= 0 or
+        targetImage.width <= 0 or targetImage.height <= 0:
+      return false
+
+    var scaleX = targetImage.width.float32 / srcImage.width.float32
+    var scaleY = targetImage.height.float32 / srcImage.height.float32
+    var drawX = offsetX.float32
+    var drawY = offsetY.float32
+
+    case scalingMode:
+    of "cover":
+      let ratio = max(scaleX, scaleY)
+      scaleX = ratio
+      scaleY = ratio
+      drawX = -((srcImage.width.float32 * ratio - targetImage.width.float32) / 2) + offsetX.float32
+      drawY = -((srcImage.height.float32 * ratio - targetImage.height.float32) / 2) + offsetY.float32
+    of "contain":
+      let ratio = min(scaleX, scaleY)
+      scaleX = ratio
+      scaleY = ratio
+      drawX = ((targetImage.width.float32 - srcImage.width.float32 * ratio) / 2) + offsetX.float32
+      drawY = ((targetImage.height.float32 - srcImage.height.float32 * ratio) / 2) + offsetY.float32
+    of "stretch":
+      discard
+    else:
+      return false
+
+    if scaleX <= 0 or scaleY <= 0:
+      return false
+
+    let invScaleX = 1'f32 / scaleX
+    let invScaleY = 1'f32 / scaleY
+    let blend = blendMode.blender()
+    for y in 0 ..< targetImage.height:
+      let srcYFloat = (y.float32 - drawY) * invScaleY
+      if srcYFloat < 0 or srcYFloat >= srcImage.height.float32:
+        continue
+      let srcY = min(srcImage.height - 1, srcYFloat.int)
+      for x in 0 ..< targetImage.width:
+        let srcXFloat = (x.float32 - drawX) * invScaleX
+        if srcXFloat < 0 or srcXFloat >= srcImage.width.float32:
+          continue
+        let srcX = min(srcImage.width - 1, srcXFloat.int)
+        let targetIndex = targetImage.dataIndex(x, y)
+        targetImage.data[targetIndex] = blend(targetImage.data[targetIndex],
+          srcImage.data[srcImage.dataIndex(srcX, srcY)])
+    true
 
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
     offsetY: int = 0, blendMode: BlendMode = OverwriteBlend) {.raises: [PixieError].} =
@@ -584,6 +639,9 @@ proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string
     else:
       targetImage.draw(srcImage, blendMode = blendMode)
   else:
+    when defined(frameosEmbedded):
+      if drawScaledNearest(targetImage, srcImage, scalingMode, offsetX, offsetY, blendMode):
+        return
     case scalingMode:
     of "cover":
       let scaleRatio = max(

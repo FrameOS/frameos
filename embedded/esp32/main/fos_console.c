@@ -31,10 +31,15 @@
 
 static const char *TAG = "fos_console";
 
+#if CONFIG_ESPTOOLPY_FLASHSIZE_32MB
+#define FOS_USB_API_MAX_UPLOAD (4 * 1024 * 1024)
+#else
 #define FOS_USB_API_MAX_UPLOAD (512 * 1024)
+#endif
 #define FOS_USB_API_MAX_SCENE_ID 256
 #define FOS_USB_API_RAW_CHUNK 384
 #define FOS_USB_API_PAYLOAD_TIMEOUT_MS 180000
+#define FOS_USB_API_PAYLOAD_READ_CHUNK 2048
 #define FOS_CONSOLE_MAX_CMDLINE_LENGTH 512
 #define FOS_CONSOLE_TASK_STACK_SIZE 8192
 
@@ -378,22 +383,47 @@ static void usb_api_ready(const char *name)
     fflush(stdout);
 }
 
-static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_ticks)
+static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_ticks, size_t *bytes_read)
 {
     size_t off = 0;
     TickType_t start = xTaskGetTickCount();
+    if (bytes_read) *bytes_read = 0;
     while (off < len) {
-        int ch = fgetc(stdin);
-        if (ch == EOF) {
-            if ((xTaskGetTickCount() - start) >= timeout_ticks) {
-                return false;
-            }
-            vTaskDelay(pdMS_TO_TICKS(1));
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        size_t remaining = len - off;
+        uint32_t chunk = remaining > FOS_USB_API_PAYLOAD_READ_CHUNK
+                             ? FOS_USB_API_PAYLOAD_READ_CHUNK
+                             : (uint32_t)remaining;
+        int count = usb_serial_jtag_read_bytes(buf + off, chunk, pdMS_TO_TICKS(20));
+        if (count > 0) {
+            off += (size_t)count;
+            if (bytes_read) *bytes_read = off;
+            taskYIELD();
             continue;
         }
-        buf[off++] = (uint8_t)ch;
+#else
+        int ch = fgetc(stdin);
+        if (ch != EOF) {
+            buf[off++] = (uint8_t)ch;
+            if (bytes_read) *bytes_read = off;
+            if ((off & 0x3ff) == 0) taskYIELD();
+            continue;
+        }
+#endif
+        if ((xTaskGetTickCount() - start) >= timeout_ticks) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
     return true;
+}
+
+static void usb_api_payload_timeout_error(const char *name, size_t read, size_t expected)
+{
+    char message[96];
+    snprintf(message, sizeof(message), "payload read timed out (%u/%u bytes)",
+             (unsigned)read, (unsigned)expected);
+    usb_api_error(name, ESP_ERR_TIMEOUT, message);
 }
 
 static void usb_api_payload_text(const char *name, const char *text)
@@ -474,7 +504,13 @@ static int cmd_usb_api(int argc, char **argv)
         scene_id[0] = '\0';
         esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
         if (err != ESP_OK) {
-            usb_api_error(subcommand, err, err == ESP_ERR_NOT_FOUND ? "no preview rendered yet" : "image unavailable");
+            const char *reason = "image unavailable";
+            if (err == ESP_ERR_NOT_FOUND) {
+                reason = strcmp(fos_client_snapshot_mode(), "hash-only") == 0
+                    ? "panel image is rendered, but preview snapshot was not retained"
+                    : "no preview rendered yet";
+            }
+            usb_api_error(subcommand, err, reason);
             return 1;
         }
         char metadata[160];
@@ -534,8 +570,9 @@ static int cmd_usb_api(int argc, char **argv)
         }
         char scene_id[FOS_USB_API_MAX_SCENE_ID];
         usb_api_ready(subcommand);
-        if (!usb_api_read_exact((uint8_t *)scene_id, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS))) {
-            usb_api_error(subcommand, ESP_ERR_TIMEOUT, "payload read timed out");
+        size_t bytes_read = 0;
+        if (!usb_api_read_exact((uint8_t *)scene_id, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
+            usb_api_payload_timeout_error(subcommand, bytes_read, len);
             return 1;
         }
         scene_id[len] = '\0';
@@ -566,9 +603,10 @@ static int cmd_usb_api(int argc, char **argv)
             return 1;
         }
         usb_api_ready(subcommand);
-        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS))) {
+        size_t bytes_read = 0;
+        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
             free(body);
-            usb_api_error(subcommand, ESP_ERR_TIMEOUT, "payload read timed out");
+            usb_api_payload_timeout_error(subcommand, bytes_read, len);
             return 1;
         }
         body[len] = '\0';
@@ -693,13 +731,16 @@ static void fos_console_usb_task(void *arg)
 
 static esp_err_t fos_console_start_usb_serial_jtag(void)
 {
-    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CRLF);
+    /* Commands are LF-delimited; raw usb_api payload bytes must not be CRLF-normalized. */
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_LF);
     usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
 
     fcntl(fileno(stdout), F_SETFL, 0);
-    fcntl(fileno(stdin), F_SETFL, 0);
+    fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
 
     usb_serial_jtag_driver_config_t usb_serial_jtag_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    usb_serial_jtag_config.rx_buffer_size = 8192;
+    usb_serial_jtag_config.tx_buffer_size = 2048;
     esp_err_t err = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
     if (err != ESP_OK) return err;
     usb_serial_jtag_vfs_use_driver();

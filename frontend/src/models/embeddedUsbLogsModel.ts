@@ -343,7 +343,7 @@ async function runUsbApiCommandOnPort(
     }
     reader = port.readable.getReader()
     writer = port.writable.getWriter()
-    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\r\n`))
+    await writer.write(encoder.encode(`usb_api ${command}${payload ? ` ${payload.byteLength}` : ''}\n`))
     if (payload) {
       const readyDeadline = Date.now() + Math.min(timeoutMs, USB_PAYLOAD_READY_TIMEOUT_MS)
       let payloadReady = false

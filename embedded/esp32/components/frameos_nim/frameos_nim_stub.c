@@ -17,6 +17,13 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     (void)buf; (void)len; (void)pixel_format;
     return -1;
 }
+int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    (void)pixel_format;
+    if (buf) *buf = NULL;
+    if (len) *len = 0;
+    return -1;
+}
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len) { return frameos_nim_render(buf, len, 1); }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
 const char *frameos_nim_scene_info_json(void) { return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}"; }

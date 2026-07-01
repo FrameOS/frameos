@@ -169,6 +169,7 @@ def test_embedded_flash_size_profiles():
     assert embedded_flash_size_for_frame(thirty_two_mb) == '32MB'
     assert embedded_ota_supported_for_frame(thirty_two_mb) is True
     assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
+    assert embedded_required_sdkconfig_for_frame(thirty_two_mb)['CONFIG_SPIFFS_PAGE_SIZE'] == '512'
 
 
 def test_embedded_firmware_layout_tracks_flash_and_ram():
@@ -1060,6 +1061,7 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
     assert missing == {
         "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
         "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": '"partitions_ota_32mb.csv"',
+        "CONFIG_SPIFFS_PAGE_SIZE": "512",
     }
     assert not sdkconfig.exists()
     assert not build_dir.exists()

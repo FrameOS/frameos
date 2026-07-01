@@ -227,10 +227,10 @@ async def test_process_log_embedded_bootup_records_boot_and_marks_generated_firm
     )
 
     updated = db.get(Frame, frame.id)
-    assert updated.frame_host == "10.8.0.232"
+    assert updated.frame_host == "frame53.local"
     assert updated.last_successful_deploy_at == boot_time
     assert updated.last_successful_deploy["frameos_version"] == "2026.6.26"
-    assert updated.last_successful_deploy["frame_host"] == "10.8.0.232"
+    assert updated.last_successful_deploy["frame_host"] == "frame53.local"
     assert updated.embedded["lastBoot"]["ip"] == "10.8.0.232"
     assert updated.embedded["lastBoot"]["frameosVersion"] == "2026.6.26"
     assert updated.embedded["lastBoot"]["panel"] == "EPD_7in3e"

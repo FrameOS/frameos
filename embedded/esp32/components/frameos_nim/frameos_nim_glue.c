@@ -38,6 +38,7 @@ extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
                               const char *backend_url, int frame_id);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
+extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
@@ -84,6 +85,18 @@ static bool nim_lock_take(void)
 static void nim_lock_give(void)
 {
     if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
+}
+
+void *frameos_nim_alloc_render_buffer(size_t len)
+{
+    void *ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ptr) ptr = malloc(len);
+    return ptr;
+}
+
+void frameos_nim_free_render_buffer(void *ptr)
+{
+    free(ptr);
 }
 
 bool frameos_nim_available(void) { return true; }
@@ -163,6 +176,15 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (!s_nim_ready) return -1;
     if (!nim_lock_take()) return -1;
     int result = fos_nim_render_impl(buf, len, pixel_format);
+    nim_lock_give();
+    return result;
+}
+
+int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    if (!s_nim_ready || !buf || !len) return -1;
+    if (!nim_lock_take()) return -1;
+    int result = fos_nim_render_alloc_impl(buf, len, pixel_format);
     nim_lock_give();
     return result;
 }

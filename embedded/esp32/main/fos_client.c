@@ -94,6 +94,12 @@ const char *fos_client_snapshot_mode(void)
     return s_display_state_valid ? "hash-only" : "none";
 }
 
+bool fos_client_display_state_ready(void)
+{
+    load_display_state();
+    return s_display_state_valid;
+}
+
 static void sha256_hex(const uint8_t sha[FOS_DISPLAY_HASH_LEN], char out[FOS_DISPLAY_HASH_LEN * 2 + 1])
 {
     static const char hex[] = "0123456789abcdef";
@@ -534,24 +540,24 @@ static esp_err_t render_once(void)
                      render_attempt, 0, width, height, format, buf_len, ESP_OK);
     frameos_nim_flush_logs();
 
-    uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!buf) buf = malloc(buf_len);
-    if (!buf) {
-        ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
-        log_render_event("render:error", scene_id, scene_name, "error", "allocate",
-                         mode, "none", "out-of-memory", render_attempt,
-                         (esp_timer_get_time() - start) / 1000, width, height,
-                         format, buf_len, ESP_ERR_NO_MEM);
-        frameos_nim_flush_logs();
-        return ESP_ERR_NO_MEM;
-    }
-    memset(buf, white_fill_for_format(format), buf_len);
-
+    uint8_t *buf = NULL;
     esp_err_t err;
     if (local_render) {
-        err = frameos_nim_render(buf, buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
+        err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
+        buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!buf) buf = malloc(buf_len);
+        if (!buf) {
+            ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
+            log_render_event("render:error", scene_id, scene_name, "error", "allocate",
+                             mode, "none", "out-of-memory", render_attempt,
+                             (esp_timer_get_time() - start) / 1000, width, height,
+                             format, buf_len, ESP_ERR_NO_MEM);
+            frameos_nim_flush_logs();
+            return ESP_ERR_NO_MEM;
+        }
+        memset(buf, white_fill_for_format(format), buf_len);
         if (config->render_mode == FOS_RENDER_LOCAL) {
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
