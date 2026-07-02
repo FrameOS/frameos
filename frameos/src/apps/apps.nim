@@ -5,8 +5,10 @@ import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
 import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
 import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
+import apps/data/googlePhotos/app_loader as data_googlePhotos_loader
 import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
+import apps/data/immich/app_loader as data_immich_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
@@ -26,6 +28,7 @@ import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
 import apps/render/calendar/app_loader as render_calendar_loader
+import apps/render/chart/app_loader as render_chart_loader
 import apps/render/color/app_loader as render_color_loader
 import apps/render/gradient/app_loader as render_gradient_loader
 import apps/render/image/app_loader as render_image_loader
@@ -33,6 +36,7 @@ import apps/render/opacity/app_loader as render_opacity_loader
 import apps/render/split/app_loader as render_split_loader
 import apps/render/svg/app_loader as render_svg_loader
 import apps/render/text/app_loader as render_text_loader
+import apps/render/zoomPan/app_loader as render_zoomPan_loader
 when not defined(frameosEmbedded):
   # Excluded from embedded builds: these apps depend on host-only
   # runtime features such as child processes and external binaries.
@@ -52,8 +56,10 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/downloadUrl": data_downloadUrl_loader.init(node, scene)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.init(node, scene)
   of "data/frameOSGallery": data_frameOSGallery_loader.init(node, scene)
+  of "data/googlePhotos": data_googlePhotos_loader.init(node, scene)
   of "data/haSensor": data_haSensor_loader.init(node, scene)
   of "data/icalJson": data_icalJson_loader.init(node, scene)
+  of "data/immich": data_immich_loader.init(node, scene)
   of "data/localImage": data_localImage_loader.init(node, scene)
   of "data/log": data_log_loader.init(node, scene)
   of "data/newImage": data_newImage_loader.init(node, scene)
@@ -78,6 +84,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.init(node, scene)
   of "logic/setAsState": logic_setAsState_loader.init(node, scene)
   of "render/calendar": render_calendar_loader.init(node, scene)
+  of "render/chart": render_chart_loader.init(node, scene)
   of "render/color": render_color_loader.init(node, scene)
   of "render/gradient": render_gradient_loader.init(node, scene)
   of "render/image": render_image_loader.init(node, scene)
@@ -85,6 +92,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "render/split": render_split_loader.init(node, scene)
   of "render/svg": render_svg_loader.init(node, scene)
   of "render/text": render_text_loader.init(node, scene)
+  of "render/zoomPan": render_zoomPan_loader.init(node, scene)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
@@ -100,8 +108,10 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/downloadUrl": data_downloadUrl_loader.setField(app, field, value)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.setField(app, field, value)
   of "data/frameOSGallery": data_frameOSGallery_loader.setField(app, field, value)
+  of "data/googlePhotos": data_googlePhotos_loader.setField(app, field, value)
   of "data/haSensor": data_haSensor_loader.setField(app, field, value)
   of "data/icalJson": data_icalJson_loader.setField(app, field, value)
+  of "data/immich": data_immich_loader.setField(app, field, value)
   of "data/localImage": data_localImage_loader.setField(app, field, value)
   of "data/log": data_log_loader.setField(app, field, value)
   of "data/newImage": data_newImage_loader.setField(app, field, value)
@@ -126,6 +136,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.setField(app, field, value)
   of "logic/setAsState": logic_setAsState_loader.setField(app, field, value)
   of "render/calendar": render_calendar_loader.setField(app, field, value)
+  of "render/chart": render_chart_loader.setField(app, field, value)
   of "render/color": render_color_loader.setField(app, field, value)
   of "render/gradient": render_gradient_loader.setField(app, field, value)
   of "render/image": render_image_loader.setField(app, field, value)
@@ -133,6 +144,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "render/split": render_split_loader.setField(app, field, value)
   of "render/svg": render_svg_loader.setField(app, field, value)
   of "render/text": render_text_loader.setField(app, field, value)
+  of "render/zoomPan": render_zoomPan_loader.setField(app, field, value)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
 
 proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
@@ -142,6 +154,7 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.run(app, context)
   of "logic/setAsState": logic_setAsState_loader.run(app, context)
   of "render/calendar": render_calendar_loader.run(app, context)
+  of "render/chart": render_chart_loader.run(app, context)
   of "render/color": render_color_loader.run(app, context)
   of "render/gradient": render_gradient_loader.run(app, context)
   of "render/image": render_image_loader.run(app, context)
@@ -149,6 +162,7 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
   of "render/split": render_split_loader.run(app, context)
   of "render/svg": render_svg_loader.run(app, context)
   of "render/text": render_text_loader.run(app, context)
+  of "render/zoomPan": render_zoomPan_loader.run(app, context)
   else: raise newException(Exception, "App '" & keyword & "' cannot be run; use get().")
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
@@ -164,8 +178,10 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/downloadUrl": data_downloadUrl_loader.get(app, context)
   of "data/eventsToAgenda": data_eventsToAgenda_loader.get(app, context)
   of "data/frameOSGallery": data_frameOSGallery_loader.get(app, context)
+  of "data/googlePhotos": data_googlePhotos_loader.get(app, context)
   of "data/haSensor": data_haSensor_loader.get(app, context)
   of "data/icalJson": data_icalJson_loader.get(app, context)
+  of "data/immich": data_immich_loader.get(app, context)
   of "data/localImage": data_localImage_loader.get(app, context)
   of "data/log": data_log_loader.get(app, context)
   of "data/newImage": data_newImage_loader.get(app, context)
@@ -186,6 +202,7 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/wikicommons": data_wikicommons_loader.get(app, context)
   of "data/xmlToJson": data_xmlToJson_loader.get(app, context)
   of "render/calendar": render_calendar_loader.get(app, context)
+  of "render/chart": render_chart_loader.get(app, context)
   of "render/color": render_color_loader.get(app, context)
   of "render/gradient": render_gradient_loader.get(app, context)
   of "render/image": render_image_loader.get(app, context)
@@ -193,4 +210,5 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "render/split": render_split_loader.get(app, context)
   of "render/svg": render_svg_loader.get(app, context)
   of "render/text": render_text_loader.get(app, context)
+  of "render/zoomPan": render_zoomPan_loader.get(app, context)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
