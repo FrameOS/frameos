@@ -26,6 +26,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     let sourceImage = self.appConfig.image
     if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
+    if sourceImage == image:
+      # The producer already decoded straight into this canvas.
+      return
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
       of "overwrite": OverwriteBlend
@@ -53,8 +56,11 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
     self.logError(message)
-    let errorImage = renderError(image.width, image.height, message)
-    scaleAndDrawImage(image, errorImage, self.appConfig.placement)
+    when defined(frameosEmbedded):
+      renderErrorInto(image, image.width, image.height, message)
+    else:
+      let errorImage = renderError(image.width, image.height, message)
+      scaleAndDrawImage(image, errorImage, self.appConfig.placement)
 
 proc run*(self: App, context: ExecutionContext) =
   try:

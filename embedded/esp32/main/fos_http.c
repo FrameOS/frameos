@@ -325,9 +325,19 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
     size_t payload_len = len;
     char requested_scene_id[FOS_HTTP_UPLOAD_SCENE_ID_LEN] = "";
     char *owned_payload = NULL;
-    cJSON *root = body ? cJSON_Parse(body) : NULL;
+    cJSON *root = NULL;
 
-    if (cJSON_IsObject(root)) {
+    if (body != NULL) {
+        const char *first = body;
+        while (*first == ' ' || *first == '\n' || *first == '\r' || *first == '\t') {
+            first++;
+        }
+        if (*first == '{') {
+            root = cJSON_Parse(body);
+        }
+    }
+
+    if (root != NULL && cJSON_IsObject(root)) {
         cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
         if (cJSON_IsArray(scenes)) {
             owned_payload = cJSON_PrintUnformatted(scenes);
@@ -350,6 +360,7 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
         }
     }
 
+    cJSON_Delete(root);
     esp_err_t err = fos_scenes_set_json(payload, payload_len);
     if (err == ESP_OK && requested_scene_id[0]) {
         err = fos_scenes_select(requested_scene_id);
@@ -358,7 +369,6 @@ esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)
         }
     }
     if (owned_payload) cJSON_free(owned_payload);
-    cJSON_Delete(root);
     return err;
 }
 
@@ -634,6 +644,8 @@ char *fos_http_status_json(void)
     bool preview_ready = fos_client_snapshot_info(&preview_width, &preview_height, &preview_format,
                                                   &preview_len, &preview_render_count,
                                                   NULL);
+    const char *snapshot_mode = fos_client_snapshot_mode();
+    bool display_state_ready = fos_client_display_state_ready();
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -679,10 +691,12 @@ char *fos_http_status_json(void)
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
-        "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\"},"
+        "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
+        "\"displayStateReady\":%s,\"panelImageReady\":%s},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
-        "\"intervalSec\":%lu,\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
+        "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
+        "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
         "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app_name, app_version, elf_sha, idf_version, partition,
@@ -707,11 +721,15 @@ char *fos_http_status_json(void)
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
         fos_client_last_refresh_skipped() ? "true" : "false",
-        fos_client_snapshot_mode(),
+        snapshot_mode,
+        display_state_ready ? "true" : "false",
+        (render_count > 0 || display_state_ready) ? "true" : "false",
         nim_info, scene_json,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
-        (unsigned long)config->interval_sec, config->server_send_logs ? "true" : "false",
+        (unsigned long)config->interval_sec,
+        (unsigned long)config->max_http_response_bytes,
+        config->server_send_logs ? "true" : "false",
         config->tls_enable ? "true" : "false", s_https_server ? "true" : "false", (unsigned)config->tls_port,
         config->deep_sleep ? "true" : "false",
         config->wake_schedule ? "true" : "false",
@@ -975,7 +993,10 @@ static esp_err_t preview_bmp_handler(httpd_req_t *req)
     scene_id[0] = '\0';
     esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
     if (err == ESP_ERR_NOT_FOUND) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+        const char *reason = strcmp(fos_client_snapshot_mode(), "hash-only") == 0
+            ? "panel image is rendered, but preview snapshot was not retained"
+            : "no preview rendered yet";
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, reason);
     }
     if (err == ESP_ERR_INVALID_SIZE) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
@@ -1798,7 +1819,11 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     esp_err_t err = fos_http_store_uploaded_scenes_payload(body, total);
     free(body);
     if (err != ESP_OK) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "store failed");
+        const char *detail = fos_scenes_last_error();
+        return httpd_resp_send_err(
+            req,
+            HTTPD_500_INTERNAL_SERVER_ERROR,
+            (detail && detail[0]) ? detail : esp_err_to_name(err));
     }
     if (s_render_cb) s_render_cb();
     httpd_resp_set_type(req, "application/json");

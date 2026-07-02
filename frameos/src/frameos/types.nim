@@ -325,6 +325,12 @@ type
     loopIndex*: int
     loopKey*: string
     nextSleep*: float
+    # Set while resolving an image input whose consumer will draw the result
+    # onto the canvas full-frame: producers may decode straight into
+    # `decodeTargetImage` with `decodeTargetScalingMode` (cover/contain/
+    # stretch) and return it, skipping a full-size intermediate copy.
+    decodeTargetImage*: Image
+    decodeTargetScalingMode*: string
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object

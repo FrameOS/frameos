@@ -26,6 +26,7 @@ uint32_t fos_client_render_count(void);
 int64_t fos_client_last_render_ms(void);
 bool fos_client_last_refresh_skipped(void);
 const char *fos_client_snapshot_mode(void);
+bool fos_client_display_state_ready(void);
 /* Last successfully rendered packed framebuffer, for HTTP preview. */
 bool fos_client_snapshot_info(int *width, int *height, fos_pixel_format_t *format,
                               size_t *len, uint32_t *render_count, int64_t *render_ms);

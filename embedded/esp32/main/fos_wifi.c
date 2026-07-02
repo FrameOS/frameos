@@ -176,6 +176,12 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     strlcpy((char *)wifi_config.sta.password, config->wifi_pass, sizeof(wifi_config.sta.password));
     wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    /* Mesh networks broadcast the SSID from several nodes; the default fast
+     * scan joins the first one heard, which can be a distant node that then
+     * drops the link with low-ack disconnects (reason 34). Scan everything
+     * and join the strongest BSSID instead. */
+    wifi_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
 
     s_state = FOS_WIFI_CONNECTING;
     s_retries = 0;

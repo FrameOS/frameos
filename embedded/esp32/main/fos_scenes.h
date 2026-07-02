@@ -26,6 +26,9 @@ esp_err_t fos_scenes_sync(bool force);
  * it pending. Safe from any task; trigger a render to apply. */
 esp_err_t fos_scenes_set_json(const char *json, size_t len);
 
+/* Last storage/sync error detail, suitable for HTTP/USB responses. */
+const char *fos_scenes_last_error(void);
+
 /* Copy the persisted scenes JSON array. Caller owns the returned buffer. */
 char *fos_scenes_json_copy(size_t *out_len);
 

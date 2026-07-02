@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -1937,6 +1938,83 @@ async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: py
     assert frame.last_successful_deploy == {"id": 53, "name": "ESPvaarikas", "mode": "embedded"}
     assert frame.last_successful_deploy_at is not None
     assert any("Embedded fast deploy complete" in message for _, message in logs)
+
+
+@pytest.mark.asyncio
+async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=59,
+        name="SuurESP",
+        mode="embedded",
+        status="ready",
+        scenes=[{"id": "scene-a", "nodes": []}],
+        last_log_at="2026-06-14T00:14:41+00:00",
+        last_successful_deploy=None,
+        last_successful_deploy_at=None,
+        to_dict=lambda: {"id": 59, "name": "SuurESP", "mode": "embedded"},
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=RecordingDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    calls: list[str] = []
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_log(_db, _redis, _frame_id, log_type: str, message: str):
+        return None
+
+    async def fake_fetch_frame_http_bytes(
+        _frame,
+        _redis,
+        *,
+        path: str,
+        method: str,
+        body=None,
+        headers=None,
+    ):
+        calls.append(path)
+        if path == "/status":
+            return 200, json.dumps({
+                "version": "v2026.6.29-14-gd17bbe05",
+                "storage": {"stateBytes": 25165824, "flashBytes": 33554432},
+                "memory": {"internalFree": 123456, "psramFree": 4567890},
+                "scenes": {"loaded": 0, "available": 0},
+            }).encode("utf-8"), {}
+        return 500, b"UNKNOWN ERROR", {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.log", fake_log)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    plan = FrameDeployPlan(
+        mode="fast",
+        frame_id=59,
+        frame_name="SuurESP",
+        build_id="build12345678",
+        frame_dict={"id": 59, "name": "SuurESP", "mode": "embedded"},
+        previous_frameos_version=None,
+        fast_deploy=SimpleNamespace(
+            tls_settings_changed=False,
+            reload_supported=True,
+            action="http_upload_scenes_reload",
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        await workflow._execute_embedded_fast(plan)
+
+    assert calls == ["/uploadScenes", "/status"]
+    assert "UNKNOWN ERROR" in str(exc.value)
+    assert "version=v2026.6.29-14-gd17bbe05" in str(exc.value)
+    assert "stateBytes=25165824" in str(exc.value)
+    assert "scenes.loaded=0" in str(exc.value)
+    assert frame.status == "uninitialized"
 
 
 @pytest.mark.asyncio

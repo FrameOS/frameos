@@ -52,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 29  # Waveshare ESP32-S3 ePaper 13.3E6 GPIO defaults
+EMBEDDED_FIRMWARE_VERSION = 42  # ESP32 preserves Wikimedia image aspect before render placement
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -250,6 +250,8 @@ EMBEDDED_REQUIRED_SDKCONFIG = {
     # Formatting an empty SPIFFS state partition happens inside app_main on
     # first boot. The ESP-IDF default stack is too small for that path.
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
+    # Scene-upload and deploy diagnostics rely on readable ESP-IDF error names.
+    "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
 }
 
 # idf.py builds are not safe to run concurrently in the same build directory
@@ -308,11 +310,14 @@ def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
 
 def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
     profile = embedded_flash_profile_for_frame(frame)
-    return {
+    required = {
         **EMBEDDED_REQUIRED_SDKCONFIG,
         "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
         "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
     }
+    if profile["flashSize"] == "32MB":
+        required["CONFIG_SPIFFS_PAGE_SIZE"] = "512"
+    return required
 
 
 def embedded_artifact_dir() -> Path:
@@ -367,10 +372,14 @@ def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | 
 
 
 def embedded_pixie_path() -> Path | None:
+    """FRAMEOS_PIXIE_PATH wins when set; otherwise a checkout next to the
+    repo (../pixie) is picked up automatically, matching the Pi builds."""
     configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    if not configured:
-        return None
-    candidate = Path(configured)
+    candidate = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parents[4] / "pixie"
+    )
     if (candidate / "src" / "pixie").is_dir():
         return candidate.resolve()
     return None
@@ -1344,7 +1353,9 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     generated_header.write_text(generated_config)
 
     # Fallback demo-scene parameters: interpreted scenes are loaded at runtime,
-    # but these defines give the built-in demo a frame-specific name/color.
+    # but this define gives the built-in demo a frame-specific label. Keep the
+    # demo background independent from configured scenes; otherwise a black
+    # first scene makes the no-scenes boot screen unreadable.
     scenes = frame.scenes if isinstance(frame.scenes, list) else []
     if scenes and isinstance(scenes[0], dict):
         # The flags expand unquoted in build_nim.sh, so reduce values to a
@@ -1355,11 +1366,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
             return cleaned or fallback
 
         scene_name = define_safe(str(scenes[0].get("name") or scenes[0].get("id") or ""), "default")
-        background = define_safe(str((scenes[0].get("settings") or {}).get("backgroundColor") or ""), "#ffffff")
-        env["FRAMEOS_EXTRA_NIM_FLAGS"] = (
-            f"-d:frameosSceneName={scene_name} "
-            f"-d:frameosSceneBackground={background}"
-        )
+        env["FRAMEOS_EXTRA_NIM_FLAGS"] = f"-d:frameosSceneName={scene_name}"
 
     # Cross-compile the Nim runtime. If nim is not installed on the worker the
     # firmware still builds, thin-client only.

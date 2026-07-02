@@ -7,10 +7,19 @@ import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/utils/image
 
+when defined(frameosEmbedded):
+  import std/math
+
 const
   CommonsApiUrl = "https://commons.wikimedia.org/w/api.php"
   CommonsUserAgent = "FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)"
   FirstPotdYear = 2008
+
+when defined(frameosEmbedded):
+  const
+    EmbeddedCommonsThumbnailWidth = 900
+    EmbeddedMaxDecodePixels = 640_000
+    EmbeddedMaxDecodeSide = 1000
 
 type
   AppConfig* = object
@@ -35,6 +44,8 @@ type
     author: string
     license: string
     mime: string
+    width: int
+    height: int
 
 proc init*(self: App) =
   randomizeSafe()
@@ -163,6 +174,8 @@ proc imageFromPage(page: JsonNode): Option[CommonsImage] =
   let imageUrl = info{"thumburl"}.getStr(info{"url"}.getStr())
   if imageUrl == "":
     return none(CommonsImage)
+  let imageWidth = info{"thumbwidth"}.getInt(info{"width"}.getInt(0))
+  let imageHeight = info{"thumbheight"}.getInt(info{"height"}.getInt(0))
 
   let title = page{"title"}.getStr()
   let description = metadataValue(info, "ImageDescription")
@@ -173,7 +186,9 @@ proc imageFromPage(page: JsonNode): Option[CommonsImage] =
     description: if description != "": description else: metadataValue(info, "ObjectName"),
     author: metadataValue(info, "Artist"),
     license: metadataValue(info, "LicenseShortName"),
-    mime: mime
+    mime: mime,
+    width: imageWidth,
+    height: imageHeight
   ))
 
 proc firstImageFromQuery(json: JsonNode): CommonsImage =
@@ -244,23 +259,72 @@ proc fetchImageForMode(self: App, thumbnailWidth: int): CommonsImage =
   else:
     raise newException(ValueError, "Invalid Wikimedia Commons mode: " & self.appConfig.mode)
 
+proc thumbnailWidthForContext(width, height: int): int =
+  result = max(max(width, height), 1)
+  when defined(frameosEmbedded):
+    result = min(result, EmbeddedCommonsThumbnailWidth)
+
+when defined(frameosEmbedded):
+  proc embeddedDecodeDimensions(image: CommonsImage, fallbackWidth, fallbackHeight: int): tuple[width: int, height: int] =
+    var width = if image.width > 0: image.width else: fallbackWidth
+    var height = if image.height > 0: image.height else: fallbackHeight
+    width = max(width, 1)
+    height = max(height, 1)
+
+    let sideScale =
+      if max(width, height) > EmbeddedMaxDecodeSide:
+        EmbeddedMaxDecodeSide.float / max(width, height).float
+      else:
+        1.0
+    let pixelCount = width.float * height.float
+    let pixelScale =
+      if pixelCount > EmbeddedMaxDecodePixels.float:
+        sqrt(EmbeddedMaxDecodePixels.float / pixelCount)
+      else:
+        1.0
+    let ratio = min(sideScale, pixelScale)
+    if ratio < 1.0:
+      width = max(1, floor(width.float * ratio).int)
+      height = max(1, floor(height.float * ratio).int)
+
+    (width, height)
+
+proc downloadCommonsImage(self: App, context: ExecutionContext, image: CommonsImage,
+    fallbackWidth, fallbackHeight: int): tuple[image: Image, data: string] =
+  when defined(frameosEmbedded):
+    let dimensions = embeddedDecodeDimensions(image, fallbackWidth, fallbackHeight)
+    let target = newImage(dimensions.width, dimensions.height)
+    return downloadImageWithDataInto(
+      image.imageUrl,
+      target,
+      maxBytes = self.maxImageResponseBytes(),
+      headers = imageHeaders()
+    )
+  else:
+    return self.downloadImageWithDataForContext(
+      context,
+      image.imageUrl,
+      maxBytes = self.maxImageResponseBytes(),
+      headers = imageHeaders(),
+      fallbackWidth = fallbackWidth,
+      fallbackHeight = fallbackHeight
+    )
+
 proc get*(self: App, context: ExecutionContext): Image =
   let width = self.contextImageWidth(context)
   let height = self.contextImageHeight(context)
 
   try:
-    let commonsImage = self.fetchImageForMode(max(max(width, height), 1))
+    let commonsImage = self.fetchImageForMode(thumbnailWidthForContext(width, height))
 
     if self.frameConfig.debug:
       self.log(&"Downloading Wikimedia Commons image: {commonsImage.imageUrl}")
 
-    let (downloadedImage, imageData) = self.downloadImageWithDataForContext(
+    let (downloadedImage, imageData) = self.downloadCommonsImage(
       context,
-      commonsImage.imageUrl,
-      maxBytes = self.maxImageResponseBytes(),
-      headers = imageHeaders(),
-      fallbackWidth = width,
-      fallbackHeight = height
+      commonsImage,
+      width,
+      height
     )
 
     if self.appConfig.metadataStateKey != "":

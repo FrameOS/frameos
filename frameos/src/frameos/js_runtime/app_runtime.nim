@@ -524,14 +524,16 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     return nil
 
   if spec.kind == JString:
-    let data = spec.getStr()
+    var data = spec.getStr()
     if data.startsWith("data:"):
       return decodeDataUrl(data)
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
       let image = decodeSvgWithFallback(data, defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
       if image.isSome:
         return image.get()
-    return decodeImageWithFallback(data)
+      # SVG has no dimensions probe; keep the unbounded fallback for it.
+      return decodeImageWithFallback(data)
+    return decodeImageWithDisplayBounds(data)
 
   if spec.kind == JObject and spec{"type"}.getStr() == "image":
     let props = spec{"props"}
@@ -557,7 +559,11 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if spec.hasKey("dataUrl"):
       return decodeDataUrl(spec["dataUrl"].getStr())
     if spec.hasKey("base64"):
-      return decodeImageWithFallback(spec["base64"].getStr().decode())
+      var decoded = spec["base64"].getStr().decode()
+      # SVG has no dimensions probe; everything else decodes bounded.
+      if decoded.len > 5 and (decoded.startsWith("<?xml") or decoded.startsWith("<svg")):
+        return decodeImageWithFallback(decoded)
+      return decodeImageWithDisplayBounds(decoded)
     let width = max(1, defaultImageWidth(owner, context, spec))
     let height = max(1, defaultImageHeight(owner, context, spec))
     let image = newImage(width, height)

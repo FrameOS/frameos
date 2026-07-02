@@ -442,7 +442,13 @@ page.wait_for_timeout(1500)
       return renderError(width, height, "Playwright command failed")
 
     if fileExists(screenshotFile):
-      let screenshotImage = readImage(screenshotFile)
+      # The screenshot is captured at width x height; keep those bounds so
+      # large displays stay sharp while the decode remains memory-bounded.
+      let screenshotImage = readImageWithDisplayBounds(
+        screenshotFile,
+        maxEdge = max(DisplayDecodeMaxEdge, max(width, height)),
+        maxPixels = max(DisplayDecodeMaxPixels, width * height)
+      )
       self.log &"Loaded screenshot from {screenshotFile}. Size: {screenshotImage.width}x{screenshotImage.height}"
       return screenshotImage
     else:

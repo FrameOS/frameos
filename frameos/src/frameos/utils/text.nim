@@ -312,12 +312,7 @@ proc drawText*(
   if layout.opts.borderWidth > 0 and layout.borderTypeset.isSome:
     let strokeWidth = float(layout.opts.borderWidth) * layout.fontScaleRatio
     when defined(frameosEmbedded):
-      image.strokeText(
-        layout.borderTypeset.get(),
-        translate(origin),
-        strokeWidth = strokeWidth,
-        lineJoin = RoundJoin
-      )
+      image.fillTextApproxStroke(layout.borderTypeset.get(), origin, strokeWidth)
     else:
       image.strokeText(
         layout.borderTypeset.get(),

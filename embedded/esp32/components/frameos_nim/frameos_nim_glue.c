@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <setjmp.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -38,6 +39,7 @@ extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
                               const char *backend_url, int frame_id);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
+extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
@@ -84,6 +86,108 @@ static bool nim_lock_take(void)
 static void nim_lock_give(void)
 {
     if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
+}
+
+/* The packed buffer allocated during fos_nim_render_alloc_impl is invisible
+ * to the OOM longjmp handler, so remember the newest one here (all Nim
+ * calls are serialized by s_nim_lock) and free it if the render aborts. */
+static void *s_pending_render_buffer = NULL;
+
+void *frameos_nim_alloc_render_buffer(size_t len)
+{
+    void *ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ptr) ptr = malloc(len);
+    s_pending_render_buffer = ptr;
+    return ptr;
+}
+
+void frameos_nim_free_render_buffer(void *ptr)
+{
+    if (ptr != NULL && ptr == s_pending_render_buffer) {
+        s_pending_render_buffer = NULL;
+    }
+    free(ptr);
+}
+
+/* Live PSRAM headroom for the Nim side (frameos/utils/memory.nim), which
+ * derives render allocation and image decode budgets from it. */
+size_t fos_psram_free_bytes(void)
+{
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+size_t fos_psram_largest_free_block(void)
+{
+    return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+/* --------------------------------------------- emergency heap reserve
+ * The Nim allocator (src/embedded/patched_malloc.nim) cannot raise from a
+ * failed malloc without rebooting the device. Instead it releases this
+ * PSRAM reserve and retries; the render loop checks
+ * fos_nim_emergency_reserve_used() at safe points, sheds memory and
+ * re-arms. A device that would previously Guru-Meditate on a large decode
+ * now finishes the frame using the reserve. */
+
+#define FOS_NIM_EMERGENCY_RESERVE_BYTES (1024u * 1024u)
+
+static void *s_nim_emergency_reserve = NULL;
+static volatile bool s_nim_emergency_used = false;
+
+void fos_nim_arm_emergency_reserve(void)
+{
+    if (s_nim_emergency_reserve == NULL) {
+        s_nim_emergency_reserve = heap_caps_malloc(
+            FOS_NIM_EMERGENCY_RESERVE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_nim_emergency_reserve == NULL) {
+            ESP_LOGW("fos_nim", "could not arm %u byte emergency heap reserve",
+                     (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES);
+        }
+    }
+    s_nim_emergency_used = false;
+}
+
+bool fos_nim_release_emergency_reserve(void)
+{
+    void *reserve = s_nim_emergency_reserve;
+    s_nim_emergency_used = true;
+    if (reserve == NULL) {
+        return false;
+    }
+    s_nim_emergency_reserve = NULL;
+    heap_caps_free(reserve);
+    ESP_LOGW("fos_nim", "heap exhausted: released %u byte emergency reserve",
+             (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES);
+    return true;
+}
+
+bool fos_nim_emergency_reserve_used(void)
+{
+    return s_nim_emergency_used;
+}
+
+/* Last-resort OOM containment: when even the reserve-backed retry fails,
+ * the patched Nim allocator calls fos_nim_fatal_oom() before raising. If a
+ * guarded Nim call is on the stack (all entry points below arm the guard
+ * while holding the Nim lock), we longjmp back to C and fail only that
+ * call. Skipped destructors leak some heap, which beats rebooting. */
+
+static jmp_buf s_nim_oom_jmp;
+static volatile bool s_nim_oom_jmp_armed = false;
+
+void fos_nim_fatal_oom(size_t size)
+{
+    ESP_LOGE("fos_nim", "unrecoverable allocation failure (%u bytes, internal=%u largest=%u, psram=%u largest=%u)",
+             (unsigned)size,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (s_nim_oom_jmp_armed) {
+        s_nim_oom_jmp_armed = false;
+        longjmp(s_nim_oom_jmp, 1);
+    }
+    /* No guard armed: fall through to Nim's raiseOutOfMem (log + reboot). */
 }
 
 bool frameos_nim_available(void) { return true; }
@@ -162,7 +266,40 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
 {
     if (!s_nim_ready) return -1;
     if (!nim_lock_take()) return -1;
-    int result = fos_nim_render_impl(buf, len, pixel_format);
+    int result;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_render_impl(buf, len, pixel_format);
+    } else {
+        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        result = -1;
+    }
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
+}
+
+int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
+{
+    if (!s_nim_ready || !buf || !len) return -1;
+    if (!nim_lock_take()) return -1;
+    int result;
+    s_pending_render_buffer = NULL;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_render_alloc_impl(buf, len, pixel_format);
+    } else {
+        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        if (s_pending_render_buffer != NULL) {
+            free(s_pending_render_buffer);
+        }
+        *buf = NULL;
+        *len = 0;
+        result = -1;
+    }
+    /* On success ownership of the packed buffer moves to the caller. */
+    s_pending_render_buffer = NULL;
+    s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return result;
 }
@@ -203,7 +340,15 @@ bool frameos_nim_set_scene(const char *scene_id)
 {
     if (!s_nim_ready || scene_id == NULL) return false;
     if (!nim_lock_take()) return false;
-    bool ok = fos_nim_set_scene_impl(scene_id);
+    bool ok;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        ok = fos_nim_set_scene_impl(scene_id);
+    } else {
+        ESP_LOGE("fos_nim", "scene switch aborted: out of memory");
+        ok = false;
+    }
+    s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return ok;
 }
@@ -212,7 +357,15 @@ int frameos_nim_load_scenes(const char *json)
 {
     if (!s_nim_ready || json == NULL) return 0;
     if (!nim_lock_take()) return 0;
-    int count = fos_nim_load_scenes_impl(json);
+    int count;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        count = fos_nim_load_scenes_impl(json);
+    } else {
+        ESP_LOGE("fos_nim", "scene load aborted: out of memory");
+        count = 0;
+    }
+    s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return count;
 }
@@ -239,7 +392,15 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
 {
     if (!s_nim_ready || event == NULL) return false;
     if (!nim_lock_take()) return false;
-    bool ok = fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
+    bool ok;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        ok = fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
+    } else {
+        ESP_LOGE("fos_nim", "event dispatch aborted: out of memory");
+        ok = false;
+    }
+    s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return ok;
 }
@@ -571,7 +732,8 @@ void frameos_nim_flush_logs(void)
 /* ------------------------------------------------------- outbound HTTP */
 
 static const char *TAG = "fos_nim_http";
-#define FOS_NIM_HTTP_NIM_COPY_LIMIT (4u * 1024u * 1024u)
+/* Never clamp below this, so small fetches keep working under pressure. */
+#define FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN (512u * 1024u)
 
 static uint8_t *http_error_response(int *out_status, size_t *out_len, const char *fmt, ...)
 {
@@ -713,8 +875,16 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
 
     if (max_bytes == 0) max_bytes = 10 * 1024 * 1024;
     size_t nim_copy_limit = max_bytes;
-    if (nim_copy_limit > FOS_NIM_HTTP_NIM_COPY_LIMIT) {
-        nim_copy_limit = FOS_NIM_HTTP_NIM_COPY_LIMIT;
+    /* Clamp to live PSRAM instead of a fixed constant: half the largest free
+     * block still has to hold the decode target and intermediates. The old
+     * fixed 4MB cap silently rejected 4-6MB images the Nim side allowed. */
+    size_t largest_spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t dynamic_limit = largest_spiram / 2;
+    if (dynamic_limit < FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN) {
+        dynamic_limit = FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN;
+    }
+    if (nim_copy_limit > dynamic_limit) {
+        nim_copy_limit = dynamic_limit;
     }
     if (content_length > 0 && (size_t)content_length > nim_copy_limit) {
         ESP_LOGW(TAG, "%s: response too large (%lld > %u)", url,

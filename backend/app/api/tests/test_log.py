@@ -39,7 +39,7 @@ async def test_api_log_multiple_entries(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_log_embedded_bootup_updates_frame_host(async_client, db, redis):
+async def test_api_log_embedded_bootup_preserves_hostname_frame_host(async_client, db, redis):
     frame = await new_frame(db, redis, 'EmbeddedLogFrame', 'frame53.local', 'localhost')
     frame.mode = 'embedded'
     frame.server_api_key = 'testkey'
@@ -59,7 +59,7 @@ async def test_api_log_embedded_bootup_updates_frame_host(async_client, db, redi
 
     assert response.status_code == 200
     db.refresh(frame)
-    assert frame.frame_host == '10.8.0.232'
+    assert frame.frame_host == 'frame53.local'
     assert frame.width == 800
     assert frame.height == 480
 

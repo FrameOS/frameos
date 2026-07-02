@@ -15,6 +15,8 @@ import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
+import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -693,13 +695,22 @@ export const scenesLogic = kea<scenesLogicType>([
           sceneId: scene.id,
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
-        const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScenes`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to send preview scene event')
+        if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
+          const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
+          await runEmbeddedUsbApiCommand(props.frameId, 'upload-scenes', {
+            payload: payloadBytes,
+            timeoutMs: embeddedUsbUploadTimeoutMs(payloadBytes.byteLength),
+          })
+          scheduleEmbeddedUsbFrameImageRefresh(props.frameId)
+        } else {
+          const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScenes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+          if (!response.ok) {
+            throw new Error('Failed to send preview scene event')
+          }
         }
         actions.previewSceneSuccess()
       } catch (error) {

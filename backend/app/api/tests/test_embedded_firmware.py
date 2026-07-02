@@ -163,11 +163,13 @@ def test_embedded_flash_size_profiles():
     assert embedded_ota_supported_for_frame(four_mb) is False
     assert embedded_sdkconfig_defaults_for_frame(four_mb) == 'sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota'
     assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESPTOOLPY_FLASHSIZE'] == '"4MB"'
+    assert embedded_required_sdkconfig_for_frame(four_mb)['CONFIG_ESP_ERR_TO_NAME_LOOKUP'] == 'y'
 
     thirty_two_mb = Frame(embedded={'flashSize': '32MB'})
     assert embedded_flash_size_for_frame(thirty_two_mb) == '32MB'
     assert embedded_ota_supported_for_frame(thirty_two_mb) is True
     assert embedded_sdkconfig_defaults_for_frame(thirty_two_mb) == 'sdkconfig.defaults;sdkconfig.defaults.32mb-ota'
+    assert embedded_required_sdkconfig_for_frame(thirty_two_mb)['CONFIG_SPIFFS_PAGE_SIZE'] == '512'
 
 
 def test_embedded_firmware_layout_tracks_flash_and_ram():
@@ -1011,7 +1013,10 @@ def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
     with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
         missing = _reset_stale_embedded_sdkconfig(build_dir)
 
-    assert missing == {"CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192"}
+    assert missing == {
+        "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
+        "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
+    }
     assert not sdkconfig.exists()
     assert not sdkconfig_old.exists()
     assert not build_dir.exists()
@@ -1019,7 +1024,10 @@ def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
 
 def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
     sdkconfig = tmp_path / "sdkconfig"
-    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n", encoding="utf-8")
+    sdkconfig.write_text(
+        "CONFIG_ESP_ERR_TO_NAME_LOOKUP=y\nCONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n",
+        encoding="utf-8",
+    )
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
@@ -1035,6 +1043,7 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
     sdkconfig = tmp_path / "sdkconfig"
     sdkconfig.write_text(
         '\n'.join([
+            'CONFIG_ESP_ERR_TO_NAME_LOOKUP=y',
             'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
             'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
             'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
@@ -1052,6 +1061,7 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
     assert missing == {
         "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
         "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": '"partitions_ota_32mb.csv"',
+        "CONFIG_SPIFFS_PAGE_SIZE": "512",
     }
     assert not sdkconfig.exists()
     assert not build_dir.exists()
