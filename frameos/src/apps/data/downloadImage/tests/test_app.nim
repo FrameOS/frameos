@@ -23,6 +23,21 @@ proc makeApp(scene: FrameScene, frameConfig: FrameConfig, metadataStateKey = "me
     appConfig: AppConfig(url: "not-a-valid-url", metadataStateKey: metadataStateKey)
   )
 
+proc minimalExifJpeg(): string =
+  # SOI + APP1 with a little-endian TIFF holding Make "Canon" (out of line,
+  # data area at TIFF offset 0x26) and Model "EOS" (inline) + EOI.
+  const tiff =
+    "II\x2A\x00\x08\x00\x00\x00" &
+    "\x02\x00" &
+    "\x0F\x01\x02\x00\x06\x00\x00\x00\x26\x00\x00\x00" &
+    "\x10\x01\x02\x00\x04\x00\x00\x00EOS\x00" &
+    "\x00\x00\x00\x00" &
+    "Canon\x00"
+  let payload = "Exif\x00\x00" & tiff
+  let segmentLen = payload.len + 2
+  "\xFF\xD8\xFF\xE1" & chr((segmentLen shr 8) and 0xFF) & chr(segmentLen and 0xFF) &
+    payload & "\xFF\xD9"
+
 suite "data/downloadImage app":
   test "invalid URL returns error image with context dimensions and does not write metadata":
     let logs = LogStore(items: @[])
@@ -48,3 +63,19 @@ suite "data/downloadImage app":
 
     check outputImage.width == 4
     check outputImage.height == 7
+
+  test "buildMetadata merges parsed exif from jpeg bytes":
+    let metadata = buildMetadata("http://example.com/a.jpg", newImage(3, 2), minimalExifJpeg())
+
+    check metadata["url"].getStr() == "http://example.com/a.jpg"
+    check metadata["width"].getInt() == 3
+    check metadata["height"].getInt() == 2
+    check metadata["exif"]["make"].getStr() == "Canon"
+    check metadata["exif"]["model"].getStr() == "EOS"
+    check metadata["exifSummary"].getStr() == "Canon EOS"
+
+  test "buildMetadata skips exif for non-jpeg data":
+    let metadata = buildMetadata("http://example.com/a.png", newImage(1, 1), "not a jpeg")
+
+    check metadata["width"].getInt() == 1
+    check not metadata.hasKey("exifSummary")

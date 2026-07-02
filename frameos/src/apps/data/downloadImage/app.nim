@@ -4,6 +4,7 @@ import options
 import frameos/apps
 import frameos/types
 import frameos/utils/app_images
+import frameos/utils/exif
 import frameos/utils/image
 
 type
@@ -14,6 +15,17 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc buildMetadata*(url: string, image: Image, imageData: string): JsonNode =
+  result = %*{
+    "url": url,
+    "width": image.width,
+    "height": image.height
+  }
+  let exifMetadata = getExifMetadataFromData(imageData)
+  if exifMetadata.isSome():
+    result["exif"] = exifMetadata.get()
+  mergeParsedExif(result, imageData)
+
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
@@ -23,15 +35,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       maxBytes = self.maxImageResponseBytes()
     )
     if self.appConfig.metadataStateKey != "":
-      var metadata = %*{
-        "url": url,
-        "width": image.width,
-        "height": image.height
-      }
-      let exifMetadata = getExifMetadataFromData(imageData)
-      if exifMetadata.isSome():
-        metadata["exif"] = exifMetadata.get()
-      self.scene.state[self.appConfig.metadataStateKey] = metadata
+      self.scene.state[self.appConfig.metadataStateKey] = buildMetadata(url, image, imageData)
     return image
   except CatchableError as e:
     let detail = if e.msg.len > 0: e.msg else: "unknown error"

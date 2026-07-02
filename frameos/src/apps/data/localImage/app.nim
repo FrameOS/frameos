@@ -8,6 +8,7 @@ import strformat
 import random
 import frameos/utils/image
 import frameos/utils/app_images
+import frameos/utils/exif
 import frameos/apps
 import frameos/types
 import frameos/hal/entropy
@@ -80,6 +81,23 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       images.add(file)
   return images
+
+proc readExifHead*(path: string): string =
+  ## First 256KB of a JPEG file: enough for the EXIF segment without
+  ## re-reading whole multi-megabyte files.
+  let lowerPath = path.toLower()
+  if not (lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")):
+    return ""
+  var file: File
+  if not open(file, path):
+    return ""
+  defer: file.close()
+  try:
+    result = newString(ExifScanBytes)
+    let bytesRead = file.readBuffer(addr result[0], result.len)
+    result.setLen(max(bytesRead, 0))
+  except CatchableError:
+    result = ""
 
 proc error*(self: App, context: ExecutionContext, message: string,
     target: Image = nil): Image =
@@ -225,6 +243,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     let exifMetadata = getExifMetadataFromPath(path)
     if exifMetadata.isSome:
       metadata["exif"] = exifMetadata.get()
+    mergeParsedExif(metadata, readExifHead(path))
     self.scene.state[self.appConfig.metadataStateKey] = metadata
 
   self.lastImage = some(currentImage)
