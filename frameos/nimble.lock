@@ -117,12 +117,12 @@
     },
     "zippy": {
       "version": "0.10.16",
-      "vcsRevision": "a109a45a6b16d852ee2912391a0c9241be5fbeb1",
-      "url": "https://github.com/FrameOS/zippy",
+      "vcsRevision": "a99f6a7d8a8e3e0213b3cad0daf0ea974bf58e3f",
+      "url": "https://github.com/guzba/zippy",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "44ac7b5bf2d573769ddc2e5559b9c2e23317f162"
+        "sha1": "da3bb5ea388f980babcc29760348e2899d29a639"
       }
     },
     "webby": {
@@ -151,7 +151,7 @@
     },
     "pixie": {
       "version": "6.1.0",
-      "vcsRevision": "4bbd30b8d94398f953a20b0fdab1f726cd2173b2",
+      "vcsRevision": "075da8d7293a842364ad7f829feeba2eddca2e47",
       "url": "https://github.com/FrameOS/pixie",
       "downloadMethod": "git",
       "dependencies": [
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "257c960331b76ef874e4dff4f2ac054fbac38986"
+        "sha1": "0dcf6b90c6b7c75c73c9e79394b7d803464b1d18"
       }
     }
   },
