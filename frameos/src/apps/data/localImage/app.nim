@@ -167,17 +167,12 @@ proc refreshImages(self: App) =
 
 proc decodeBoundsForContext(self: App, context: ExecutionContext):
     tuple[maxEdge: int, maxPixels: int] =
-  ## Bound decodes by what the display can actually show: the render target
-  ## size with 2x pixel slack for cover-style crops. The memory budget in
-  ## displayDecodeDimensions may lower this further on constrained devices.
-  let
-    targetWidth = max(1, self.contextImageWidth(context))
-    targetHeight = max(1, self.contextImageHeight(context))
-    targetPixels64 = min(targetWidth.int64 * targetHeight.int64 * 2, high(int).int64)
-  (
-    2 * max(targetWidth, targetHeight),
-    targetPixels64.int
-  )
+  ## Decode at full resolution whenever memory allows: downstream consumers
+  ## (resize crops, transforms) need native detail, and pre-scaling to the
+  ## context size degraded them — the context can even be a small split
+  ## cell. The live memory budget in displayDecodeDimensions still scales
+  ## oversized decodes down on constrained devices (ESP32, low-RAM Pi).
+  (0, 0)
 
 proc get*(self: App, context: ExecutionContext): Image =
   # Consume the decode-into-canvas hint up front so every path below —

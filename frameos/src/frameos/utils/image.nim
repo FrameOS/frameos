@@ -594,7 +594,8 @@ proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[
     var content = response.body
     if looksLikeSvg(content):
       return decodeImageWithFallback(content)
-    result = decodeImageWithDisplayBounds(content)
+    # Full decode when memory allows; the budget scales oversized decodes
+    result = decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
@@ -611,7 +612,7 @@ proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     if looksLikeSvg(content):
       return (decodeImageWithFallback(content), content)
     var decodeContent = content
-    result = (decodeImageWithDisplayBounds(decodeContent), content)
+    result = (decodeImageWithDisplayBounds(decodeContent, maxEdge = 0, maxPixels = 0), content)
 
 proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): Image =
@@ -624,7 +625,11 @@ proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadB
     if response.code >= 400:
       raise newException(IOError, response.status)
     var content = response.body
-    return decodeImageWithFallback(content, target)
+    if looksLikeSvg(content):
+      return decodeImageWithFallback(content)
+    # Decode-into-target stays an embedded strategy; on hosts consumers
+    # need the native resolution and scale it themselves
+    return decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
 
 proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
@@ -637,8 +642,10 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
     if response.code >= 400:
       raise newException(IOError, response.status)
     let content = response.body
+    if looksLikeSvg(content):
+      return (decodeImageWithFallback(content), content)
     var decodeContent = content
-    return (decodeImageWithFallback(decodeContent, target), content)
+    return (decodeImageWithDisplayBounds(decodeContent, maxEdge = 0, maxPixels = 0), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:
