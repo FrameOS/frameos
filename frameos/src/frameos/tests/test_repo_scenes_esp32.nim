@@ -2,6 +2,7 @@ import std/[json, os, tables, strutils, sets, options]
 import pixie
 import ../interpreter
 import ../types
+import ../utils/image
 import ../utils/memory
 
 # Renders the bundled repo scenes through the interpreter with an ESP32-like
@@ -109,14 +110,20 @@ proc renderScene(sceneId: SceneId, assetsPath: string,
 let renderNetworkScenes = getEnv("FRAMEOS_TEST_NETWORK") == "1"
 
 # Fixture "SD card": a 10-megapixel JPEG that only fits through the
-# streaming, display-bounded decode path under the ESP32-like budget.
+# streaming, display-bounded decode path under the ESP32-like budget, and a
+# canvas-sized PNG that relies on the streamed scanline decode.
 let fixtureDir = getTempDir() / "frameos-test-sd-assets"
 removeDir(fixtureDir)
 createDir(fixtureDir)
 const LargeJpegFixture = "src/frameos/tests/fixtures/large-gradient.jpg"
 doAssert fileExists(LargeJpegFixture), "missing " & LargeJpegFixture
 copyFile(LargeJpegFixture, fixtureDir / "large-gradient.jpg")
-let fixtureNames = @["large-gradient.jpg"]
+var fixtureNames = @["large-gradient.jpg"]
+# The repo template previews are PNG data despite the .jpg name
+const CanvasPngFixture = "../repo/scenes/samples/Unsplash image/image.jpg"
+if fileExists(CanvasPngFixture):
+  copyFile(CanvasPngFixture, fixtureDir / "canvas-sized.png")
+  fixtureNames.add("canvas-sized.png")
 
 var templateCount = 0
 var renderedScenes = 0
@@ -200,6 +207,14 @@ for kind, templateDir in walkDir(SamplesDir):
       doAssert inked > 5000, "chart sample drew only " & $inked & " bright pixels"
 
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+# A canvas-sized PNG must decode through the display-bounded path within the
+# same budget (streamed scanline decode; the plan is pixels + fixed overhead)
+if fileExists(fixtureDir / "canvas-sized.png"):
+  refreshDecodeBudget()
+  let png = readImageWithDisplayBounds(fixtureDir / "canvas-sized.png",
+    maxEdge = 1600, maxPixels = 800 * 480 * 2)
+  doAssert png.width > 0 and png.height > 0
 
 doAssert templateCount >= 15, "expected the full samples repo, found " & $templateCount
 doAssert renderedScenes >= 8, "expected to render most sample scenes offline, rendered " & $renderedScenes
