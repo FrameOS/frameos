@@ -1,6 +1,6 @@
 {
   "name": "Google Photos",
-  "description": "Show images from a shared Google Photos album",
+  "description": "Show images from a shared Google Photos album. Reads the public share page directly since Google offers no API for shared albums - this may stop working if Google changes the page format.",
   "category": "data",
   "version": "1.0.0",
   "fields": [
@@ -16,7 +16,10 @@
     {
       "name": "mode",
       "type": "select",
-      "options": ["random", "sequential"],
+      "options": [
+        "random",
+        "sequential"
+      ],
       "value": "random",
       "required": true,
       "label": "Order of images"
@@ -39,7 +42,10 @@
     {
       "name": "fitMode",
       "type": "select",
-      "options": ["cover", "contain"],
+      "options": [
+        "cover",
+        "contain"
+      ],
       "value": "cover",
       "required": true,
       "label": "Fit mode",
@@ -57,7 +63,11 @@
       "name": "saveAssets",
       "type": "select",
       "value": "auto",
-      "options": ["auto", "always", "never"],
+      "options": [
+        "auto",
+        "always",
+        "never"
+      ],
       "label": "Save asset",
       "hint": "Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
     },

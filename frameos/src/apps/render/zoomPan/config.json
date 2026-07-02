@@ -1,6 +1,6 @@
 {
   "name": "Zoom & Pan",
-  "description": "Ken Burns style image motion: every render draws a slightly different crop of the source image, so consecutive renders form a smooth zoom and pan.",
+  "description": "Ken Burns style image motion: every render draws a slightly different crop, so consecutive renders form a smooth zoom and pan. Only useful on displays that can render many times per second (HDMI, LCD, web) - e-ink panels refresh far too slowly for this.",
   "category": "render",
   "version": "1.0.0",
   "fields": [
@@ -25,7 +25,13 @@
     {
       "name": "motion",
       "type": "select",
-      "options": ["zoomInOut", "zoomIn", "panLeftRight", "panTopBottom", "kenBurns"],
+      "options": [
+        "zoomInOut",
+        "zoomIn",
+        "panLeftRight",
+        "panTopBottom",
+        "kenBurns"
+      ],
       "value": "kenBurns",
       "required": true,
       "label": "Motion",
@@ -38,12 +44,21 @@
       "required": false,
       "label": "Start zoom",
       "hint": "Zoom level at the start of a cycle. 1.0 shows the largest crop of the image that covers the canvas.",
-      "showIf": [{ "field": "motion", "operator": "notIn", "value": ["panLeftRight", "panTopBottom"] }]
+      "showIf": [
+        {
+          "field": "motion",
+          "operator": "notIn",
+          "value": [
+            "panLeftRight",
+            "panTopBottom"
+          ]
+        }
+      ]
     },
     {
       "name": "zoomEnd",
       "type": "float",
-      "value": "1.3",
+      "value": "1.4",
       "required": false,
       "label": "End zoom",
       "hint": "Zoom level at the end of a cycle. Pan motions keep this zoom for the whole cycle.",
@@ -61,7 +76,11 @@
     {
       "name": "easing",
       "type": "select",
-      "options": ["linear", "easeInOut", "sine"],
+      "options": [
+        "linear",
+        "easeInOut",
+        "sine"
+      ],
       "value": "easeInOut",
       "required": false,
       "label": "Easing"
@@ -69,12 +88,28 @@
     {
       "name": "anchor",
       "type": "select",
-      "options": ["center", "top", "bottom", "left", "right", "random"],
+      "options": [
+        "center",
+        "top",
+        "bottom",
+        "left",
+        "right",
+        "random"
+      ],
       "value": "center",
       "required": false,
       "label": "Anchor",
       "hint": "Part of the image the zoom stays locked on. Random picks a new deterministic spot every cycle.",
-      "showIf": [{ "field": "motion", "operator": "in", "value": ["zoomInOut", "zoomIn"] }]
+      "showIf": [
+        {
+          "field": "motion",
+          "operator": "in",
+          "value": [
+            "zoomInOut",
+            "zoomIn"
+          ]
+        }
+      ]
     },
     {
       "name": "phaseStateKey",

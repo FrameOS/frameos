@@ -70,7 +70,9 @@
         },
         "data": {
           "keyword": "render/chart",
-          "config": {}
+          "config": {
+            "axisColor": "#e8e8e8"
+          }
         },
         "width": 300,
         "height": 130

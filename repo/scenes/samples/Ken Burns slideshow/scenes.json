@@ -3,7 +3,7 @@
     "id": "1c1899f7-0e3a-5756-805d-d7b0dae17d67",
     "name": "Ken Burns slideshow",
     "settings": {
-      "refreshInterval": 10,
+      "refreshInterval": 0.0416,
       "backgroundColor": "#000000",
       "execution": "interpreted"
     },
@@ -15,6 +15,15 @@
         "value": "/srv/assets",
         "persist": "disk",
         "access": "public"
+      },
+      {
+        "name": "search",
+        "label": "Search in filename",
+        "type": "string",
+        "value": "",
+        "persist": "disk",
+        "access": "public",
+        "hint": "Only show images whose filename contains this text."
       },
       {
         "name": "motion",
@@ -35,7 +44,7 @@
         "name": "cycleSeconds",
         "label": "Seconds per image",
         "type": "float",
-        "value": "60",
+        "value": "30",
         "persist": "disk",
         "access": "public",
         "hint": "How long each image is shown; one full zoom cycle per image."
@@ -44,10 +53,10 @@
         "name": "seconds",
         "label": "Seconds between renders",
         "type": "float",
-        "value": "0.1",
+        "value": "0.0416",
         "persist": "disk",
         "access": "public",
-        "hint": "How often to redraw. 0.04-0.1 gives smooth motion on LCD/HDMI frames; keep this well above the panel refresh time on e-ink."
+        "hint": "How often to redraw. The default 0.0416 is 24 fps for smooth motion on HDMI/LCD frames; on e-ink set this well above the panel refresh time."
       },
       {
         "name": "counter",
@@ -89,7 +98,9 @@
         },
         "data": {
           "keyword": "render/zoomPan",
-          "config": {}
+          "config": {
+            "zoomEnd": "1.45"
+          }
         },
         "width": 300,
         "height": 130
@@ -130,6 +141,19 @@
         },
         "data": {
           "keyword": "imageFolder"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "c6284198-1c92-5a64-b2cb-d0166a98253b",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -140
+        },
+        "data": {
+          "keyword": "search"
         },
         "width": 220,
         "height": 48
@@ -209,6 +233,13 @@
         "sourceHandle": "fieldOutput",
         "target": "045962b7-124e-5ef2-a225-e2441d0fa2be",
         "targetHandle": "fieldInput/path"
+      },
+      {
+        "id": "a3d6deec-8eb0-5793-9ebc-717d993a028c",
+        "source": "c6284198-1c92-5a64-b2cb-d0166a98253b",
+        "sourceHandle": "fieldOutput",
+        "target": "045962b7-124e-5ef2-a225-e2441d0fa2be",
+        "targetHandle": "fieldInput/search"
       },
       {
         "id": "73830420-0526-5b05-8598-88f9645e4317",

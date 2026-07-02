@@ -1,6 +1,6 @@
 {
   "name": "Ken Burns slideshow",
-  "description": "Slowly zoom and pan across images from the SD card or assets folder.",
+  "description": "Smooth slow zoom and pan across your photos. Only for HDMI/LCD frames that render many times per second - e-ink panels refresh far too slowly for this.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
