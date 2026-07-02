@@ -10,6 +10,7 @@ import { buildSplitScene, frameLogic } from '../frame/frameLogic'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { apiFetch } from '../../utils/apiFetch'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
+import { visiblePublicStateFields } from '../../utils/showIf'
 import {
   assignSceneToSplitLayoutLeaf,
   splitLayoutLeafBorderEdges,
@@ -599,8 +600,8 @@ function SplitSceneOptionsPanel({
     )
   }
 
-  const fields = (scene.fields ?? []).filter((field) => field.access === 'public')
   const state = leaf.state ?? {}
+  const fields = visiblePublicStateFields(scene.fields ?? [], state)
 
   return (
     <div className="frameos-card rounded-lg border px-3 py-3 shadow-sm">

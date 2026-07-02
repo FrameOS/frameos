@@ -31,14 +31,16 @@ export function ExpandedScene({
   isUnsaved,
   isUndeployed,
 }: ExpandedSceneProps) {
-  const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { stateChanges, hasStateChanges, fields, visibleFields } = useValues(
+    expandedSceneLogic({ frameId, sceneId, scene })
+  )
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
   const { editScene } = useActions(frameEditorsLogic)
-  const fieldCount = fields.length
+  const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
 
   const currentState = states[sceneId] ?? {}
@@ -59,7 +61,7 @@ export function ExpandedScene({
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }
     const state: Record<string, any> = {}
-    for (const field of fields) {
+    for (const field of visibleFields) {
       if (!field.name) {
         continue
       }
@@ -164,7 +166,7 @@ export function ExpandedScene({
           formKey="stateChanges"
           className="space-y-2 @container"
         >
-          {fields.map((field) => (
+          {visibleFields.map((field) => (
             <Field
               key={field.name}
               name={field.name}

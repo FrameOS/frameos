@@ -68,7 +68,7 @@ export function TemplateRow({
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
-  const { trySceneConfig, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
+  const { trySceneConfig, trySceneModalOpen, trySceneFields, visibleTrySceneFields, trySceneState } = useValues(
     templateRowLogic({ frameId, template })
   )
   const { openTrySceneModal, closeTrySceneModal, submitTrySceneState, resetTrySceneState } = useActions(
@@ -311,9 +311,9 @@ export function TemplateRow({
             formKey="trySceneState"
             className="space-y-4 p-5"
           >
-            {trySceneFields.length ? (
+            {visibleTrySceneFields.length ? (
               <div className="space-y-2 @container">
-                {trySceneFields.map((field) => (
+                {visibleTrySceneFields.map((field) => (
                   <Field key={field.name} name={field.name} label={field.label || field.name}>
                     {({ value, onChange }) => (
                       <StateFieldEdit

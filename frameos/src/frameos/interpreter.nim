@@ -815,8 +815,13 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
 
+  # stateFields carries every field (including private ones); older callers
+  # that only set publicStateFields still get their state seeded.
+  let allStateFields =
+    if exportedScene.stateFields.len > 0: exportedScene.stateFields
+    else: exportedScene.publicStateFields
   var typeMap = initTable[string, string]()
-  for field in exportedScene.publicStateFields:
+  for field in allStateFields:
     typeMap[field.name] = field.fieldType
     if not scene.state.hasKey(field.name) and not field.value.isNil and field.value.kind != JNull:
       if field.value.kind == JString and field.value.getStr().len == 0:
@@ -1235,7 +1240,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     nodes: scene.nodes,
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
-    publicStateFields: scene.fields,
+    stateFields: scene.fields,
+    # Fields without an explicit access default to public for interpreted
+    # scenes to keep older scenes.json exports controllable.
+    publicStateFields: scene.fields.filterIt(it.access != "private"),
     persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
     init: init,
     render: render,

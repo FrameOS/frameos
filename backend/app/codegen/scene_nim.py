@@ -1185,26 +1185,21 @@ class SceneWriter:
             type = field.get("type", "string")
             value = field.get("value", "")
             if type == "integer":
-                state_init_fields += [f'"{sanitize_nim_string(name)}": %*({int(value)})']
+                value_literal = f"%*({int(value)})"
             elif type == "float":
-                state_init_fields += [f'"{sanitize_nim_string(name)}": %*({float(value)})']
+                value_literal = f"%*({float(value)})"
             elif type == "boolean":
-                state_init_fields += [
-                    f"\"{sanitize_nim_string(name)}\": %*({'true' if value == 'true' else 'false'})"
-                ]
+                value_literal = f"%*({'true' if value == 'true' else 'false'})"
             elif type == "json":
                 try:
                     json.loads(str(value))
                     json_string = sanitize_nim_string(str(value))
                 except ValueError:
                     json_string = "null"
-                state_init_fields += [
-                    f'"{sanitize_nim_string(name)}": parseJson("{json_string}")'
-                ]
+                value_literal = f'parseJson("{json_string}")'
             else:
-                state_init_fields += [
-                    f'"{sanitize_nim_string(name)}": %*("{sanitize_nim_string(str(value))}")'
-                ]
+                value_literal = f'%*("{sanitize_nim_string(str(value))}")'
+            state_init_fields += [f'"{sanitize_nim_string(name)}": {value_literal}']
             if field.get("access", "private") == "public":
                 opts = ""
                 if field.get("type", "string") == "select":
@@ -1215,13 +1210,22 @@ class SceneWriter:
                         ]
                     )
 
+                show_if = field.get("showIf", None)
+                show_if_nim = ""
+                if isinstance(show_if, list) and len(show_if) > 0:
+                    show_if_nim = (
+                        f", showIf: parseJson(\"{sanitize_nim_string(json.dumps(show_if))}\")"
+                    )
+
                 public_state_fields.append(
                     f"StateField(name: \"{sanitize_nim_string(field.get('name', ''))}\", "
                     f"label: \"{sanitize_nim_string(field.get('label', field.get('name', '')))}\", "
                     f"fieldType: \"{sanitize_nim_string(field.get('type', 'string'))}\", options: @[{opts}], "
                     f"placeholder: \"{sanitize_nim_string(field.get('placeholder', ''))}\", "
                     f"required: {'true' if field.get('required', False) else 'false'}, "
-                    f"secret: {'true' if field.get('secret', False) else 'false'})"
+                    f"secret: {'true' if field.get('secret', False) else 'false'}, "
+                    f"value: {value_literal}"
+                    f"{show_if_nim})"
                 )
             if field.get("persist", "memory") == "disk":
                 persisted_state_fields.append(f'"{sanitize_nim_string(name)}"')

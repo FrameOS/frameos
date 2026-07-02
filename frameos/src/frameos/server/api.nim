@@ -14,6 +14,7 @@ import frameos/channels
 import frameos/types
 import frameos/utils/image
 import frameos/utils/font
+import frameos/utils/show_if
 import frameos/config
 import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
@@ -760,30 +761,41 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
 
 proc renderControlPage*(request: Request) =
   var fieldsHtml = ""
-  var fieldsSubmitHtml = ""
+  var fieldsMeta = newJArray()
   let (currentSceneId, values, fields, _) = getLastPublicState()
+
+  # Values used for showIf checks: field defaults overlaid with current state
+  var showIfValues = %*{}
+  for field in fields:
+    if not field.value.isNil and field.value.kind != JNull:
+      showIfValues[field.name] = field.value
+  if not values.isNil and values.kind == JObject:
+    for key in values.keys:
+      showIfValues[key] = values[key]
+
   for field in fields:
     let key = field.name
     let label = if field.label != "": field.label else: key
     let placeholder = field.placeholder
     let fieldType = field.fieldType
-    let value = if values.hasKey(key): values{key} else: %*""
-    var stringValue = value.getStr()
+    let value = if values.hasKey(key): values{key} else: field.value
+    var stringValue =
+      if value.isNil or value.kind == JNull: ""
+      elif fieldType == "integer": $value.getInt()
+      elif fieldType == "float": $value.getFloat()
+      elif fieldType == "boolean": $value.getBool()
+      elif value.kind == JString: value.getStr()
+      else: $value
 
-    if fieldsSubmitHtml != "":
-      fieldsSubmitHtml.add(", ")
-    if fieldType == "integer":
-      stringValue = $value.getInt()
-      fieldsSubmitHtml.add(fmt"'{s($key)}': parseInt(document.getElementById('{s($key)}').value)")
-    elif fieldType == "float":
-      stringValue = $value.getFloat()
-      fieldsSubmitHtml.add(fmt"'{s($key)}': parseFloat(document.getElementById('{s($key)}').value)")
-    elif fieldType == "boolean":
-      stringValue = $value.getBool()
-      fieldsSubmitHtml.add(fmt"'{s($key)}': document.getElementById('{s($key)}').value === 'true'")
-    else:
-      fieldsSubmitHtml.add(fmt"'{s($key)}': document.getElementById('{s($key)}').value")
+    var fieldMeta = %*{"name": key, "type": fieldType}
+    if not field.showIf.isNil and field.showIf.kind == JArray and field.showIf.len > 0:
+      fieldMeta["showIf"] = field.showIf
+    fieldsMeta.add(fieldMeta)
 
+    let hiddenStyle =
+      if shouldShowField(field.showIf, showIfValues, key): ""
+      else: " style='display:none'"
+    fieldsHtml.add(fmt"<div class='state-field' id='stateField--{h($key)}'{hiddenStyle}>")
     fieldsHtml.add(fmt"<label for='{h($key)}'>{h(label)}</label><br/>")
     if fieldType == "text":
       fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}' rows=5>{h(stringValue)}</textarea><br/><br/>")
@@ -802,6 +814,7 @@ proc renderControlPage*(request: Request) =
       fieldsHtml.add("</select><br/><br/>")
     else:
       fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
+    fieldsHtml.add("</div>")
 
   var sceneOptionsHtml = ""
   var allSceneOptions: seq[tuple[id: SceneId, name: string]]
@@ -835,12 +848,17 @@ proc renderControlPage*(request: Request) =
     )
 
   fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
+  # Keep the metadata JSON inert inside the <script> block AND as HTML, in
+  # case field text carries a template placeholder that relocates it
+  let fieldsMetaJson = ($fieldsMeta).replace("<", "\\u003c")
   {.gcsafe.}:
-    let controlHtml = getWebAsset("assets/compiled/web/control.html").
-      replace("/*$$fieldsHtml$$*/", fieldsHtml).
-      replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
-      replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).
-      replace("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control")
+    # Single pass: substituted content (which may contain user-supplied
+    # text) is never rescanned for the other placeholders
+    let controlHtml = getWebAsset("assets/compiled/web/control.html").multiReplace(
+      ("/*$$fieldsHtml$$*/", fieldsHtml),
+      ("[/*$$fieldsMetaJson$$*/]", fieldsMetaJson),
+      ("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml),
+      ("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control"))
     request.respond(int(Http200), body = controlHtml)
 
 proc appsPayload*(): string =

@@ -5,6 +5,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
 import { appConfigFieldTypes, type AppConfigField, type StateField } from '../../../../types'
 import { Button } from '../../../../components/Button'
+import { ShowIfEditor, type ShowIfConditions } from './ShowIfEditor'
 
 export function codenameToLabel(codename: string): string {
   const label = codename
@@ -86,6 +87,42 @@ export function FieldDefinitionForm<T extends AppConfigField>({
       </Field>
       <Field name="placeholder" label="Placeholder">
         <TextInput />
+      </Field>
+      <Field
+        name="showIf"
+        label="Show only if"
+        tooltip={
+          <>
+            Hide this field from forms unless the conditions below match. Conditions can reference the other{' '}
+            {includeStateOptions ? 'public state fields' : 'fields'} and are re-evaluated as values change.
+          </>
+        }
+      >
+        {({ value }) => (
+          <ShowIfEditor
+            value={value as ShowIfConditions | undefined}
+            availableFields={fields.filter(
+              (otherField, otherIndex) =>
+                otherIndex !== index &&
+                !!otherField.name &&
+                (!includeStateOptions || (otherField as StateField).access === 'public')
+            )}
+            onChange={(showIf) =>
+              setFields(
+                fields.map((currentField, i) => {
+                  if (i !== index) {
+                    return currentField
+                  }
+                  if (showIf && showIf.length > 0) {
+                    return { ...currentField, showIf }
+                  }
+                  const { showIf: _removed, ...rest } = currentField
+                  return rest as T
+                })
+              )
+            }
+          />
+        )}
       </Field>
       {includeStateOptions ? (
         <>

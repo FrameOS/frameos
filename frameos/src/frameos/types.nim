@@ -257,7 +257,7 @@ type
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
-    # TODO: add private state fields
+    stateFields*: seq[StateField] # all state fields, including private ones
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -343,6 +343,8 @@ type
     required*: bool
     secret*: bool
     persist*: string
+    access*: string
+    showIf*: JsonNode
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig
