@@ -56,7 +56,11 @@ from app.tasks.utils import find_nim_v2
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
-FRAMEOS_NIM_FLAGS = ("-d:malloc",)
+# useMalloc routes Nim's heap through glibc malloc so the mallopt/malloc_trim
+# tuning in setupRenderMemory()/reclaimRenderMemory() actually governs image
+# buffers ("-d:malloc" was a typo that left Nim's page allocator in charge,
+# ratcheting RSS on frequently-rendering frames).
+FRAMEOS_NIM_FLAGS = ("-d:useMalloc",)
 
 DRIVER_LIBRARY_NIM_FLAGS = (
     *FRAMEOS_NIM_FLAGS,

@@ -102,6 +102,21 @@ esp_err_t fos_assets_sd_mount(const fos_config_t *config)
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
+    if (err == ESP_FAIL) {
+        /* The card answers SD commands but carries no mountable FAT volume —
+         * typically a blank/new card. Format it so it can serve as the assets
+         * folder. esp_vfs_fat_sdspi_mount only formats on FR_NO_FILESYSTEM;
+         * transient disk errors on a good card never trigger a format. */
+        ESP_LOGW(TAG, "no FAT filesystem on SD card; formatting so it can hold assets (pins=%s)", pins);
+        mount_config.format_if_mount_failed = true;
+        err = esp_vfs_fat_sdspi_mount(config->assets_path, &host, &slot_config, &mount_config, &s_card);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "SD card formatted as FAT and mounted at %s", config->assets_path);
+        } else {
+            ESP_LOGW(TAG, "formatting SD card failed: %s", esp_err_to_name(err));
+            s_card = NULL;
+        }
+    }
     if (err != ESP_OK) {
         spi_bus_free(host.slot);
         s_card = NULL;

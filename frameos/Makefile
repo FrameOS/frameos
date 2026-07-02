@@ -10,7 +10,7 @@ COMPILATION_MODE_ARG = $(if $(COMPILATION_MODE),--compilation-mode $(COMPILATION
 NIM ?= nim
 NIMCACHE ?= .nimcache
 FRAMEOS_VERSION ?= $(shell python3 tools/frameos_version.py ../versions.json)
-NIM_BUILD_FLAGS = --out:build/frameos --nimcache:"$(NIMCACHE)" --lineTrace:on --stackTrace:on -d:malloc --define:frameosVersion:"$(FRAMEOS_VERSION)"
+NIM_BUILD_FLAGS = --out:build/frameos --nimcache:"$(NIMCACHE)" --lineTrace:on --stackTrace:on -d:useMalloc --define:frameosVersion:"$(FRAMEOS_VERSION)"
 
 run: build
 	./build/frameos --verbose

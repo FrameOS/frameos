@@ -13,8 +13,7 @@ import uri
 
 import frameos/utils/http_client
 import frameos/utils/memory
-when not defined(frameosEmbedded):
-  import frameos/utils/font
+import frameos/utils/font
 when defined(frameosEmbedded):
   import pixie/blends
   import pixie/fileformats/bmp
@@ -797,9 +796,37 @@ when defined(frameosEmbedded):
     fillPixelRect(image, width div 8, height div 2 - bar div 2, width * 3 div 4, bar, black)
     fillPixelRect(image, width div 2 - bar div 2, height div 8, bar, height * 3 div 4, black)
 
+when defined(frameosEmbedded):
+  proc writeEmbeddedErrorText(image: Image, width, height: int, message: string) =
+    ## Renders the error message with the compiled-in typeface: a thin black
+    ## border and the wrapped text centered on the (already white) canvas.
+    let black = rgbx(0, 0, 0, 255)
+    let border = max(2, min(width, height) div 160)
+    fillPixelRect(image, 0, 0, width, border, black)
+    fillPixelRect(image, 0, height - border, width, border, black)
+    fillPixelRect(image, 0, 0, border, height, black)
+    fillPixelRect(image, width - border, 0, border, height, black)
+
+    let typeface = getDefaultTypeface()
+    let fontSize = clamp(min(width, height).float / 24.0, 16.0, 44.0)
+    let font = newFont(typeface, fontSize, color(0, 0, 0, 1))
+    let padding = max(16.0, min(width, height).float / 20.0)
+    let types = typeset(
+      spans = [newSpan(message, font)],
+      bounds = vec2(width.toFloat() - 2 * padding, height.toFloat() - 2 * padding),
+      hAlign = CenterAlign,
+      vAlign = MiddleAlign,
+    )
+    image.fillText(types, translate(vec2(padding, padding)))
+
 proc writeError*(image: Image, width, height: int, message: string) =
   when defined(frameosEmbedded):
-    writeEmbeddedErrorMarker(image, width, height)
+    # Error frames often follow allocation failures; if typesetting the real
+    # message runs out of memory too, fall back to the allocation-free marker.
+    try:
+      writeEmbeddedErrorText(image, width, height, message)
+    except Exception:
+      writeEmbeddedErrorMarker(image, width, height)
   else:
     let typeface = getDefaultTypeface()
     let font = newFont(typeface, 32, parseHtmlColor("#000000"))
