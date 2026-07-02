@@ -1,0 +1,191 @@
+[
+  {
+    "id": "94e3715d-8a64-54dc-8480-68d3c13ceffc",
+    "name": "Google Photos",
+    "settings": {
+      "refreshInterval": 300,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "shareUrl",
+        "label": "Shared album URL",
+        "type": "text",
+        "value": "",
+        "persist": "disk",
+        "access": "public",
+        "hint": "Create a shared album in Google Photos and paste its share link here."
+      },
+      {
+        "name": "mode",
+        "label": "Image order",
+        "type": "select",
+        "value": "random",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "random",
+          "sequential"
+        ]
+      },
+      {
+        "name": "seconds",
+        "label": "Seconds per image",
+        "type": "float",
+        "value": "300",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "84ebe4bb-5fa4-591d-8c50-d140aeb6b161",
+        "type": "event",
+        "position": {
+          "x": -220,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "b1c6dd15-3b2d-5224-9426-743de7ca854e",
+        "type": "app",
+        "position": {
+          "x": 450,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "71575097-d1aa-590f-ba61-087cf752e164",
+        "type": "app",
+        "position": {
+          "x": 420,
+          "y": -80
+        },
+        "data": {
+          "keyword": "data/googlePhotos",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "state{\"seconds\"}.getFloat()",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "bb5c8ad6-164d-5e45-a734-53c4dd7067b9",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -180
+        },
+        "data": {
+          "keyword": "shareUrl"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "fe48a08f-9838-5cbe-bbb8-ebfcfc1d227a",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -110
+        },
+        "data": {
+          "keyword": "mode"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "d9e1828f-2167-5245-8922-b531d01a933a",
+        "type": "app",
+        "position": {
+          "x": 850,
+          "y": 100
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "dda9db6d-293f-53d7-84e4-fe63987bb508",
+        "type": "state",
+        "position": {
+          "x": 850,
+          "y": -20
+        },
+        "data": {
+          "keyword": "seconds"
+        },
+        "width": 220,
+        "height": 48
+      }
+    ],
+    "edges": [
+      {
+        "id": "76634a91-8319-5dd5-9333-2ef279141c9a",
+        "source": "84ebe4bb-5fa4-591d-8c50-d140aeb6b161",
+        "sourceHandle": "next",
+        "target": "b1c6dd15-3b2d-5224-9426-743de7ca854e",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "8203e26d-a156-50b7-9bb9-25dfd0f79306",
+        "source": "71575097-d1aa-590f-ba61-087cf752e164",
+        "sourceHandle": "fieldOutput",
+        "target": "b1c6dd15-3b2d-5224-9426-743de7ca854e",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "a87d243a-2af6-5422-82fa-4e8b67d0a3bf",
+        "source": "bb5c8ad6-164d-5e45-a734-53c4dd7067b9",
+        "sourceHandle": "fieldOutput",
+        "target": "71575097-d1aa-590f-ba61-087cf752e164",
+        "targetHandle": "fieldInput/shareUrl"
+      },
+      {
+        "id": "184d16db-fccb-5ac4-800b-63d37dbcee9a",
+        "source": "fe48a08f-9838-5cbe-bbb8-ebfcfc1d227a",
+        "sourceHandle": "fieldOutput",
+        "target": "71575097-d1aa-590f-ba61-087cf752e164",
+        "targetHandle": "fieldInput/mode"
+      },
+      {
+        "id": "86d018a6-4d88-52b4-9207-fddc4f06929a",
+        "source": "b1c6dd15-3b2d-5224-9426-743de7ca854e",
+        "sourceHandle": "next",
+        "target": "d9e1828f-2167-5245-8922-b531d01a933a",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "d2d37691-ff86-5b38-b278-e1252f24a913",
+        "source": "dda9db6d-293f-53d7-84e4-fe63987bb508",
+        "sourceHandle": "fieldOutput",
+        "target": "d9e1828f-2167-5245-8922-b531d01a933a",
+        "targetHandle": "fieldInput/duration"
+      }
+    ]
+  }
+]

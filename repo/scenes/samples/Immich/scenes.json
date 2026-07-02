@@ -1,0 +1,200 @@
+[
+  {
+    "id": "b91d14d1-ed3e-520f-bf9a-f88ce4c1cc9a",
+    "name": "Immich",
+    "settings": {
+      "refreshInterval": 300,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "mode",
+        "label": "Show",
+        "type": "select",
+        "value": "random",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "random",
+          "album",
+          "favorites",
+          "memories"
+        ]
+      },
+      {
+        "name": "albumId",
+        "label": "Album ID",
+        "type": "string",
+        "value": "",
+        "persist": "disk",
+        "access": "public",
+        "hint": "The album UUID from the Immich album URL.",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "album"
+          }
+        ]
+      },
+      {
+        "name": "seconds",
+        "label": "Seconds per image",
+        "type": "float",
+        "value": "300",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "c5090bae-49cf-50b3-9ecd-c7e497f7c361",
+        "type": "event",
+        "position": {
+          "x": -220,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "b7440734-9be1-5919-b5e5-112ba05ff349",
+        "type": "app",
+        "position": {
+          "x": 450,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "044dfc61-e7bd-53dd-a995-caee4614c817",
+        "type": "app",
+        "position": {
+          "x": 420,
+          "y": -80
+        },
+        "data": {
+          "keyword": "data/immich",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "state{\"seconds\"}.getFloat()",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "2e731540-8684-5d32-928a-d356e16cc451",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -180
+        },
+        "data": {
+          "keyword": "mode"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "2bb40258-38b5-5159-90f0-625a7117f0d1",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -110
+        },
+        "data": {
+          "keyword": "albumId"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "22697dfe-0c03-5d6d-a07b-23a38d1469e1",
+        "type": "app",
+        "position": {
+          "x": 850,
+          "y": 100
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "cf108080-de50-51a3-83c8-2f7f55b5f42b",
+        "type": "state",
+        "position": {
+          "x": 850,
+          "y": -20
+        },
+        "data": {
+          "keyword": "seconds"
+        },
+        "width": 220,
+        "height": 48
+      }
+    ],
+    "edges": [
+      {
+        "id": "fa247338-0e75-5b8d-a2b9-85dc46e15922",
+        "source": "c5090bae-49cf-50b3-9ecd-c7e497f7c361",
+        "sourceHandle": "next",
+        "target": "b7440734-9be1-5919-b5e5-112ba05ff349",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e882994c-83ba-520f-862f-59cf6ba002a2",
+        "source": "044dfc61-e7bd-53dd-a995-caee4614c817",
+        "sourceHandle": "fieldOutput",
+        "target": "b7440734-9be1-5919-b5e5-112ba05ff349",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "1cba365e-b69b-55f5-943b-beb6d0526ed8",
+        "source": "2e731540-8684-5d32-928a-d356e16cc451",
+        "sourceHandle": "fieldOutput",
+        "target": "044dfc61-e7bd-53dd-a995-caee4614c817",
+        "targetHandle": "fieldInput/mode"
+      },
+      {
+        "id": "af33cb67-f7fc-5eaa-881b-3ef9b26eddb6",
+        "source": "2bb40258-38b5-5159-90f0-625a7117f0d1",
+        "sourceHandle": "fieldOutput",
+        "target": "044dfc61-e7bd-53dd-a995-caee4614c817",
+        "targetHandle": "fieldInput/albumId"
+      },
+      {
+        "id": "ccc150da-ac66-5cf2-bd2a-482cdb7849c4",
+        "source": "b7440734-9be1-5919-b5e5-112ba05ff349",
+        "sourceHandle": "next",
+        "target": "22697dfe-0c03-5d6d-a07b-23a38d1469e1",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "28fba5f6-ecfa-5c6f-983e-cb085b4aab79",
+        "source": "cf108080-de50-51a3-83c8-2f7f55b5f42b",
+        "sourceHandle": "fieldOutput",
+        "target": "22697dfe-0c03-5d6d-a07b-23a38d1469e1",
+        "targetHandle": "fieldInput/duration"
+      }
+    ]
+  }
+]

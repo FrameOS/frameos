@@ -1,0 +1,9 @@
+{
+  "name": "Google Photos",
+  "description": "Show photos from a shared Google Photos album.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

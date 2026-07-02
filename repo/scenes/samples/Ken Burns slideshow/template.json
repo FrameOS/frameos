@@ -1,0 +1,9 @@
+{
+  "name": "Ken Burns slideshow",
+  "description": "Slowly zoom and pan across images from the SD card or assets folder.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

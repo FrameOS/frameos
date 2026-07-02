@@ -1,0 +1,242 @@
+[
+  {
+    "id": "1c1899f7-0e3a-5756-805d-d7b0dae17d67",
+    "name": "Ken Burns slideshow",
+    "settings": {
+      "refreshInterval": 10,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "imageFolder",
+        "label": "Image folder",
+        "type": "string",
+        "value": "/srv/assets",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "motion",
+        "label": "Motion",
+        "type": "select",
+        "value": "kenBurns",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "kenBurns",
+          "zoomInOut",
+          "zoomIn",
+          "panLeftRight",
+          "panTopBottom"
+        ]
+      },
+      {
+        "name": "cycleSeconds",
+        "label": "Seconds per zoom cycle",
+        "type": "float",
+        "value": "600",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "seconds",
+        "label": "Seconds between renders",
+        "type": "float",
+        "value": "10",
+        "persist": "disk",
+        "access": "public",
+        "hint": "How often to redraw. Lower is smoother; e-ink frames should stay above their refresh time."
+      },
+      {
+        "name": "counter",
+        "label": "Counter",
+        "type": "integer",
+        "value": "0",
+        "persist": "disk",
+        "access": "private"
+      },
+      {
+        "name": "imageMetadata",
+        "label": "Image metadata",
+        "type": "json",
+        "value": "",
+        "persist": "memory",
+        "access": "private"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "780b4084-b70f-5067-9ce8-605e4cfcd965",
+        "type": "event",
+        "position": {
+          "x": -220,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "type": "app",
+        "position": {
+          "x": 500,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render/zoomPan",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "045962b7-124e-5ef2-a225-e2441d0fa2be",
+        "type": "app",
+        "position": {
+          "x": 420,
+          "y": -100
+        },
+        "data": {
+          "keyword": "data/localImage",
+          "config": {
+            "order": "sequential",
+            "counterStateKey": "counter",
+            "metadataStateKey": "imageMetadata"
+          },
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": "state{\"cycleSeconds\"}.getFloat()",
+            "expressionEnabled": false,
+            "expression": null,
+            "expressionType": null
+          }
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "485c3128-c8f4-5b1b-a7ce-0e1fab0f8a4a",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -200
+        },
+        "data": {
+          "keyword": "imageFolder"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "929a97ed-0a4b-5f60-b51d-d22539c882cf",
+        "type": "state",
+        "position": {
+          "x": 200,
+          "y": 0
+        },
+        "data": {
+          "keyword": "motion"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "71fbc83a-5a3b-5aa3-8343-c70d091a8c1d",
+        "type": "state",
+        "position": {
+          "x": 200,
+          "y": 60
+        },
+        "data": {
+          "keyword": "cycleSeconds"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "0d023acc-0edb-5bfe-9cc0-b02ecbcd4cbc",
+        "type": "app",
+        "position": {
+          "x": 900,
+          "y": 100
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "4f66643e-a402-53c4-b7a9-9ae3193b0e67",
+        "type": "state",
+        "position": {
+          "x": 900,
+          "y": -20
+        },
+        "data": {
+          "keyword": "seconds"
+        },
+        "width": 220,
+        "height": 48
+      }
+    ],
+    "edges": [
+      {
+        "id": "e7d4ecfa-ce9d-5717-b0f3-13ba24a54025",
+        "source": "780b4084-b70f-5067-9ce8-605e4cfcd965",
+        "sourceHandle": "next",
+        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "26172d0d-43fb-57a4-b0d9-11c5b16cb1c3",
+        "source": "045962b7-124e-5ef2-a225-e2441d0fa2be",
+        "sourceHandle": "fieldOutput",
+        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "0093f42e-98a5-5b1b-a465-2a89527e01b5",
+        "source": "485c3128-c8f4-5b1b-a7ce-0e1fab0f8a4a",
+        "sourceHandle": "fieldOutput",
+        "target": "045962b7-124e-5ef2-a225-e2441d0fa2be",
+        "targetHandle": "fieldInput/path"
+      },
+      {
+        "id": "73830420-0526-5b05-8598-88f9645e4317",
+        "source": "929a97ed-0a4b-5f60-b51d-d22539c882cf",
+        "sourceHandle": "fieldOutput",
+        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "targetHandle": "fieldInput/motion"
+      },
+      {
+        "id": "e0c96c79-a233-5bc1-b512-924c31510311",
+        "source": "71fbc83a-5a3b-5aa3-8343-c70d091a8c1d",
+        "sourceHandle": "fieldOutput",
+        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "targetHandle": "fieldInput/durationSeconds"
+      },
+      {
+        "id": "08a1fd27-433e-58ec-b630-0be9aab97671",
+        "source": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "sourceHandle": "next",
+        "target": "0d023acc-0edb-5bfe-9cc0-b02ecbcd4cbc",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ee7805d1-4995-5a30-9651-f72fa1f188e1",
+        "source": "4f66643e-a402-53c4-b7a9-9ae3193b0e67",
+        "sourceHandle": "fieldOutput",
+        "target": "0d023acc-0edb-5bfe-9cc0-b02ecbcd4cbc",
+        "targetHandle": "fieldInput/duration"
+      }
+    ]
+  }
+]
