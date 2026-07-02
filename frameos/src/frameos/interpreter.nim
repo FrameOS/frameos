@@ -826,7 +826,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     if not scene.state.hasKey(field.name) and not field.value.isNil and field.value.kind != JNull:
       if field.value.kind == JString and field.value.getStr().len == 0:
         continue
-      scene.state[field.name] = valueToJson(valueFromJsonByType(field.value, field.fieldType))
+      var seedValue = field.value
+      if field.fieldType == "json" and seedValue.kind == JString:
+        # Compiled scenes parse JSON string defaults; stay consistent
+        try:
+          seedValue = parseJson(seedValue.getStr())
+        except CatchableError:
+          discard
+      scene.state[field.name] = valueToJson(valueFromJsonByType(seedValue, field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
