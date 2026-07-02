@@ -87,11 +87,15 @@ proc jFloatOr(j: JsonNode, key: string, default: float): float =
     except CatchableError: default
   else: default
 
-proc readCacheConfig(node: DiagramNode): tuple[enabled, inputEnabled, durationEnabled: bool, durationSec: float] =
+proc readCacheConfig(node: DiagramNode): tuple[
+    enabled, inputEnabled, durationEnabled: bool, durationSec: float,
+    expressionEnabled: bool, expression: string] =
   var enabled = false
   var inputEnabled = false
   var durationEnabled = false
   var durationSec = 0.0
+  var expressionEnabled = false
+  var expression = ""
   if node.data.hasKey("cache") and node.data["cache"].kind == JObject:
     let cc = node.data["cache"]
     enabled = jBoolOr(cc, "enabled", false)
@@ -99,8 +103,15 @@ proc readCacheConfig(node: DiagramNode): tuple[enabled, inputEnabled, durationEn
       inputEnabled = jBoolOr(cc, "inputEnabled", false)
       durationEnabled = jBoolOr(cc, "durationEnabled", false)
       if durationEnabled:
-        durationSec = jFloatOr(cc, "duration", 0.0)
-  (enabled, inputEnabled, durationEnabled, durationSec)
+        # 60s matches the compiled codegen's default; an unparseable duration
+        # must not become 0 ("expire every render")
+        durationSec = jFloatOr(cc, "duration", 60.0)
+      expressionEnabled = jBoolOr(cc, "expressionEnabled", false)
+      if expressionEnabled:
+        expression = cc{"expression"}.getStr("").strip()
+        if expression == "":
+          expressionEnabled = false
+  (enabled, inputEnabled, durationEnabled, durationSec, expressionEnabled, expression)
 
 # Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
 proc valueToKeyJson(v: Value): JsonNode =
@@ -122,6 +133,7 @@ proc withCache(scene: InterpretedFrameScene,
                nodeId: NodeId,
                cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
                builtAnyInput: bool, builtInputKey: JsonNode,
+               cacheExprActive: bool, cacheExprValue: JsonNode,
                extraLog: JsonNode,
                compute: proc (): Value): Value =
   ## Generic cache handler shared by app/code data nodes.
@@ -137,6 +149,14 @@ proc withCache(scene: InterpretedFrameScene,
       let last = scene.cacheTimes[nodeId]
       if epochTime() > last + cacheDurationSec:
         useCached = false
+
+  if useCached and cacheExprActive:
+    # Recompute when the cache expression's value changes, like compiled
+    # scenes do
+    if not scene.cacheExprs.hasKey(nodeId):
+      useCached = false
+    elif scene.cacheExprs[nodeId] != cacheExprValue:
+      useCached = false
 
   if useCached and cacheInputEnabled and builtAnyInput:
     if not scene.cacheKeys.hasKey(nodeId):
@@ -172,6 +192,8 @@ proc withCache(scene: InterpretedFrameScene,
   scene.cacheValues[nodeId] = fresh
   if cacheDurationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
+  if cacheExprActive:
+    scene.cacheExprs[nodeId] = cacheExprValue
   if cacheInputEnabled and builtAnyInput:
     scene.cacheKeys[nodeId] = builtInputKey
   fresh
@@ -219,6 +241,26 @@ proc diagnosticKeyword(node: DiagramNode): string =
 # -------------------------
 # Core node runner
 # -------------------------
+
+proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext,
+    nodeId: NodeId, expression: string): tuple[active: bool, value: JsonNode] =
+  ## Evaluates a cache expression (inline JS for interpreted scenes) so the
+  ## node recomputes when the value changes, mirroring compiled scenes. On
+  ## error the expression is ignored for this render.
+  try:
+    let v = evalInline(scene, context, nodeId, "__cacheExpression", expression,
+                       scene.appInlineFuncNameByNodeArg, compileAppInlineFn,
+                       "__cacheExpression")
+    (true, valueToKeyJson(v))
+  except Exception as e:
+    scene.logger.log(%*{
+      "event": "interpreter:cacheExpression:error",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int,
+      "code": expression,
+      "error": $e.msg
+    })
+    (false, newJNull())
 
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
@@ -280,7 +322,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       let app = self.appsByNodeId[currentNodeId]
 
       # ---- Read per-node cache config ----
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
 
       # ---- Decode-into-canvas hint ----
       # When this render/image node draws its image input full-frame onto
@@ -302,7 +345,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           let producerNode = self.nodes[producerId]
           if producerNode.nodeType == "app" and
               producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
-            let (producerCache, _, _, _) = readCacheConfig(producerNode)
+            let (producerCache, _, _, _, _, _) = readCacheConfig(producerNode)
             directImageProducer = not producerCache
       if directImageProducer and
           context.hasImage and not context.image.isNil and
@@ -400,9 +443,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetScalingMode = ""
 
       if asDataNode and cacheEnabled:
+        var cacheExprActive = false
+        var cacheExprValue: JsonNode = newJNull()
+        if cacheExpressionEnabled:
+          (cacheExprActive, cacheExprValue) =
+            evalCacheExpression(self, context, currentNodeId, cacheExpression)
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
+                           cacheExprActive, cacheExprValue,
                            %*{"keyword": keyword}):
           (proc (): Value =
             getInterpretedApp(keyword, app, context)
@@ -543,7 +592,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var builtInputKey = %*{}
       var builtAnyInput = false
 
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
 
       if self.codeInputsForNodeId.hasKey(currentNodeId):
         let connectedArgs = self.codeInputsForNodeId[currentNodeId]
@@ -601,9 +651,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
 
       if asDataNode and cacheEnabled:
+        var cacheExprActive = false
+        var cacheExprValue: JsonNode = newJNull()
+        if cacheExpressionEnabled:
+          (cacheExprActive, cacheExprValue) =
+            evalCacheExpression(self, context, currentNodeId, cacheExpression)
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
+                           cacheExprActive, cacheExprValue,
                            %*{"nodeType": "code"},
                            computeFresh)
       else:
@@ -806,6 +862,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     cacheValues: initTable[NodeId, Value](),
     cacheTimes: initTable[NodeId, float](),
     cacheKeys: initTable[NodeId, JsonNode](),
+    cacheExprs: initTable[NodeId, JsonNode](),
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)

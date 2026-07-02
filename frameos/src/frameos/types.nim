@@ -313,6 +313,7 @@ type
     cacheValues*: Table[NodeId, Value]
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
+    cacheExprs*: Table[NodeId, JsonNode]
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
