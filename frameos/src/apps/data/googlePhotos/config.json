@@ -1,0 +1,86 @@
+{
+  "name": "Google Photos",
+  "description": "Show images from a shared Google Photos album",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "shareUrl",
+      "type": "text",
+      "value": "",
+      "required": true,
+      "label": "Shared album link",
+      "placeholder": "https://photos.app.goo.gl/...",
+      "hint": "In Google Photos, open an album, tap Share and create a link that anyone can view. Paste the resulting https://photos.app.goo.gl/... or https://photos.google.com/share/... link here. The album must stay shared via link for the frame to read it."
+    },
+    {
+      "name": "mode",
+      "type": "select",
+      "options": ["random", "sequential"],
+      "value": "random",
+      "required": true,
+      "label": "Order of images"
+    },
+    {
+      "name": "counterStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Optional state key for persistence",
+      "hint": "Enter a state key to persist the current image index between restarts.",
+      "showIf": [
+        {
+          "field": "mode",
+          "operator": "eq",
+          "value": "sequential"
+        }
+      ]
+    },
+    {
+      "name": "fitMode",
+      "type": "select",
+      "options": ["cover", "contain"],
+      "value": "cover",
+      "required": true,
+      "label": "Fit mode",
+      "hint": "How Google Photos sizes the downloaded image. 'cover' crops the photo to exactly fill the frame, 'contain' keeps the whole photo visible within the frame's dimensions."
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Metadata state key",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {source, index, count, imageUrl}."
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+    },
+    {
+      "name": "cacheAlbumSeconds",
+      "type": "integer",
+      "value": "3600",
+      "required": false,
+      "label": "Album cache duration (seconds)",
+      "placeholder": "3600",
+      "hint": "How long to reuse the scraped list of photos before fetching the album page again. New photos added to the album show up after this many seconds at the latest."
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
+}
