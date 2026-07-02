@@ -99,6 +99,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
+  refreshDecodeBudget()
   markRuntimeStart("render", scene.id.string, "render", requiredWidth, requiredHeight)
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
       "sceneId": scene.id.string})
@@ -283,8 +284,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       finally:
         lastRotatedImage = nil
         renderResult[0] = nil
-        if self.frameConfig.device == "framebuffer":
-          reclaimRenderMemory()
+        # Return decode/render spikes to the OS on every device; e-ink frames
+        # otherwise hold tens of MB of dead heap between refreshes.
+        reclaimRenderMemory()
         clearNextRenderSeconds()
       markRuntimeDone()
 

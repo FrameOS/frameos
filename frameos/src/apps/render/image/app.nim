@@ -26,6 +26,9 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     let sourceImage = self.appConfig.image
     if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
+    if sourceImage == image:
+      # The producer already decoded straight into this canvas.
+      return
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
       of "overwrite": OverwriteBlend

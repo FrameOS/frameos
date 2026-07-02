@@ -282,6 +282,70 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       # ---- Read per-node cache config ----
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
 
+      # ---- Decode-into-canvas hint ----
+      # When this render/image node draws its image input full-frame onto
+      # the canvas (no offsets, plain blend, cover/contain/stretch) and the
+      # image comes DIRECTLY from an uncached leaf producer that understands
+      # the hint, that producer may decode straight into the canvas instead
+      # of returning a full-size intermediate. Restricting to direct, known
+      # producers keeps the hint away from transformer chains (resizeImage,
+      # rotateImage, code nodes) whose output is not the final canvas, and
+      # away from node caches that would otherwise store the live canvas.
+      const decodeTargetProducers = ["data/localImage"]
+      var setDecodeTargetHint = false
+      var directImageProducer = false
+      if keyword == "render/image" and not asDataNode and cacheEnabled == false and
+          self.appInputsForNodeId.hasKey(currentNodeId) and
+          self.appInputsForNodeId[currentNodeId].hasKey("image"):
+        let producerId = self.appInputsForNodeId[currentNodeId]["image"]
+        if self.nodes.hasKey(producerId):
+          let producerNode = self.nodes[producerId]
+          if producerNode.nodeType == "app" and
+              producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
+            let (producerCache, _, _, _) = readCacheConfig(producerNode)
+            directImageProducer = not producerCache
+      if directImageProducer and
+          context.hasImage and not context.image.isNil and
+          context.decodeTargetImage.isNil:
+        var placement = ""
+        var fullFrameDraw = true
+        let config = currentNode.data{"config"}
+        if config != nil and config.kind == JObject:
+          placement = config{"placement"}.getStr("")
+          for offsetKey in ["offsetX", "offsetY"]:
+            let offset = config{offsetKey}
+            if offset != nil and offset.kind != JNull:
+              if (offset.kind == JString and offset.getStr() notin ["", "0"]) or
+                  (offset.kind == JInt and offset.getInt() != 0):
+                fullFrameDraw = false
+          let blend = config{"blendMode"}.getStr("")
+          if blend notin ["", "normal", "overwrite"]:
+            fullFrameDraw = false
+        if self.appInputsForNodeId.hasKey(currentNodeId):
+          let connected = self.appInputsForNodeId[currentNodeId]
+          for inputName in ["offsetX", "offsetY", "blendMode", "inputImage"]:
+            if connected.hasKey(inputName):
+              fullFrameDraw = false
+          if fullFrameDraw and connected.hasKey("placement"):
+            # Placement wired from a state field is a pure read; resolve it
+            # up front. Anything else (app/code producers) disqualifies.
+            let producerId = connected["placement"]
+            if self.nodes.hasKey(producerId) and
+                self.nodes[producerId].nodeType == "state":
+              placement = runNode(self, producerId, context,
+                asDataNode = true).asString()
+            else:
+              fullFrameDraw = false
+        if self.appInlineInputsForNodeId.hasKey(currentNodeId):
+          let inline = self.appInlineInputsForNodeId[currentNodeId]
+          for inputName in ["placement", "offsetX", "offsetY", "blendMode", "inputImage"]:
+            if inline.hasKey(inputName):
+              fullFrameDraw = false
+        if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
+          context.decodeTargetImage = context.image
+          context.decodeTargetScalingMode = placement
+          setDecodeTargetHint = true
+
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
       var builtAnyInput = false
@@ -330,6 +394,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               "error": $e.msg,
               "stacktrace": e.getStackTrace()
             })
+
+      if setDecodeTargetHint:
+        context.decodeTargetImage = nil
+        context.decodeTargetScalingMode = ""
 
       if asDataNode and cacheEnabled:
         result = withCache(self, currentNodeId,

@@ -136,7 +136,7 @@ proc run*(self: App, context: ExecutionContext) =
         finally:
           client2.close()
 
-      downloadedImage = some(decodeImageWithFallback(imageDataBody))
+      downloadedImage = some(decodeImageWithDisplayBounds(imageDataBody))
     except CatchableError as e:
       self.error "Error fetching image from OpenAI: " & $e.msg
     finally:

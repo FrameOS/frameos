@@ -215,6 +215,6 @@ proc get*(self: App, context: ExecutionContext): Image =
       else:
         result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len)
     else:
-      result = decodeImageWithFallback(imageDataBody)
+      result = decodeImageWithDisplayBounds(imageDataBody)
   except CatchableError as e:
     return self.error(context, "Error fetching image from OpenAI: " & $e.msg)

@@ -7,6 +7,8 @@
 #include "driver/spi_common.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdmmc_cmd.h"
 
 static const char *TAG = "fos_assets_sd";
@@ -84,10 +86,23 @@ esp_err_t fos_assets_sd_mount(const fos_config_t *config)
         .allocation_unit_size = 16 * 1024,
     };
 
-    err = esp_vfs_fat_sdspi_mount(config->assets_path, &host, &slot_config, &mount_config, &s_card);
+    /* Card init over jumper wires can time out on the first probe; retry a
+     * few times, then once more at a reduced bus clock before giving up. */
+    const int max_attempts = 3;
+    for (int attempt = 1; attempt <= max_attempts; attempt++) {
+        err = esp_vfs_fat_sdspi_mount(config->assets_path, &host, &slot_config, &mount_config, &s_card);
+        if (err == ESP_OK) break;
+        ESP_LOGW(TAG, "mounting SD assets at %s failed (attempt %d/%d, %s, pins=%s, %lu kHz)",
+                 config->assets_path, attempt, max_attempts, esp_err_to_name(err), pins,
+                 (unsigned long)host.max_freq_khz);
+        s_card = NULL;
+        if (attempt == max_attempts) break;
+        if (attempt == max_attempts - 1 && host.max_freq_khz > 10000) {
+            host.max_freq_khz = 10000;
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mounting SD assets at %s failed (%s, pins=%s)",
-                 config->assets_path, esp_err_to_name(err), pins);
         spi_bus_free(host.slot);
         s_card = NULL;
         return err;

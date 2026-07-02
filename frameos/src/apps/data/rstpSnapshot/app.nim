@@ -95,7 +95,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       })
 
     let startedAt = epochTime()
-    let (data, exitCode) = runFfmpeg(command, url, timeoutMs)
+    var (data, exitCode) = runFfmpeg(command, url, timeoutMs)
     let elapsedMs = round((epochTime() - startedAt) * 1000, 3)
 
     if exitCode != 0:
@@ -114,7 +114,15 @@ proc get*(self: App, context: ExecutionContext): Image =
       })
 
     try:
-      return decodeImageWithFallback(data)
+      # Bound the decode to the render target so oversized camera frames
+      # cannot exhaust memory; never below the display decode defaults.
+      let targetWidth = if context.hasImage: context.image.width else: self.frameConfig.renderWidth()
+      let targetHeight = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
+      return decodeImageWithDisplayBounds(
+        data,
+        maxEdge = max(DisplayDecodeMaxEdge, max(targetWidth, targetHeight)),
+        maxPixels = max(DisplayDecodeMaxPixels, targetWidth * targetHeight)
+      )
     except CatchableError as decodeErr:
       self.logError "Failed to decode image: " & decodeErr.msg
       return renderError(self, context, "Could not decode image from ffmpeg output")

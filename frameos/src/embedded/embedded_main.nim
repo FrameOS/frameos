@@ -17,6 +17,8 @@ import pixie
 import embedded_scene
 import embedded_runtime
 import frameos/utils/dither
+import frameos/utils/image as frameos_image
+import frameos/utils/memory
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
 
@@ -31,6 +33,23 @@ var
   infoBuffer: string
   sceneInfoBuffer: string
   sceneStateBuffer: string
+
+# --------------------------------------------------------- out-of-memory
+# The patched allocator (src/embedded/patched_malloc.nim via config.nims)
+# survives a failed allocation by releasing a 1MB PSRAM reserve
+# (frameos_nim_glue.c) and retrying. After each render we check whether the
+# reserve was consumed, shed memory and re-arm it, so a single oversized
+# frame degrades instead of rebooting the device.
+
+proc armEmergencyReserve() {.importc: "fos_nim_arm_emergency_reserve", cdecl.}
+proc emergencyReserveUsed(): bool {.importc: "fos_nim_emergency_reserve_used", cdecl.}
+
+proc recoverEmergencyReserve(where: string) =
+  if emergencyReserveUsed():
+    log("memory pressure: emergency heap reserve was needed during " & where &
+        "; collecting and re-arming")
+    GC_fullCollect()
+    armEmergencyReserve()
 
 # ------------------------------------------------------- dither + packing
 # Floyd–Steinberg to packed 1bpp (white=1, MSB first) — the format the
@@ -284,6 +303,7 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   frameHeight = height.int
   frameName = $name
   try:
+    armEmergencyReserve()
     let backend =
       if backendUrl == nil or ($backendUrl).len == 0:
         ""
@@ -293,6 +313,9 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     initScene()
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} \"{frameName}\", nim {NimVersion}")
     true
+  except Defect as e:
+    log("nim init failed (defect): " & e.msg)
+    false
   except CatchableError as e:
     log("nim init failed: " & e.msg)
     false
@@ -301,10 +324,40 @@ proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Install interpreted scenes from JSON (backend scenes.json format).
   ## Returns the number of scenes loaded, 0 on bad payload.
   try:
-    loadScenes($payload).cint
+    result = loadScenes($payload).cint
+    recoverEmergencyReserve("scene load")
+  except Defect as e:
+    log("loadScenes failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene load failure")
+    result = 0
   except CatchableError as e:
     log("loadScenes failed: " & e.msg)
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+
+proc renderErrorFallback(
+    buf: ptr UncheckedArray[uint8];
+    bufLen: int;
+    pixelFormat: int;
+    message: string
+  ): cint =
+  ## Best-effort error frame after a failed render. Collects first so even
+  ## an OOM-aborted render usually has room for one canvas; gives up (keeps
+  ## the previous panel contents) when it does not.
+  try:
+    GC_fullCollect()
+    let image = renderError(frameWidth, frameHeight, message)
+    if not packImageForFormat(image, buf, bufLen, pixelFormat):
+      return 1
+    GC_fullCollect()
     0
+  except Defect:
+    GC_fullCollect()
+    1
+  except CatchableError:
+    GC_fullCollect()
+    1
 
 proc fos_nim_render_impl(
     buf: ptr UncheckedArray[uint8];
@@ -316,6 +369,7 @@ proc fos_nim_render_impl(
     # stale request before running the scene so only new events raised during
     # this render can schedule another pass.
     discard takeRenderRequested()
+    refreshDecodeBudget()
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -330,13 +384,49 @@ proc fos_nim_render_impl(
     lastRenderMs = ((packed - start).inMilliseconds).int
     log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
         &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+    recoverEmergencyReserve("render")
     # Many interpreted scene graphs dispatch "render" while responding to the
     # render event itself. On embedded that should not immediately replay the
     # same frame and fragment the tiny internal heap.
     discard takeRenderRequested()
-    0
+    result = 0
+  except Defect as e:
+    log("render failed (defect): " & e.msg)
+    result = renderErrorFallback(buf, bufLen.int, pixelFormat.int, "Render failed: " & e.msg)
+    recoverEmergencyReserve("render failure")
   except CatchableError as e:
     log("render failed: " & e.msg)
+    result = renderErrorFallback(buf, bufLen.int, pixelFormat.int, "Render failed: " & e.msg)
+    recoverEmergencyReserve("render failure")
+
+proc renderErrorFallbackAlloc(
+    outBuf: var pointer;
+    outLen: var csize_t;
+    pixelFormat: int;
+    message: string
+  ): cint =
+  ## Error-frame fallback for the allocating render path.
+  try:
+    GC_fullCollect()
+    let packedLen = packedLenForFormat(frameWidth, frameHeight, pixelFormat)
+    if packedLen <= 0:
+      return 1
+    let raw = renderBufferAlloc(packedLen.csize_t)
+    if raw == nil:
+      return 1
+    let image = renderError(frameWidth, frameHeight, message)
+    if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
+      renderBufferFree(raw)
+      return 1
+    outBuf = raw
+    outLen = packedLen.csize_t
+    GC_fullCollect()
+    0
+  except Defect:
+    GC_fullCollect()
+    1
+  except CatchableError:
+    GC_fullCollect()
     1
 
 proc fos_nim_render_alloc_impl(
@@ -348,6 +438,7 @@ proc fos_nim_render_alloc_impl(
   outLen = 0
   try:
     discard takeRenderRequested()
+    refreshDecodeBudget()
     let start = getMonoTime()
     let rendered = renderFrameImage()
     var image = rendered.image
@@ -380,16 +471,25 @@ proc fos_nim_render_alloc_impl(
     lastRenderMs = ((packed - start).inMilliseconds).int
     log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
         &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+    recoverEmergencyReserve("render")
     discard takeRenderRequested()
-    0
+    result = 0
+  except Defect as e:
+    log("render failed (defect): " & e.msg)
+    if outBuf != nil:
+      renderBufferFree(outBuf)
+      outBuf = nil
+    outLen = 0
+    result = renderErrorFallbackAlloc(outBuf, outLen, pixelFormat.int, "Render failed: " & e.msg)
+    recoverEmergencyReserve("render failure")
   except CatchableError as e:
     log("render failed: " & e.msg)
     if outBuf != nil:
       renderBufferFree(outBuf)
       outBuf = nil
     outLen = 0
-    GC_fullCollect()
-    1
+    result = renderErrorFallbackAlloc(outBuf, outLen, pixelFormat.int, "Render failed: " & e.msg)
+    recoverEmergencyReserve("render failure")
 
 proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): cint {.exportc, cdecl.} =
   fos_nim_render_impl(buf, bufLen, 1)
@@ -397,7 +497,14 @@ proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): 
 proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   ## Refresh interval requested by the active interpreted scene, in seconds;
   ## 0 means "no opinion" (firmware falls back to its configured interval).
-  sceneRefreshSeconds().cdouble
+  try:
+    sceneRefreshSeconds().cdouble
+  except Defect as e:
+    log("scene interval failed (defect): " & e.msg)
+    0.cdouble
+  except CatchableError as e:
+    log("scene interval failed: " & e.msg)
+    0.cdouble
 
 proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a
@@ -405,23 +512,47 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   takeRenderRequested()
 
 proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
-  sceneInfoBuffer = sceneInfoJson()
+  try:
+    sceneInfoBuffer = sceneInfoJson()
+  except Defect as e:
+    log("scene info failed (defect): " & e.msg)
+    sceneInfoBuffer = "{}"
+  except CatchableError as e:
+    log("scene info failed: " & e.msg)
+    sceneInfoBuffer = "{}"
   sceneInfoBuffer.cstring
 
 proc fos_nim_scene_state_json_impl(): cstring {.exportc, cdecl.} =
-  sceneStateBuffer = sceneStateJson()
+  try:
+    sceneStateBuffer = sceneStateJson()
+  except Defect as e:
+    log("scene state failed (defect): " & e.msg)
+    sceneStateBuffer = "{}"
+  except CatchableError as e:
+    log("scene state failed: " & e.msg)
+    sceneStateBuffer = "{}"
   sceneStateBuffer.cstring
 
 proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
     if sceneId == nil:
       return false
-    selectScene($sceneId)
+    result = selectScene($sceneId)
+    recoverEmergencyReserve("scene switch")
+  except Defect as e:
+    log("set scene failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene switch failure")
+    result = false
   except CatchableError as e:
     log("set scene failed: " & e.msg)
-    false
+    recoverEmergencyReserve("scene switch failure")
+    result = false
 
 proc fos_nim_info_impl(): cstring {.exportc, cdecl.} =
-  infoBuffer = &"nim {NimVersion} + pixie + quickjs, {frameWidth}x{frameHeight}, " &
-               &"scenes={sceneCount()}, renders={renderCount}, last={lastRenderMs} ms"
+  try:
+    infoBuffer = &"nim {NimVersion} + pixie + quickjs, {frameWidth}x{frameHeight}, " &
+                 &"scenes={sceneCount()}, renders={renderCount}, last={lastRenderMs} ms"
+  except Defect, CatchableError:
+    infoBuffer = "info unavailable"
   infoBuffer.cstring

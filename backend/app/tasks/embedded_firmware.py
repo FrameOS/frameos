@@ -372,10 +372,14 @@ def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | 
 
 
 def embedded_pixie_path() -> Path | None:
+    """FRAMEOS_PIXIE_PATH wins when set; otherwise a checkout next to the
+    repo (../pixie) is picked up automatically, matching the Pi builds."""
     configured = os.environ.get("FRAMEOS_PIXIE_PATH")
-    if not configured:
-        return None
-    candidate = Path(configured)
+    candidate = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parents[4] / "pixie"
+    )
     if (candidate / "src" / "pixie").is_dir():
         return candidate.resolve()
     return None

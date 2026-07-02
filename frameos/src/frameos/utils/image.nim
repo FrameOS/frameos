@@ -1,5 +1,6 @@
 import pixie
 import pixie/fileformats/svg
+import pixie/fileformats/jpeg as pixie_jpeg
 import base64
 import json
 import math
@@ -11,6 +12,7 @@ import strformat
 import uri
 
 import frameos/utils/http_client
+import frameos/utils/memory
 when not defined(frameosEmbedded):
   import frameos/utils/font
 when defined(frameosEmbedded):
@@ -62,19 +64,33 @@ proc getEffectiveRuntimeImageEngine*(): string =
 proc useImageMagick(): bool =
   runtimeImageEngine == ImageEngineImageMagick
 
+proc decodeOutputMaxPixels*(): int =
+  ## Largest decoded-output pixel count the current memory headroom allows;
+  ## 0 = unknown/unlimited. The output takes 4 bytes per pixel and shares
+  ## the headroom with decode intermediates and the canvas.
+  let available = availableRenderBytes()
+  if available <= 0:
+    return 0
+  max(65_536, (available div 3) div 4)
+
 proc displayDecodeDimensions*(sourceWidth, sourceHeight: int,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): tuple[width: int, height: int] =
   if sourceWidth <= 0 or sourceHeight <= 0:
     raise newException(PixieError, "Invalid image dimensions")
 
+  var effectiveMaxPixels = maxPixels
+  let budgetPixels = decodeOutputMaxPixels()
+  if budgetPixels > 0 and (effectiveMaxPixels <= 0 or budgetPixels < effectiveMaxPixels):
+    effectiveMaxPixels = budgetPixels
+
   var scaleRatio = 1.0
   if maxEdge > 0:
     scaleRatio = min(scaleRatio, maxEdge.float / max(sourceWidth, sourceHeight).float)
-  if maxPixels > 0:
+  if effectiveMaxPixels > 0:
     let sourcePixels = sourceWidth.int64 * sourceHeight.int64
-    if sourcePixels > maxPixels.int64:
-      scaleRatio = min(scaleRatio, sqrt(maxPixels.float / sourcePixels.float))
+    if sourcePixels > effectiveMaxPixels.int64:
+      scaleRatio = min(scaleRatio, sqrt(effectiveMaxPixels.float / sourcePixels.float))
 
   if scaleRatio >= 1.0:
     return (sourceWidth, sourceHeight)
@@ -174,6 +190,7 @@ proc decodeImageWithFallback*(data: string): Image =
 proc decodeImageWithDisplayBounds*(data: var string,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): Image =
+  refreshDecodeBudget()
   let dimensions = decodeImageDimensions(data)
   let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
   if target.width != dimensions.width or target.height != dimensions.height:
@@ -338,11 +355,134 @@ proc readImageWithFallback*(path: string): Image =
       return converted.get()
   return readImage(path)
 
+const ImageHeaderProbeBytes = 256 * 1024
+
+proc probeImageFileHeader(path: string): string =
+  ## Reads just enough of a file to determine its format and dimensions.
+  var file: File
+  if not file.open(path):
+    raise newException(PixieError, "Cannot open image file: " & path)
+  defer: file.close()
+  let probeLen = min(getFileSize(path), ImageHeaderProbeBytes.int64).int
+  result = newString(probeLen)
+  if probeLen > 0:
+    let got = file.readBuffer(addr result[0], probeLen)
+    result.setLen(max(0, got))
+
+proc isJpegHeader(data: string): bool =
+  data.len > 2 and data[0] == '\xFF' and data[1] == '\xD8'
+
+proc fileJpegSource(file: File): JpegSourceProc =
+  result = proc(dst: pointer, maxBytes: int): int =
+    try:
+      file.readBuffer(dst, maxBytes)
+    except IOError, OSError:
+      0
+
+proc ensureFileReadBudget(path: string, fileSize: int64) =
+  ## Refuses to buffer a whole compressed file when doing so would consume
+  ## most of the remaining render memory.
+  let available = availableRenderBytes()
+  if available > 0 and fileSize > available.int64 div 2:
+    raise newException(PixieError,
+      "Image file " & path & " is " & $(fileSize div 1024) &
+      "K; only " & $(available div 1024) &
+      "K of render memory is available")
+
 proc readImageWithDisplayBounds*(path: string,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): Image =
+  refreshDecodeBudget()
+  let fileSize = getFileSize(path)
+
+  # JPEGs stream from disk through a small window, so neither the compressed
+  # file nor full-size intermediates ever need to fit in memory.
+  var header = probeImageFileHeader(path)
+  if isJpegHeader(header) and not useImageMagick():
+    var dimensions: ImageDimensions
+    var probed = true
+    try:
+      dimensions = decodeImageDimensions(header)
+    except CatchableError:
+      # Oversized metadata segments (rare) defeat the probe; fall through to
+      # a buffered read below.
+      probed = false
+    if probed:
+      header = ""
+      let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
+      var file: File
+      if not file.open(path):
+        raise newException(PixieError, "Cannot open image file: " & path)
+      try:
+        return decodeJpegStreamScaled(
+          fileJpegSource(file), fileSize.int, target.width, target.height)
+      except PixieError:
+        # Progressive JPEGs cannot stream; retry buffered below (bounded by
+        # the file-read budget and pixie's decode budget).
+        discard
+      finally:
+        file.close()
+
+  header = ""
+  ensureFileReadBudget(path, fileSize)
   var data = readFile(path)
   decodeImageWithDisplayBounds(data, maxEdge, maxPixels)
+
+proc looksLikeSvg(data: string): bool =
+  ## SVG has no dimensions probe; callers keep it on the generic decoder.
+  data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
+
+proc scalingModeToFit(scalingMode: string): Option[ScaledDecodeFit] =
+  case scalingMode
+  of "cover": some(fitCover)
+  of "contain": some(fitContain)
+  of "stretch": some(fitStretch)
+  else: none(ScaledDecodeFit)
+
+proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): bool =
+  ## Decodes an image file directly into an existing target image (usually
+  ## the render canvas) with aspect-correct fit, keeping peak memory at the
+  ## decode intermediates only. Returns false when this fast path does not
+  ## apply (unsupported scaling mode or format); raises catchable errors for
+  ## unreadable or over-budget files.
+  if target.isNil or target.width <= 0 or target.height <= 0:
+    return false
+  if useImageMagick():
+    # Keep the configured engine in charge; the generic path knows how to
+    # route through ImageMagick.
+    return false
+  let fitOption = scalingModeToFit(scalingMode)
+  if fitOption.isNone:
+    return false
+  let fit = fitOption.get()
+
+  refreshDecodeBudget()
+  let fileSize = getFileSize(path)
+  var header = probeImageFileHeader(path)
+
+  # JPEG only: it has no alpha, so writing decoded pixels straight over the
+  # canvas is equivalent to compositing. PNGs may carry transparency that
+  # must alpha-blend over the scene background via the generic path.
+  if not isJpegHeader(header):
+    return false
+  header = ""
+
+  var file: File
+  if not file.open(path):
+    raise newException(PixieError, "Cannot open image file: " & path)
+  try:
+    decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+    return true
+  except PixieError:
+    # Progressive JPEGs cannot stream; retry buffered below.
+    discard
+  finally:
+    file.close()
+
+  ensureFileReadBudget(path, fileSize)
+  var data = readFile(path)
+  discard decodeImageScaledInto(data, target, fit)
+  true
 
 proc decodeDataUrl*(dataUrl: string): Image =
   if not dataUrl.startsWith("data:"):
@@ -354,12 +494,15 @@ proc decodeDataUrl*(dataUrl: string): Image =
   let dataBody = dataUrl[commaIndex + 1 .. ^1]
   let headerParts = if header.len > 0: header.split(';') else: @[""]
   let isBase64 = headerParts.anyIt(it == "base64")
-  let decodedData =
+  var decodedData =
     if isBase64:
       dataBody.decode
     else:
       decodeUrl(dataBody)
-  return decodeImageWithFallback(decodedData)
+  # SVG has no dimensions probe; everything else decodes bounded.
+  if looksLikeSvg(decodedData):
+    return decodeImageWithFallback(decodedData)
+  return decodeImageWithDisplayBounds(decodedData)
 
 proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
   if not dataUrl.startsWith("data:"):
@@ -449,8 +592,10 @@ proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[
     let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
-    let content = response.body
-    result = decodeImageWithFallback(content)
+    var content = response.body
+    if looksLikeSvg(content):
+      return decodeImageWithFallback(content)
+    result = decodeImageWithDisplayBounds(content)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
@@ -464,7 +609,10 @@ proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     if response.code >= 400:
       raise newException(IOError, response.status)
     let content = response.body
-    result = (decodeImageWithFallback(content), content)
+    if looksLikeSvg(content):
+      return (decodeImageWithFallback(content), content)
+    var decodeContent = content
+    result = (decodeImageWithDisplayBounds(decodeContent), content)
 
 proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): Image =
