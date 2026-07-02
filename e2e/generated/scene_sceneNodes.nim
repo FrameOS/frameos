@@ -45,16 +45,16 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
     of 1.NodeId: # render/split
       self.node1.run(context)
       nextNode = -1.NodeId
-    of 2.NodeId: # render
+    of 2.NodeId: # renderTextSplit
       scene_renderTextSplit.runEvent(self.node2, context)
       nextNode = -1.NodeId
-    of 3.NodeId: # render
+    of 3.NodeId: # renderTextRich
       scene_renderTextRich.runEvent(self.node3, context)
       nextNode = -1.NodeId
-    of 4.NodeId: # render
+    of 4.NodeId: # renderGradientSplit
       scene_renderGradientSplit.runEvent(self.node4, context)
       nextNode = -1.NodeId
-    of 5.NodeId: # render
+    of 5.NodeId: # logicIfElse
       scene_logicIfElse.runEvent(self.node5, context)
       nextNode = -1.NodeId
     else:

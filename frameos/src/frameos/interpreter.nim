@@ -1126,28 +1126,6 @@ proc eventFilterValue(value: JsonNode): string =
   else:
     return $value
 
-proc eventPayloadValueMatches(payload: JsonNode, key: string, expected: string): bool =
-  if expected.len == 0:
-    return true
-  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
-    return false
-  let value = payload[key]
-  case value.kind
-  of JString:
-    return value.getStr() == expected
-  of JInt:
-    return $value.getInt() == expected
-  of JFloat:
-    return $value.getFloat() == expected
-  of JBool:
-    if value.getBool():
-      return expected == "true"
-    return expected == "false"
-  of JNull:
-    return expected == "null"
-  else:
-    return $value == expected
-
 proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
   if node.data.isNil or node.data.kind != JObject:
     return true

@@ -1145,7 +1145,7 @@ class SceneWriter:
                 if filter_pairs:
                     condition = " and ".join(
                         [
-                            'frameosEventPayloadValueMatches(context.payload, '
+                            'eventPayloadValueMatches(context.payload, '
                             f'"{sanitize_nim_string(key)}", "{sanitize_nim_string(value)}")'
                             for key, value in filter_pairs
                         ]
@@ -1282,28 +1282,6 @@ type Scene* = ref object of FrameScene
 
 {{.push hint[XDeclaredButNotUsed]: off.}}
 {newline.join(self.cache_fields)}
-
-proc frameosEventPayloadValueMatches(payload: JsonNode, key: string, expected: string): bool =
-  if expected.len == 0:
-    return true
-  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
-    return false
-  let value = payload[key]
-  case value.kind
-  of JString:
-    return value.getStr() == expected
-  of JInt:
-    return $value.getInt() == expected
-  of JFloat:
-    return $value.getFloat() == expected
-  of JBool:
-    if value.getBool():
-      return expected == "true"
-    return expected == "false"
-  of JNull:
-    return expected == "null"
-  else:
-    return $value == expected
 
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   result = VNone()

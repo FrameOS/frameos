@@ -250,8 +250,8 @@ def test_event_listener_filters_match_configured_payload_fields():
     source = write_scene_nim(frame, scene)
 
     assert 'of "keyUp":' in source
-    assert 'frameosEventPayloadValueMatches(context.payload, "key", "Enter")' in source
-    assert 'frameosEventPayloadValueMatches(context.payload, "code", "13")' in source
+    assert 'eventPayloadValueMatches(context.payload, "key", "Enter")' in source
+    assert 'eventPayloadValueMatches(context.payload, "code", "13")' in source
 
 
 def test_shared_scene_registry_loads_scene_libraries():
