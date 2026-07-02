@@ -720,6 +720,10 @@ export interface FrameOSSettings {
   github?: {
     api_key?: string
   }
+  immich?: {
+    url?: string
+    apiKey?: string
+  }
   openAI?: {
     apiKey?: string
     backendApiKey?: string

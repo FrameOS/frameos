@@ -176,7 +176,7 @@ const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
   { value: '32MB', label: '32MB' },
 ]
 
-const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'unsplash'] as const
+const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'immich', 'unsplash'] as const
 
 function displayVersion(version?: string | null): string {
   const trimmed = version?.trim()

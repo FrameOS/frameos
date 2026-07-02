@@ -1,0 +1,86 @@
+{
+  "name": "Immich",
+  "description": "Show images from a self-hosted Immich server",
+  "category": "data",
+  "version": "1.0.0",
+  "settings": ["immich"],
+  "fields": [
+    {
+      "name": "mode",
+      "type": "select",
+      "value": "random",
+      "options": ["random", "album", "favorites", "memories"],
+      "required": false,
+      "label": "Mode",
+      "hint": "Which images to show: a random image from the whole library, a random image from one album, a random favorite, or today's memories."
+    },
+    {
+      "name": "albumId",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Album ID",
+      "hint": "UUID of the album — visible in the album URL.",
+      "placeholder": "e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6",
+      "showIf": [
+        {
+          "field": "mode",
+          "operator": "eq",
+          "value": "album"
+        }
+      ]
+    },
+    {
+      "name": "personId",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Person ID",
+      "hint": "Optional. UUID of a person to limit random images to — visible in the person's URL.",
+      "placeholder": "e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+      "showIf": [
+        {
+          "field": "mode",
+          "operator": "eq",
+          "value": "random"
+        }
+      ]
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Metadata state key",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {source, id, originalFileName, camera EXIF fields, people, ...}."
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Save the downloaded image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+    },
+    {
+      "name": "previewSize",
+      "type": "select",
+      "value": "preview",
+      "options": ["preview", "fullsize"],
+      "label": "Image size",
+      "hint": "'preview' is resized server-side and much lighter on frame memory. 'fullsize' downloads the original file."
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900"
+  }
+}

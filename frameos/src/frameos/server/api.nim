@@ -159,6 +159,8 @@ const frameAdminEditableSettingsFields = [
   ("homeAssistant", "url"),
   ("homeAssistant", "accessToken"),
   ("github", "api_key"),
+  ("immich", "url"),
+  ("immich", "apiKey"),
   ("unsplash", "accessKey"),
 ]
 

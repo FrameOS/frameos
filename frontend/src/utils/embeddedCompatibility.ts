@@ -13,7 +13,7 @@ const embeddedUnavailableApps: Record<string, string> = {
   'data/rstpSnapshot': 'Requires FFmpeg and child processes.',
 }
 
-const embeddedIgnoredSettings = new Set(['frameOS', 'homeAssistant', 'openAI', 'unsplash'])
+const embeddedIgnoredSettings = new Set(['frameOS', 'homeAssistant', 'immich', 'openAI', 'unsplash'])
 
 function unsupported(reason: string): CompatibilityResult {
   return { supported: false, reason }

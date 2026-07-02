@@ -34,6 +34,14 @@ export const settingsDetails: Record<
       },
     ],
   },
+  immich: {
+    title: 'Immich',
+    tagLabel: 'Immich API key missing',
+    fields: [
+      { label: 'Server URL', path: ['immich', 'url'] },
+      { label: 'API key (Account Settings → API Keys)', secret: true, path: ['immich', 'apiKey'] },
+    ],
+  },
   github: {
     title: 'GitHub',
     tagLabel: 'GitHub personal access token missing',
