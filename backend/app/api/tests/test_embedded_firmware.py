@@ -1067,8 +1067,10 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
     assert not build_dir.exists()
 
 
-def test_embedded_pixie_path_requires_explicit_override(tmp_path, monkeypatch):
-    monkeypatch.delenv("FRAMEOS_PIXIE_PATH", raising=False)
+def test_embedded_pixie_path_resolves_override(tmp_path, monkeypatch):
+    # Pin the override away from any real ../pixie checkout so this behaves
+    # the same on dev machines and CI (same trick as the deployer tests).
+    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(tmp_path / "no-pixie"))
     assert embedded_pixie_path() is None
 
     pixie = tmp_path / "pixie"
