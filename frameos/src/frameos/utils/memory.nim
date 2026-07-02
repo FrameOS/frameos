@@ -36,9 +36,17 @@ elif defined(linux):
       discard
     0
 
+when defined(testing):
+  # Lets tests simulate a memory-constrained device (e.g. ESP32 PSRAM
+  # headroom) on a development host. 0 disables the override.
+  var availableRenderBytesOverride* = 0
+
 proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.
+  when defined(testing):
+    if availableRenderBytesOverride > 0:
+      return availableRenderBytesOverride
   when defined(frameosEmbedded):
     let largest = fos_psram_largest_free_block().int
     let free = fos_psram_free_bytes().int
