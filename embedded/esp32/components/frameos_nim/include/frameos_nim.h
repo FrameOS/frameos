@@ -27,6 +27,10 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
+/* Render the current scene and allocate the packed output after the full RGBA
+ * scene image is created. The caller owns `*buf` and must free it with free().
+ * This lowers peak PSRAM on large panels. */
+int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
 /* Backward-compatible 1bpp entrypoint used by older builds/tests. */
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */

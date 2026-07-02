@@ -8,6 +8,7 @@ import { frameLogic } from '../../frameLogic'
 import { controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
+import { visiblePublicStateFields } from '../../../../utils/showIf'
 
 export interface ExpandedSceneLogicProps {
   frameId: number
@@ -36,7 +37,13 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           detail: values.scene?.name || props.sceneId,
         })
         const state: Record<string, any> = {}
-        const fields = values.scene?.fields ?? []
+        // Only submit fields the user can currently see, matching the
+        // on-frame control page: hidden fields keep their current values
+        const fields = visiblePublicStateFields(
+          values.scene?.fields ?? [],
+          values.states[props.sceneId] ?? {},
+          formValues
+        )
         try {
           for (const field of fields) {
             if (field.name in formValues && field.access === 'public') {
@@ -89,6 +96,10 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
         sceneOverride ?? scenes?.find((scene) => scene.id === sceneId) ?? null,
     ],
     fields: [(s) => [s.scene], (scene) => (scene?.fields ?? []).filter((field) => field.access === 'public')],
+    visibleFields: [
+      (s) => [s.fields, s.states, s.stateChanges, (_, props) => props.sceneId],
+      (fields, states, stateChanges, sceneId) => visiblePublicStateFields(fields, states[sceneId] ?? {}, stateChanges),
+    ],
     scenesAsOptions: [
       (s) => [s.scenes],
       (scenes): { label: string; value: string }[] =>

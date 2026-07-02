@@ -257,7 +257,7 @@ type
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
-    # TODO: add private state fields
+    stateFields*: seq[StateField] # all state fields, including private ones
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -313,6 +313,7 @@ type
     cacheValues*: Table[NodeId, Value]
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
+    cacheExprs*: Table[NodeId, JsonNode]
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
@@ -325,6 +326,12 @@ type
     loopIndex*: int
     loopKey*: string
     nextSleep*: float
+    # Set while resolving an image input whose consumer will draw the result
+    # onto the canvas full-frame: producers may decode straight into
+    # `decodeTargetImage` with `decodeTargetScalingMode` (cover/contain/
+    # stretch) and return it, skipping a full-size intermediate copy.
+    decodeTargetImage*: Image
+    decodeTargetScalingMode*: string
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object
@@ -337,6 +344,8 @@ type
     required*: bool
     secret*: bool
     persist*: string
+    access*: string
+    showIf*: JsonNode
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig

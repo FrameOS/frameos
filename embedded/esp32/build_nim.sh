@@ -22,8 +22,8 @@ command -v nim >/dev/null || { echo "nim not found on PATH" >&2; exit 1; }
 rm -rf "$NIMCACHE"
 mkdir -p "$NIMCACHE"
 
-# Compiled-scene parameters from the backend (e.g. "-d:frameosSceneName=clock
-# -d:frameosSceneBackground=#000000"); empty for a generic image.
+# Compiled-scene parameters from the backend (e.g. "-d:frameosSceneName=clock");
+# empty for a generic image.
 EXTRA_NIM_FLAGS="${FRAMEOS_EXTRA_NIM_FLAGS:-}"
 LOCKED_PIXIE_SHA1="$(cd "$FRAMEOS_DIR" && python3 -c 'import json; print(json.load(open("nimble.lock"))["packages"]["pixie"]["checksums"]["sha1"])')"
 NEEDS_NIMBLE_SETUP=0

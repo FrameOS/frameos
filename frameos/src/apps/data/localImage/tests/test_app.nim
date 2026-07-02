@@ -3,6 +3,7 @@ import pixie
 
 import ../app
 import frameos/types
+import frameos/utils/exif
 
 type LogStore = ref object
   items: seq[JsonNode]
@@ -23,6 +24,21 @@ proc uniqueTempDir(prefix: string): string =
   let ts = $(epochTime().int64)
   result = getTempDir() / (prefix & "-" & ts)
   createDir(result)
+
+proc minimalExifJpeg(): string =
+  # SOI + APP1 with a little-endian TIFF holding Make "Canon" (out of line,
+  # data area at TIFF offset 0x26) and Model "EOS" (inline) + EOI.
+  const tiff =
+    "II\x2A\x00\x08\x00\x00\x00" &
+    "\x02\x00" &
+    "\x0F\x01\x02\x00\x06\x00\x00\x00\x26\x00\x00\x00" &
+    "\x10\x01\x02\x00\x04\x00\x00\x00EOS\x00" &
+    "\x00\x00\x00\x00" &
+    "Canon\x00"
+  let payload = "Exif\x00\x00" & tiff
+  let segmentLen = payload.len + 2
+  "\xFF\xD8\xFF\xE1" & chr((segmentLen shr 8) and 0xFF) & chr(segmentLen and 0xFF) &
+    payload & "\xFF\xD9"
 
 suite "data/localImage app":
   test "alphabetical mode sorts filenames before iterating":
@@ -54,15 +70,17 @@ suite "data/localImage app":
     discard app.get(ExecutionContext(hasImage: false))
     check scene.state["meta"]["filename"].getStr() == "zeta.ppm"
 
-  test "discovery excludes thumbs and non-images and metadata/counter are updated":
+  test "discovery excludes internal dirs and non-images and metadata/counter are updated":
     let root = uniqueTempDir("frameos-local-image")
     defer: removeDir(root)
 
     createDir(root / "sub")
     createDir(root / ".thumbs")
+    createDir(root / ".frameos" / "scene_images")
     writePpm(root / "first.PPM", 255, 0, 0)
     writePpm(root / "sub" / "second.ppm", 0, 255, 0)
     writePpm(root / ".thumbs" / "ignored.ppm", 0, 0, 255)
+    writePpm(root / ".frameos" / "scene_images" / "ignored.ppm", 255, 255, 0)
     writeFile(root / "not-image.txt", "hello")
 
     let logs = LogStore(items: @[])
@@ -127,6 +145,34 @@ suite "data/localImage app":
     app.appConfig.search = "forest"
     discard app.get(ExecutionContext(hasImage: false))
     check scene.state["meta"]["filename"].getStr() == "Forest.ppm"
+
+  test "readExifHead reads jpeg headers that merge into metadata":
+    let root = uniqueTempDir("frameos-local-image-exif")
+    defer: removeDir(root)
+
+    let jpegPath = root / "photo.jpg"
+    writeFile(jpegPath, minimalExifJpeg())
+
+    let head = readExifHead(jpegPath)
+    check head.len > 0
+
+    var metadata = %*{"path": jpegPath}
+    mergeParsedExif(metadata, head)
+    check metadata["exif"]["make"].getStr() == "Canon"
+    check metadata["exif"]["model"].getStr() == "EOS"
+    check metadata["exifSummary"].getStr() == "Canon EOS"
+
+  test "readExifHead skips non-jpeg files and caps reads at 256KB":
+    let root = uniqueTempDir("frameos-local-image-exif-head")
+    defer: removeDir(root)
+
+    writePpm(root / "image.ppm", 1, 2, 3)
+    check readExifHead(root / "image.ppm") == ""
+    check readExifHead(root / "missing.jpg") == ""
+
+    let bigPath = root / "big.JPEG"
+    writeFile(bigPath, minimalExifJpeg() & repeat('\0', ExifScanBytes))
+    check readExifHead(bigPath).len == ExifScanBytes
 
   test "empty-folder and no-match paths return deterministic error image dimensions":
     let root = uniqueTempDir("frameos-local-image-empty")

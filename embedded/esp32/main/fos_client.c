@@ -94,6 +94,12 @@ const char *fos_client_snapshot_mode(void)
     return s_display_state_valid ? "hash-only" : "none";
 }
 
+bool fos_client_display_state_ready(void)
+{
+    load_display_state();
+    return s_display_state_valid;
+}
+
 static void sha256_hex(const uint8_t sha[FOS_DISPLAY_HASH_LEN], char out[FOS_DISPLAY_HASH_LEN * 2 + 1])
 {
     static const char hex[] = "0123456789abcdef";
@@ -144,6 +150,19 @@ static bool display_state_matches(const fos_display_state_t *a, const fos_displa
         a->len == b->len &&
         strncmp(a->panel, b->panel, sizeof(a->panel)) == 0 &&
         memcmp(a->sha256, b->sha256, FOS_DISPLAY_HASH_LEN) == 0;
+}
+
+static uint8_t white_fill_for_format(fos_pixel_format_t format)
+{
+    switch (format) {
+        case FOS_PIXEL_2BPP_BWYR:
+            return 0x55; /* palette index 1 (white) */
+        case FOS_PIXEL_4BPP_7COLOR:
+        case FOS_PIXEL_4BPP_SPECTRA6:
+            return 0x11; /* palette index 1 (white) */
+        default:
+            return 0xFF;
+    }
 }
 
 static void load_display_state(void)
@@ -243,26 +262,87 @@ static bool json_string_value(const char *json, const char *key, char *out, size
     return used > 0;
 }
 
-static void current_scene_id(char *out, size_t out_len)
+static void json_escape_value(const char *src, char *out, size_t out_len)
 {
     if (!out || out_len == 0) return;
     out[0] = '\0';
-    json_string_value(frameos_nim_scene_info_json(), "currentSceneId", out, out_len);
+    if (!src) return;
+
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *)src; *p && used + 1 < out_len; p++) {
+        unsigned char c = *p;
+        if (c == '"' || c == '\\') {
+            if (used + 2 >= out_len) break;
+            out[used++] = '\\';
+            out[used++] = (char)c;
+        } else if (c == '\n' || c == '\r' || c == '\t') {
+            if (used + 2 >= out_len) break;
+            out[used++] = '\\';
+            out[used++] = c == '\n' ? 'n' : (c == '\r' ? 'r' : 't');
+        } else if (c < 0x20) {
+            if (used + 6 >= out_len) break;
+            int written = snprintf(out + used, out_len - used, "\\u%04x", (unsigned)c);
+            if (written != 6) break;
+            used += 6;
+        } else {
+            out[used++] = (char)c;
+        }
+    }
+    out[used] = '\0';
 }
 
-static void log_render_event(const char *event, const char *scene_id, const char *status,
-                             const char *mode, uint32_t count, int64_t ms, int width,
-                             int height, fos_pixel_format_t format, size_t bytes,
+static void current_scene_details(char *scene_id, size_t scene_id_len,
+                                  char *scene_name, size_t scene_name_len)
+{
+    if (scene_id && scene_id_len > 0) scene_id[0] = '\0';
+    if (scene_name && scene_name_len > 0) scene_name[0] = '\0';
+    const char *info = frameos_nim_scene_info_json();
+    json_string_value(info, "currentSceneId", scene_id, scene_id_len);
+    json_string_value(info, "currentSceneName", scene_name, scene_name_len);
+}
+
+static void log_render_event(const char *event, const char *scene_id,
+                             const char *scene_name, const char *status,
+                             const char *stage, const char *mode,
+                             const char *refresh, const char *reason,
+                             uint32_t count, int64_t ms, int width, int height,
+                             fos_pixel_format_t format, size_t bytes,
                              esp_err_t esp_err)
 {
-    char log_line[512];
+    char event_esc[64];
+    char scene_id_esc[192];
+    char scene_name_esc[192];
+    char status_esc[64];
+    char stage_esc[64];
+    char mode_esc[64];
+    char refresh_esc[64];
+    char reason_esc[96];
+    char err_name_esc[64];
+    json_escape_value(event, event_esc, sizeof(event_esc));
+    json_escape_value(scene_id, scene_id_esc, sizeof(scene_id_esc));
+    json_escape_value(scene_name, scene_name_esc, sizeof(scene_name_esc));
+    json_escape_value(status, status_esc, sizeof(status_esc));
+    json_escape_value(stage, stage_esc, sizeof(stage_esc));
+    json_escape_value(mode, mode_esc, sizeof(mode_esc));
+    json_escape_value(refresh, refresh_esc, sizeof(refresh_esc));
+    json_escape_value(reason, reason_esc, sizeof(reason_esc));
+    json_escape_value(esp_err == ESP_OK ? "OK" : esp_err_to_name(esp_err),
+                      err_name_esc, sizeof(err_name_esc));
+
+    char log_line[1536];
     snprintf(log_line, sizeof(log_line),
-             "{\"event\":\"%s\",\"source\":\"esp32\",\"sceneId\":\"%s\",\"status\":\"%s\","
-             "\"mode\":\"%s\",\"count\":%lu,\"ms\":%lld,\"durationMs\":%lld,"
-             "\"width\":%d,\"height\":%d,\"pixelFormat\":%d,\"bytes\":%u,\"espErr\":%d}",
-             event, scene_id ? scene_id : "", status ? status : "",
-             mode ? mode : "", (unsigned long)count, ms, ms, width, height,
-             (int)format, (unsigned)bytes, (int)esp_err);
+             "{\"event\":\"%s\",\"source\":\"esp32\",\"sceneId\":\"%s\",\"sceneName\":\"%s\","
+             "\"status\":\"%s\",\"stage\":\"%s\",\"mode\":\"%s\",\"refresh\":\"%s\","
+             "\"reason\":\"%s\",\"count\":%lu,\"ms\":%lld,\"durationMs\":%lld,"
+             "\"width\":%d,\"height\":%d,\"pixelFormat\":%d,\"bytes\":%u,"
+             "\"loadedScenes\":%d,\"freeHeap\":%u,\"freePsram\":%u,"
+             "\"espErr\":%d,\"espErrName\":\"%s\"}",
+             event_esc, scene_id_esc, scene_name_esc, status_esc, stage_esc,
+             mode_esc, refresh_esc, reason_esc, (unsigned long)count, ms, ms,
+             width, height, (int)format, (unsigned)bytes, fos_scenes_loaded(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (int)esp_err, err_name_esc);
     frameos_nim_log_hook(log_line);
 }
 
@@ -451,49 +531,75 @@ static esp_err_t render_once(void)
                                            : (((size_t)width + 7u) / 8u) * (size_t)height;
     bool local_render = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
     const char *mode = local_render ? "local" : "remote";
+    uint32_t render_attempt = s_render_count + 1;
     char scene_id[128];
-    current_scene_id(scene_id, sizeof(scene_id));
-    log_render_event("render:scene", scene_id, "rendering", mode, s_render_count + 1,
-                     0, width, height, format, buf_len, ESP_OK);
+    char scene_name[128];
+    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+    log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
+                     mode, fos_display_present() ? "pending" : "none", "",
+                     render_attempt, 0, width, height, format, buf_len, ESP_OK);
     frameos_nim_flush_logs();
 
-    uint8_t *buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!buf) buf = malloc(buf_len);
-    if (!buf) {
-        ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
-        log_render_event("render:error", scene_id, "error", mode, s_render_count,
-                         (esp_timer_get_time() - start) / 1000, width, height,
-                         format, buf_len, ESP_ERR_NO_MEM);
-        frameos_nim_flush_logs();
-        return ESP_ERR_NO_MEM;
-    }
-    memset(buf, 0xFF, buf_len); /* white */
-
+    uint8_t *buf = NULL;
     esp_err_t err;
     if (local_render) {
-        err = frameos_nim_render(buf, buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
+        err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
+        buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!buf) buf = malloc(buf_len);
+        if (!buf) {
+            ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
+            log_render_event("render:error", scene_id, scene_name, "error", "allocate",
+                             mode, "none", "out-of-memory", render_attempt,
+                             (esp_timer_get_time() - start) / 1000, width, height,
+                             format, buf_len, ESP_ERR_NO_MEM);
+            frameos_nim_flush_logs();
+            return ESP_ERR_NO_MEM;
+        }
+        memset(buf, white_fill_for_format(format), buf_len);
         if (config->render_mode == FOS_RENDER_LOCAL) {
             ESP_LOGW(TAG, "local render requested but nim runtime unavailable; trying remote");
         }
         err = fetch_remote_bitmap(buf, buf_len);
     }
 
+    int64_t framebuffer_ms = (esp_timer_get_time() - start) / 1000;
+    log_render_event("render:framebuffer", scene_id, scene_name,
+                     err == ESP_OK ? "rendered" : "error", "framebuffer",
+                     mode, fos_display_present() ? "pending" : "none",
+                     err == ESP_OK ? "" : "render-failed", render_attempt,
+                     framebuffer_ms, width, height, format, buf_len, err);
+    frameos_nim_flush_logs();
+
     fos_display_state_t rendered_state;
     bool rendered_state_valid = err == ESP_OK && fos_display_present() &&
         display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
     bool skipped_refresh = false;
+    const char *refresh = fos_display_present() ? "pending" : "none";
     if (err == ESP_OK && fos_display_present()) {
         load_display_state();
         if (rendered_state_valid && s_display_state_valid && display_state_matches(&rendered_state, &s_display_state)) {
             skipped_refresh = true;
             s_last_refresh_skipped = true;
+            refresh = "skipped";
             char sha_hex[FOS_DISPLAY_HASH_LEN * 2 + 1];
             sha256_hex(rendered_state.sha256, sha_hex);
             ESP_LOGI(TAG, "display refresh skipped: packed image unchanged (%.*s)", 12, sha_hex);
+            log_render_event("render:device", scene_id, scene_name, "skipped",
+                             "display", mode, refresh, "unchanged",
+                             render_attempt, (esp_timer_get_time() - start) / 1000,
+                             width, height, format, buf_len, ESP_OK);
+            frameos_nim_flush_logs();
         } else {
+            refresh = "update";
+            log_render_event("render:device", scene_id, scene_name, "refreshing",
+                             "display", mode, refresh, "", render_attempt,
+                             (esp_timer_get_time() - start) / 1000, width, height,
+                             format, buf_len, ESP_OK);
+            frameos_nim_flush_logs();
             err = fos_display_blit(buf, buf_len);
+            refresh = err == ESP_OK ? "updated" : "failed";
             if (err == ESP_OK && rendered_state_valid) {
                 s_display_state = rendered_state;
                 s_display_state_valid = true;
@@ -503,6 +609,7 @@ static esp_err_t render_once(void)
         }
     } else if (err == ESP_OK) {
         ESP_LOGI(TAG, "headless: rendered %u bytes, no panel to blit", (unsigned)buf_len);
+        refresh = "none";
     }
     if (err == ESP_OK) {
         if (skipped_refresh && rendered_state_valid) {
@@ -520,13 +627,40 @@ static esp_err_t render_once(void)
         }
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
-    current_scene_id(scene_id, sizeof(scene_id));
+    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
     log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
-                     err == ESP_OK ? "ok" : "error", mode, s_render_count,
-                     total_ms, width, height, format, buf_len, err);
+                     scene_name, err == ESP_OK ? "ok" : "error", "complete",
+                     mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
+                     err == ESP_OK ? s_render_count : render_attempt, total_ms,
+                     width, height, format, buf_len, err);
     frameos_nim_flush_logs();
     free(buf);
     return err;
+}
+
+static void log_render_skipped(const char *reason, int battery_pct)
+{
+    fos_config_t *config = fos_config();
+    int width = fos_display_present() ? fos_display_width() : 800;
+    int height = fos_display_present() ? fos_display_height() : 480;
+    fos_pixel_format_t format = fos_display_present() ? fos_display_format() : FOS_PIXEL_1BPP;
+    size_t buf_len = fos_display_present() ? fos_display_buffer_size()
+                                           : (((size_t)width + 7u) / 8u) * (size_t)height;
+    bool local_render = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+    const char *mode = local_render ? "local" : "remote";
+    char scene_id[128];
+    char scene_name[128];
+    char reason_buf[96];
+    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+    if (battery_pct >= 0) {
+        snprintf(reason_buf, sizeof(reason_buf), "%s:%d%%", reason ? reason : "battery", battery_pct);
+    } else {
+        snprintf(reason_buf, sizeof(reason_buf), "%s", reason ? reason : "");
+    }
+    log_render_event("render:skipped", scene_id, scene_name, "skipped", "guard",
+                     mode, "none", reason_buf, s_render_count + 1, 0, width,
+                     height, format, buf_len, ESP_OK);
+    frameos_nim_flush_logs();
 }
 
 /* How long to wait before the next render, in seconds.
@@ -577,9 +711,11 @@ static void client_task(void *arg)
         bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
         if (battery_critical) {
             ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
+            log_render_skipped("battery", battery_pct);
         } else {
             if (fos_ota_busy()) {
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
+                log_render_skipped("ota", -1);
             } else {
                 render_once();
             }

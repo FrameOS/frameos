@@ -60,6 +60,7 @@ const settingsNavSections: readonly SettingsNavSection[] = [
       ['PostHog', '#settings-posthog'],
       ['Home Assistant', '#settings-home-assistant'],
       ['GitHub', '#settings-github'],
+      ['Immich', '#settings-immich'],
       ['Unsplash API', '#settings-unsplash'],
     ],
   },
@@ -639,8 +640,8 @@ export function Settings() {
                 </H6>
                 <Box className="p-3 space-y-3">
                   <p className="text-sm leading-loose">
-                    To compile FrameOS from source, we need access to a Linux shell where we can run commands through Docker.
-                    There are a few options for that.
+                    To compile FrameOS from source, we need access to a Linux shell where we can run commands through
+                    Docker. There are a few options for that.
                   </p>
                   <Group name="buildEnvironment">
                     <Field name="provider" label="Build system">
@@ -656,9 +657,9 @@ export function Settings() {
                   </Group>
                   {buildEnvironmentProvider === 'none' ? (
                     <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
-                        You can still use prebuilt images and binaries for quick deploys.
-                        FrameOS source cross-compilation on the backend is disabled. 
-                        Raspberry Pi OS frames will compile custom code on device (might be very slow).
+                      You can still use prebuilt images and binaries for quick deploys. FrameOS source cross-compilation
+                      on the backend is disabled. Raspberry Pi OS frames will compile custom code on device (might be
+                      very slow).
                     </div>
                   ) : null}
                   {buildEnvironmentProvider === 'docker' ? (
@@ -666,7 +667,15 @@ export function Settings() {
                       <p>
                         FrameOS will use Docker from the backend host. If this backend runs in a container, the
                         container needs Docker CLI access and a reachable Docker daemon, usually by running privileged
-                        Docker-in-Docker or mounting the host Docker socket. See the <A href="https://github.com/FrameOS/frameos#running-via-docker-manually" target="_blank" className="frameos-link hover:underline">readme</A> for details.
+                        Docker-in-Docker or mounting the host Docker socket. See the{' '}
+                        <A
+                          href="https://github.com/FrameOS/frameos#running-via-docker-manually"
+                          target="_blank"
+                          className="frameos-link hover:underline"
+                        >
+                          readme
+                        </A>{' '}
+                        for details.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={systemInfo?.docker?.daemonAvailable ? 'text-emerald-600' : 'text-amber-600'}>
@@ -945,6 +954,23 @@ export function Settings() {
                   </H6>
                   <Box className="p-2 space-y-2">
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
+                      <TextInput />
+                    </Field>
+                  </Box>
+                </Group>
+                <Group name="immich">
+                  <H6 id="settings-immich" className="pt-4">
+                    Immich
+                  </H6>
+                  <Box className="p-2 space-y-2">
+                    <Field name="url" label="Server URL">
+                      <TextInput placeholder="https://immich.example.com" />
+                    </Field>
+                    <Field
+                      name="apiKey"
+                      label="API key (Account Settings -> API Keys)"
+                      secret={!!savedSettings?.immich?.apiKey}
+                    >
                       <TextInput />
                     </Field>
                   </Box>

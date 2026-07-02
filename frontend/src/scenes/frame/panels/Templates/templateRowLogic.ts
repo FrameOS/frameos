@@ -6,6 +6,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
+import { visiblePublicStateFields } from '../../../../utils/showIf'
 
 import type { templateRowLogicType } from './templateRowLogicType'
 
@@ -98,6 +99,10 @@ export const templateRowLogic = kea<templateRowLogicType>([
     trySceneFields: [
       (s) => [s.trySceneConfig],
       (trySceneConfig) => (trySceneConfig?.mainScene?.fields ?? []).filter((field) => field.access === 'public'),
+    ],
+    visibleTrySceneFields: [
+      (s) => [s.trySceneFields, s.trySceneState],
+      (trySceneFields, trySceneState) => visiblePublicStateFields(trySceneFields, trySceneState),
     ],
     defaultTrySceneState: [
       (s) => [s.trySceneFields],

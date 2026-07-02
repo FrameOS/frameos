@@ -36,7 +36,7 @@ LINUX_SIZE_FLAGS = [
     "--passC:-fno-unwind-tables",
     "--passL:-Wl,--gc-sections",
 ]
-FRAMEOS_NIM_FLAGS = ["-d:malloc"]
+FRAMEOS_NIM_FLAGS = ["-d:useMalloc"]
 
 
 def run(command: list[str], *, cwd: Path) -> None:

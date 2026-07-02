@@ -1,0 +1,9 @@
+{
+  "name": "Google Photos",
+  "description": "Show photos from a shared Google Photos album. Reads the public share page directly (Google offers no API for this), so it may stop working if Google changes the page format.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

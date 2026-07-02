@@ -1,0 +1,9 @@
+{
+  "name": "Immich",
+  "description": "Show photos from a self-hosted Immich server. Set the server URL and API key in settings.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

@@ -12,6 +12,7 @@ import frameos/scheduler
 import frameos/scenes
 import frameos/timezone_updater
 import frameos/types
+import frameos/utils/memory
 import frameos/portal as netportal
 import frameos/tls_proxy
 import frameos/setup_proxy
@@ -216,5 +217,6 @@ proc startFrameOS*() {.async.} =
   # Tell systemd (Type=notify) we are up before any slow driver or scene
   # init; the runner loop takes over with WATCHDOG=1 heartbeats from here.
   notifyReady()
+  setupRenderMemory()
   var frameOS = newFrameOS()
   await frameOS.start()

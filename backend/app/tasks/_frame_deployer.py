@@ -56,7 +56,11 @@ from app.tasks.utils import find_nim_v2
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
-FRAMEOS_NIM_FLAGS = ("-d:malloc",)
+# useMalloc routes Nim's heap through glibc malloc so the mallopt/malloc_trim
+# tuning in setupRenderMemory()/reclaimRenderMemory() actually governs image
+# buffers ("-d:malloc" was a typo that left Nim's page allocator in charge,
+# ratcheting RSS on frequently-rendering frames).
+FRAMEOS_NIM_FLAGS = ("-d:useMalloc",)
 
 DRIVER_LIBRARY_NIM_FLAGS = (
     *FRAMEOS_NIM_FLAGS,
@@ -110,6 +114,24 @@ LOCAL_SOURCE_IGNORE_PATTERNS = (
 
 DEFAULT_FRAMEOS_SOURCE_ROOT = Path(__file__).resolve().parents[3] / "frameos"
 FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
+
+
+def local_pixie_override_path() -> Path | None:
+    """Pixie checkout to compile against instead of the nimble.lock revision.
+
+    FRAMEOS_PIXIE_PATH wins when set; otherwise a checkout next to the repo
+    (../pixie) is picked up automatically so local pixie changes deploy
+    without editing the lock file.
+    """
+    configured = os.environ.get("FRAMEOS_PIXIE_PATH")
+    candidate = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parents[4] / "pixie"
+    )
+    if (candidate / "src" / "pixie").is_dir():
+        return candidate.resolve()
+    return None
 
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
@@ -892,9 +914,17 @@ $(OBJECTS): pre-build
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
         version_option = shlex.quote(f"--define:frameosVersion:{_frameos_version_for_source(source_dir)}")
+        pixie_override = local_pixie_override_path()
+        pixie_env = ""
+        if pixie_override is not None:
+            pixie_env = f"FRAMEOS_PIXIE_PATH={shlex.quote(str(pixie_override))} "
+            await log(
+                self.db, self.redis, int(frame.id), "stdout",
+                f"Using local Pixie checkout at {pixie_override}",
+            )
         cmd = (
             f"cd {source_dir} && nimble assets -y && nimble setup && "
-            f"{nim_path} compile --os:linux --cpu:{cpu} "
+            f"{pixie_env}{nim_path} compile --os:linux --cpu:{cpu} "
             f"{' '.join(FRAMEOS_NIM_FLAGS)} "
             f"{version_option} "
             f"--compileOnly --genScript --nimcache:{build_dir} "

@@ -87,11 +87,15 @@ proc jFloatOr(j: JsonNode, key: string, default: float): float =
     except CatchableError: default
   else: default
 
-proc readCacheConfig(node: DiagramNode): tuple[enabled, inputEnabled, durationEnabled: bool, durationSec: float] =
+proc readCacheConfig(node: DiagramNode): tuple[
+    enabled, inputEnabled, durationEnabled: bool, durationSec: float,
+    expressionEnabled: bool, expression: string] =
   var enabled = false
   var inputEnabled = false
   var durationEnabled = false
   var durationSec = 0.0
+  var expressionEnabled = false
+  var expression = ""
   if node.data.hasKey("cache") and node.data["cache"].kind == JObject:
     let cc = node.data["cache"]
     enabled = jBoolOr(cc, "enabled", false)
@@ -99,8 +103,15 @@ proc readCacheConfig(node: DiagramNode): tuple[enabled, inputEnabled, durationEn
       inputEnabled = jBoolOr(cc, "inputEnabled", false)
       durationEnabled = jBoolOr(cc, "durationEnabled", false)
       if durationEnabled:
-        durationSec = jFloatOr(cc, "duration", 0.0)
-  (enabled, inputEnabled, durationEnabled, durationSec)
+        # 60s matches the compiled codegen's default; an unparseable duration
+        # must not become 0 ("expire every render")
+        durationSec = jFloatOr(cc, "duration", 60.0)
+      expressionEnabled = jBoolOr(cc, "expressionEnabled", false)
+      if expressionEnabled:
+        expression = cc{"expression"}.getStr("").strip()
+        if expression == "":
+          expressionEnabled = false
+  (enabled, inputEnabled, durationEnabled, durationSec, expressionEnabled, expression)
 
 # Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
 proc valueToKeyJson(v: Value): JsonNode =
@@ -122,6 +133,7 @@ proc withCache(scene: InterpretedFrameScene,
                nodeId: NodeId,
                cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
                builtAnyInput: bool, builtInputKey: JsonNode,
+               cacheExprActive: bool, cacheExprValue: JsonNode,
                extraLog: JsonNode,
                compute: proc (): Value): Value =
   ## Generic cache handler shared by app/code data nodes.
@@ -137,6 +149,14 @@ proc withCache(scene: InterpretedFrameScene,
       let last = scene.cacheTimes[nodeId]
       if epochTime() > last + cacheDurationSec:
         useCached = false
+
+  if useCached and cacheExprActive:
+    # Recompute when the cache expression's value changes, like compiled
+    # scenes do
+    if not scene.cacheExprs.hasKey(nodeId):
+      useCached = false
+    elif scene.cacheExprs[nodeId] != cacheExprValue:
+      useCached = false
 
   if useCached and cacheInputEnabled and builtAnyInput:
     if not scene.cacheKeys.hasKey(nodeId):
@@ -172,6 +192,8 @@ proc withCache(scene: InterpretedFrameScene,
   scene.cacheValues[nodeId] = fresh
   if cacheDurationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
+  if cacheExprActive:
+    scene.cacheExprs[nodeId] = cacheExprValue
   if cacheInputEnabled and builtAnyInput:
     scene.cacheKeys[nodeId] = builtInputKey
   fresh
@@ -219,6 +241,26 @@ proc diagnosticKeyword(node: DiagramNode): string =
 # -------------------------
 # Core node runner
 # -------------------------
+
+proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext,
+    nodeId: NodeId, expression: string): tuple[active: bool, value: JsonNode] =
+  ## Evaluates a cache expression (inline JS for interpreted scenes) so the
+  ## node recomputes when the value changes, mirroring compiled scenes. On
+  ## error the expression is ignored for this render.
+  try:
+    let v = evalInline(scene, context, nodeId, "__cacheExpression", expression,
+                       scene.appInlineFuncNameByNodeArg, compileAppInlineFn,
+                       "__cacheExpression")
+    (true, valueToKeyJson(v))
+  except Exception as e:
+    scene.logger.log(%*{
+      "event": "interpreter:cacheExpression:error",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int,
+      "code": expression,
+      "error": $e.msg
+    })
+    (false, newJNull())
 
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
@@ -280,7 +322,72 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       let app = self.appsByNodeId[currentNodeId]
 
       # ---- Read per-node cache config ----
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
+
+      # ---- Decode-into-canvas hint ----
+      # When this render/image node draws its image input full-frame onto
+      # the canvas (no offsets, plain blend, cover/contain/stretch) and the
+      # image comes DIRECTLY from an uncached leaf producer that understands
+      # the hint, that producer may decode straight into the canvas instead
+      # of returning a full-size intermediate. Restricting to direct, known
+      # producers keeps the hint away from transformer chains (resizeImage,
+      # rotateImage, code nodes) whose output is not the final canvas, and
+      # away from node caches that would otherwise store the live canvas.
+      const decodeTargetProducers = ["data/localImage"]
+      var setDecodeTargetHint = false
+      var directImageProducer = false
+      if keyword == "render/image" and not asDataNode and cacheEnabled == false and
+          self.appInputsForNodeId.hasKey(currentNodeId) and
+          self.appInputsForNodeId[currentNodeId].hasKey("image"):
+        let producerId = self.appInputsForNodeId[currentNodeId]["image"]
+        if self.nodes.hasKey(producerId):
+          let producerNode = self.nodes[producerId]
+          if producerNode.nodeType == "app" and
+              producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
+            let (producerCache, _, _, _, _, _) = readCacheConfig(producerNode)
+            directImageProducer = not producerCache
+      if directImageProducer and
+          context.hasImage and not context.image.isNil and
+          context.decodeTargetImage.isNil:
+        var placement = ""
+        var fullFrameDraw = true
+        let config = currentNode.data{"config"}
+        if config != nil and config.kind == JObject:
+          placement = config{"placement"}.getStr("")
+          for offsetKey in ["offsetX", "offsetY"]:
+            let offset = config{offsetKey}
+            if offset != nil and offset.kind != JNull:
+              if (offset.kind == JString and offset.getStr() notin ["", "0"]) or
+                  (offset.kind == JInt and offset.getInt() != 0):
+                fullFrameDraw = false
+          let blend = config{"blendMode"}.getStr("")
+          if blend notin ["", "normal", "overwrite"]:
+            fullFrameDraw = false
+        if self.appInputsForNodeId.hasKey(currentNodeId):
+          let connected = self.appInputsForNodeId[currentNodeId]
+          for inputName in ["offsetX", "offsetY", "blendMode", "inputImage"]:
+            if connected.hasKey(inputName):
+              fullFrameDraw = false
+          if fullFrameDraw and connected.hasKey("placement"):
+            # Placement wired from a state field is a pure read; resolve it
+            # up front. Anything else (app/code producers) disqualifies.
+            let producerId = connected["placement"]
+            if self.nodes.hasKey(producerId) and
+                self.nodes[producerId].nodeType == "state":
+              placement = runNode(self, producerId, context,
+                asDataNode = true).asString()
+            else:
+              fullFrameDraw = false
+        if self.appInlineInputsForNodeId.hasKey(currentNodeId):
+          let inline = self.appInlineInputsForNodeId[currentNodeId]
+          for inputName in ["placement", "offsetX", "offsetY", "blendMode", "inputImage"]:
+            if inline.hasKey(inputName):
+              fullFrameDraw = false
+        if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
+          context.decodeTargetImage = context.image
+          context.decodeTargetScalingMode = placement
+          setDecodeTargetHint = true
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -331,10 +438,20 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               "stacktrace": e.getStackTrace()
             })
 
+      if setDecodeTargetHint:
+        context.decodeTargetImage = nil
+        context.decodeTargetScalingMode = ""
+
       if asDataNode and cacheEnabled:
+        var cacheExprActive = false
+        var cacheExprValue: JsonNode = newJNull()
+        if cacheExpressionEnabled:
+          (cacheExprActive, cacheExprValue) =
+            evalCacheExpression(self, context, currentNodeId, cacheExpression)
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
+                           cacheExprActive, cacheExprValue,
                            %*{"keyword": keyword}):
           (proc (): Value =
             getInterpretedApp(keyword, app, context)
@@ -475,7 +592,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var builtInputKey = %*{}
       var builtAnyInput = false
 
-      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec) = readCacheConfig(currentNode)
+      let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
 
       if self.codeInputsForNodeId.hasKey(currentNodeId):
         let connectedArgs = self.codeInputsForNodeId[currentNodeId]
@@ -533,9 +651,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
 
       if asDataNode and cacheEnabled:
+        var cacheExprActive = false
+        var cacheExprValue: JsonNode = newJNull()
+        if cacheExpressionEnabled:
+          (cacheExprActive, cacheExprValue) =
+            evalCacheExpression(self, context, currentNodeId, cacheExpression)
         result = withCache(self, currentNodeId,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
+                           cacheExprActive, cacheExprValue,
                            %*{"nodeType": "code"},
                            computeFresh)
       else:
@@ -738,6 +862,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     cacheValues: initTable[NodeId, Value](),
     cacheTimes: initTable[NodeId, float](),
     cacheKeys: initTable[NodeId, JsonNode](),
+    cacheExprs: initTable[NodeId, JsonNode](),
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
@@ -747,13 +872,25 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     for key in persistedState.keys:
       scene.state[key] = persistedState[key]
 
+  # stateFields carries every field (including private ones); older callers
+  # that only set publicStateFields still get their state seeded.
+  let allStateFields =
+    if exportedScene.stateFields.len > 0: exportedScene.stateFields
+    else: exportedScene.publicStateFields
   var typeMap = initTable[string, string]()
-  for field in exportedScene.publicStateFields:
+  for field in allStateFields:
     typeMap[field.name] = field.fieldType
     if not scene.state.hasKey(field.name) and not field.value.isNil and field.value.kind != JNull:
       if field.value.kind == JString and field.value.getStr().len == 0:
         continue
-      scene.state[field.name] = valueToJson(valueFromJsonByType(field.value, field.fieldType))
+      var seedValue = field.value
+      if field.fieldType == "json" and seedValue.kind == JString:
+        # Compiled scenes parse JSON string defaults; stay consistent
+        try:
+          seedValue = parseJson(seedValue.getStr())
+        except CatchableError:
+          discard
+      scene.state[field.name] = valueToJson(valueFromJsonByType(seedValue, field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
@@ -967,8 +1104,17 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
   if payload.isNil or payload.kind != JObject: return
   for field in scene.publicStateFields:
     let key = field.name
-    if payload.hasKey(key) and payload[key] != scene.state{key}:
-      scene.state[key] = copy(payload[key])
+    if payload.hasKey(key):
+      var value = copy(payload[key])
+      # Control forms deliver json fields as strings; parse them so state
+      # nodes hand consumers real objects, like seeded defaults do
+      if field.fieldType == "json" and value.kind == JString:
+        try:
+          value = parseJson(value.getStr())
+        except CatchableError:
+          discard
+      if value != scene.state{key}:
+        scene.state[key] = value
 
 proc eventFilterValue(value: JsonNode): string =
   if value.isNil:
@@ -988,28 +1134,6 @@ proc eventFilterValue(value: JsonNode): string =
     return "null"
   else:
     return $value
-
-proc eventPayloadValueMatches(payload: JsonNode, key: string, expected: string): bool =
-  if expected.len == 0:
-    return true
-  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
-    return false
-  let value = payload[key]
-  case value.kind
-  of JString:
-    return value.getStr() == expected
-  of JInt:
-    return $value.getInt() == expected
-  of JFloat:
-    return $value.getFloat() == expected
-  of JBool:
-    if value.getBool():
-      return expected == "true"
-    return expected == "false"
-  of JNull:
-    return expected == "null"
-  else:
-    return $value == expected
 
 proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
   if node.data.isNil or node.data.kind != JObject:
@@ -1167,7 +1291,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     nodes: scene.nodes,
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
-    publicStateFields: scene.fields,
+    stateFields: scene.fields,
+    # Fields without an explicit access default to public for interpreted
+    # scenes to keep older scenes.json exports controllable.
+    publicStateFields: scene.fields.filterIt(it.access != "private"),
     persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
     init: init,
     render: render,

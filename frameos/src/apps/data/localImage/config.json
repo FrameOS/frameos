@@ -34,7 +34,7 @@
       "value": "",
       "required": false,
       "label": "Optional metadata state key",
-      "hint": "Enter a state key to persist metadata about the last image. Stores: {path, filename, index, total, width, height, exif: {...} }"
+      "hint": "Enter a state key to persist metadata about the last image. Stores: {path, filename, index, total, width, height, exif: {make, model, lensModel, exposureTime, fNumber, iso, focalLength, dateTimeOriginal, gpsLatitude, ...}, exifSummary}. EXIF is parsed from JPEG files; exifSummary is a one-line photographer credit."
     },
     {
       "name": "search",

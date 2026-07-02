@@ -11,6 +11,7 @@ import { scheduleLogic } from './scheduleLogic'
 import { CalendarDaysIcon } from '@heroicons/react/24/outline'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { FrameScene, ScheduledEvent, StateField } from '../../../../types'
+import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from '../../../workspace/sceneDrag'
@@ -396,21 +397,19 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
         {event.payload.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
-              {eventFields
-                .filter((field) => field.access === 'public')
-                .map((field) => (
-                  <Field key={field.name} name={field.name} label={field.label || field.name}>
-                    {({ value, onChange }) => (
-                      <StateFieldEdit
-                        field={field}
-                        value={value}
-                        onChange={onChange}
-                        currentState={{}}
-                        stateChanges={{}}
-                      />
-                    )}
-                  </Field>
-                ))}
+              {visiblePublicStateFields(eventFields, event.payload?.state ?? {}).map((field) => (
+                <Field key={field.name} name={field.name} label={field.label || field.name}>
+                  {({ value, onChange }) => (
+                    <StateFieldEdit
+                      field={field}
+                      value={value}
+                      onChange={onChange}
+                      currentState={{}}
+                      stateChanges={{}}
+                    />
+                  )}
+                </Field>
+              ))}
             </div>
           </Group>
         ) : null}

@@ -16,7 +16,7 @@ export interface NodeCacheProps {
 
 export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
   const { updateNodeData } = useActions(appNodeLogic)
-  const { node, configJson } = useValues(appNodeLogic)
+  const { node, configJson, codeNodeLanguage } = useValues(appNodeLogic)
   if (!node) {
     return <div />
   }
@@ -92,11 +92,15 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
               {getValue('expressionEnabled') && (
                 <div className="pl-4 space-y-2">
                   <div className="space-y-1">
-                    <Label>Nim expression</Label>
+                    <Label>{codeNodeLanguage === 'js' ? 'JavaScript expression' : 'Nim expression'}</Label>
                     <TextArea
                       value={getValue('expression')}
                       onChange={(value) => setValue('expression', value.replaceAll('\n', ''))}
-                      placeholder={`e.g. now().format("yyyy-MM-dd")`}
+                      placeholder={
+                        codeNodeLanguage === 'js'
+                          ? `e.g. new Date().toDateString()`
+                          : `e.g. now().format("yyyy-MM-dd")`
+                      }
                       rows={3}
                       className="font-mono"
                     />

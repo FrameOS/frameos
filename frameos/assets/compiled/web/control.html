@@ -64,22 +64,100 @@
         function buildFrameUrl(path) {
             return getBasePath() + path;
         }
-        function postRender() { 
-            fetch(buildFrameUrl('event/render'), { 
-                method: 'POST', 
-                headers: headers, 
-                body: JSON.stringify({}) 
-            }) 
+        function postRender() {
+            fetch(buildFrameUrl('event/render'), {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({})
+            })
         }
-        function postSetSceneState() { 
-            var data={render:true,state:{/*$$fieldsSubmitHtml$$*/}};
-            fetch(buildFrameUrl('event/setSceneState'), { 
-                method: 'POST', 
-                headers: headers, 
-                body: JSON.stringify(data) 
-            }); 
-            document.getElementById('setSceneState').value = 'Now wait a while...'; 
+        // Field metadata (name, type, showIf conditions) injected by the server
+        var frameosFields = [/*$$fieldsMetaJson$$*/];
+        function frameosFieldValue(field) {
+            var el = document.getElementById(field.name);
+            if (!el) { return undefined; }
+            var raw = el.value;
+            if (field.type === 'integer') { return parseInt(raw); }
+            if (field.type === 'float') { return parseFloat(raw); }
+            if (field.type === 'boolean') { return raw === 'true'; }
+            return raw;
         }
+        function frameosFieldValues() {
+            var values = {};
+            for (var i = 0; i < frameosFields.length; i++) {
+                var field = frameosFields[i];
+                var value = frameosFieldValue(field);
+                if (value !== undefined) { values[field.name] = value; }
+            }
+            return values;
+        }
+        // Mirrors evaluateShowIf in the FrameOS frontend: top level conditions
+        // are OR-ed, "and" blocks are AND-ed, no conditions means visible.
+        function frameosMatchCondition(condition, values, currentFieldName) {
+            if (condition && condition.and) {
+                for (var i = 0; i < condition.and.length; i++) {
+                    if (!frameosMatchCondition(condition.and[i], values, currentFieldName)) { return false; }
+                }
+                return true;
+            }
+            var field = (condition && condition.field) || currentFieldName || '';
+            var operator = condition ? condition.operator : undefined;
+            var value = condition ? condition.value : undefined;
+            var actual = values[field];
+            if (operator === 'eq') { return actual === value; }
+            if (operator === 'ne') { return actual !== value; }
+            if (operator === 'gt') { return actual > value; }
+            if (operator === 'lt') { return actual < value; }
+            if (operator === 'gte') { return actual >= value; }
+            if (operator === 'lte') { return actual <= value; }
+            if (operator === 'in') { return !!(value && value.includes && value.includes(actual)); }
+            if (operator === 'notIn') { return !(value && value.includes && value.includes(actual)); }
+            if (operator === 'empty') { return !actual; }
+            if (operator === 'notEmpty') { return !!actual; }
+            return value !== undefined ? value === actual : !!actual;
+        }
+        function frameosShouldShow(conditions, values, currentFieldName) {
+            if (!conditions || conditions.length === 0) { return true; }
+            for (var i = 0; i < conditions.length; i++) {
+                if (frameosMatchCondition(conditions[i], values, currentFieldName)) { return true; }
+            }
+            return false;
+        }
+        function frameosFieldVisible(field, values) {
+            return frameosShouldShow(field.showIf, values, field.name);
+        }
+        function frameosUpdateFieldVisibility() {
+            var values = frameosFieldValues();
+            for (var i = 0; i < frameosFields.length; i++) {
+                var field = frameosFields[i];
+                var wrapper = document.getElementById('stateField--' + field.name);
+                if (wrapper) {
+                    wrapper.style.display = frameosFieldVisible(field, values) ? '' : 'none';
+                }
+            }
+        }
+        function postSetSceneState() {
+            var values = frameosFieldValues();
+            var state = {};
+            for (var i = 0; i < frameosFields.length; i++) {
+                var field = frameosFields[i];
+                if (frameosFieldVisible(field, values) && values[field.name] !== undefined) {
+                    state[field.name] = values[field.name];
+                }
+            }
+            var data = { render: true, state: state };
+            fetch(buildFrameUrl('event/setSceneState'), {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(data)
+            });
+            document.getElementById('setSceneState').value = 'Now wait a while...';
+        }
+        window.addEventListener('DOMContentLoaded', function () {
+            frameosUpdateFieldVisibility();
+            document.addEventListener('input', frameosUpdateFieldVisibility);
+            document.addEventListener('change', frameosUpdateFieldVisibility);
+        });
         function postSetCurrentScene() { 
             var data={sceneId: document.getElementById('currentSceneId').value};
             fetch(buildFrameUrl('event/setCurrentScene'), { 

@@ -81,6 +81,62 @@ def _apply_frame_sync_deploy_revision(frame: Frame, frame_dict: dict[str, Any]) 
     setattr(frame, "_frame_sync_deploy_revision", revision)
 
 
+def _embedded_status_failure_context(body: bytes) -> str | None:
+    try:
+        status = json.loads(body.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    if not isinstance(status, dict):
+        return None
+
+    parts: list[str] = []
+    version = status.get("version")
+    if isinstance(version, str) and version:
+        parts.append(f"version={version}")
+
+    storage = status.get("storage")
+    if isinstance(storage, dict):
+        state_bytes = storage.get("stateBytes")
+        flash_bytes = storage.get("flashBytes")
+        if isinstance(state_bytes, int):
+            parts.append(f"stateBytes={state_bytes}")
+        if isinstance(flash_bytes, int):
+            parts.append(f"flashBytes={flash_bytes}")
+
+    memory = status.get("memory")
+    if isinstance(memory, dict):
+        internal_free = memory.get("internalFree")
+        psram_free = memory.get("psramFree")
+        if isinstance(internal_free, int):
+            parts.append(f"internalFree={internal_free}")
+        if isinstance(psram_free, int):
+            parts.append(f"psramFree={psram_free}")
+
+    scenes = status.get("scenes")
+    if isinstance(scenes, dict):
+        for key in ("loaded", "available"):
+            value = scenes.get(key)
+            if isinstance(value, int):
+                parts.append(f"scenes.{key}={value}")
+
+    return ", ".join(parts) if parts else None
+
+
+async def _embedded_status_failure_context_for_frame(frame: Frame, redis: Redis) -> str | None:
+    try:
+        status, body, _headers = await _fetch_frame_http_bytes(
+            frame,
+            redis,
+            path="/status",
+            method="GET",
+        )
+    except Exception as exc:
+        return f"status unavailable: {exc}"
+    if status >= 300:
+        return f"status endpoint returned HTTP {status}"
+    return _embedded_status_failure_context(body)
+
+
 def deploy_lock_key(frame_id: int) -> str:
     return f"frame:deploy:lock:{frame_id}"
 
@@ -804,7 +860,10 @@ class FrameDeployWorkflow:
                 headers={"Content-Type": "application/json"},
             )
             if status >= 300:
-                message = body.decode("utf-8", errors="replace")
+                message = body.decode("utf-8", errors="replace").strip()
+                context = await _embedded_status_failure_context_for_frame(frame, self.redis)
+                if context:
+                    message = f"{message} ({context})" if message else context
                 raise RuntimeError(f"Scene upload failed with status {status}: {message}")
 
             status, body, _headers = await _fetch_frame_http_bytes(

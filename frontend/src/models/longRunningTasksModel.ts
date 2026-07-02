@@ -164,6 +164,16 @@ function latestRunningTask(tasks: LongRunningTask[], payload: FinishTaskPayload)
   return index === -1 ? null : tasks[index]
 }
 
+function latestRunningDeployTaskWithActiveStatus(tasks: LongRunningTask[], frameId: number): LongRunningTask | null {
+  for (let index = tasks.length - 1; index >= 0; index -= 1) {
+    const task = tasks[index]
+    if (task.status === 'running' && task.frameId === frameId && task.kind === 'deploy' && task.activeStatusSeen) {
+      return task
+    }
+  }
+  return null
+}
+
 function finishLatestTask(tasks: LongRunningTask[], payload: FinishTaskPayload): LongRunningTask[] {
   const index = latestRunningTaskIndex(tasks, payload)
   if (index === -1) {
@@ -614,7 +624,12 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
         return
       }
       if (DEPLOY_FAILED_STATUSES.has(status)) {
+        const deployTask = latestRunningDeployTaskWithActiveStatus(values.tasks, frame.id)
+        if (!deployTask) {
+          return
+        }
         actions.taskFailed({
+          taskId: deployTask.id,
           frameId: frame.id,
           kind: 'deploy',
           detail: 'Deploy did not complete',

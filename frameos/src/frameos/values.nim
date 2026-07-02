@@ -188,3 +188,28 @@ proc logCodeNodeOutput*[T](scene: FrameScene; nodeId: NodeId; rawValue: T) =
   else:
     let value: Value = rawValue
     logCodeNodeOutput(scene, nodeId, value)
+
+proc eventPayloadValueMatches*(payload: JsonNode, key: string, expected: string): bool =
+  ## Event listener filters: does the payload's value for key match the
+  ## configured filter string? Empty filters match anything. Shared by the
+  ## interpreter and compiled scene codegen.
+  if expected.len == 0:
+    return true
+  if payload.isNil or payload.kind != JObject or not payload.hasKey(key):
+    return false
+  let value = payload[key]
+  case value.kind
+  of JString:
+    return value.getStr() == expected
+  of JInt:
+    return $value.getInt() == expected
+  of JFloat:
+    return $value.getFloat() == expected
+  of JBool:
+    if value.getBool():
+      return expected == "true"
+    return expected == "false"
+  of JNull:
+    return expected == "null"
+  else:
+    return $value == expected

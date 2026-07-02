@@ -105,7 +105,11 @@ proc run*(self: App, context: ExecutionContext) =
       self.scene.state[self.appConfig.counterStateKey] = %*(self.counter)
 
     try:
-      nextImage = some(readImage(path))
+      # SVG has no dimensions probe; everything else reads memory-bounded.
+      if path.endsWith(".svg"):
+        nextImage = some(readImage(path))
+      else:
+        nextImage = some(readImageWithDisplayBounds(path))
       if self.appConfig.seconds > 0:
         self.lastImage = nextImage
         self.lastExpiry = epochTime() + self.appConfig.seconds

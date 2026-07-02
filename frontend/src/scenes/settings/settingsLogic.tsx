@@ -30,6 +30,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     homeAssistant: settings.homeAssistant ?? {},
     frameOS: settings.frameOS ?? {},
     github: settings.github ?? {},
+    immich: settings.immich ?? {},
     openAI: settings.openAI ?? {},
     posthog: settings.posthog ?? {},
     personal: {

@@ -260,7 +260,7 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     payload: dict = {}
     if not isinstance(frame_settings, dict):
         return payload
-    for key in ("homeAssistant", "openAI", "unsplash"):
+    for key in ("homeAssistant", "immich", "openAI", "unsplash"):
         value = frame_settings.get(key)
         if isinstance(value, dict):
             payload[key] = value

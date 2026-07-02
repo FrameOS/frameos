@@ -1,0 +1,192 @@
+[
+  {
+    "id": "5dcce227-a996-5c59-b782-145758d827c1",
+    "name": "Chart",
+    "settings": {
+      "refreshInterval": 300,
+      "backgroundColor": "#000000",
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "data",
+        "label": "Chart data (JSON)",
+        "type": "json",
+        "value": "{\"labels\": [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"], \"series\": [{\"name\": \"Indoor\", \"values\": [21.5, 21.8, 22.4, 22.1, 21.6, 20.9, 21.2]}, {\"name\": \"Outdoor\", \"values\": [12.1, 14.3, 16.8, 15.2, 11.4, 9.8, 10.5]}]}",
+        "persist": "disk",
+        "access": "public",
+        "hint": "Accepts [1,2,3], [{\"label\": \"Mon\", \"value\": 3}, ...] or {\"labels\": [...], \"series\": [...]}. Wire a data app into the chart node to plot live data."
+      },
+      {
+        "name": "chartType",
+        "label": "Chart type",
+        "type": "select",
+        "value": "line",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "line",
+          "bar",
+          "area"
+        ]
+      },
+      {
+        "name": "title",
+        "label": "Title",
+        "type": "string",
+        "value": "Temperature this week",
+        "persist": "disk",
+        "access": "public"
+      },
+      {
+        "name": "seconds",
+        "label": "Refresh interval in seconds",
+        "type": "float",
+        "value": "900",
+        "persist": "disk",
+        "access": "public"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "ab3bccc8-9ef5-5028-939d-f5404de302eb",
+        "type": "event",
+        "position": {
+          "x": -220,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "type": "app",
+        "position": {
+          "x": 450,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render/chart",
+          "config": {
+            "axisColor": "#e8e8e8"
+          }
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "1f9266f6-a68a-591c-b50a-c9c9f61d50bf",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -140
+        },
+        "data": {
+          "keyword": "data"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "9da2fbfc-bd06-5765-b916-b85131766045",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": -70
+        },
+        "data": {
+          "keyword": "chartType"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "d291ba9f-76a6-5f1e-90df-7b5a3e392b44",
+        "type": "state",
+        "position": {
+          "x": 120,
+          "y": 0
+        },
+        "data": {
+          "keyword": "title"
+        },
+        "width": 220,
+        "height": 48
+      },
+      {
+        "id": "1df2b991-1dd6-5e63-9d60-3d7028ffd917",
+        "type": "app",
+        "position": {
+          "x": 850,
+          "y": 100
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "e680696a-f69a-532c-a576-f1a41b09615f",
+        "type": "state",
+        "position": {
+          "x": 850,
+          "y": -20
+        },
+        "data": {
+          "keyword": "seconds"
+        },
+        "width": 220,
+        "height": 48
+      }
+    ],
+    "edges": [
+      {
+        "id": "0b52ce51-f33a-5734-9149-4b3871468f42",
+        "source": "ab3bccc8-9ef5-5028-939d-f5404de302eb",
+        "sourceHandle": "next",
+        "target": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "808b8b6d-37f9-58f3-a7bf-42380ea0d281",
+        "source": "1f9266f6-a68a-591c-b50a-c9c9f61d50bf",
+        "sourceHandle": "fieldOutput",
+        "target": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "targetHandle": "fieldInput/data"
+      },
+      {
+        "id": "9a23f80c-6fc9-5f62-9731-7b3b7a50f468",
+        "source": "9da2fbfc-bd06-5765-b916-b85131766045",
+        "sourceHandle": "fieldOutput",
+        "target": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "targetHandle": "fieldInput/chartType"
+      },
+      {
+        "id": "614bef06-66ae-5eca-9955-fb6b57d41041",
+        "source": "d291ba9f-76a6-5f1e-90df-7b5a3e392b44",
+        "sourceHandle": "fieldOutput",
+        "target": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "targetHandle": "fieldInput/title"
+      },
+      {
+        "id": "1aa1e81a-58ff-5184-a080-301c2df47e3a",
+        "source": "20206dfe-458d-59ae-9310-0ba29b157e57",
+        "sourceHandle": "next",
+        "target": "1df2b991-1dd6-5e63-9d60-3d7028ffd917",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "7d2c4b84-252e-5acb-9eed-57b6ae9d7133",
+        "source": "e680696a-f69a-532c-a576-f1a41b09615f",
+        "sourceHandle": "fieldOutput",
+        "target": "1df2b991-1dd6-5e63-9d60-3d7028ffd917",
+        "targetHandle": "fieldInput/duration"
+      }
+    ]
+  }
+]

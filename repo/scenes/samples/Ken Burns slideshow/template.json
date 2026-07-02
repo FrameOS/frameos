@@ -1,0 +1,9 @@
+{
+  "name": "Ken Burns slideshow",
+  "description": "Smooth slow zoom and pan across your photos. Only for HDMI/LCD frames that render many times per second - e-ink panels refresh far too slowly for this.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

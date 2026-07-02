@@ -250,8 +250,8 @@ def test_event_listener_filters_match_configured_payload_fields():
     source = write_scene_nim(frame, scene)
 
     assert 'of "keyUp":' in source
-    assert 'frameosEventPayloadValueMatches(context.payload, "key", "Enter")' in source
-    assert 'frameosEventPayloadValueMatches(context.payload, "code", "13")' in source
+    assert 'eventPayloadValueMatches(context.payload, "key", "Enter")' in source
+    assert 'eventPayloadValueMatches(context.payload, "code", "13")' in source
 
 
 def test_shared_scene_registry_loads_scene_libraries():
@@ -359,3 +359,43 @@ def test_shared_scene_bundle_library_exports_scene_symbols_without_scene_wrapper
     assert "hostChannels.setSharedHostCallbacks(logHook, sendEventHook)" in source
     assert ".frameos_scene_init(logHook, sendEventHook)" not in source
     assert "result = cast[pointer](scene_myscene.exportedScene)" in source
+
+
+def test_public_state_fields_include_value_and_show_if():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
+        ],
+        "edges": [],
+        "fields": [
+            {"name": "showMetadata", "type": "boolean", "value": "true", "access": "public", "persist": "disk"},
+            {
+                "name": "metadataPosition",
+                "type": "select",
+                "options": ["top", "bottom"],
+                "value": "bottom",
+                "access": "public",
+                "persist": "disk",
+                "showIf": [{"field": "showMetadata", "operator": "eq", "value": True}],
+            },
+            {"name": "counter", "type": "integer", "value": "5", "access": "private", "persist": "memory"},
+        ],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+        "apps": {},
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, scene)
+
+    assert 'StateField(name: "showMetadata"' in source
+    assert "value: %*(true)" in source
+    # showIf conditions survive into the generated StateField as JSON
+    assert (
+        'showIf: parseJson("[{\\"field\\": \\"showMetadata\\", \\"operator\\": \\"eq\\", \\"value\\": true}]")'
+        in source
+    )
+    # private fields stay out of PUBLIC_STATE_FIELDS but still seed state
+    assert 'StateField(name: "counter"' not in source
+    assert '"counter": %*(5)' in source

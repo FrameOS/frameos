@@ -1,24 +1,30 @@
 {
-    "framePort": 8787,
-    "frameHost": "localhost",
-    "serverHost": "localhost",
-    "serverPort": 8989,
-    "serverApiKey": "test-api-key",
-    "serverSendLogs": false,
-    "width": 320,
-    "height": 480,
-    "device": "http.upload",
-    "deviceConfig": {
-        "uploadUrl": "",
-        "uploadHeaders": []
-    },
-    "color": null,
-    "backgroundColor": "blue",
-    "interval": 1.0,
-    "metricsInterval": 60.0,
-    "scalingMode": "cover",
-    "frameAccess": "public",
-    "rotate": 0,
-    "settings": {},
-    "assetsPath": "../frameos/assets/copied"
+  "framePort": 8787,
+  "frameHost": "localhost",
+  "serverHost": "localhost",
+  "serverPort": 8989,
+  "serverApiKey": "test-api-key",
+  "serverSendLogs": false,
+  "width": 320,
+  "height": 480,
+  "device": "http.upload",
+  "deviceConfig": {
+    "uploadUrl": "",
+    "uploadHeaders": []
+  },
+  "color": null,
+  "backgroundColor": "blue",
+  "interval": 1.0,
+  "metricsInterval": 60.0,
+  "scalingMode": "cover",
+  "frameAccess": "public",
+  "rotate": 0,
+  "settings": {},
+  "assetsPath": "../frameos/assets/copied",
+  "network": {
+    "networkCheck": false
+  },
+  "timeZoneUpdates": {
+    "enabled": false
+  }
 }

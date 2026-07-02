@@ -12,7 +12,11 @@ import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
+import {
+  embeddedUsbApiCanUse,
+  embeddedUsbLogsModel,
+  runEmbeddedUsbApiCommand,
+} from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -109,7 +113,17 @@ const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.s
 const embeddedUsbImageRefreshesInFlight = new Set<number>()
 const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
 const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
+const EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS = 45000
+const EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS = 30000
+const EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB = 250
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
+
+export function embeddedUsbUploadTimeoutMs(payloadBytes: number): number {
+  return Math.max(
+    EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS,
+    EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS + Math.ceil(payloadBytes / 1024) * EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB
+  )
+}
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
   try {
@@ -224,7 +238,7 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
   }
 }
 
-function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
+export function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
   if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
     return
   }
@@ -669,48 +683,11 @@ export const framesModel = kea<framesModelType>([
         detail: 'Deploy request sent',
       })
       try {
-        const frame = values.frames[id]
-        if (fastDeploy && (frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
-          const frameResponse = await apiFetch(`/api/frames/${id}`)
-          if (!frameResponse.ok) {
-            throw new Error('Failed to fetch frame before USB deploy')
-          }
-          const currentFrame = (await frameResponse.json())?.frame as FrameType
-          const scenesPayload = JSON.stringify(currentFrame.scenes ?? [])
-          longRunningTasksModel.actions.updateTaskProgress({
-            taskId,
-            frameId: id,
-            kind: 'deploy',
-            progressCurrent: null,
-            progressTotal: null,
-            detail: 'Uploading scenes over USB',
-          })
-          await runEmbeddedUsbApiCommand(id, 'upload-scenes', {
-            payload: scenesPayload,
-            timeoutMs: 45000,
-          })
-          const completeResponse = await apiFetch(
-            `/api/frames/${id}/embedded/usb_deploy_complete${taskIdQuery(taskId)}`,
-            { method: 'POST' }
-          )
-          if (!completeResponse.ok) {
-            throw new Error('USB deploy completed, but backend deploy state update failed')
-          }
-          actions.loadFrame(id)
-          longRunningTasksModel.actions.finishTask({
-            taskId,
-            frameId: id,
-            kind: 'deploy',
-            status: 'success',
-            detail: 'Fast deploy completed over USB',
-          })
-        } else {
-          const response = fastDeploy
-            ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-            : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
-          if (!response.ok) {
-            throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
-          }
+        const response = fastDeploy
+          ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+          : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

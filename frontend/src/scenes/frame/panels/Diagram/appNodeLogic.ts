@@ -10,14 +10,13 @@ import {
   DiagramNode,
   MarkdownField,
   OutputField,
-  ConfigFieldCondition,
-  ConfigFieldConditionAnd,
   StateNodeData,
   FieldType,
   toFieldType,
   FrameScene,
   SceneNodeData,
 } from '../../../../types'
+import { filterFieldsByShowIf, stateFieldShowIfValues } from '../../../../utils/showIf'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import equal from 'fast-deep-equal'
@@ -358,6 +357,8 @@ export const appNodeLogic = kea<appNodeLogicType>([
         s.allDefaultValues,
         s.fieldInputFields,
         s.nodeOutputFields,
+        s.event,
+        s.scene,
       ],
       (
         allFields,
@@ -366,75 +367,26 @@ export const appNodeLogic = kea<appNodeLogicType>([
         nodeConfig,
         allDefaultValues,
         fieldInputFields,
-        nodeOutputFields
+        nodeOutputFields,
+        event,
+        scene
       ): (AppConfigField | MarkdownField)[] | null => {
-        const values = { ...allDefaultValues, ...nodeConfig }
-
-        function matchValue(
-          currentField: AppConfigField | MarkdownField,
-          condition: ConfigFieldCondition | ConfigFieldConditionAnd
-        ): boolean {
-          if ('and' in condition) {
-            return condition.and.every((condition) => matchValue(currentField, condition))
-          }
-
-          const { value, operator, field: fieldName } = condition
-          const field = fieldName || ('name' in currentField ? currentField.name : null) || ''
-
-          const actualValue =
-            fieldName === '.meta.showOutput'
-              ? showOutput
-              : fieldName === '.meta.showNextPrev'
-              ? showNextPrev
-              : values[field]
-
-          if (operator === 'eq') {
-            if (actualValue === value) return true
-          } else if (operator === 'ne') {
-            if (actualValue !== value) return true
-          } else if (operator === 'gt') {
-            if (actualValue > value) return true
-          } else if (operator === 'lt') {
-            if (actualValue < value) return true
-          } else if (operator === 'gte') {
-            if (actualValue >= value) return true
-          } else if (operator === 'lte') {
-            if (actualValue <= value) return true
-          } else if (operator === 'in') {
-            if (value.includes(actualValue)) return true
-          } else if (operator === 'notIn') {
-            if (!value.includes(actualValue)) return true
-          } else if (operator === 'empty') {
-            if (!actualValue && !fieldInputFields.includes(field) && !nodeOutputFields.includes(field)) return true
-          } else if (operator === 'notEmpty') {
-            if (!!actualValue || fieldInputFields.includes(field) || nodeOutputFields.includes(field)) return true
-          } else if (operator === null && value === null && fieldName?.startsWith('.meta.')) {
-            if (actualValue) return true
-          } else {
-            if (
-              value !== undefined
-                ? value === actualValue
-                : !!actualValue || fieldInputFields.includes(field) || nodeOutputFields.includes(field)
-            )
-              return true
-          }
-          return false
+        if (!allFields) {
+          return null
         }
-
-        return (
-          allFields?.filter((configField) => {
-            const conditions = configField.showIf ?? []
-            if (conditions.length === 0) {
-              return true
-            }
-            for (const condition of conditions) {
-              if (matchValue(configField, condition)) {
-                return true
-              }
-            }
-            return false
-          }) ?? null
-        )
+        // State fields and custom event fields are declared with real types,
+        // and their showIf conditions carry typed values; coerce the string
+        // form values so "eq true" style conditions match, like every other
+        // form does. App config.json fields keep raw values for backwards
+        // compatibility with hand-written string comparisons.
+        const usesTypedFields = !!event || !!scene
+        const values = usesTypedFields
+          ? stateFieldShowIfValues(allFields.filter((field) => 'name' in field) as AppConfigField[], nodeConfig)
+          : { ...allDefaultValues, ...nodeConfig }
+        return filterFieldsByShowIf(allFields, values, {
+          metaValues: { '.meta.showOutput': showOutput, '.meta.showNextPrev': showNextPrev },
+          connectedFields: [...fieldInputFields, ...nodeOutputFields],
+        })
       },
       { resultEqualityCheck: equal },
     ],
