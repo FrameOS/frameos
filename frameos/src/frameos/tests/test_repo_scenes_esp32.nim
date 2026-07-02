@@ -161,9 +161,12 @@ for kind, templateDir in walkDir(SamplesDir):
       skippedNetwork.add(sceneLabel)
       continue
 
-    # These scenes default to /srv/assets; point them at the fixture dir
+    # These scenes default to /srv/assets; point them at the fixture dir.
+    # Ken Burns gets a huge cycle so both renders land inside one image hold.
     let persistedState =
-      if templateName in ["SD card image", "Ken Burns slideshow"]:
+      if templateName == "Ken Burns slideshow":
+        %*{"imageFolder": fixtureDir, "cycleSeconds": 3600}
+      elif templateName == "SD card image":
         %*{"imageFolder": fixtureDir}
       else: %*{}
     renderChainErrors = @[]
@@ -196,6 +199,13 @@ for kind, templateDir in walkDir(SamplesDir):
       let metadata = scene.state{"imageMetadata"}
       doAssert not metadata.isNil and metadata{"filename"}.getStr() in fixtureNames,
         "Ken Burns scene did not load the fixture image"
+      # The image must HOLD for a whole zoom cycle: the sequential counter
+      # advances once on the first load and then stays put across renders
+      # (a cache regression here makes slideshows flick a new image every
+      # render)
+      doAssert scene.state{"counter"}.getInt() == 1,
+        "Ken Burns image advanced between renders: counter = " &
+        $scene.state{"counter"}.getInt()
 
     if templateName == "Chart":
       # The demo data must produce chart marks, not a "no data" message:

@@ -33,20 +33,21 @@
       },
       {
         "name": "cycleSeconds",
-        "label": "Seconds per zoom cycle",
+        "label": "Seconds per image",
         "type": "float",
-        "value": "600",
+        "value": "60",
         "persist": "disk",
-        "access": "public"
+        "access": "public",
+        "hint": "How long each image is shown; one full zoom cycle per image."
       },
       {
         "name": "seconds",
         "label": "Seconds between renders",
         "type": "float",
-        "value": "10",
+        "value": "0.1",
         "persist": "disk",
         "access": "public",
-        "hint": "How often to redraw. Lower is smoother; e-ink frames should stay above their refresh time."
+        "hint": "How often to redraw. 0.04-0.1 gives smooth motion on LCD/HDMI frames; keep this well above the panel refresh time on e-ink."
       },
       {
         "name": "counter",
@@ -110,11 +111,11 @@
           "cache": {
             "enabled": true,
             "inputEnabled": true,
-            "durationEnabled": true,
-            "duration": "state{\"cycleSeconds\"}.getFloat()",
-            "expressionEnabled": false,
-            "expression": null,
-            "expressionType": null
+            "durationEnabled": false,
+            "duration": "",
+            "expressionEnabled": true,
+            "expression": "Math.floor(Date.now() / 1000 / (state.cycleSeconds > 0 ? state.cycleSeconds : 60))",
+            "expressionType": "integer"
           }
         },
         "width": 300,
