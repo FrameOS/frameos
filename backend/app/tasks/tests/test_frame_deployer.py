@@ -159,6 +159,14 @@ def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
     assert (destination_dir / "lgpio.h").read_text(encoding="utf-8") == "native lgpio header\n"
 
 
+@pytest.fixture(autouse=True)
+def _no_local_pixie_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A pixie checkout next to the repo would trigger the override log call,
+    # which needs a real db session; point the override somewhere empty so
+    # these tests behave the same on dev machines and CI.
+    monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(tmp_path / "no-pixie"))
+
+
 async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:
     source_dir = tmp_path / "frameos"
     temp_dir = tmp_path / "temp"
@@ -254,7 +262,7 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert commands
     assert "cd " in commands[0]
     assert "nimble assets -y && nimble setup &&" in commands[0]
-    assert "-d:malloc" in commands[0]
+    assert "-d:useMalloc" in commands[0]
     assert "--define:frameosVersion:1.2.3+abc" in commands[0]
 
 
@@ -317,9 +325,9 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
-    assert "-d:malloc" in commands[0]
+    assert "-d:useMalloc" in commands[0]
     assert "src/drivers/shared/httpUpload.nim" in commands[1]
-    assert "-d:malloc" in commands[1]
+    assert "-d:useMalloc" in commands[1]
     assert "--define:frameosDriverLibrary" in commands[1]
     assert "--opt:size" in commands[1]
     assert "--stackTrace:off" in commands[1]
@@ -412,9 +420,9 @@ async def test_create_local_build_archive_generates_shared_scene_makefiles(
     await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
-    assert "-d:malloc" in commands[0]
+    assert "-d:useMalloc" in commands[0]
     assert "src/scenes/shared/scene_myscene.nim" in commands[1]
-    assert "-d:malloc" in commands[1]
+    assert "-d:useMalloc" in commands[1]
     assert "--define:frameosSharedLibrary" in commands[1]
     scene_makefile = build_dir / "scenes" / "myscene" / "Makefile"
     scene_makefile_text = scene_makefile.read_text(encoding="utf-8")
@@ -490,9 +498,9 @@ async def test_create_local_build_archive_generates_shared_scene_bundle_makefile
     await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared-scenes")
 
     assert len(commands) == 2
-    assert "-d:malloc" in commands[0]
+    assert "-d:useMalloc" in commands[0]
     assert "src/scenes/scenes_bundle.nim" in commands[1]
-    assert "-d:malloc" in commands[1]
+    assert "-d:useMalloc" in commands[1]
     assert "--define:frameosSharedLibrary" in commands[1]
     scene_makefile = build_dir / "scenes" / "Makefile"
     scene_makefile_text = scene_makefile.read_text(encoding="utf-8")
