@@ -43,7 +43,8 @@ let scenesJson = """
       "access": "public", "persist": "disk",
       "showIf": [{"field": "showMetadata", "operator": "eq", "value": true}]
     },
-    {"name": "showMetadata", "type": "boolean", "value": "true", "access": "public", "persist": "disk"}
+    {"name": "showMetadata", "type": "boolean", "value": "true", "access": "public", "persist": "disk"},
+    {"name": "data", "type": "json", "value": "", "access": "public", "persist": "memory"}
   ]
 }]
 """
@@ -53,7 +54,7 @@ doAssert inputs.len == 1
 let sceneInput = inputs[0]
 
 block test_state_field_parsing:
-  doAssert sceneInput.fields.len == 5
+  doAssert sceneInput.fields.len == 6
   let searchField = sceneInput.fields[0]
   doAssert searchField.name == "search"
   doAssert searchField.access == "public"
@@ -66,10 +67,10 @@ block test_state_field_parsing:
 
 block test_public_state_field_filtering:
   let exported = buildInterpretedScenes(inputs)[sceneInput.id]
-  doAssert exported.stateFields.len == 5
+  doAssert exported.stateFields.len == 6
   let publicNames = exported.publicStateFields.mapIt(it.name)
   # Private fields are excluded; missing access defaults to public
-  doAssert publicNames == @["search", "legacyNoAccess", "metadataPosition", "showMetadata"]
+  doAssert publicNames == @["search", "legacyNoAccess", "metadataPosition", "showMetadata", "data"]
 
 block test_private_fields_still_seed_state:
   setUploadedInterpretedScenes(buildInterpretedScenes(inputs))
@@ -95,6 +96,23 @@ block test_private_fields_still_seed_state:
   doAssert scene.state{"search"}.getStr() == "cats"
   doAssert scene.state{"counter"}.getInt() == 5
 
+  setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+block test_set_scene_state_parses_json_strings:
+  setUploadedInterpretedScenes(buildInterpretedScenes(inputs))
+  resetInterpretedScenes()
+  let scene = InterpretedFrameScene(init(sceneInput.id, testConfig(), testLogger(testConfig()), %*{}))
+  # Control forms deliver json values as strings; setSceneState parses them
+  var context = ExecutionContext(
+    scene: scene, event: "setSceneState",
+    payload: %*{"state": {"data": "{\"a\": 1}", "search": "{\"a\": 1}"}},
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: 0.0
+  )
+  runEvent(scene, context)
+  doAssert scene.state{"data"}.kind == JObject
+  doAssert scene.state{"data"}{"a"}.getInt() == 1
+  # string fields keep the raw string
+  doAssert scene.state{"search"}.getStr() == "{\"a\": 1}"
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
 echo "test_interpreter_state_fields: all assertions passed"

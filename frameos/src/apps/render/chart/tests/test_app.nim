@@ -226,3 +226,15 @@ suite "render/chart config and rendering":
     let image = app.get(ExecutionContext(image: newImage(120, 80), hasImage: true))
     check drawnPixels(image) > 0
     check logs.items.len == 0
+
+suite "render/chart string-wrapped data":
+  test "json delivered as a string parses like the object form":
+    let text = """{"labels": ["a", "b"], "series": [{"values": [1, 2]}]}"""
+    let fromString = parseChartData(%*text)
+    check fromString.series.len == 1
+    check fromString.series[0].values == @[1.0, 2.0]
+    check fromString.labels == @["a", "b"]
+
+  test "junk strings give no data instead of raising":
+    check parseChartData(%*"not json").series.len == 0
+    check parseChartData(%*"").series.len == 0

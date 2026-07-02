@@ -1104,8 +1104,17 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
   if payload.isNil or payload.kind != JObject: return
   for field in scene.publicStateFields:
     let key = field.name
-    if payload.hasKey(key) and payload[key] != scene.state{key}:
-      scene.state[key] = copy(payload[key])
+    if payload.hasKey(key):
+      var value = copy(payload[key])
+      # Control forms deliver json fields as strings; parse them so state
+      # nodes hand consumers real objects, like seeded defaults do
+      if field.fieldType == "json" and value.kind == JString:
+        try:
+          value = parseJson(value.getStr())
+        except CatchableError:
+          discard
+      if value != scene.state{key}:
+        scene.state[key] = value
 
 proc eventFilterValue(value: JsonNode): string =
   if value.isNil:

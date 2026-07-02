@@ -109,6 +109,15 @@ proc parseChartData*(node: JsonNode): ChartData =
   result = ChartData()
   if node.isNil:
     return
+  # State fields and control forms often deliver json values as strings
+  if node.kind == JString:
+    let text = node.getStr().strip()
+    if text.len == 0:
+      return
+    try:
+      return parseChartData(parseJson(text))
+    except CatchableError:
+      return
   case node.kind
   of JArray:
     if node.len == 0:
@@ -248,9 +257,23 @@ proc init*(self: App) =
   self.appConfig.minY = self.appConfig.minY.strip()
   self.appConfig.maxY = self.appConfig.maxY.strip()
 
-proc inkColor(self: App): Color =
+proc canvasIsDark(image: Image): bool =
+  ## Sample a few canvas pixels to tell dark backgrounds from light ones
+  if image.isNil or image.width <= 0 or image.height <= 0:
+    return false
+  var luminance = 0.0
+  var samples = 0
+  for (fx, fy) in [(0.5, 0.5), (0.2, 0.2), (0.8, 0.2), (0.2, 0.8), (0.8, 0.8)]:
+    let px = image.unsafe[int(fx * float(image.width - 1)), int(fy * float(image.height - 1))]
+    luminance += 0.21 * px.r.float + 0.72 * px.g.float + 0.07 * px.b.float
+    inc samples
+  luminance / samples.float < 100.0
+
+proc inkColor(self: App, image: Image): Color =
   if self.appConfig.axisColor.a > 0:
     self.appConfig.axisColor
+  elif canvasIsDark(image):
+    color(0.9, 0.9, 0.9, 1)
   else:
     color(0, 0, 0, 1)
 
@@ -266,7 +289,7 @@ proc drawTextBox(self: App, image: Image, text: string, font: Font,
 
 proc drawMessage(self: App, image: Image, message: string) =
   let size = clamp(min(image.width, image.height).float / 8.0, 8.0, 32.0)
-  let font = newFont(getDefaultTypeface(), size, self.inkColor())
+  let font = newFont(getDefaultTypeface(), size, self.inkColor(image))
   self.drawTextBox(image, message, font, 0.0, 0.0, image.width.float, image.height.float,
       CenterAlign, MiddleAlign)
 
@@ -321,7 +344,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     let fontSize = max(self.appConfig.fontSize, 1.0)
     let padding = max(self.appConfig.padding, 0.0)
     let lineWidth = max(self.appConfig.lineWidth, 0.5)
-    let ink = self.inkColor()
+    let ink = self.inkColor(image)
     let typeface = getDefaultTypeface()
 
     let includeZero = chartType in ["bar", "area"]
