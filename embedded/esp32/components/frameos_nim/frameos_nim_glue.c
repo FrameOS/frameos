@@ -873,6 +873,37 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
     int64_t content_length = esp_http_client_fetch_headers(client);
     *out_status = esp_http_client_get_status_code(client);
 
+    /* Follow redirects manually: this open/read flow bypasses
+     * esp_http_client_perform(), the only place ESP-IDF honors
+     * max_redirection_count. Shared-album short links (photos.app.goo.gl)
+     * and http->https upgrades would otherwise surface as 30x errors. */
+    int redirects = 0;
+    while (redirects < 5 &&
+           (*out_status == 301 || *out_status == 302 || *out_status == 303 ||
+            *out_status == 307 || *out_status == 308)) {
+        char drain[512];
+        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {}
+        if (esp_http_client_set_redirection(client) != ESP_OK) break;
+        err = esp_http_client_open(client, body_len);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
+                     esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            return http_error_response(out_status, out_len, "redirect connect failed: %s",
+                                       esp_err_to_name(err));
+        }
+        if (body != NULL && body_len > 0) {
+            if (esp_http_client_write(client, body, body_len) < 0) {
+                ESP_LOGW(TAG, "%s %s: redirect body write failed", method ? method : "GET", url);
+                esp_http_client_cleanup(client);
+                return http_error_response(out_status, out_len, "request body write failed");
+            }
+        }
+        content_length = esp_http_client_fetch_headers(client);
+        *out_status = esp_http_client_get_status_code(client);
+        redirects++;
+    }
+
     if (max_bytes == 0) max_bytes = 10 * 1024 * 1024;
     size_t nim_copy_limit = max_bytes;
     /* Clamp to live PSRAM instead of a fixed constant: half the largest free

@@ -111,8 +111,10 @@ when defined(frameosEmbedded):
       maxSeconds = DefaultFetchMaxSeconds,
       headers: seq[SimpleHttpHeader] = @[]
     ): BoundedHttpResponse =
-    ## esp_http_client follows redirects and bounds every phase with its own
-    ## timeout; maxSeconds is approximated by the C side's overall timeout.
+    ## The C glue follows up to 5 redirects itself (the manual open/read flow
+    ## bypasses esp_http_client_perform's redirect handling) and bounds every
+    ## phase with its own timeout; maxSeconds is approximated by the C side's
+    ## overall timeout.
     var response = boundedRequestBuffer(
       url,
       httpMethod = httpMethod,
