@@ -1,0 +1,131 @@
+{
+  "name": "Chart",
+  "description": "Graphs and charts",
+  "category": "render",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputImage",
+      "type": "image",
+      "value": "",
+      "required": false,
+      "label": "Image to render on (optional)",
+      "showIf": [
+        {
+          "field": ".meta.showOutput"
+        }
+      ]
+    },
+    {
+      "name": "data",
+      "type": "json",
+      "value": "[]",
+      "required": true,
+      "label": "Chart data",
+      "hint": "Accepts [1,2,3], [{\"label\": \"Mon\", \"value\": 3}, ...] or {\"series\": [{\"name\": \"a\", \"color\": \"#ff0000\", \"values\": [1, 2]}], \"labels\": [\"Mon\", \"Tue\"]}"
+    },
+    {
+      "name": "chartType",
+      "type": "select",
+      "options": ["line", "bar", "area"],
+      "value": "line",
+      "required": true,
+      "label": "Chart type"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Title"
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "value": "#2a78d6",
+      "required": true,
+      "label": "Series color",
+      "hint": "First series uses this color, extra series get colors from a built-in palette"
+    },
+    {
+      "name": "transparentBackground",
+      "type": "boolean",
+      "value": "true",
+      "required": true,
+      "label": "Transparent background"
+    },
+    {
+      "name": "backgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "required": false,
+      "label": "Background color",
+      "showIf": [{ "field": "transparentBackground", "operator": "eq", "value": "false" }]
+    },
+    {
+      "name": "axisColor",
+      "type": "color",
+      "value": "#333333",
+      "required": true,
+      "label": "Axis & text color"
+    },
+    {
+      "name": "showGrid",
+      "type": "boolean",
+      "value": "true",
+      "required": true,
+      "label": "Show grid lines"
+    },
+    {
+      "name": "showLabels",
+      "type": "boolean",
+      "value": "true",
+      "required": true,
+      "label": "Show axis labels"
+    },
+    {
+      "name": "minY",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Min Y (empty = auto)",
+      "placeholder": "auto"
+    },
+    {
+      "name": "maxY",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Max Y (empty = auto)",
+      "placeholder": "auto"
+    },
+    {
+      "name": "lineWidth",
+      "type": "float",
+      "value": "2",
+      "required": false,
+      "label": "Line width",
+      "showIf": [{ "field": "chartType", "operator": "in", "value": ["line", "area"] }]
+    },
+    {
+      "name": "fontSize",
+      "type": "float",
+      "value": "16",
+      "required": true,
+      "label": "Font size"
+    },
+    {
+      "name": "padding",
+      "type": "float",
+      "value": "16",
+      "required": true,
+      "label": "Padding"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
