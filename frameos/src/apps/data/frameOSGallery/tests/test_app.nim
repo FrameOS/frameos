@@ -17,10 +17,11 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeGalleryDownload(url: string, maxBytes: int, target: Image): Image =
+proc fakeGalleryDownload(url: string, maxBytes: int, target: Image, fit: ScaledDecodeFit): Image =
   galleryHookUrl = url
   galleryHookMaxBytes = maxBytes
   check target.isNil
+  check fit == fitCover
   newImage(2, 3)
 
 suite "data/frameOSGallery app":

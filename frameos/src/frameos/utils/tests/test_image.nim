@@ -71,6 +71,47 @@ suite "image helpers":
     expect(ValueError):
       discard decodeDataUrl("data:image/png;base64")
 
+  test "decodeDataUrlInto honors aspect-preserving fits":
+    # 6x2 source with three vertical bands: red red green green blue blue
+    let source = newImage(6, 2)
+    for y in 0 ..< 2:
+      for x in 0 ..< 6:
+        let color =
+          if x < 2: rgbx(255, 0, 0, 255)
+          elif x < 4: rgbx(0, 255, 0, 255)
+          else: rgbx(0, 0, 255, 255)
+        source.data[source.dataIndex(x, y)] = color
+    let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+    let url = "data:image/png;base64," & encode(pngData)
+    let yellow = rgbx(255, 255, 0, 255)
+
+    # cover: scale to fill 2x2, center-cropping to the green band
+    let coverTarget = newImage(2, 2)
+    coverTarget.fill(yellow)
+    discard decodeDataUrlInto(url, coverTarget, fitCover)
+    for i in 0 ..< 4:
+      check coverTarget.data[i].g > 200
+      check coverTarget.data[i].r < 50
+
+    # contain: whole source fits inside, leaving untouched borders
+    let containTarget = newImage(2, 2)
+    containTarget.fill(yellow)
+    discard decodeDataUrlInto(url, containTarget, fitContain)
+    var untouched = 0
+    for i in 0 ..< 4:
+      if containTarget.data[i] == yellow:
+        inc untouched
+    check untouched > 0
+
+    # stretch: fills the target and pulls the red band in, unlike cover
+    # (all green) and contain (yellow borders remain)
+    let stretchTarget = newImage(2, 2)
+    stretchTarget.fill(yellow)
+    discard decodeDataUrlInto(url, stretchTarget, fitStretch)
+    for i in 0 ..< 4:
+      check stretchTarget.data[i] != yellow
+    check stretchTarget.data[stretchTarget.dataIndex(0, 0)].r > 100
+
   when defined(frameosEmbedded):
     test "embedded pointer decoder accepts guarded small JPEGs":
       let fixture = "../../pixie/tests/fileformats/jpeg/masters/8x8.jpg"

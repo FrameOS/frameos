@@ -35,10 +35,22 @@ proc contextImageTarget*(self: AppRoot, context: ExecutionContext,
     else: self.frameConfig.renderHeight()
   newImage(width, height)
 
+proc scaledDecodeFitForFrame*(frameConfig: FrameConfig): ScaledDecodeFit =
+  ## The decode-time fit that best matches the frame's scaling mode when an
+  ## image is decoded straight into a region-sized target on embedded builds.
+  ## Hosts decode downloads at native resolution, so the fit only applies
+  ## on embedded targets.
+  if frameConfig.isNil:
+    return fitCover
+  case frameConfig.scalingMode
+  of "contain": fitContain
+  of "stretch": fitStretch
+  else: fitCover
+
 proc downloadImageForTarget*(url: string, maxBytes: int, target: Image = nil,
-    headers: seq[SimpleHttpHeader] = @[]): Image =
+    headers: seq[SimpleHttpHeader] = @[], fit = fitCover): Image =
   if not target.isNil:
-    return downloadImageInto(url, target, maxBytes = maxBytes, headers = headers)
+    return downloadImageInto(url, target, maxBytes = maxBytes, headers = headers, fit = fit)
   downloadImage(url, maxBytes = maxBytes, headers = headers)
 
 proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, url: string,
@@ -51,5 +63,6 @@ proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, 
     url,
     self.contextImageTarget(context, fallbackWidth, fallbackHeight),
     maxBytes = byteLimit,
-    headers = headers
+    headers = headers,
+    fit = scaledDecodeFitForFrame(self.frameConfig)
   )
