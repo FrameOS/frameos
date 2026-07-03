@@ -104,6 +104,13 @@ proc displayDecodeDimensions*(dimensions: ImageDimensions,
     maxPixels = DisplayDecodeMaxPixels): tuple[width: int, height: int] =
   displayDecodeDimensions(dimensions.width, dimensions.height, maxEdge, maxPixels)
 
+proc scaledFitPlacement*(fit: ScaledDecodeFit): string =
+  ## The scaleAndDrawImage placement equivalent to a decode-time fit.
+  case fit
+  of fitCover: "cover"
+  of fitContain: "contain"
+  of fitStretch: "stretch"
+
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
   if magick != "":
@@ -190,16 +197,22 @@ proc decodeImageWithDisplayBounds*(data: var string,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): Image =
   refreshDecodeBudget()
-  let dimensions = decodeImageDimensions(data)
-  let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
-  if target.width != dimensions.width or target.height != dimensions.height:
-    if useImageMagick():
-      let converted = decodeImageWithImageMagick(data, target.width, target.height)
-      if converted.isSome:
-        data = ""
-        GC_fullCollect()
-        return converted.get()
-    return decodeImageScaled(data, target.width, target.height)
+  # Formats without a dimension prober (e.g. SVG) decode unscaled below.
+  var dimensions = ImageDimensions(width: 0, height: 0)
+  try:
+    dimensions = decodeImageDimensions(data)
+  except PixieError:
+    discard
+  if dimensions.width > 0 and dimensions.height > 0:
+    let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
+    if target.width != dimensions.width or target.height != dimensions.height:
+      if useImageMagick():
+        let converted = decodeImageWithImageMagick(data, target.width, target.height)
+        if converted.isSome:
+          data = ""
+          GC_fullCollect()
+          return converted.get()
+      return decodeImageScaled(data, target.width, target.height)
 
   result = decodeImageWithFallback(data)
   data = ""
@@ -265,18 +278,19 @@ when defined(frameosEmbedded):
     raise newException(PixieError,
       &"Direct on-device decode for {format} images over {EmbeddedSmallDecodeCopyBytes div 1024}K needs a low-memory decoder; fetched {len div 1024}K")
 
-  proc decodeImageWithFallback*(data: pointer, len: int, target: Image): Image =
+  proc decodeImageWithFallback*(data: pointer, len: int, target: Image,
+      fit = fitCover): Image =
     if data == nil or len <= 0:
       raise newException(PixieError, "Unsupported image file format: empty response")
     let format = embeddedImageFormat(data, len)
     if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
       GC_fullCollect()
-      when compiles(decodeJpegScaledInto(data, len, target)):
-        decodeJpegScaledInto(data, len, target)
+      when compiles(decodeJpegScaledInto(data, len, target, fit)):
+        decodeJpegScaledInto(data, len, target, fit)
         return target
       else:
         if len <= EmbeddedMaxDirectDecodeCopyBytes:
-          target.scaleAndDrawImage(decodeImageWithFallback(copyImageBuffer(data, len)), "cover")
+          target.scaleAndDrawImage(decodeImageWithFallback(copyImageBuffer(data, len)), scaledFitPlacement(fit))
           return target
         raise newException(PixieError,
           &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {len div 1024}K")
@@ -286,26 +300,27 @@ when defined(frameosEmbedded):
           &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {len div 1024}K")
       guardEmbeddedDirectDecode(data, len, format)
       GC_fullCollect()
-      when compiles(decodePngScaledInto(data, len, target)):
-        decodePngScaledInto(data, len, target)
+      when compiles(decodePngScaledInto(data, len, target, fit)):
+        decodePngScaledInto(data, len, target, fit)
         return target
       else:
-        target.scaleAndDrawImage(decodeImageWithFallback(data, len), "cover")
+        target.scaleAndDrawImage(decodeImageWithFallback(data, len), scaledFitPlacement(fit))
         return target
     decodeImageWithFallback(data, len)
 
-  proc decodeImageWithFallback*(data: var string, target: Image): Image =
+  proc decodeImageWithFallback*(data: var string, target: Image,
+      fit = fitCover): Image =
     if data.len <= 0:
       raise newException(PixieError, "Unsupported image file format: empty response")
     let format = embeddedImageFormat(data.cstring, data.len)
     if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
       GC_fullCollect()
-      when compiles(decodeJpegScaledInto(data, target)):
-        decodeJpegScaledInto(data, target)
+      when compiles(decodeJpegScaledInto(data, target, fit)):
+        decodeJpegScaledInto(data, target, fit)
         return target
       else:
         if data.len <= EmbeddedMaxDirectDecodeCopyBytes:
-          target.scaleAndDrawImage(decodeImageWithFallback(data), "cover")
+          target.scaleAndDrawImage(decodeImageWithFallback(data), scaledFitPlacement(fit))
           return target
         raise newException(PixieError,
           &"Direct on-device JPEG scaling is not available in this Pixie build; fetched {data.len div 1024}K")
@@ -315,11 +330,11 @@ when defined(frameosEmbedded):
           &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {data.len div 1024}K")
       guardEmbeddedDirectDecode(data.cstring, data.len, format)
       GC_fullCollect()
-      when compiles(decodePngScaledInto(data, target)):
-        decodePngScaledInto(data, target)
+      when compiles(decodePngScaledInto(data, target, fit)):
+        decodePngScaledInto(data, target, fit)
         return target
       else:
-        target.scaleAndDrawImage(decodeImageWithFallback(data), "cover")
+        target.scaleAndDrawImage(decodeImageWithFallback(data), scaledFitPlacement(fit))
         return target
     decodeImageWithFallback(data)
 
@@ -335,16 +350,17 @@ when defined(frameosEmbedded):
     ": " & snippet
 
 when not defined(frameosEmbedded):
-  proc decodeImageWithFallback*(data: var string, target: Image): Image =
+  proc decodeImageWithFallback*(data: var string, target: Image,
+      fit = fitCover): Image =
     if not target.isNil and target.width > 0 and target.height > 0:
       if useImageMagick():
         let converted = decodeImageWithImageMagick(data, target.width, target.height)
         if converted.isSome:
-          target.scaleAndDrawImage(converted.get(), "stretch")
+          target.scaleAndDrawImage(converted.get(), scaledFitPlacement(fit))
           data = ""
           GC_fullCollect()
           return target
-      return decodeImageScaledInto(data, target)
+      return decodeImageScaledInto(data, target, fit)
     decodeImageWithFallback(data)
 
 proc readImageWithFallback*(path: string): Image =
@@ -503,7 +519,7 @@ proc decodeDataUrl*(dataUrl: string): Image =
     return decodeImageWithFallback(decodedData)
   return decodeImageWithDisplayBounds(decodedData)
 
-proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
+proc decodeDataUrlInto*(dataUrl: string, target: Image, fit = fitCover): Image =
   if not dataUrl.startsWith("data:"):
     raise newException(ValueError, "Invalid data URL.")
   let commaIndex = dataUrl.find(',')
@@ -519,7 +535,7 @@ proc decodeDataUrlInto*(dataUrl: string, target: Image): Image =
     else:
       decodeUrl(dataBody)
   if not target.isNil and decodedData.len > 0:
-    return decodeImageWithFallback(decodedData, target)
+    return decodeImageWithFallback(decodedData, target, fit)
   return decodeImageWithFallback(decodedData)
 
 when defined(frameosEmbedded):
@@ -561,7 +577,7 @@ when defined(frameosEmbedded):
       return url
 
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
-      headers: seq[SimpleHttpHeader] = @[]):
+      headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     try:
@@ -569,7 +585,7 @@ when defined(frameosEmbedded):
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
       let image =
         if not target.isNil:
-          decodeImageWithFallback(response.body, response.bodyLen, target)
+          decodeImageWithFallback(response.body, response.bodyLen, target, fit)
         else:
           decodeImageWithFallback(response.body, response.bodyLen)
       result = (image, "")
@@ -577,10 +593,10 @@ when defined(frameosEmbedded):
       response.freeHttpBufferResponse()
 
   proc downloadImageFromBuffer(url: string, maxBytes: int, target: Image = nil,
-      headers: seq[SimpleHttpHeader] = @[]):
+      headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
     let directUrl = embeddedSizedRemoteImageUrl(url, target)
-    downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers)
+    downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers, fit)
 
 proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[SimpleHttpHeader] = @[]): Image =
   if url.startsWith("data:"):
@@ -615,29 +631,33 @@ proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     result = (decodeImageWithDisplayBounds(decodeContent, maxEdge = 0, maxPixels = 0), content)
 
 proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
-    headers: seq[SimpleHttpHeader] = @[]): Image =
-  if url.startsWith("data:"):
-    return decodeDataUrlInto(url, target)
+    headers: seq[SimpleHttpHeader] = @[], fit = fitCover): Image =
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, target, headers).image
+    if url.startsWith("data:"):
+      return decodeDataUrlInto(url, target, fit)
+    return downloadImageFromBuffer(url, maxBytes, target, headers, fit).image
   else:
+    # Decode-into-target stays an embedded strategy; on hosts consumers
+    # need the native resolution and scale it themselves
+    if url.startsWith("data:"):
+      return decodeDataUrl(url)
     var response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
     var content = response.body
     if looksLikeSvg(content):
       return decodeImageWithFallback(content)
-    # Decode-into-target stays an embedded strategy; on hosts consumers
-    # need the native resolution and scale it themselves
     return decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
 
 proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageDownloadBytes,
-    headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
-  if url.startsWith("data:"):
-    return (decodeDataUrlInto(url, target), "")
+    headers: seq[SimpleHttpHeader] = @[], fit = fitCover): tuple[image: Image, data: string] =
   when defined(frameosEmbedded):
-    return downloadImageFromBuffer(url, maxBytes, target, headers)
+    if url.startsWith("data:"):
+      return (decodeDataUrlInto(url, target, fit), "")
+    return downloadImageFromBuffer(url, maxBytes, target, headers, fit)
   else:
+    if url.startsWith("data:"):
+      return (decodeDataUrl(url), "")
     let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
