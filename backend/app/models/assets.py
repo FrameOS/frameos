@@ -1,3 +1,4 @@
+import shlex
 import uuid
 import os
 
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session, mapped_column
 from app.models.frame import Frame
 from app.database import Base
 from arq import ArqRedis as Redis
-from app.utils.remote_exec import _use_remote, run_commands, run_command, upload_file
+from app.utils.remote_exec import _use_remote, run_command, upload_file
 from app.models.log import new_log as log
 
 default_assets_path = "/srv/assets"
@@ -29,34 +30,49 @@ class Assets(Base):
 
 async def sync_assets(db: Session, redis: Redis, frame: Frame):
     assets_path = frame.assets_path or default_assets_path
-    await make_asset_folders(db, redis, frame, assets_path)
+    writable = await make_asset_folders(db, redis, frame, assets_path)
     if frame.upload_fonts != "none":
-        await upload_font_assets(db, redis, frame, assets_path)
+        if writable:
+            await upload_font_assets(db, redis, frame, assets_path)
+        else:
+            await log(db, redis, frame.id, "stderr",
+                      f"Warning: {assets_path} is not writable, skipping font sync")
 
-async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_path: str):
-    if frame.upload_fonts != "none":
-        cmd = (
-            f"if [ ! -d {assets_path}/fonts ]; then "
-            f"  sudo mkdir -p {assets_path}/fonts && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
-            f"elif [ ! -w {assets_path} ]; then "
-            f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
-            f"elif [ ! -w {assets_path}/fonts ]; then "
-            f"  echo 'User lacks write access to {assets_path}/fonts. Fixing...'; "
-            f"  sudo chown -R $(whoami) {assets_path}/fonts && sudo chmod -R u+rwX,go+rX {assets_path}/fonts; "
-            f"fi"
-        )
-    else:
-        cmd = (
-            f"if [ ! -d {assets_path} ]; then "
-            f"  sudo mkdir -p {assets_path} && sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
-            f"elif [ ! -w {assets_path} ]; then "
-            f"  echo 'User lacks write access to {assets_path}. Fixing...'; "
-            f"  sudo chown -R $(whoami) {assets_path} && sudo chmod -R u+rwX,go+rX {assets_path}; "
-            f"fi"
-        )
+ASSETS_WRITABLE_MARKER = "FRAMEOS_ASSETS_WRITABLE"
 
-    await run_commands(db, redis, frame, [cmd])
+async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_path: str) -> bool:
+    # Best-effort: the assets path can sit on a vfat partition (PhotoPainter
+    # images), where chown/chmod always fail and an unclean shutdown leaves the
+    # mount read-only until remounted. Never fail the deploy over permissions.
+    target = f"{assets_path}/fonts" if frame.upload_fonts != "none" else assets_path
+    p = shlex.quote(assets_path)
+    t = shlex.quote(target)
+    cmd = (
+        f'p={p}; t={t}; '
+        f'mp=$(df -P "$p" 2>/dev/null | awk \'NR==2 {{print $6}}\'); '
+        f'fstype=$(awk -v m="$mp" \'$2 == m {{f=$3}} END {{print f}}\' /proc/mounts 2>/dev/null); '
+        f'opts=$(awk -v m="$mp" \'$2 == m {{o=$4}} END {{print o}}\' /proc/mounts 2>/dev/null); '
+        f'case ",$opts," in *,ro,*) '
+        f'  echo "$mp is mounted read-only, remounting read-write"; '
+        f'  sudo mount -o remount,rw "$mp" || echo "Warning: failed to remount $mp read-write"; '
+        f'esac; '
+        f'[ -d "$t" ] || sudo mkdir -p "$t" || echo "Warning: failed to create $t"; '
+        f'if [ ! -w "$p" ] || [ ! -w "$t" ]; then '
+        f'  echo "User lacks write access to $p. Fixing..."; '
+        f'  case "$fstype" in '
+        f'    vfat|exfat|msdos) echo "Skipping chown/chmod on $fstype filesystem";; '
+        f'    *) '
+        f'      fix="$p"; if [ -w "$p" ]; then fix="$t"; fi; '
+        f'      sudo chown -R "$(whoami)" "$fix" || echo "Warning: failed to chown $fix"; '
+        f'      sudo chmod -R u+rwX,go+rX "$fix" || echo "Warning: failed to chmod $fix";; '
+        f'  esac; '
+        f'fi; '
+        f'if [ -w "$p" ] && [ -w "$t" ]; then echo {ASSETS_WRITABLE_MARKER}; '
+        f'else echo "Warning: $p is not writable"; fi'
+    )
+
+    _, stdout, _ = await run_command(db, redis, frame, cmd)
+    return ASSETS_WRITABLE_MARKER in stdout
 
 async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_path: str):
     if await _use_remote(frame, redis):
