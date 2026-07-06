@@ -155,7 +155,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
     """Element type (for seqs)."""
-    if field_type in ("string", "text", "select", "font"):
+    if field_type in ("string", "text", "select", "font", "date"):
         return "string"
     if field_type == "integer":
         return "int"
@@ -624,7 +624,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             )
         else:
             # Map Value -> field setter
-            if field_type in ("string", "text", "select", "font"):
+            if field_type in ("string", "text", "select", "font", "date"):
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asString()")
             elif field_type == "integer":
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt().int")
