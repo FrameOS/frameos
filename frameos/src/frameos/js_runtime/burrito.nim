@@ -290,22 +290,26 @@ const
   JS_CFUNC_generic* = 0
   JS_CFUNC_generic_magic* = 1
 
-# Constants as procs that call the C macros
+# Constants as procs that call the C macros.
+# NOTE: these must assign to `result` instead of emitting a bare C `return`:
+# a raw return skips the epilogue Nim generates with --stackTrace:on
+# (popFrame), which leaves `framePtr` pointing at a dead stack frame and
+# crashes on the next instrumented call.
 proc jsUndefined*(ctx: ptr JSContext): JSValue =
   ## Return JavaScript undefined value
-  {.emit: "return JS_UNDEFINED;".}
+  {.emit: "`result` = JS_UNDEFINED;".}
 
 proc jsNull*(ctx: ptr JSContext): JSValue =
   ## Return JavaScript null value
-  {.emit: "return JS_NULL;".}
+  {.emit: "`result` = JS_NULL;".}
 
 proc jsTrue*(ctx: ptr JSContext): JSValue =
   ## Return JavaScript true value
-  {.emit: "return JS_TRUE;".}
+  {.emit: "`result` = JS_TRUE;".}
 
 proc jsFalse*(ctx: ptr JSContext): JSValue =
   ## Return JavaScript false value
-  {.emit: "return JS_FALSE;".}
+  {.emit: "`result` = JS_FALSE;".}
 
 # High-level wrapper types
 type
@@ -403,26 +407,27 @@ proc toNimInt64Ext*(ctx: ptr JSContext, val: JSValueConst): int64 =
     raise newException(JSException, "Failed to convert JSValue to int64")
   result = res
 
+# Same as above: assign to `result`, never emit a bare C `return`.
 proc jsIsUndefined*(val: JSValueConst): bool =
-  {.emit: "return JS_IsUndefined(`val`);".}
+  {.emit: "`result` = JS_IsUndefined(`val`);".}
 
 proc jsIsNull*(val: JSValueConst): bool =
-  {.emit: "return JS_IsNull(`val`);".}
+  {.emit: "`result` = JS_IsNull(`val`);".}
 
 proc jsIsBool*(val: JSValueConst): bool =
-  {.emit: "return JS_IsBool(`val`);".}
+  {.emit: "`result` = JS_IsBool(`val`);".}
 
 proc jsIsNumber*(val: JSValueConst): bool =
-  {.emit: "return JS_IsNumber(`val`);".}
+  {.emit: "`result` = JS_IsNumber(`val`);".}
 
 proc jsIsString*(val: JSValueConst): bool =
-  {.emit: "return JS_IsString(`val`);".}
+  {.emit: "`result` = JS_IsString(`val`);".}
 
 proc jsIsObject*(val: JSValueConst): bool =
-  {.emit: "return JS_IsObject(`val`);".}
+  {.emit: "`result` = JS_IsObject(`val`);".}
 
 proc jsIsBigInt*(ctx: ptr JSContext, val: JSValueConst): bool =
-  {.emit: "return JS_IsBigInt(`ctx`, `val`);".}
+  {.emit: "`result` = JS_IsBigInt(`ctx`, `val`);".}
 
 # Conversion from Nim types to JSValue
 proc nimStringToJS*(ctx: ptr JSContext, str: string): JSValue =
