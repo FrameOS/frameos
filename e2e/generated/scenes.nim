@@ -32,10 +32,16 @@ import scenes/scene_renderTextRich as scene_renderTextRich
 import scenes/scene_renderTextRichOver as scene_renderTextRichOver
 import scenes/scene_renderTextSplit as scene_renderTextSplit
 import scenes/scene_sceneNodes as scene_sceneNodes
+import scenes/scene_weatherCurrent as scene_weatherCurrent
+import scenes/scene_weatherDaily as scene_weatherDaily
+import scenes/scene_weatherHourly as scene_weatherHourly
+import scenes/scene_weatherIconSheet as scene_weatherIconSheet
+import scenes/scene_weatherStacked as scene_weatherStacked
+import scenes/scene_weatherStackedLow as scene_weatherStackedLow
 
 let defaultSceneId* = some("black".SceneId)
 
-const sceneOptions*: array[30, tuple[id: SceneId, name: string]] = [
+const sceneOptions*: array[36, tuple[id: SceneId, name: string]] = [
   ("black".SceneId, "Black"),
   ("blue".SceneId, "Blue"),
   ("dataCodeFloat".SceneId, "Numeric Code Nodes"),
@@ -66,6 +72,12 @@ const sceneOptions*: array[30, tuple[id: SceneId, name: string]] = [
   ("renderTextRichOver".SceneId, "Rich text overflow"),
   ("renderTextSplit".SceneId, "Text Split"),
   ("sceneNodes".SceneId, "3"),
+  ("weatherCurrent".SceneId, "Weather: current"),
+  ("weatherDaily".SceneId, "Weather: daily"),
+  ("weatherHourly".SceneId, "Weather: hourly"),
+  ("weatherIconSheet".SceneId, "Weather: icon sheet"),
+  ("weatherStacked".SceneId, "Weather: stacked"),
+  ("weatherStackedLow".SceneId, "Weather: stacked low contrast"),
 ]
 
 proc getExportedScenes*(): Table[SceneId, ExportedScene] =
@@ -100,3 +112,9 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["renderTextRichOver".SceneId] = scene_renderTextRichOver.exportedScene
   result["renderTextSplit".SceneId] = scene_renderTextSplit.exportedScene
   result["sceneNodes".SceneId] = scene_sceneNodes.exportedScene
+  result["weatherCurrent".SceneId] = scene_weatherCurrent.exportedScene
+  result["weatherDaily".SceneId] = scene_weatherDaily.exportedScene
+  result["weatherHourly".SceneId] = scene_weatherHourly.exportedScene
+  result["weatherIconSheet".SceneId] = scene_weatherIconSheet.exportedScene
+  result["weatherStacked".SceneId] = scene_weatherStacked.exportedScene
+  result["weatherStackedLow".SceneId] = scene_weatherStackedLow.exportedScene

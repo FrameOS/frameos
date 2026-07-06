@@ -1,0 +1,9 @@
+{
+  "name": "Weather",
+  "description": "Current conditions plus hourly and daily forecasts from Open-Meteo. Several display modes, adaptive layouts and a low contrast e-ink theme.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 320,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}
