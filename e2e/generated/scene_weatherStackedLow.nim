@@ -21,7 +21,7 @@ let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
   StateField(name: "lowContrast", label: "Low contrast (e-ink friendly)", fieldType: "boolean", options: @[], placeholder: "", required: false, secret: false, value: %*(true)),
   StateField(name: "hours", label: "Hours to show", fieldType: "integer", options: @[], placeholder: "", required: false, secret: false, value: %*(8)),
   StateField(name: "days", label: "Days to show", fieldType: "integer", options: @[], placeholder: "", required: false, secret: false, value: %*(7)),
-  StateField(name: "stackedMode", label: "Forecast shown in stacked mode", fieldType: "select", options: @["hourly", "daily"], placeholder: "", required: false, secret: false, value: %*("daily"))
+  StateField(name: "stackedMode", label: "Forecast shown in stacked mode", fieldType: "select", options: @["hourly", "daily"], placeholder: "", required: false, secret: false, value: %*("daily"), showIf: parseJson("[{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"stacked\"}]"))
 ]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
