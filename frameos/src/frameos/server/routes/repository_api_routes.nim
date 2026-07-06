@@ -108,18 +108,36 @@ proc loadTemplateDefinition(repositorySlug: string, templateSlug: string): JsonN
     templateData["image"] =
       %("/api/repositories/system/" & repositorySlug & "/templates/" & templateSlug & "/image")
 
+  # Scenes can be large (embedded app sources), so the listing only carries
+  # a URL; clients fetch the scenes on install or when otherwise needed.
   let scenesReference = templateData{"scenes"}.getStr("")
   if scenesReference.len > 0:
+    templateData.delete("scenes")
     let scenesPath = resolveTemplateResource(repositorySlug, templateSlug, scenesReference)
     if scenesPath.len > 0 and repoSceneAssetExists(scenesPath):
-      try:
-        templateData["scenes"] = parseJson(getRepoSceneAsset(scenesPath))
-      except CatchableError:
-        templateData["scenes"] = newJArray()
-    else:
-      templateData["scenes"] = newJArray()
+      templateData["scenesUrl"] =
+        %("/api/repositories/system/" & repositorySlug & "/templates/" & templateSlug & "/scenes.json")
 
   templateData
+
+proc systemTemplateScenesPath(repositorySlug: string, templateSlug: string): string {.gcsafe.} =
+  if not validPathSegment(repositorySlug) or not validPathSegment(templateSlug):
+    return ""
+
+  let templatePath = RepoSceneAssetPrefix & repositorySlug & "/" & templateSlug & "/template.json"
+  if not repoSceneAssetExists(templatePath):
+    return ""
+
+  let templateData =
+    try:
+      parseJson(getRepoSceneAsset(templatePath))
+    except CatchableError:
+      return ""
+  let scenesReference = templateData{"scenes"}.getStr("")
+  let scenesPath = resolveTemplateResource(repositorySlug, templateSlug, scenesReference)
+  if scenesPath.len == 0 or not repoSceneAssetExists(scenesPath):
+    return ""
+  scenesPath
 
 proc loadSystemRepository(repositorySlug: string): JsonNode {.gcsafe.} =
   let metadataPath = RepoSceneAssetPrefix & repositorySlug & "/repository.json"
@@ -188,6 +206,22 @@ proc addRepositoryApiRoutes*(router: var Router) =
     if not requireRepositoryReadAccess(request):
       return
     jsonResponse(request, Http200, newJArray())
+  )
+
+  router.get("/api/repositories/system/@repositorySlug/templates/@templateSlug/scenes.json", proc(request: Request) {.gcsafe.} =
+    if not requireRepositoryReadAccess(request):
+      return
+    {.gcsafe.}:
+      let repositorySlug = decodePathSegment(request.pathParams["repositorySlug"])
+      let templateSlug = decodePathSegment(request.pathParams["templateSlug"])
+      let scenesPath = systemTemplateScenesPath(repositorySlug, templateSlug)
+      if scenesPath.len == 0:
+        jsonResponse(request, Http404, %*{"detail": "Template scenes not found"})
+        return
+
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      request.respond(Http200, headers, getRepoSceneAsset(scenesPath))
   )
 
   router.get("/api/repositories/system/@repositorySlug/templates/@templateSlug/image", proc(request: Request) {.gcsafe.} =

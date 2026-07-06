@@ -293,6 +293,8 @@ export interface TemplateType {
   name: string
   description?: string
   scenes?: FrameScene[]
+  /** Repository templates ship metadata only; fetch the scenes from here on install or when needed. */
+  scenesUrl?: string
   image?: any
   imageWidth?: number
   imageHeight?: number

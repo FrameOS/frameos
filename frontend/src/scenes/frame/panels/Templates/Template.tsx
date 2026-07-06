@@ -68,12 +68,15 @@ export function TemplateRow({
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
-  const { trySceneConfig, trySceneModalOpen, trySceneFields, visibleTrySceneFields, trySceneState } = useValues(
-    templateRowLogic({ frameId, template })
-  )
-  const { openTrySceneModal, closeTrySceneModal, submitTrySceneState, resetTrySceneState } = useActions(
-    templateRowLogic({ frameId, template })
-  )
+  const {
+    trySceneConfig,
+    trySceneModalOpen,
+    visibleTrySceneFields,
+    trySceneState,
+    scenes: templateScenes,
+    canLoadRemoteScenes,
+  } = useValues(templateRowLogic({ frameId, template }))
+  const { startTryScene, closeTrySceneModal, submitTrySceneState } = useActions(templateRowLogic({ frameId, template }))
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
@@ -93,10 +96,7 @@ export function TemplateRow({
   const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')
   const fallbackImageUrl = managedImageUrl ?? (typeof template.image === 'string' ? template.image : null)
   const imageUrl = fallbackImageUrl
-  const secretSettings = useMemo(
-    () => collectSecretSettingsFromScenes(template.scenes ?? [], apps),
-    [apps, template.scenes]
-  )
+  const secretSettings = useMemo(() => collectSecretSettingsFromScenes(templateScenes, apps), [apps, templateScenes])
   const missingSecretSettings = useMemo(
     () => getMissingSecretSettingKeys(secretSettings, savedSettings),
     [savedSettings, secretSettings]
@@ -158,12 +158,12 @@ export function TemplateRow({
                     {installedTemplatesByName[template.name] ? (
                       'Added'
                     ) : (
-                      <>Add{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
+                      <>Add{templateScenes.length > 1 ? ` (${templateScenes.length})` : ''}</>
                     )}
                   </span>
                 </Button>
               ) : null}
-              {trySceneConfig ? (
+              {trySceneConfig || canLoadRemoteScenes ? (
                 <Button
                   className="!px-2 flex gap-1"
                   size="small"
@@ -172,12 +172,7 @@ export function TemplateRow({
                     if (!canInstall) {
                       return
                     }
-                    if (trySceneFields.length === 0) {
-                      resetTrySceneState({})
-                      submitTrySceneState()
-                      return
-                    }
-                    openTrySceneModal()
+                    startTryScene()
                   }}
                   disabled={!frameId || !canInstall}
                   title={unsupported ? unsupportedReason : 'Preview this interpreted scene on the frame'}
@@ -208,12 +203,9 @@ export function TemplateRow({
                   ...(applyTemplate
                     ? [
                         {
-                          label:
-                            'scenes' in template && Array.isArray(template.scenes)
-                              ? `Add ${(template.scenes || []).length} scene${
-                                  (template.scenes || []).length === 1 ? '' : 's'
-                                } onto frame`
-                              : 'Add onto frame',
+                          label: templateScenes.length
+                            ? `Add ${templateScenes.length} scene${templateScenes.length === 1 ? '' : 's'} onto frame`
+                            : 'Add onto frame',
                           onClick: () => applyTemplate(template),
                           disabled: !canInstall,
                           title: unsupported ? unsupportedReason : undefined,
