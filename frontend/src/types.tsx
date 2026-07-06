@@ -295,6 +295,8 @@ export interface TemplateType {
   scenes?: FrameScene[]
   /** Repository templates ship metadata only; fetch the scenes from here on install or when needed. */
   scenesUrl?: string
+  /** Set to false in template.json when the template cannot run on embedded (ESP32) frames. */
+  embedded?: boolean
   image?: any
   imageWidth?: number
   imageHeight?: number

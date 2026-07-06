@@ -1,6 +1,7 @@
 {
   "name": "Chromium Screenshot",
   "description": "Chromium (degoogled Chrome) only works on devices with over 1GB of RAM. This will NOT work on the Pi Zero 2 W.",
+  "embedded": false,
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,
