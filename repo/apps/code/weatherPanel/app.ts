@@ -225,6 +225,14 @@ function fmtTemp(v) {
   return (r === 0 ? 0 : r) + '°'
 }
 
+function unitLetter(unit) {
+  return ('' + (unit || '°C')).indexOf('F') >= 0 ? 'F' : 'C'
+}
+
+function fmtPrecip(v) {
+  return Math.round(v * 10) / 10 + ''
+}
+
 function fmtClock(iso) {
   const p = iso.split('T')
   return p.length > 1 ? p[1] : iso
@@ -599,22 +607,28 @@ function renderHourlyChart(p, count) {
   const availW = right - left
   const colW = availW / series.length
 
+  // The panel has two optional parts: the values row (icons + temperatures)
+  // and the graph (temperature curve + precipitation bars).
+  const showGraph = p.showGraph
+  const showValues = p.showValues || !showGraph
+
   const timeH = clamp(p.base * 1.5, 14, 26)
-  const iconSize = clamp(colW * 0.78, 15, 46)
-  const tempSize = clamp(colW * 0.34, 9, 20)
-  const precipH = clamp(p.H * 0.07, 8, 34)
+  const iconSize = showValues ? clamp(colW * (showGraph ? 0.78 : 0.95), 15, showGraph ? 46 : 64) : 0
+  const tempSize = showValues ? clamp(colW * (showGraph ? 0.34 : 0.4), 9, showGraph ? 20 : 24) : 0
+  const precipH = showGraph ? clamp(p.H * 0.07, 8, 34) : 0
 
   // Cap the curve height and center the whole block vertically.
   const availBand = p.H - p.pad - timeH - (h.bottom + p.base * 0.4)
-  const fixedH = iconSize + tempSize * 1.25 + tempSize * 0.8 + precipH + 6
-  const chartH = clamp(availBand - fixedH, 40, p.H * 0.4)
+  const valuesH = showValues ? iconSize + tempSize * 1.25 + tempSize * 0.8 : 0
+  const fixedH = valuesH + (showGraph ? precipH + 6 : 0)
+  const chartH = showGraph ? clamp(availBand - fixedH, 40, p.H * (showValues ? 0.4 : 0.62)) : 0
   const offset = Math.max(0, (availBand - fixedH - chartH) / 2)
 
   const iconTop = h.bottom + p.base * 0.4 + offset
   const tempY = iconTop + iconSize + tempSize * 1.25
-  const chartTop = tempY + tempSize * 0.8
+  const chartTop = iconTop + valuesH
   const chartBottom = chartTop + chartH
-  const bottom = chartBottom + precipH + 6
+  const bottom = chartBottom + precipH + (showGraph ? 6 : 0)
 
   // Temperature curve scale.
   let tMin = series[0].temp
@@ -636,20 +650,42 @@ function renderHourlyChart(p, count) {
     ys.push(chartBottom - ((series[i].temp - tMin) / (tMax - tMin)) * (chartBottom - chartTop))
   }
 
-  // Per-column icons, temps, precipitation bars and time labels.
+  // Per-column icons, temps, precipitation bars and time labels. The first
+  // temperature and the first precipitation value carry the units.
   const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'
+  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()
+  const tempLabels = []
+  let fittedTempSize = tempSize
+  for (let i = 0; i < series.length; i++) {
+    tempLabels.push(fmtTemp(series[i].temp) + (i === 0 ? unitLetter(unit) : ''))
+    if (showValues) {
+      fittedTempSize = Math.min(fittedTempSize, fitSize(tempLabels[i], tempSize, colW * 0.96))
+    }
+  }
+  const dividerTop = showValues ? iconTop + iconSize * 0.2 : chartTop
+  let precipLabeled = false
   for (let i = 0; i < series.length; i++) {
     const cx = xs[i]
     const item = series[i]
-    parts.push(iconFragment(p.icons, item.code, item.isDay, cx - iconSize / 2, iconTop, iconSize))
-    parts.push(text(fmtTemp(item.temp), cx, tempY, tempSize, p.theme.text, tempSize * 0.13, 'middle'))
-    if (item.precip > 0.05) {
+    if (showValues) {
+      parts.push(iconFragment(p.icons, item.code, item.isDay, cx - iconSize / 2, iconTop, iconSize))
+      parts.push(text(tempLabels[i], cx, tempY, fittedTempSize, p.theme.text, fittedTempSize * 0.13, 'middle'))
+    }
+    if (showGraph && item.precip > 0.05) {
       const bh = Math.max(2.5, (Math.min(item.precip, pMax) / pMax) * precipH)
       const bw = Math.max(3, colW * 0.24)
+      const barTop = bottom - 4 - bh
       parts.push(
-        '<rect x="' + (cx - bw / 2).toFixed(2) + '" y="' + (bottom - 4 - bh).toFixed(2) + '" width="' + bw.toFixed(2) +
+        '<rect x="' + (cx - bw / 2).toFixed(2) + '" y="' + barTop.toFixed(2) + '" width="' + bw.toFixed(2) +
         '" height="' + bh.toFixed(2) + '" fill="' + p.theme.rain + '"/>'
       )
+      const precipSize = clamp(colW * 0.24, 7, 10)
+      let precipLabel = fmtPrecip(item.precip)
+      if (!precipLabeled && textWidth(precipLabel + ' ' + precipUnit, precipSize) <= colW * 1.5) {
+        precipLabel = precipLabel + ' ' + precipUnit
+        precipLabeled = true
+      }
+      parts.push(text(precipLabel, cx, barTop - precipSize * 0.4, precipSize, p.theme.rain, precipSize * 0.13, 'middle'))
     }
     const isMidnight = item.hour === 0
     const label = isMidnight ? DAY_NAMES[item.dow] : '' + item.hour
@@ -660,10 +696,14 @@ function renderHourlyChart(p, count) {
     if (isMidnight && i > 0) {
       const lx = left + colW * i
       parts.push(
-        '<line x1="' + lx.toFixed(2) + '" y1="' + (iconTop + iconSize * 0.2).toFixed(2) + '" x2="' + lx.toFixed(2) +
+        '<line x1="' + lx.toFixed(2) + '" y1="' + dividerTop.toFixed(2) + '" x2="' + lx.toFixed(2) +
         '" y2="' + bottom.toFixed(2) + '" stroke="' + p.theme.grid + '" stroke-width="1"/>'
       )
     }
+  }
+
+  if (!showGraph) {
+    return parts.join('')
   }
 
   // Smooth temperature curve (Catmull-Rom converted to cubic beziers).
@@ -710,6 +750,9 @@ function renderHourlyList(p, wanted) {
     return renderMessage(p, 'NO HOURLY DATA')
   }
   const size = clamp(rowH * 0.42, 9, 20)
+  const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'
+  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()
+  let precipLabeled = false
   for (let i = 0; i < series.length; i++) {
     const item = series[i]
     const midY = top + rowH * (i + 0.5)
@@ -717,9 +760,13 @@ function renderHourlyList(p, wanted) {
     const label = item.hour === 0 ? DAY_NAMES[item.dow] : (item.hour < 10 ? '0' : '') + item.hour + ':00'
     parts.push(text(label, p.pad, baseY, size, p.theme.sub, size * 0.12, 'start'))
     parts.push(iconFragment(p.icons, item.code, item.isDay, p.W * 0.36, midY - rowH * 0.42, rowH * 0.84))
-    parts.push(text(fmtTemp(item.temp), p.W * 0.66, baseY, size * 1.15, p.theme.text, size * 0.15, 'middle'))
+    parts.push(
+      text(fmtTemp(item.temp) + (i === 0 ? unitLetter(unit) : ''), p.W * 0.66, baseY, size * 1.15, p.theme.text, size * 0.15, 'middle')
+    )
     if (item.precip > 0.05) {
-      parts.push(text(Math.round(item.precip * 10) / 10 + '', p.W - p.pad, baseY, size * 0.92, p.theme.rain, size * 0.11, 'end'))
+      const precipLabel = fmtPrecip(item.precip) + (precipLabeled ? '' : ' ' + precipUnit)
+      precipLabeled = true
+      parts.push(text(precipLabel, p.W - p.pad, baseY, size * 0.92, p.theme.rain, size * 0.11, 'end'))
     }
     if (i > 0) {
       parts.push(
@@ -883,6 +930,8 @@ export function get(app: FrameOSApp, context: FrameOSContext) {
     // `key: value !== x` inside object literals as a type annotation.
     const showLocation = app.config.showLocation !== false
     const showDetails = app.config.showDetails !== false
+    const showValues = app.config.showValues !== false
+    const showGraph = app.config.showGraph !== false
     const p = {
       W: W,
       H: H,
@@ -896,6 +945,8 @@ export function get(app: FrameOSApp, context: FrameOSContext) {
       days: Number(app.config.days) || 7,
       showLocation: showLocation,
       showDetails: showDetails,
+      showValues: showValues,
+      showGraph: showGraph,
       locationName: weather.location && weather.location.name ? weather.location.name : '',
     }
     const mode = app.config.mode || 'current'

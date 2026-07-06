@@ -1,6 +1,6 @@
 {
-  "id": "weatherCurrent",
-  "name": "Weather: current",
+  "id": "weatherHourlyValuesOnly",
+  "name": "Weather: hourly values only",
   "settings": {
     "refreshInterval": 3600,
     "backgroundColor": "#000000"
@@ -209,7 +209,7 @@
   },
   "nodes": [
     {
-      "id": "2adcb767-5f01-5ecd-8f3f-b1e7b12b5277",
+      "id": "773519cc-6233-562f-aa28-ce0a6e65e96c",
       "type": "event",
       "position": {
         "x": -500,
@@ -222,7 +222,7 @@
       "height": 161
     },
     {
-      "id": "4fd0c774-ca86-5bc9-8878-fdfaafee6e85",
+      "id": "fc806020-cbce-530e-8c09-8497e46b8edb",
       "type": "app",
       "position": {
         "x": 300,
@@ -238,7 +238,7 @@
       "height": 200
     },
     {
-      "id": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "id": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "type": "app",
       "position": {
         "x": -100,
@@ -247,14 +247,15 @@
       "data": {
         "keyword": "weatherPanel",
         "config": {
-          "mode": "current"
+          "mode": "hourly",
+          "showGraph": "false"
         }
       },
       "width": 300,
       "height": 200
     },
     {
-      "id": "948ff97f-4e9e-590e-8fea-6cf475570467",
+      "id": "870f0338-175f-5c78-9d74-cd8b4b3dff8a",
       "type": "app",
       "position": {
         "x": -500,
@@ -268,7 +269,7 @@
       "height": 200
     },
     {
-      "id": "223ee1c8-3f7b-5a32-9548-48152c35c2e0",
+      "id": "393d72b0-49c6-513e-8540-91a8e486a227",
       "type": "state",
       "position": {
         "x": -500,
@@ -281,7 +282,7 @@
       "height": 60
     },
     {
-      "id": "95c35777-2b62-5e9d-a827-1c21aaae2c33",
+      "id": "d2114a0d-4410-5ccb-852b-6e1685fbcc26",
       "type": "state",
       "position": {
         "x": -820,
@@ -294,7 +295,7 @@
       "height": 60
     },
     {
-      "id": "caad8329-f841-5e3f-856b-6829e6c2a03a",
+      "id": "8a8c1c89-3e5a-55f3-a28f-bc142ebeabe6",
       "type": "state",
       "position": {
         "x": -500,
@@ -307,7 +308,7 @@
       "height": 60
     },
     {
-      "id": "613e42d3-efb9-5f66-b1a1-afb091263d00",
+      "id": "af77d11f-a821-565b-979c-1c104300d7a2",
       "type": "state",
       "position": {
         "x": -500,
@@ -322,66 +323,66 @@
   ],
   "edges": [
     {
-      "id": "fb910c56-d0c0-56ee-9ace-10a63f4c81b3",
-      "source": "2adcb767-5f01-5ecd-8f3f-b1e7b12b5277",
+      "id": "495d535d-d294-5efb-b677-a037bc58f415",
+      "source": "773519cc-6233-562f-aa28-ce0a6e65e96c",
       "sourceHandle": "next",
-      "target": "4fd0c774-ca86-5bc9-8878-fdfaafee6e85",
+      "target": "fc806020-cbce-530e-8c09-8497e46b8edb",
       "targetHandle": "prev",
       "type": "appNodeEdge"
     },
     {
-      "id": "59d24b9f-ac36-5624-848e-496d2f32a70e",
-      "source": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "id": "dfc4dc54-80ae-5a65-9f42-067ec259075d",
+      "source": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "sourceHandle": "fieldOutput",
-      "target": "4fd0c774-ca86-5bc9-8878-fdfaafee6e85",
+      "target": "fc806020-cbce-530e-8c09-8497e46b8edb",
       "targetHandle": "fieldInput/image",
       "type": "codeNodeEdge"
     },
     {
-      "id": "8d6c8efe-e34f-5f1b-9425-81c19899fed7",
-      "source": "223ee1c8-3f7b-5a32-9548-48152c35c2e0",
+      "id": "e6610324-7c77-5b19-90a4-4920c3c093f0",
+      "source": "393d72b0-49c6-513e-8540-91a8e486a227",
       "sourceHandle": "fieldOutput",
-      "target": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "target": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "targetHandle": "fieldInput/weather",
       "type": "codeNodeEdge"
     },
     {
-      "id": "0c0f9b7d-4b57-5c43-8d14-a52d0461eef6",
-      "source": "948ff97f-4e9e-590e-8fea-6cf475570467",
+      "id": "30ae59fe-66de-5689-9117-86181bf2b55a",
+      "source": "870f0338-175f-5c78-9d74-cd8b4b3dff8a",
       "sourceHandle": "fieldOutput",
-      "target": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "target": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "targetHandle": "fieldInput/icons",
       "type": "codeNodeEdge"
     },
     {
-      "id": "60d65e56-8df3-53d7-a392-cb7ef990a533",
-      "source": "95c35777-2b62-5e9d-a827-1c21aaae2c33",
+      "id": "4d081f8a-e139-5622-b55c-1e45b0f1a9d4",
+      "source": "d2114a0d-4410-5ccb-852b-6e1685fbcc26",
       "sourceHandle": "fieldOutput",
-      "target": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "target": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "targetHandle": "fieldInput/lowContrast",
       "type": "codeNodeEdge"
     },
     {
-      "id": "5313dfe9-41f7-50c7-8a9b-1ee5764b7132",
-      "source": "95c35777-2b62-5e9d-a827-1c21aaae2c33",
+      "id": "e4109bda-fab8-5bae-a241-ebaa9875ccc8",
+      "source": "d2114a0d-4410-5ccb-852b-6e1685fbcc26",
       "sourceHandle": "fieldOutput",
-      "target": "948ff97f-4e9e-590e-8fea-6cf475570467",
+      "target": "870f0338-175f-5c78-9d74-cd8b4b3dff8a",
       "targetHandle": "fieldInput/lowContrast",
       "type": "codeNodeEdge"
     },
     {
-      "id": "2c154710-ae9c-5a96-b99a-71240738969f",
-      "source": "caad8329-f841-5e3f-856b-6829e6c2a03a",
+      "id": "568f8474-783e-55c8-ab0a-2ea38463967b",
+      "source": "8a8c1c89-3e5a-55f3-a28f-bc142ebeabe6",
       "sourceHandle": "fieldOutput",
-      "target": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "target": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "targetHandle": "fieldInput/hours",
       "type": "codeNodeEdge"
     },
     {
-      "id": "d76ab307-faee-561e-8ad1-2c7155384f48",
-      "source": "613e42d3-efb9-5f66-b1a1-afb091263d00",
+      "id": "265f57e6-df04-57ae-8d89-50d90e1d700e",
+      "source": "af77d11f-a821-565b-979c-1c104300d7a2",
       "sourceHandle": "fieldOutput",
-      "target": "c1e90e1b-c4a9-5062-92d4-5b4f7910a754",
+      "target": "3256ab39-ab63-5a3a-bf0e-84735e22709f",
       "targetHandle": "fieldInput/days",
       "type": "codeNodeEdge"
     }

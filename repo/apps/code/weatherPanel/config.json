@@ -36,6 +36,20 @@
       "value": "7"
     },
     {
+      "name": "showValues",
+      "label": "Show icons and temperatures (hourly)",
+      "type": "boolean",
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
+    },
+    {
+      "name": "showGraph",
+      "label": "Show graph (hourly)",
+      "type": "boolean",
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
+    },
+    {
       "name": "lowContrast",
       "label": "Low contrast (e-ink friendly)",
       "type": "boolean",
