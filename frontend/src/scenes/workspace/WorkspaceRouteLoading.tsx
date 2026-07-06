@@ -194,7 +194,11 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     : inFrameAdminMode
     ? urls.frameControlScenes()
     : urls.scenes()
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const frameHref = selectedFrame
+    ? urls.frame(selectedFrame.id)
+    : inFrameAdminMode
+    ? urls.frameControl()
+    : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
     : lastAppsHref ?? urls.systemApps()
@@ -208,7 +212,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
       <aside
         className={clsx(
-          'workspace-sidebar frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200',
+          'workspace-sidebar frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl',
           secondarySidebarOpen ? 'w-[420px]' : 'workspace-sidebar-collapsed w-[88px]'
         )}
       >

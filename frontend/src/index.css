@@ -2188,7 +2188,6 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
     margin: 0;
     border-radius: 0;
     flex-direction: column;
-    transition: width 0.2s ease, height 0.2s ease;
   }
 
   .workspace-sidebar-collapsed {
