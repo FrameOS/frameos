@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
@@ -520,6 +520,7 @@ function NewBlankSceneModal({
   onCreate: (name: string) => void
 }): JSX.Element {
   const [name, setName] = useState('New blank scene')
+  const nameInputRef = useRef<HTMLInputElement>(null)
   const canCreate = name.trim().length > 0
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -531,11 +532,11 @@ function NewBlankSceneModal({
   }
 
   return (
-    <Modal open onClose={onClose} title="New blank scene">
+    <Modal open onClose={onClose} title="New blank scene" initialFocus={nameInputRef}>
       <form onSubmit={handleSubmit} className="space-y-4 p-5">
         <label className="block">
           <span className="frameos-muted mb-2 block text-sm font-semibold">Scene name</span>
-          <TextInput autoFocus value={name} onChange={setName} onFocus={(event) => event.target.select()} />
+          <TextInput ref={nameInputRef} value={name} onChange={setName} onFocus={(event) => event.target.select()} />
         </label>
         <div className="flex justify-end gap-2">
           <button

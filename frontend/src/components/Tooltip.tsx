@@ -27,7 +27,16 @@ export function Tooltip({
 }: TooltipProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'absolute' })
+  const { styles, attributes } = usePopper(referenceElement, popperElement, {
+    strategy: 'fixed',
+    placement: 'bottom-end',
+    modifiers: [
+      { name: 'offset', options: { offset: [0, 8] } },
+      { name: 'flip', options: { padding: 8 } },
+      // altAxis keeps tall panels (e.g. large JSON output examples) inside the viewport
+      { name: 'preventOverflow', options: { padding: 8, altAxis: true, tether: false } },
+    ],
+  })
 
   return (
     <Popover className={containerClassName}>
@@ -55,7 +64,7 @@ export function Tooltip({
               <Popover.Panel
                 static
                 className={clsx(
-                  'frameos-tooltip-panel absolute right-0 mt-2 origin-top-right rounded-md focus:outline-none',
+                  'frameos-tooltip-panel origin-top-right rounded-md focus:outline-none',
                   noPadding ? '' : 'w-56',
                   titleClassName ? titleClassName : ''
                 )}

@@ -11,7 +11,6 @@ type
   AppConfig* = object
     location*: string
     date*: string
-    timezone*: string
     temperatureUnit*: string
     windSpeedUnit*: string
     precipitationUnit*: string
@@ -52,8 +51,8 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       resultNode["timezone"].getStr
     else:
       "auto"
-    let timezone = if self.appConfig.timezone.len > 0:
-      self.appConfig.timezone
+    let timezone = if self.frameConfig.timeZone.len > 0:
+      self.frameConfig.timeZone
     else:
       defaultTimezone
 

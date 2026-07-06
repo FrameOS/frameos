@@ -14,19 +14,11 @@
     },
     {
       "name": "date",
-      "type": "string",
+      "type": "date",
       "value": "",
       "required": false,
-      "label": "Date (YYYY-MM-DD)",
+      "label": "Date",
       "placeholder": "2024-01-30"
-    },
-    {
-      "name": "timezone",
-      "type": "string",
-      "value": "auto",
-      "required": false,
-      "label": "Timezone",
-      "placeholder": "auto"
     },
     {
       "name": "temperatureUnit",
