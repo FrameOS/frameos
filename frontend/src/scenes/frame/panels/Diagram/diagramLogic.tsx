@@ -109,13 +109,15 @@ type ClipboardDiagramPayload = {
 const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
 const DELETE_HISTORY_DEBOUNCE_MS = 50
+// min/max instead of a fixed width: nodes with long labels and many fields
+// (e.g. the weather app) grow to fit instead of overflowing the border
 const DEFAULT_NODE_STYLES: Record<string, CSSProperties> = {
-  app: { width: 300 },
-  source: { width: 300 },
-  dispatch: { width: 300 },
-  scene: { width: 300 },
-  event: { width: 300 },
-  state: { width: 300 },
+  app: { minWidth: 300, maxWidth: 460 },
+  source: { minWidth: 300, maxWidth: 460 },
+  dispatch: { minWidth: 300, maxWidth: 460 },
+  scene: { minWidth: 300, maxWidth: 460 },
+  event: { minWidth: 300, maxWidth: 460 },
+  state: { minWidth: 300, maxWidth: 460 },
   code: { width: 300, height: 119 },
 }
 
@@ -124,7 +126,12 @@ const renderNodeWithStyle = (node: DiagramNode): DiagramNode => {
   return {
     ...node,
     dragHandle: '.frameos-node-title',
-    style: defaultStyle ? { ...defaultStyle, ...(node.style ?? {}) } : node.style,
+    // nodes with an explicit width (resized by the user or stored in the
+    // scene JSON) keep it and skip the default min/max constraints
+    style:
+      defaultStyle && typeof node.style?.width === 'undefined'
+        ? { ...defaultStyle, ...(node.style ?? {}) }
+        : node.style,
   }
 }
 

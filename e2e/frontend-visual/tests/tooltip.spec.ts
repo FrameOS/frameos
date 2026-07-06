@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { currentProjectApiPath, login } from './visual-helpers'
+import { addTemporaryWeatherNode, login } from './visual-helpers'
 
 // Regression tests for the shared Tooltip popover (the "i" icons):
 // - it must stay open after clicking the icon
@@ -9,29 +9,15 @@ test('output example tooltip stays open and follows the diagram', async ({ page 
 
   // Add a weather node to the gradient scene: its output declares an example,
   // which renders the "i" info button next to the output handle.
-  const framePath = await currentProjectApiPath(page, '/api/frames/1')
-  const frameResponse = await page.request.get(framePath)
-  expect(frameResponse.ok()).toBeTruthy()
-  const frame = (await frameResponse.json()).frame
-  const scenes = frame.scenes.map((scene: any) =>
-    scene.id === 'scene-gradient'
-      ? {
-          ...scene,
-          nodes: [
-            ...scene.nodes.filter((node: any) => node.id !== 'tooltip-repro-weather'),
-            {
-              id: 'tooltip-repro-weather',
-              type: 'app',
-              position: { x: 500, y: 260 },
-              data: { keyword: 'data/weather', config: {} },
-            },
-          ],
-        }
-      : scene
-  )
-  const saveResponse = await page.request.post(framePath, { data: { scenes } })
-  expect(saveResponse.ok()).toBeTruthy()
+  const restoreScenes = await addTemporaryWeatherNode(page)
+  try {
+    await runTooltipChecks(page)
+  } finally {
+    await restoreScenes()
+  }
+})
 
+async function runTooltipChecks(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/scenes/1/scene-gradient', { waitUntil: 'domcontentloaded' })
 
   const infoButton = page.locator('[aria-label="Example output"]').first()
@@ -59,14 +45,15 @@ test('output example tooltip stays open and follows the diagram', async ({ page 
   await page.keyboard.press('Escape')
   await expect(panel).toBeHidden()
 
-  // 2. Pan the diagram, reopen: the tooltip must follow the button's new position
+  // 2. Pan the diagram, reopen: the tooltip must follow the button's new position.
+  // Pan to the right so the node stays clear of the fixed workspace sidebar.
   const pane = page.locator('.react-flow__pane')
   const paneBox = (await pane.boundingBox())!
-  const startX = paneBox.x + paneBox.width - 60
+  const startX = paneBox.x + 480
   const startY = paneBox.y + paneBox.height - 60
   await page.mouse.move(startX, startY)
   await page.mouse.down()
-  await page.mouse.move(startX - 350, startY - 60, { steps: 8 })
+  await page.mouse.move(startX + 330, startY - 40, { steps: 8 })
   await page.mouse.up()
 
   const buttonBox2 = (await infoButton.boundingBox())!
@@ -76,7 +63,7 @@ test('output example tooltip stays open and follows the diagram', async ({ page 
   await expect(panel).toBeVisible()
   const panelBox2 = (await panel.boundingBox())!
   expect(horizontalDistance(panelBox2, buttonBox2)).toBeLessThan(250)
-})
+}
 
 function horizontalDistance(panel: { x: number; width: number }, button: { x: number; width: number }): number {
   // bottom-end placement: the panel's right edge should sit near the button
