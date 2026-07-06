@@ -1,7 +1,8 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import type { MouseEvent } from 'react'
+import { useState } from 'react'
+import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
   ArrowUturnLeftIcon,
@@ -21,6 +22,8 @@ import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
+import { Modal } from '../../components/Modal'
+import { TextInput } from '../../components/TextInput'
 import {
   formatFrameRelativeTime,
   frameHost,
@@ -509,8 +512,55 @@ export function TemplateDrawer(): JSX.Element | null {
   )
 }
 
+function NewBlankSceneModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void
+  onCreate: (name: string) => void
+}): JSX.Element {
+  const [name, setName] = useState('New blank scene')
+  const canCreate = name.trim().length > 0
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (!canCreate) {
+      return
+    }
+    onCreate(name.trim())
+  }
+
+  return (
+    <Modal open onClose={onClose} title="New blank scene">
+      <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <label className="block">
+          <span className="frameos-muted mb-2 block text-sm font-semibold">Scene name</span>
+          <TextInput autoFocus value={name} onChange={setName} onFocus={(event) => event.target.select()} />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canCreate}
+            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Create
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
@@ -523,7 +573,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
       <button
         type="button"
         onClick={() => {
-          createBlankSceneAndSave(undefined, false, true)
+          setNewBlankSceneModalOpen(true)
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
@@ -600,6 +650,15 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
             </span>
           </span>
         </button>
+      ) : null}
+      {newBlankSceneModalOpen ? (
+        <NewBlankSceneModal
+          onClose={() => setNewBlankSceneModalOpen(false)}
+          onCreate={(name) => {
+            setNewBlankSceneModalOpen(false)
+            createBlankSceneAndSave(name, false, true)
+          }}
+        />
       ) : null}
     </div>
   )
