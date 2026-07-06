@@ -1705,6 +1705,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
           actions.closeSecondarySidebar()
           return
         }
+        if (!isMobileWorkspaceViewport() && !values.secondarySidebarOpen) {
+          // growing back to desktop: restore the default docked sidebar
+          actions.openSecondarySidebar()
+          return
+        }
         applyWorkspaceScrollGuard(values.secondarySidebarOpen)
       }
       if (mobileWorkspaceQuery) {

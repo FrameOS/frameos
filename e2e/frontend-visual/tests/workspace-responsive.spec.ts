@@ -15,9 +15,12 @@ test('sidebar closes when the viewport shrinks from desktop to mobile', async ({
   await page.setViewportSize({ width: 500, height: 900 })
   await expect(page.locator('.workspace-sidebar-collapsed')).toHaveCount(1) // mobile: overlay closed
 
-  // growing back to desktop must not animate the sidebar's size (it used to
-  // fly in from the right as its width transitioned from 100vw)
+  // growing back to desktop restores the docked sidebar...
   await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(page.locator('.workspace-sidebar-collapsed')).toHaveCount(0)
+
+  // ...without animating its size (it used to fly in from the right as its
+  // width transitioned from 100vw)
   const transition = await page.evaluate(() => {
     const sidebar = document.querySelector('.workspace-sidebar, .workspace-sidebar-collapsed')!
     const style = getComputedStyle(sidebar)
