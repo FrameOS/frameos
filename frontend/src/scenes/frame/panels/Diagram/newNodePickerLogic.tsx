@@ -31,7 +31,6 @@ import {
   installSceneAppForKeyword,
   isJavaScriptCatalogApp,
   javascriptCatalogAppKeywords,
-  javascriptCatalogAppLabel,
 } from '../../../../utils/sceneApps'
 import { appCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { frameEventsForScene } from '../../../../utils/frameEvents'
@@ -39,7 +38,7 @@ import { frameEventsForScene } from '../../../../utils/frameEvents'
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
 export const CANVAS_NODE_ID = '__canvas__'
-const INLINE_CODE_OPTION_LABEL = 'Code: new inline node'
+const INLINE_CODE_OPTION_LABEL = 'New inline node'
 
 export interface NewNodePickerLogicProps {
   frameId: number
@@ -62,6 +61,8 @@ export interface OptionWithType extends Option {
   type: FieldType
   /** keyword we can use to refer to the other node, e.g. the field name */
   keyword: string
+  /** category shown as a colored tag, e.g. "code", "data", "dispatch" */
+  category?: string
   disabledReason?: string
 }
 
@@ -111,10 +112,11 @@ function addJavaScriptCatalogAppOptions(
     }
     const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frame)
     options.push({
-      label: javascriptCatalogAppLabel(keyword, app),
+      label: app.name ?? keyword,
       value: `app/${keyword}`,
       type: toFieldType(app.output?.[0].type ?? 'string'),
       keyword: optionKeyword ?? keyword,
+      category: 'code',
       disabledReason: compatibility.reason,
     })
   }
@@ -295,43 +297,50 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             type: 'string',
             keyword: 'clipboard',
           })
-          options.push({ label: INLINE_CODE_OPTION_LABEL, value: 'code', type: 'string', keyword: 'code' })
+          options.push({
+            label: INLINE_CODE_OPTION_LABEL,
+            value: 'code',
+            type: 'string',
+            keyword: 'code',
+            category: 'code',
+          })
           addJavaScriptCatalogAppOptions(options, effectiveApps, mode, frameForm)
           const events = frameEventsForScene(scene)
           const dispatchableEvents = events.filter((event) => event.canDispatch)
           for (const event of dispatchableEvents) {
             options.push({
-              label: `dispatch: ${event.name}`,
+              label: event.name,
               value: `dispatch/${event.name}`,
               type: 'string',
               keyword: event.name,
+              category: 'dispatch',
             })
           }
           for (const event of events) {
             options.push({
-              label: `event: ${event.name}`,
+              label: event.name,
               value: `event/${event.name}`,
               type: 'string',
               keyword: event.name,
+              category: 'event',
             })
           }
           for (const [keyword, app] of Object.entries(effectiveApps)) {
-            if (isJavaScriptCatalogApp(keyword)) {
+            if (isJavaScriptCatalogApp(keyword) || app.category === 'legacy') {
               continue
             }
-            if (isRunnableApp(app)) {
-              const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
-              options.push({
-                label: appLabel(app, app.category ?? 'app'),
-                value: `app/${keyword}`,
-                type: toFieldType(app.output?.[0].type ?? 'string'),
-                keyword,
-                disabledReason: compatibility.reason,
-              })
-            }
+            const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
+            options.push({
+              label: appLabel(app),
+              value: `app/${keyword}`,
+              type: toFieldType(app.output?.[0]?.type ?? 'string'),
+              keyword,
+              category: app.category ?? 'app',
+              disabledReason: compatibility.reason,
+            })
           }
           for (const { id, name } of scenes) {
-            options.push({ label: `scene: ${name}`, value: `scene/${id}`, type: 'scene', keyword: id })
+            options.push({ label: name, value: `scene/${id}`, type: 'scene', keyword: id, category: 'scene' })
           }
           return options
         }
@@ -348,12 +357,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             value: 'code',
             type: newNodeHandleDataType ?? 'string',
             keyword: key,
+            category: 'code',
           })
           options.push({
             label: 'New state field',
             value: 'state',
             type: newNodeHandleDataType ?? 'string',
             keyword: key,
+            category: 'state',
           })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(effectiveApps, newNodeHandleDataType)
@@ -364,10 +375,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               }
               const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
               options.push({
-                label: appLabel(app, 'App'),
+                label: appLabel(app),
                 value: `app/${keyword}`,
                 type: newNodeHandleDataType,
                 keyword: key,
+                category: app.category ?? 'app',
                 disabledReason: compatibility.reason,
               })
             }
@@ -377,16 +389,18 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 value: 'code/context.image',
                 type: newNodeHandleDataType,
                 keyword: key,
+                category: 'code',
               })
             }
             for (const field of (scene?.fields ?? []).filter(
               (f) => 'type' in f && typesMatch(f.type, newNodeHandleDataType)
             )) {
               options.push({
-                label: `State: ${field.label}`,
+                label: field.label,
                 value: `state/${field.name}`,
                 type: newNodeHandleDataType,
                 keyword: field.name,
+                category: 'state',
               })
             }
           } else if (handleId === 'codeField/+') {
@@ -405,20 +419,22 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               if (app.output && app.output.length > 0) {
                 const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
                 options.push({
-                  label: appLabel(app, 'App'),
+                  label: appLabel(app),
                   value: `app/${keyword}`,
                   type: app.output[0].type,
                   keyword: key,
+                  category: app.category ?? 'app',
                   disabledReason: compatibility.reason,
                 })
               }
             }
             for (const field of scene?.fields ?? []) {
               options.push({
-                label: `State: ${field.label}`,
+                label: field.label,
                 value: `state/${field.name}`,
                 type: toFieldType(field.type),
                 keyword: field.name,
+                category: 'state',
               })
             }
           } else {
@@ -437,10 +453,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             if (isRunnableApp(app)) {
               const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
               options.push({
-                label: appLabel(app, app.category ?? 'app'),
+                label: appLabel(app),
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
                 keyword,
+                category: app.category ?? 'app',
                 disabledReason: compatibility.reason,
               })
             }
@@ -448,18 +465,20 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           const dispatchableEvents = frameEventsForScene(scene).filter((event) => event.canDispatch)
           for (const event of dispatchableEvents) {
             options.push({
-              label: `dispatch: ${event.name}`,
+              label: event.name,
               value: `dispatch/${event.name}`,
               type: 'string',
               keyword: event.name,
+              category: 'dispatch',
             })
           }
           for (const { id, name } of scenes) {
             options.push({
-              label: `scene: ${name}`,
+              label: name,
               value: `scene/${id}`,
               type: 'scene',
               keyword: id,
+              category: 'scene',
             })
           }
         } else if (handleType === 'source' && handleId === 'fieldOutput') {
@@ -476,6 +495,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             value: 'code',
             type: newNodeHandleDataType ?? 'string',
             keyword: keyword,
+            category: 'code',
           })
           // TODO: show all apps that can take this field type as input
         } else {
@@ -496,9 +516,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         const priority: Record<string, OptionWithType[]> = {
           special: [],
           code: [],
-          dispatch: [],
           render: [],
           logic: [],
+          data: [],
+          dispatch: [],
+          event: [],
+          state: [],
+          scene: [],
           legacy: [],
           other: [],
         }
@@ -507,19 +531,19 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             priority['special'].push(option)
             continue
           }
-          const type = option.label.split(':')[0].toLowerCase()
-          if (priority[type]) {
-            priority[type].push(option)
-          } else {
-            priority['other'].push(option)
-          }
+          const category = option.category ?? 'other'
+          ;(priority[category] ?? priority['other']).push(option)
         }
         return [
           ...priority['special'],
           ...priority['code'],
           ...priority['render'],
           ...priority['logic'],
+          ...priority['data'],
           ...priority['dispatch'],
+          ...priority['event'],
+          ...priority['state'],
+          ...priority['scene'],
           ...priority['legacy'],
           ...priority['other'],
         ]
@@ -529,7 +553,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       (s) => [s.sortedNewNodeOptions],
       (sortedNewNodeOptions): LocalFuse => {
         return new Fuse(sortedNewNodeOptions, {
-          keys: ['label', 'value'],
+          keys: ['label', 'value', 'category'],
           threshold: 0.3,
           shouldSort: false,
         })

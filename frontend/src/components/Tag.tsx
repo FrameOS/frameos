@@ -3,7 +3,7 @@ import { ButtonProps } from './Button'
 
 export interface TagProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode
-  color?: ButtonProps['color']
+  color?: ButtonProps['color'] | 'purple' | 'green' | 'pink'
   className?: string
 }
 

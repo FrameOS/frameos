@@ -906,6 +906,24 @@ html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-pri
   color: #b91c1c;
 }
 
+.frameos-tag[data-tag-color='green'] {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #15803d;
+}
+
+.frameos-tag[data-tag-color='purple'] {
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.28);
+  color: #7e22ce;
+}
+
+.frameos-tag[data-tag-color='pink'] {
+  background: rgba(236, 72, 153, 0.12);
+  border-color: rgba(236, 72, 153, 0.28);
+  color: #be185d;
+}
+
 .frameos-resize-handle {
   background: rgba(148, 163, 184, 0.28);
   border-radius: 999px;
@@ -1325,6 +1343,27 @@ html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='red'] {
   background: rgba(248, 113, 113, 0.13);
   border-color: rgba(248, 113, 113, 0.28);
   color: #fca5a5;
+}
+
+.frameos-theme-dark .frameos-tag[data-tag-color='green'],
+html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='green'] {
+  background: rgba(74, 222, 128, 0.13);
+  border-color: rgba(74, 222, 128, 0.28);
+  color: #86efac;
+}
+
+.frameos-theme-dark .frameos-tag[data-tag-color='purple'],
+html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='purple'] {
+  background: rgba(192, 132, 252, 0.13);
+  border-color: rgba(192, 132, 252, 0.28);
+  color: #d8b4fe;
+}
+
+.frameos-theme-dark .frameos-tag[data-tag-color='pink'],
+html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='pink'] {
+  background: rgba(244, 114, 182, 0.13);
+  border-color: rgba(244, 114, 182, 0.28);
+  color: #f9a8d4;
 }
 
 .frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag,
