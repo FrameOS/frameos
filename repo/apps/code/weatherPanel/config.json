@@ -25,15 +25,17 @@
     },
     {
       "name": "hours",
-      "label": "Hours to show (hourly mode)",
+      "label": "Hours to show",
       "type": "integer",
-      "value": "10"
+      "value": "10",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
     },
     {
       "name": "days",
-      "label": "Days to show (daily mode)",
+      "label": "Days to show",
       "type": "integer",
-      "value": "7"
+      "value": "7",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "daily" }]
     },
     {
       "name": "showValues",
@@ -51,7 +53,7 @@
     },
     {
       "name": "lowContrast",
-      "label": "Low contrast (e-ink friendly)",
+      "label": "Low contrast",
       "type": "boolean",
       "value": "false"
     },
@@ -63,9 +65,10 @@
     },
     {
       "name": "showDetails",
-      "label": "Show detail row (current mode)",
+      "label": "Show detail row",
       "type": "boolean",
-      "value": "true"
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "current" }]
     },
     {
       "name": "width",
