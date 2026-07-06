@@ -1,7 +1,8 @@
 import type { Page, Route } from '@playwright/test'
 
 const fixedNow = '2026-05-23T12:00:00Z'
-const e2eInstallFrameNamePattern = /^E2E (?:(?:SD card|SSH|Script|Import) \d+|install flow (?:SD card|SSH|Script|Import) \d+-[a-z0-9]+)$/
+const e2eInstallFrameNamePattern =
+  /^E2E (?:(?:SD card|SSH|Script|Import) \d+|install flow (?:SD card|SSH|Script|Import) \d+-[a-z0-9]+)$/
 const livePreviewSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
   <rect width="800" height="480" fill="#111827"/>
@@ -284,7 +285,10 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   await page.route(projectApiPathPattern('/frames/1/event/*'), fulfillText('OK'))
   await page.route(projectApiPathPattern('/frames/1/fast_deploy'), fulfillJson({ message: 'Deployment queued' }))
   await page.route(projectApiPathPattern('/frames/1/deploy'), fulfillJson({ message: 'Deployment queued' }))
-  await page.route(projectApiPathPattern('/frames/1/assets/sync'), fulfillJson({ message: 'Assets synced successfully' }))
+  await page.route(
+    projectApiPathPattern('/frames/1/assets/sync'),
+    fulfillJson({ message: 'Assets synced successfully' })
+  )
   await page.route(
     projectApiPathPattern('/frames/1/scene_source/*'),
     fulfillJson({
@@ -408,7 +412,11 @@ export function attachFrontendErrorCollector(page: Page): () => string[] {
     if (/favicon\.ico/i.test(text)) {
       return
     }
-    if (/^Failed to load resource: the server responded with a status of (?:401|403) \((?:Unauthorized|Forbidden)\)$/.test(text)) {
+    if (
+      /^Failed to load resource: the server responded with a status of (?:401|403) \((?:Unauthorized|Forbidden)\)$/.test(
+        text
+      )
+    ) {
       return
     }
     if (/TypeError: Failed to fetch[\s\S]*\bat sync\b/.test(text)) {
@@ -435,4 +443,45 @@ function fulfillText(body: string): (route: Route) => Promise<void> {
       contentType: 'text/plain',
       body,
     })
+}
+
+/**
+ * Add a weather app node (it has many fields and an output example) to a
+ * seeded scene. Returns a restore callback that puts the original scenes
+ * back so later tests see the pristine seed.
+ */
+export async function addTemporaryWeatherNode(
+  page: Page,
+  { sceneId = 'scene-gradient', nodeId = 'e2e-temp-weather' }: { sceneId?: string; nodeId?: string } = {}
+): Promise<() => Promise<void>> {
+  const framePath = await currentProjectApiPath(page, '/api/frames/1')
+  const frameResponse = await page.request.get(framePath)
+  if (!frameResponse.ok()) {
+    throw new Error(`Could not load frame 1: ${frameResponse.status()}`)
+  }
+  const frame = (await frameResponse.json()).frame
+  const originalScenes = frame.scenes
+  const scenes = originalScenes.map((scene: any) =>
+    scene.id === sceneId
+      ? {
+          ...scene,
+          nodes: [
+            ...scene.nodes.filter((node: any) => node.id !== nodeId),
+            {
+              id: nodeId,
+              type: 'app',
+              position: { x: 500, y: 260 },
+              data: { keyword: 'data/weather', config: {} },
+            },
+          ],
+        }
+      : scene
+  )
+  const saveResponse = await page.request.post(framePath, { data: { scenes } })
+  if (!saveResponse.ok()) {
+    throw new Error(`Could not save weather node: ${saveResponse.status()}`)
+  }
+  return async () => {
+    await page.request.post(framePath, { data: { scenes: originalScenes } })
+  }
 }

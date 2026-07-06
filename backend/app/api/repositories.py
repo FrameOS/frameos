@@ -49,16 +49,45 @@ def _load_template_definition(repository_slug: str, template_dir: Path):
     if image_path:
         template_data["image"] = f"/api/repositories/system/{repository_slug}/templates/{template_dir.name}/image"
 
+    # Scenes can be large (embedded app sources), so the listing only carries
+    # a URL; clients fetch the scenes on install or when otherwise needed.
+    scenes_reference = template_data.pop("scenes", None)
+    if isinstance(scenes_reference, str):
+        scenes_path = _resolve_template_resource(template_dir, scenes_reference)
+        if scenes_path and scenes_path.is_file():
+            template_data["scenesUrl"] = (
+                f"/api/repositories/system/{repository_slug}/templates/{template_dir.name}/scenes.json"
+            )
+    elif isinstance(scenes_reference, list):
+        template_data["scenes"] = scenes_reference
+
+    return template_data
+
+
+def _load_template_scenes(repository_slug: str, template_slug: str):
+    repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
+    if not repository_path.is_dir():
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    template_dir = repository_path / template_slug
+    template_path = template_dir / "template.json"
+    if not template_dir.is_dir() or not template_path.is_file():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    with template_path.open("r", encoding="utf-8") as template_file:
+        template_data = json.load(template_file)
+
     scenes_reference = template_data.get("scenes")
+    if isinstance(scenes_reference, list):
+        return scenes_reference
+
     if isinstance(scenes_reference, str):
         scenes_path = _resolve_template_resource(template_dir, scenes_reference)
         if scenes_path and scenes_path.is_file():
             with scenes_path.open("r", encoding="utf-8") as scenes_file:
-                template_data["scenes"] = json.load(scenes_file)
-        else:
-            template_data["scenes"] = []
+                return json.load(scenes_file)
 
-    return template_data
+    raise HTTPException(status_code=404, detail="Template scenes not found")
 
 
 def _resolve_template_resource(base_dir: Path, resource_path: str) -> Path | None:
@@ -186,6 +215,13 @@ async def get_system_repository_image(
         raise HTTPException(status_code=404, detail="Template image not found")
 
     return FileResponse(image_path)
+
+@api_user.get("/repositories/system/{repository_slug}/templates/{template_slug}/scenes.json")
+async def get_system_repository_template_scenes(repository_slug: str, template_slug: str):
+    if any("/" in slug or "\\" in slug or slug in (".", "..") for slug in (repository_slug, template_slug)):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return _load_template_scenes(repository_slug, template_slug)
+
 
 @api_project.get("/repositories", response_model=RepositoriesListResponse)
 async def get_repositories(db: Session = Depends(get_db)):

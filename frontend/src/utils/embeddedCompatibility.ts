@@ -115,6 +115,10 @@ export function templateCompatibilityForFrame(
     return supported
   }
 
+  if (template.embedded === false) {
+    return unsupported('This scene is marked as not supported on ESP32 frames.')
+  }
+
   const scenes = Array.isArray(template.scenes) ? template.scenes : []
   if (scenes.length === 0) {
     return supported

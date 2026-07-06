@@ -4,6 +4,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from posthog.ai.openai import AsyncOpenAI
+from posthog.client import Client as PostHogClient
 
 from app.config import config
 from app.utils.ai_catalog import AiCatalogItem
@@ -446,11 +447,25 @@ def _format_reference_context(catalog_context: str | None, context_items: list[A
     return "\n\n".join(parts)
 
 
+_disabled_posthog_client: PostHogClient | None = None
+
+
+def _noop_posthog_client() -> PostHogClient:
+    # posthog.ai's AsyncOpenAI falls back to the global posthog client when
+    # posthog_client is None and raises "API key is required" if analytics was
+    # never configured. Hand it a disabled client so AI features keep working
+    # on installs without PostHog.
+    global _disabled_posthog_client
+    if _disabled_posthog_client is None:
+        _disabled_posthog_client = PostHogClient("disabled", disabled=True)
+    return _disabled_posthog_client
+
+
 def _openai_client(api_key: str) -> AsyncOpenAI:
     posthog_client = get_posthog_client() if llm_analytics_enabled() else None
     return AsyncOpenAI(
         api_key=api_key,
-        posthog_client=posthog_client,
+        posthog_client=posthog_client or _noop_posthog_client(),
         timeout=AI_REQUEST_TIMEOUT,
     )
 

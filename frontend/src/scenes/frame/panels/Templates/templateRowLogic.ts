@@ -1,12 +1,13 @@
 import { actions, connect, kea, key, path, props, reducers, selectors, listeners } from 'kea'
 import { forms } from 'kea-forms'
-import { SceneNodeData, TemplateType } from '../../../../types'
+import { FrameScene, SceneNodeData, TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { fetchTemplateScenes } from './templatesLogic'
 
 import type { templateRowLogicType } from './templateRowLogicType'
 
@@ -24,6 +25,8 @@ export const templateRowLogic = kea<templateRowLogicType>([
   }),
   actions({
     tryScene: (state?: Record<string, any>) => ({ state }),
+    startTryScene: true,
+    setRemoteScenes: (scenes: FrameScene[]) => ({ scenes }),
     openTrySceneModal: true,
     closeTrySceneModal: true,
   }),
@@ -33,6 +36,13 @@ export const templateRowLogic = kea<templateRowLogicType>([
       {
         openTrySceneModal: () => true,
         closeTrySceneModal: () => false,
+      },
+    ],
+    // Scenes fetched lazily from template.scenesUrl; repository listings only carry metadata.
+    remoteScenes: [
+      null as FrameScene[] | null,
+      {
+        setRemoteScenes: (_, { scenes }) => scenes,
       },
     ],
   }),
@@ -55,7 +65,14 @@ export const templateRowLogic = kea<templateRowLogicType>([
     },
   })),
   selectors({
-    scenes: [() => [(_, props: TemplateRowLogicProps) => props.template?.scenes], (scenes) => scenes ?? []],
+    scenes: [
+      (s) => [(_, props: TemplateRowLogicProps) => props.template?.scenes, s.remoteScenes],
+      (scenes, remoteScenes) => scenes ?? remoteScenes ?? [],
+    ],
+    canLoadRemoteScenes: [
+      (s) => [(_, props: TemplateRowLogicProps) => props.template?.scenesUrl, s.remoteScenes],
+      (scenesUrl, remoteScenes) => Boolean(scenesUrl) && remoteScenes === null,
+    ],
     frameMode: [
       (s) => [s.frames, (_, props: TemplateRowLogicProps) => props.frameId],
       (frames, frameId: number | undefined) => (frameId ? frames[frameId]?.mode : undefined),
@@ -118,6 +135,25 @@ export const templateRowLogic = kea<templateRowLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
+    startTryScene: async () => {
+      if (values.scenes.length === 0 && values.canLoadRemoteScenes) {
+        try {
+          actions.setRemoteScenes(await fetchTemplateScenes(props.template))
+        } catch (error) {
+          console.error('Failed to load template scenes', error)
+          return
+        }
+      }
+      if (!values.trySceneConfig) {
+        return
+      }
+      if (values.trySceneFields.length === 0) {
+        actions.resetTrySceneState({})
+        actions.submitTrySceneState()
+        return
+      }
+      actions.openTrySceneModal()
+    },
     openTrySceneModal: () => {
       actions.resetTrySceneState(values.defaultTrySceneState)
     },

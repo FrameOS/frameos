@@ -2,7 +2,7 @@
   "name": "Weather (Open-Meteo)",
   "description": "Fetch current, hourly, and daily forecasts from Open-Meteo for a location and date.",
   "category": "data",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "fields": [
     {
       "name": "location",
@@ -14,19 +14,20 @@
     },
     {
       "name": "date",
-      "type": "string",
+      "type": "date",
       "value": "",
       "required": false,
-      "label": "Date (YYYY-MM-DD)",
+      "label": "Date",
       "placeholder": "2024-01-30"
     },
     {
-      "name": "timezone",
-      "type": "string",
-      "value": "auto",
+      "name": "forecastDays",
+      "type": "integer",
+      "value": "1",
       "required": false,
-      "label": "Timezone",
-      "placeholder": "auto"
+      "label": "Forecast days (1-16)",
+      "hint": "How many days of hourly and daily forecast to fetch. Ignored when a specific date is set.",
+      "showIf": [{ "field": "date", "operator": "empty" }]
     },
     {
       "name": "temperatureUnit",

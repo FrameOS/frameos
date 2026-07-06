@@ -1,15 +1,8 @@
-import * as ReactJsonImport from '@microlink/react-json-view'
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
-
-const reactJsonModule = ReactJsonImport as any
-const ReactJsonComponent: any =
-  (typeof reactJsonModule === 'function' && reactJsonModule) ||
-  (typeof reactJsonModule?.default === 'function' && reactJsonModule.default) ||
-  (typeof reactJsonModule?.default?.default === 'function' && reactJsonModule.default.default) ||
-  null
+import { ReactJsonComponent } from '../../../../utils/reactJsonView'
 
 interface DebugProps {
   scrollContainer?: boolean

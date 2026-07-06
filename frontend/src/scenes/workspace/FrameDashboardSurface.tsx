@@ -616,19 +616,17 @@ function FrameScenesBlock({
 
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
-            <A
-              key={panel}
-              href={urls.frame(frame.id, panel)}
-              className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </A>
-          ))}
-        </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
+          <A
+            key={panel}
+            href={urls.frame(frame.id, panel)}
+            className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </A>
+        ))}
         <SceneDependencyFormatMenu frameId={frame.id} surface="overview" />
       </div>
       {sceneOverviewEntries.length > 0 ? (

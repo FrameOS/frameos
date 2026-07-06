@@ -2,7 +2,7 @@ import { actions, kea, reducers, path, key, props, connect, listeners, selectors
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { RepositoryType, TemplateForm, TemplateType } from '../../../../types'
+import { FrameScene, RepositoryType, TemplateForm, TemplateType } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
@@ -15,6 +15,21 @@ import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFav
 
 export interface TemplateLogicProps {
   frameId: number
+}
+
+/** Repository listings only carry template metadata; fetch the scenes separately when needed. */
+export async function fetchTemplateScenes(template: TemplateType): Promise<FrameScene[]> {
+  if (template.scenes?.length) {
+    return template.scenes
+  }
+  if (!template.scenesUrl) {
+    throw new Error('Template has no scenes to load')
+  }
+  const response = await apiFetch(template.scenesUrl)
+  if (!response.ok) {
+    throw new Error('Failed to load template scenes')
+  }
+  return await response.json()
 }
 
 export const templatesLogic = kea<templatesLogicType>([
@@ -319,14 +334,7 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
     favouriteTemplates: [
       (s) => [s.allTemplates, s.allRepositories, s.favouriteTemplateIds, s.frame, s.frameForm, s.apps],
-      (
-        allTemplates,
-        allRepositories,
-        favouriteTemplateIds,
-        frame,
-        frameForm,
-        apps,
-      ): TemplateWithFavouriteId[] => {
+      (allTemplates, allRepositories, favouriteTemplateIds, frame, frameForm, apps): TemplateWithFavouriteId[] => {
         const mode = frameForm?.mode ?? frame?.mode
         const rows: TemplateWithFavouriteId[] = []
         for (const template of allTemplates) {
@@ -371,6 +379,24 @@ export const templatesLogic = kea<templatesLogicType>([
         }
         actions.setAddTemplateUrlFormValues({ url: zipPath })
         actions.submitAddTemplateUrlForm()
+        return
+      }
+
+      if (template.scenesUrl || template.scenes?.length) {
+        const scenes = await fetchTemplateScenes(template)
+        const response = await apiFetch(`/api/templates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: template.name,
+            description: template.description,
+            scenes,
+          }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to save template')
+        }
+        actions.updateTemplate(await response.json())
       }
     },
     applyRemoteToFrame: async ({ template, repository, persistOnInstall, openDrawer }) => {
@@ -379,6 +405,16 @@ export const templatesLogic = kea<templatesLogicType>([
           actions.applyTemplateAndSave(template, openDrawer)
         } else {
           actions.applyTemplate(template)
+        }
+        return
+      }
+
+      if (template.scenesUrl) {
+        const loadedTemplate = { ...template, scenes: await fetchTemplateScenes(template) }
+        if (persistOnInstall) {
+          actions.applyTemplateAndSave(loadedTemplate, openDrawer)
+        } else {
+          actions.applyTemplate(loadedTemplate)
         }
         return
       }
@@ -425,6 +461,11 @@ export const templatesLogic = kea<templatesLogicType>([
 
         if (row.template.scenes?.length) {
           templates.push(row.template)
+          continue
+        }
+
+        if (row.template.scenesUrl) {
+          templates.push({ ...row.template, scenes: await fetchTemplateScenes(row.template) })
           continue
         }
 

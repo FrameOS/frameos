@@ -11,6 +11,7 @@ class FieldTypeEnum(str, Enum):
     integer = "integer"
     boolean = "boolean"
     color = "color"
+    date = "date"
     json = "json"
     node = "node"
     scene = "scene"

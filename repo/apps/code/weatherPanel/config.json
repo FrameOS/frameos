@@ -1,0 +1,92 @@
+{
+  "name": "Weather panel (JS)",
+  "category": "data",
+  "description": "High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "weather",
+      "label": "Weather data (from Weather app)",
+      "type": "json",
+      "required": true
+    },
+    {
+      "name": "icons",
+      "label": "Icon set (from Weather icon set app)",
+      "type": "json",
+      "required": true
+    },
+    {
+      "name": "mode",
+      "label": "Mode",
+      "type": "select",
+      "options": ["current", "hourly", "daily"],
+      "value": "current"
+    },
+    {
+      "name": "hours",
+      "label": "Hours to show",
+      "type": "integer",
+      "value": "10",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
+    },
+    {
+      "name": "days",
+      "label": "Days to show",
+      "type": "integer",
+      "value": "7",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "daily" }]
+    },
+    {
+      "name": "showValues",
+      "label": "Show icons and temperatures (hourly)",
+      "type": "boolean",
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
+    },
+    {
+      "name": "showGraph",
+      "label": "Show graph (hourly)",
+      "type": "boolean",
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "hourly" }]
+    },
+    {
+      "name": "lowContrast",
+      "label": "Low contrast",
+      "type": "boolean",
+      "value": "false"
+    },
+    {
+      "name": "showLocation",
+      "label": "Show location header",
+      "type": "boolean",
+      "value": "true"
+    },
+    {
+      "name": "showDetails",
+      "label": "Show detail row",
+      "type": "boolean",
+      "value": "true",
+      "showIf": [{ "field": "mode", "operator": "eq", "value": "current" }]
+    },
+    {
+      "name": "width",
+      "label": "Width (0 = fit canvas)",
+      "type": "integer",
+      "value": "0"
+    },
+    {
+      "name": "height",
+      "label": "Height (0 = fit canvas)",
+      "type": "integer",
+      "value": "0"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

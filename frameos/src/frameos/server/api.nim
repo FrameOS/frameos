@@ -814,6 +814,8 @@ proc renderControlPage*(request: Request) =
         let selected = if option == stringValue: " selected" else: ""
         fieldsHtml.add(fmt"<option value='{h($option)}'{selected}>{h($option)}</option>")
       fieldsHtml.add("</select><br/><br/>")
+    elif fieldType == "date":
+      fieldsHtml.add(fmt"<input type='date' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
     else:
       fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
     fieldsHtml.add("</div>")

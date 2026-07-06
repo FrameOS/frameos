@@ -42,6 +42,40 @@ async def test_get_system_repositories_includes_packaged_templates(async_client)
     assert "system-gallery" in repo_ids
     assert all(repo.get("templates") for repo in repos)
 
+    # Listings carry metadata only; scenes are fetched separately via scenesUrl.
+    for repo in repos:
+        for template in repo["templates"]:
+            assert "scenes" not in template
+            assert template["scenesUrl"].startswith("/api/repositories/system/")
+            assert template["scenesUrl"].endswith("/scenes.json")
+
+    # Templates that cannot run on ESP32 frames carry embedded: false.
+    samples = next(repo for repo in repos if repo["id"] == "system-samples")
+    by_name = {template["name"]: template for template in samples["templates"]}
+    assert by_name["Chromium Screenshot"]["embedded"] is False
+    assert by_name["Webcam RSTP"]["embedded"] is False
+    assert "embedded" not in by_name["Weather"]
+
+
+@pytest.mark.asyncio
+async def test_get_system_repository_template_scenes(async_client):
+    response = await async_client.get('/api/repositories/system/samples/templates/Calendar/scenes.json')
+    assert response.status_code == 200
+
+    scenes = response.json()
+    assert isinstance(scenes, list)
+    assert len(scenes) > 0
+    assert scenes[0].get("nodes")
+
+
+@pytest.mark.asyncio
+async def test_get_system_repository_template_scenes_not_found(async_client):
+    response = await async_client.get('/api/repositories/system/samples/templates/Missing/scenes.json')
+    assert response.status_code == 404
+
+    response = await async_client.get('/api/repositories/system/%2e%2e/templates/Calendar/scenes.json')
+    assert response.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_get_repository(async_client, db):

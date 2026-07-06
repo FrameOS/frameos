@@ -1,0 +1,381 @@
+{
+  "id": "weatherDaily",
+  "name": "Weather: daily",
+  "settings": {
+    "refreshInterval": 3600,
+    "backgroundColor": "#000000"
+  },
+  "fields": [
+    {
+      "name": "weather",
+      "type": "json",
+      "value": "{\"provider\":\"open-meteo\",\"forecastModes\":[\"current\",\"hourly\",\"daily\"],\"date\":\"2026-01-18\",\"location\":{\"name\":\"Brussels\",\"latitude\":50.85045,\"longitude\":4.34878,\"timezone\":\"Europe/Brussels\",\"country\":\"Belgium\",\"countryCode\":\"BE\",\"admin1\":\"Brussels Capital\"},\"forecast\":{\"latitude\":50.854,\"longitude\":4.35,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Brussels\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":27,\"current_weather_units\":{\"time\":\"iso8601\",\"interval\":\"seconds\",\"temperature\":\"°C\",\"windspeed\":\"km/h\",\"winddirection\":\"°\",\"is_day\":\"\",\"weathercode\":\"wmo code\"},\"current_weather\":{\"time\":\"2026-01-18T11:30\",\"interval\":900,\"temperature\":6.4,\"windspeed\":14.2,\"winddirection\":224,\"is_day\":1,\"weathercode\":2},\"hourly_units\":{\"time\":\"iso8601\",\"temperature_2m\":\"°C\",\"apparent_temperature\":\"°C\",\"precipitation\":\"mm\",\"weathercode\":\"wmo code\",\"windspeed_10m\":\"km/h\",\"winddirection_10m\":\"°\"},\"hourly\":{\"time\":[\"2026-01-18T00:00\",\"2026-01-18T01:00\",\"2026-01-18T02:00\",\"2026-01-18T03:00\",\"2026-01-18T04:00\",\"2026-01-18T05:00\",\"2026-01-18T06:00\",\"2026-01-18T07:00\",\"2026-01-18T08:00\",\"2026-01-18T09:00\",\"2026-01-18T10:00\",\"2026-01-18T11:00\",\"2026-01-18T12:00\",\"2026-01-18T13:00\",\"2026-01-18T14:00\",\"2026-01-18T15:00\",\"2026-01-18T16:00\",\"2026-01-18T17:00\",\"2026-01-18T18:00\",\"2026-01-18T19:00\",\"2026-01-18T20:00\",\"2026-01-18T21:00\",\"2026-01-18T22:00\",\"2026-01-18T23:00\",\"2026-01-19T00:00\",\"2026-01-19T01:00\",\"2026-01-19T02:00\",\"2026-01-19T03:00\",\"2026-01-19T04:00\",\"2026-01-19T05:00\",\"2026-01-19T06:00\",\"2026-01-19T07:00\",\"2026-01-19T08:00\",\"2026-01-19T09:00\",\"2026-01-19T10:00\",\"2026-01-19T11:00\",\"2026-01-19T12:00\",\"2026-01-19T13:00\",\"2026-01-19T14:00\",\"2026-01-19T15:00\",\"2026-01-19T16:00\",\"2026-01-19T17:00\",\"2026-01-19T18:00\",\"2026-01-19T19:00\",\"2026-01-19T20:00\",\"2026-01-19T21:00\",\"2026-01-19T22:00\",\"2026-01-19T23:00\",\"2026-01-20T00:00\",\"2026-01-20T01:00\",\"2026-01-20T02:00\",\"2026-01-20T03:00\",\"2026-01-20T04:00\",\"2026-01-20T05:00\",\"2026-01-20T06:00\",\"2026-01-20T07:00\",\"2026-01-20T08:00\",\"2026-01-20T09:00\",\"2026-01-20T10:00\",\"2026-01-20T11:00\",\"2026-01-20T12:00\",\"2026-01-20T13:00\",\"2026-01-20T14:00\",\"2026-01-20T15:00\",\"2026-01-20T16:00\",\"2026-01-20T17:00\",\"2026-01-20T18:00\",\"2026-01-20T19:00\",\"2026-01-20T20:00\",\"2026-01-20T21:00\",\"2026-01-20T22:00\",\"2026-01-20T23:00\"],\"temperature_2m\":[0.9,2.0,3.3,3.1,4.5,4.4,5.7,7.0,6.6,7.5,6.7,7.2,7.5,6.1,6.1,4.4,4.2,4.0,2.4,2.3,0.9,1.2,1.7,0.9,1.8,2.9,4.2,4.0,5.4,5.3,6.6,7.9,7.5,8.4,7.6,8.1,8.4,7.0,7.0,5.3,5.1,4.9,3.3,3.2,1.8,2.1,2.6,1.8,4.3,5.4,6.7,6.5,7.9,7.8,9.1,10.4,10.0,10.9,10.1,10.6,10.9,9.5,9.5,7.8,7.6,7.4,5.8,5.7,4.3,4.6,5.1,4.3],\"apparent_temperature\":[-1.2,-0.1,1.2,1.0,2.4,2.3,3.6,4.9,4.5,5.4,4.6,5.1,5.4,4.0,4.0,2.3,2.1,1.9,0.3,0.2,-1.2,-0.9,-0.4,-1.2,-0.3,0.8,2.1,1.9,3.3,3.2,4.5,5.8,5.4,6.3,5.5,6.0,6.3,4.9,4.9,3.2,3.0,2.8,1.2,1.1,-0.3,0.0,0.5,-0.3,2.2,3.3,4.6,4.4,5.8,5.7,7.0,8.3,7.9,8.8,8.0,8.5,8.8,7.4,7.4,5.7,5.5,5.3,3.7,3.6,2.2,2.5,3.0,2.2],\"precipitation\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.8,2.6,5.4,1.6,1.2,0.8,0,0,0,0,0,0,0,0,0,0,0,0.4,1.6,1.2,0.8,0.4,1.6,1.2,0.8,0.4,1.6,1.2,0.8,0,0,0,0,0,0,0,0,0,0,0,0,0.7,2.6,2.0,1.4,0.7,2.6,2.0,1.4,0.7,2.6,2.0,1.4,0,0,0,0],\"weathercode\":[45,45,45,3,3,3,2,2,1,1,2,1,0,2,3,61,63,95,71,71,73,3,3,3,2,2,2,2,2,2,2,2,61,61,61,61,61,61,61,61,61,61,61,61,2,2,2,2,2,2,2,2,2,2,2,2,95,95,95,95,95,95,95,95,95,95,95,95,2,2,2,2],\"windspeed_10m\":[6.0,10.5,15.0,19.5,8.7,13.2,17.7,6.9,11.4,15.9,20.4,9.6,14.1,18.6,7.8,12.3,16.8,6.0,10.5,15.0,19.5,8.7,13.2,17.7,15.9,20.4,9.6,14.1,18.6,7.8,12.3,16.8,6.0,10.5,15.0,19.5,8.7,13.2,17.7,6.9,11.4,15.9,20.4,9.6,14.1,18.6,7.8,12.3,10.5,15.0,19.5,8.7,13.2,17.7,6.9,11.4,15.9,20.4,9.6,14.1,18.6,7.8,12.3,16.8,6.0,10.5,15.0,19.5,8.7,13.2,17.7,6.9],\"winddirection_10m\":[0,37,74,111,148,185,222,259,296,333,10,47,84,121,158,195,232,269,306,343,20,57,94,131,90,127,164,201,238,275,312,349,26,63,100,137,174,211,248,285,322,359,36,73,110,147,184,221,180,217,254,291,328,5,42,79,116,153,190,227,264,301,338,15,52,89,126,163,200,237,274,311]},\"daily_units\":{\"time\":\"iso8601\",\"temperature_2m_max\":\"°C\",\"temperature_2m_min\":\"°C\",\"precipitation_sum\":\"mm\",\"weathercode\":\"wmo code\",\"sunrise\":\"iso8601\",\"sunset\":\"iso8601\",\"windspeed_10m_max\":\"km/h\"},\"daily\":{\"time\":[\"2026-01-18\",\"2026-01-19\",\"2026-01-20\",\"2026-01-21\",\"2026-01-22\",\"2026-01-23\",\"2026-01-24\"],\"temperature_2m_max\":[8.9,7.1,11.3,2.1,4.4,3.2,6.0],\"temperature_2m_min\":[1.2,3.5,4.8,-2.4,-1.0,-3.8,0.5],\"precipitation_sum\":[0.4,8.6,12.4,5.2,0,0,0.1],\"weathercode\":[2,61,95,71,3,0,45],\"sunrise\":[\"2026-01-18T08:35\",\"2026-01-19T08:34\",\"2026-01-20T08:33\",\"2026-01-21T08:32\",\"2026-01-22T08:31\",\"2026-01-23T08:30\",\"2026-01-24T08:29\"],\"sunset\":[\"2026-01-18T17:10\",\"2026-01-19T17:12\",\"2026-01-20T17:14\",\"2026-01-21T17:16\",\"2026-01-22T17:18\",\"2026-01-23T17:20\",\"2026-01-24T17:22\"],\"windspeed_10m_max\":[14.2,22.1,30.5,18.0,9.7,8.2,6.5]}}}",
+      "access": "private",
+      "persist": "memory",
+      "label": "Weather data (fixture)"
+    },
+    {
+      "name": "lowContrast",
+      "type": "boolean",
+      "value": "false",
+      "access": "public",
+      "persist": "memory",
+      "label": "Low contrast"
+    },
+    {
+      "name": "days",
+      "type": "integer",
+      "value": "7",
+      "access": "public",
+      "persist": "memory",
+      "label": "Days to show"
+    }
+  ],
+  "apps": {
+    "weatherIcons": {
+      "origin": "repo/apps/code/weatherIcons",
+      "name": "Weather icon set (JS)",
+      "category": "data",
+      "description": "Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "palette",
+          "label": "Palette",
+          "type": "select",
+          "options": [
+            "auto",
+            "vivid",
+            "mono"
+          ],
+          "value": "auto",
+          "hint": "auto picks vivid, or mono when low contrast is enabled"
+        },
+        {
+          "name": "lowContrast",
+          "label": "Low contrast",
+          "type": "boolean",
+          "value": "false"
+        },
+        {
+          "name": "lineWidth",
+          "label": "Line width",
+          "type": "float",
+          "value": "3"
+        },
+        {
+          "name": "ink",
+          "label": "Ink color (mono)",
+          "type": "color",
+          "value": "#222222"
+        },
+        {
+          "name": "paper",
+          "label": "Paper color (mono)",
+          "type": "color",
+          "value": "#ffffff"
+        }
+      ],
+      "output": [
+        {
+          "name": "icons",
+          "type": "json",
+          "example": "{\n  \"viewBox\": 64,\n  \"map\": { \"0\": \"clear\", \"61\": \"rain\" },\n  \"labels\": { \"0\": \"Clear sky\", \"61\": \"Light rain\" },\n  \"icons\": { \"clear\": \"<g>...</g>\", \"rain\": \"<g>...</g>\" }\n}"
+        }
+      ],
+      "sources": {
+        "app.ts": "// Weather icon set for Open-Meteo / WMO weather codes.\n// Returns { viewBox, map, labels, icons } where every icon is an SVG <g>\n// fragment drawn inside a 64x64 box. Consumers stamp the fragments with\n// <g transform=\"translate(x,y) scale(s)\">...</g>.\n\nconst WMO_ICON_MAP = {\n  '0': 'clear',\n  '1': 'mostly-clear',\n  '2': 'partly',\n  '3': 'overcast',\n  '45': 'fog',\n  '48': 'fog',\n  '51': 'drizzle',\n  '53': 'drizzle',\n  '55': 'drizzle',\n  '56': 'freezing-rain',\n  '57': 'freezing-rain',\n  '61': 'rain',\n  '63': 'rain',\n  '65': 'heavy-rain',\n  '66': 'freezing-rain',\n  '67': 'freezing-rain',\n  '71': 'snow',\n  '73': 'snow',\n  '75': 'heavy-snow',\n  '77': 'snow',\n  '80': 'showers',\n  '81': 'showers',\n  '82': 'heavy-rain',\n  '85': 'snow-showers',\n  '86': 'snow-showers',\n  '95': 'thunder',\n  '96': 'thunder-hail',\n  '99': 'thunder-hail',\n}\n\nconst WMO_LABELS = {\n  '0': 'Clear sky',\n  '1': 'Mainly clear',\n  '2': 'Partly cloudy',\n  '3': 'Overcast',\n  '45': 'Fog',\n  '48': 'Icy fog',\n  '51': 'Light drizzle',\n  '53': 'Drizzle',\n  '55': 'Dense drizzle',\n  '56': 'Freezing drizzle',\n  '57': 'Freezing drizzle',\n  '61': 'Light rain',\n  '63': 'Rain',\n  '65': 'Heavy rain',\n  '66': 'Freezing rain',\n  '67': 'Freezing rain',\n  '71': 'Light snow',\n  '73': 'Snow',\n  '75': 'Heavy snow',\n  '77': 'Snow grains',\n  '80': 'Rain showers',\n  '81': 'Rain showers',\n  '82': 'Violent showers',\n  '85': 'Snow showers',\n  '86': 'Snow showers',\n  '95': 'Thunderstorm',\n  '96': 'Storm with hail',\n  '99': 'Storm with hail',\n}\n\n// Material-style cloud outline, drawn in a 24x24 box (spans roughly x 0..24, y 4..20).\nconst CLOUD_PATH =\n  'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z'\n\nfunction group(children) {\n  return '<g>' + children.join('') + '</g>'\n}\n\nfunction cloud(x, y, scale, fill, stroke, lw) {\n  return (\n    '<g transform=\"translate(' + x + ' ' + y + ') scale(' + scale + ')\">' +\n    '<path d=\"' + CLOUD_PATH + '\" fill=\"' + fill + '\" stroke=\"' + stroke +\n    '\" stroke-width=\"' + (lw / scale) + '\" stroke-linejoin=\"round\"/></g>'\n  )\n}\n\nfunction sun(cx, cy, r, fill, stroke, lw, rays) {\n  const parts = []\n  parts.push(\n    '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"' + r + '\" fill=\"' + fill +\n    '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw + '\"/>'\n  )\n  const rayCount = 8\n  for (let i = 0; i < rayCount; i++) {\n    const a = (Math.PI * 2 * i) / rayCount + Math.PI / 8\n    const r1 = r + rays * 0.55\n    const r2 = r + rays * 1.45\n    const x1 = cx + Math.cos(a) * r1\n    const y1 = cy + Math.sin(a) * r1\n    const x2 = cx + Math.cos(a) * r2\n    const y2 = cy + Math.sin(a) * r2\n    parts.push(\n      '<line x1=\"' + x1.toFixed(2) + '\" y1=\"' + y1.toFixed(2) + '\" x2=\"' + x2.toFixed(2) +\n      '\" y2=\"' + y2.toFixed(2) + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n      '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction moon(cx, cy, r, fill, stroke, lw) {\n  // Crescent: large outer arc plus a shallower inner return arc.\n  const top = (cy - r).toFixed(2)\n  const bottom = (cy + r).toFixed(2)\n  const x = (cx + r * 0.45).toFixed(2)\n  const inner = (r * 0.78).toFixed(2)\n  const d =\n    'M ' + x + ' ' + top +\n    ' A ' + r + ' ' + r + ' 0 1 0 ' + x + ' ' + bottom +\n    ' A ' + inner + ' ' + inner + ' 0 0 1 ' + x + ' ' + top + ' Z'\n  return (\n    '<path d=\"' + d + '\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/>'\n  )\n}\n\nfunction star(x, y, s, color, lw) {\n  return (\n    '<path d=\"M ' + x + ' ' + (y - s) + ' L ' + x + ' ' + (y + s) +\n    ' M ' + (x - s) + ' ' + y + ' L ' + (x + s) + ' ' + y +\n    '\" stroke=\"' + color + '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n  )\n}\n\nfunction rainLine(x, y, len, color, lw) {\n  const x2 = (x - len * 0.3).toFixed(2)\n  const y2 = (y + len).toFixed(2)\n  return (\n    '<line x1=\"' + x + '\" y1=\"' + y + '\" x2=\"' + x2 + '\" y2=\"' + y2 + '\" stroke=\"' + color +\n    '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n  )\n}\n\nfunction dot(x, y, r, color) {\n  return '<circle cx=\"' + x + '\" cy=\"' + y + '\" r=\"' + r + '\" fill=\"' + color + '\"/>'\n}\n\nfunction flake(x, y, s, color, lw) {\n  const parts = []\n  for (let i = 0; i < 3; i++) {\n    const a = (Math.PI * i) / 3 + Math.PI / 6\n    const dx = Math.cos(a) * s\n    const dy = Math.sin(a) * s\n    parts.push(\n      '<line x1=\"' + (x - dx).toFixed(2) + '\" y1=\"' + (y - dy).toFixed(2) +\n      '\" x2=\"' + (x + dx).toFixed(2) + '\" y2=\"' + (y + dy).toFixed(2) +\n      '\" stroke=\"' + color + '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction bolt(x, y, s, fill, stroke, lw) {\n  const pts = [\n    [x + 2.5 * s, y],\n    [x - 2.2 * s, y + 7 * s],\n    [x + 0.4 * s, y + 7 * s],\n    [x - 1.6 * s, y + 12 * s],\n    [x + 3.6 * s, y + 4.6 * s],\n    [x + 1 * s, y + 4.6 * s],\n  ]\n  const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' ') + ' Z'\n  return (\n    '<path d=\"' + d + '\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/>'\n  )\n}\n\nfunction fogLines(color, lw) {\n  const parts = []\n  const rows = [\n    [16, 48, 46],\n    [20, 54, 44],\n    [24, 60, 40],\n  ]\n  for (let i = 0; i < rows.length; i++) {\n    const x1 = rows[i][0]\n    const y = rows[i][1]\n    const x2 = rows[i][0] + rows[i][2] - 16\n    parts.push(\n      '<line x1=\"' + x1 + '\" y1=\"' + y + '\" x2=\"' + x2 + '\" y2=\"' + y + '\" stroke=\"' + color +\n      '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction buildIcons(colors, lw) {\n  const c = colors\n  const icons = {}\n\n  const mainCloud = cloud(9, 14, 1.9, c.cloudFill, c.cloudStroke, lw)\n  const highCloud = cloud(9, 6, 1.9, c.cloudFill, c.cloudStroke, lw)\n  const backCloud = cloud(24, 6, 1.15, c.cloudBackFill, c.cloudBackStroke, lw)\n  const smallCloud = cloud(22, 26, 1.55, c.cloudFill, c.cloudStroke, lw)\n  const sunPeek = sun(20, 20, 8.5, c.sunFill, c.sunStroke, lw, 5)\n  const moonPeek = moon(20, 19, 9.5, c.moonFill, c.moonStroke, lw)\n\n  icons['clear'] = group([sun(32, 32, 11, c.sunFill, c.sunStroke, lw, 7)])\n  icons['clear-night'] = group([\n    moon(30, 32, 13, c.moonFill, c.moonStroke, lw),\n    star(47, 16, 3, c.starColor, lw * 0.8),\n    star(52, 30, 2, c.starColor, lw * 0.7),\n  ])\n  icons['mostly-clear'] = group([\n    sun(28, 26, 10, c.sunFill, c.sunStroke, lw, 6),\n    cloud(28, 32, 1.15, c.cloudFill, c.cloudStroke, lw),\n  ])\n  icons['mostly-clear-night'] = group([\n    moon(27, 26, 11, c.moonFill, c.moonStroke, lw),\n    star(50, 18, 2.5, c.starColor, lw * 0.7),\n    cloud(28, 32, 1.15, c.cloudFill, c.cloudStroke, lw),\n  ])\n  icons['partly'] = group([sunPeek, smallCloud])\n  icons['partly-night'] = group([moonPeek, smallCloud])\n  icons['cloudy'] = group([backCloud, cloud(7, 16, 1.9, c.cloudFill, c.cloudStroke, lw)])\n  icons['overcast'] = group([\n    cloud(20, 6, 1.35, c.cloudBackFill, c.cloudBackStroke, lw),\n    cloud(6, 18, 1.95, c.cloudDarkFill, c.cloudDarkStroke, lw),\n  ])\n  icons['fog'] = group([cloud(9, 2, 1.75, c.cloudFill, c.cloudStroke, lw), fogLines(c.fogColor, lw)])\n  icons['drizzle'] = group([\n    highCloud,\n    dot(24, 50, 1.9, c.rainColor),\n    dot(33, 56, 1.9, c.rainColor),\n    dot(42, 50, 1.9, c.rainColor),\n    dot(28, 59, 1.9, c.rainColor),\n    dot(38, 61, 1.9, c.rainColor),\n  ])\n  icons['rain'] = group([\n    highCloud,\n    rainLine(25, 49, 9, c.rainColor, lw),\n    rainLine(34, 52, 9, c.rainColor, lw),\n    rainLine(43, 49, 9, c.rainColor, lw),\n  ])\n  icons['heavy-rain'] = group([\n    highCloud,\n    rainLine(22, 48, 8, c.rainColor, lw),\n    rainLine(30, 53, 8, c.rainColor, lw),\n    rainLine(38, 48, 8, c.rainColor, lw),\n    rainLine(46, 53, 8, c.rainColor, lw),\n    rainLine(28, 44, 6, c.rainColor, lw),\n    rainLine(40, 58, 6, c.rainColor, lw),\n  ])\n  icons['freezing-rain'] = group([\n    highCloud,\n    rainLine(24, 49, 9, c.rainColor, lw),\n    rainLine(33, 53, 9, c.rainColor, lw),\n    flake(43, 54, 4.5, c.snowColor, lw * 0.85),\n  ])\n  icons['snow'] = group([\n    highCloud,\n    flake(24, 51, 5, c.snowColor, lw * 0.85),\n    flake(34, 58, 5, c.snowColor, lw * 0.85),\n    flake(44, 51, 5, c.snowColor, lw * 0.85),\n  ])\n  icons['heavy-snow'] = group([\n    highCloud,\n    flake(22, 49, 5, c.snowColor, lw * 0.85),\n    flake(33, 54, 5, c.snowColor, lw * 0.85),\n    flake(44, 49, 5, c.snowColor, lw * 0.85),\n    flake(27, 59, 4, c.snowColor, lw * 0.85),\n    flake(39, 61, 4, c.snowColor, lw * 0.85),\n  ])\n  icons['sleet'] = group([\n    highCloud,\n    rainLine(25, 49, 8, c.rainColor, lw),\n    flake(35, 55, 4.5, c.snowColor, lw * 0.85),\n    rainLine(45, 49, 8, c.rainColor, lw),\n  ])\n  icons['showers'] = group([\n    sun(19, 17, 7.5, c.sunFill, c.sunStroke, lw, 4.5),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    rainLine(26, 52, 8, c.rainColor, lw),\n    rainLine(35, 55, 8, c.rainColor, lw),\n    rainLine(44, 52, 8, c.rainColor, lw),\n  ])\n  icons['showers-night'] = group([\n    moon(19, 16, 8.5, c.moonFill, c.moonStroke, lw),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    rainLine(26, 52, 8, c.rainColor, lw),\n    rainLine(35, 55, 8, c.rainColor, lw),\n    rainLine(44, 52, 8, c.rainColor, lw),\n  ])\n  icons['snow-showers'] = group([\n    sun(19, 17, 7.5, c.sunFill, c.sunStroke, lw, 4.5),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    flake(26, 54, 4.5, c.snowColor, lw * 0.85),\n    flake(38, 57, 4.5, c.snowColor, lw * 0.85),\n  ])\n  icons['thunder'] = group([highCloud, bolt(32, 41, 1.5, c.boltFill, c.boltStroke, lw * 0.75)])\n  icons['thunder-hail'] = group([\n    highCloud,\n    bolt(28, 41, 1.4, c.boltFill, c.boltStroke, lw * 0.75),\n    dot(43, 49, 2.4, c.snowColor),\n    dot(47, 56, 2.4, c.snowColor),\n  ])\n  return icons\n}\n\nexport function get(app: FrameOSApp) {\n  const lowContrast = app.config.lowContrast === true\n  let palette = app.config.palette || 'auto'\n  if (palette === 'auto') {\n    palette = lowContrast ? 'mono' : 'vivid'\n  }\n  const lw = Number(app.config.lineWidth) > 0 ? Number(app.config.lineWidth) : 3\n  const ink = app.config.ink || '#222222'\n  const paper = app.config.paper || '#ffffff'\n\n  let colors\n  if (palette === 'mono') {\n    colors = {\n      sunFill: 'none',\n      sunStroke: ink,\n      moonFill: 'none',\n      moonStroke: ink,\n      starColor: ink,\n      cloudFill: paper,\n      cloudStroke: ink,\n      cloudBackFill: paper,\n      cloudBackStroke: ink,\n      cloudDarkFill: paper,\n      cloudDarkStroke: ink,\n      rainColor: ink,\n      snowColor: ink,\n      boltFill: paper,\n      boltStroke: ink,\n      fogColor: ink,\n    }\n  } else {\n    colors = {\n      sunFill: '#FFD54F',\n      sunStroke: '#F59E0B',\n      moonFill: '#FDE9A8',\n      moonStroke: '#E8B93C',\n      starColor: '#FDE9A8',\n      cloudFill: '#FDFEFF',\n      cloudStroke: '#7C8DA6',\n      cloudBackFill: '#DCE5F0',\n      cloudBackStroke: '#93A5BD',\n      cloudDarkFill: '#C7D2E1',\n      cloudDarkStroke: '#6C7E98',\n      rainColor: '#38BDF8',\n      snowColor: '#A8D8F0',\n      boltFill: '#FFD54F',\n      boltStroke: '#F59E0B',\n      fogColor: '#9FB0C4',\n    }\n  }\n\n  return {\n    viewBox: 64,\n    palette: palette,\n    map: WMO_ICON_MAP,\n    labels: WMO_LABELS,\n    icons: buildIcons(colors, lw),\n  }\n}\n",
+        "config.json": "{\n  \"name\": \"Weather icon set (JS)\",\n  \"category\": \"data\",\n  \"description\": \"Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"palette\",\n      \"label\": \"Palette\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"vivid\", \"mono\"],\n      \"value\": \"auto\",\n      \"hint\": \"auto picks vivid, or mono when low contrast is enabled\"\n    },\n    {\n      \"name\": \"lowContrast\",\n      \"label\": \"Low contrast\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"lineWidth\",\n      \"label\": \"Line width\",\n      \"type\": \"float\",\n      \"value\": \"3\"\n    },\n    {\n      \"name\": \"ink\",\n      \"label\": \"Ink color (mono)\",\n      \"type\": \"color\",\n      \"value\": \"#222222\"\n    },\n    {\n      \"name\": \"paper\",\n      \"label\": \"Paper color (mono)\",\n      \"type\": \"color\",\n      \"value\": \"#ffffff\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"icons\",\n      \"type\": \"json\",\n      \"example\": \"{\\n  \\\"viewBox\\\": 64,\\n  \\\"map\\\": { \\\"0\\\": \\\"clear\\\", \\\"61\\\": \\\"rain\\\" },\\n  \\\"labels\\\": { \\\"0\\\": \\\"Clear sky\\\", \\\"61\\\": \\\"Light rain\\\" },\\n  \\\"icons\\\": { \\\"clear\\\": \\\"<g>...</g>\\\", \\\"rain\\\": \\\"<g>...</g>\\\" }\\n}\"\n    }\n  ]\n}\n"
+      }
+    },
+    "weatherPanel": {
+      "origin": "repo/apps/code/weatherPanel",
+      "name": "Weather panel (JS)",
+      "category": "data",
+      "description": "High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "weather",
+          "label": "Weather data (from Weather app)",
+          "type": "json",
+          "required": true
+        },
+        {
+          "name": "icons",
+          "label": "Icon set (from Weather icon set app)",
+          "type": "json",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "label": "Mode",
+          "type": "select",
+          "options": [
+            "current",
+            "hourly",
+            "daily"
+          ],
+          "value": "current"
+        },
+        {
+          "name": "hours",
+          "label": "Hours to show",
+          "type": "integer",
+          "value": "10",
+          "showIf": [
+            {
+              "field": "mode",
+              "operator": "eq",
+              "value": "hourly"
+            }
+          ]
+        },
+        {
+          "name": "days",
+          "label": "Days to show",
+          "type": "integer",
+          "value": "7",
+          "showIf": [
+            {
+              "field": "mode",
+              "operator": "eq",
+              "value": "daily"
+            }
+          ]
+        },
+        {
+          "name": "showValues",
+          "label": "Show icons and temperatures (hourly)",
+          "type": "boolean",
+          "value": "true",
+          "showIf": [
+            {
+              "field": "mode",
+              "operator": "eq",
+              "value": "hourly"
+            }
+          ]
+        },
+        {
+          "name": "showGraph",
+          "label": "Show graph (hourly)",
+          "type": "boolean",
+          "value": "true",
+          "showIf": [
+            {
+              "field": "mode",
+              "operator": "eq",
+              "value": "hourly"
+            }
+          ]
+        },
+        {
+          "name": "lowContrast",
+          "label": "Low contrast",
+          "type": "boolean",
+          "value": "false"
+        },
+        {
+          "name": "showLocation",
+          "label": "Show location header",
+          "type": "boolean",
+          "value": "true"
+        },
+        {
+          "name": "showDetails",
+          "label": "Show detail row",
+          "type": "boolean",
+          "value": "true",
+          "showIf": [
+            {
+              "field": "mode",
+              "operator": "eq",
+              "value": "current"
+            }
+          ]
+        },
+        {
+          "name": "width",
+          "label": "Width (0 = fit canvas)",
+          "type": "integer",
+          "value": "0"
+        },
+        {
+          "name": "height",
+          "label": "Height (0 = fit canvas)",
+          "type": "integer",
+          "value": "0"
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "app.ts": "// High fidelity weather panel for Open-Meteo data.\n//\n// Everything is drawn as vector SVG that FrameOS rasterizes with pixie.\n// Pixie's SVG subset has no <text> element, so the panel ships a small\n// single-stroke vector font (digits, A-Z and a few symbols) and draws all\n// text as stroked paths. Icons come in through the `icons` field, produced\n// by the \"Weather icon set (JS)\" app.\n\n// ---------------------------------------------------------------------------\n// Vector font: single stroke glyphs in a 14-unit tall box, baseline at y=14.\n// Each entry is [advanceWidth, pathData].\n// ---------------------------------------------------------------------------\n\nconst GLYPHS = {\n  '0': [9, 'M4.5 0 Q9 0 9 7 Q9 14 4.5 14 Q0 14 0 7 Q0 0 4.5 0'],\n  '1': [9, 'M2.5 2.6 Q5 1.6 6 0 L6 14'],\n  '2': [9, 'M0.5 3 Q0.5 0 4.5 0 Q8.5 0 8.5 3 Q8.5 5.5 6 8 L0 14 L9 14'],\n  '3': [9, 'M0.8 2.2 Q1.6 0 4.5 0 Q8.2 0 8.2 3.1 Q8.2 6.1 4.4 6.4 Q8.7 6.7 8.7 10.3 Q8.7 14 4.5 14 Q1.2 14 0.4 11.6'],\n  '4': [9, 'M6.5 14 L6.5 0 L0 9.5 L9 9.5'],\n  '5': [9, 'M8 0 L1.4 0 L0.9 6.1 Q2.2 5.2 4.2 5.2 Q8.7 5.2 8.7 9.5 Q8.7 14 4.4 14 Q1.2 14 0.4 11.8'],\n  '6': [9, 'M8 1.6 Q7 0 4.8 0 Q0.4 0 0.4 7.3 Q0.4 14 4.6 14 Q8.7 14 8.7 9.9 Q8.7 6 4.9 6 Q1.3 6 0.4 8.8'],\n  '7': [9, 'M0.3 0 L9 0 L3.6 14'],\n  '8': [9, 'M4.5 6.4 Q1 6.1 1 3.2 Q1 0 4.5 0 Q8 0 8 3.2 Q8 6.1 4.5 6.4 Q0.4 6.8 0.4 10.4 Q0.4 14 4.5 14 Q8.6 14 8.6 10.4 Q8.6 6.8 4.5 6.4'],\n  '9': [9, 'M1 12.4 Q2 14 4.2 14 Q8.6 14 8.6 6.7 Q8.6 0 4.4 0 Q0.3 0 0.3 4.1 Q0.3 8 4.1 8 Q7.7 8 8.6 5.2'],\n  'A': [10, 'M0 14 L5 0 L10 14 M1.8 9.2 L8.2 9.2'],\n  'B': [9.4, 'M1 0 L1 14 M1 0 L5 0 Q8.4 0 8.4 3.2 Q8.4 6.3 5 6.4 L1 6.4 M5 6.4 Q9 6.5 9 10.2 Q9 14 5 14 L1 14'],\n  'C': [9.6, 'M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q8 14 9.2 11.4'],\n  'D': [9.7, 'M1 0 L1 14 M1 0 L4.4 0 Q9.2 0 9.2 7 Q9.2 14 4.4 14 L1 14'],\n  'E': [8.7, 'M8.3 0 L1 0 L1 14 L8.3 14 M1 6.4 L7 6.4'],\n  'F': [8.5, 'M8.3 0 L1 0 L1 14 M1 6.4 L7 6.4'],\n  'G': [9.7, 'M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q9.2 14 9.2 10.4 L9.2 8 L5.4 8'],\n  'H': [9.5, 'M1 0 L1 14 M8.5 0 L8.5 14 M1 6.4 L8.5 6.4'],\n  'I': [2.6, 'M1.3 0 L1.3 14'],\n  'J': [7, 'M6 0 L6 10.6 Q6 14 3.2 14 Q0.7 14 0.4 11'],\n  'K': [9.6, 'M1 0 L1 14 M9 0 L1 7.8 M3.8 5.6 L9.5 14'],\n  'L': [8, 'M1 0 L1 14 L7.8 14'],\n  'M': [11.5, 'M1 14 L1 0 L5.75 9.6 L10.5 0 L10.5 14'],\n  'N': [9.5, 'M1 14 L1 0 L8.5 14 L8.5 0'],\n  'O': [10.5, 'M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0'],\n  'P': [9.2, 'M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.6 Q8.8 7.2 5.2 7.2 L1 7.2'],\n  'Q': [10.5, 'M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0 M6.4 10.6 L10.3 14.8'],\n  'R': [9.5, 'M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.5 Q8.8 6.9 5.2 6.9 L1 6.9 M5.4 6.9 L9.2 14'],\n  'S': [9.2, 'M8.4 2.1 Q7.6 0 4.6 0 Q1 0 1 3.1 Q1 5.6 4.6 6.4 Q8.7 7.3 8.7 10.3 Q8.7 14 4.6 14 Q1.1 14 0.3 11.7'],\n  'T': [9, 'M4.5 14 L4.5 0 M0 0 L9 0'],\n  'U': [9.5, 'M1 0 L1 9.4 Q1 14 4.75 14 Q8.5 14 8.5 9.4 L8.5 0'],\n  'V': [10, 'M0 0 L5 14 L10 0'],\n  'W': [13, 'M0.5 0 L3.4 14 L6.5 3.4 L9.6 14 L12.5 0'],\n  'X': [9.5, 'M0.4 0 L9.1 14 M9.1 0 L0.4 14'],\n  'Y': [10, 'M0 0 L5 7.6 L10 0 M5 7.6 L5 14'],\n  'Z': [9, 'M0.5 0 L8.5 0 L0.5 14 L8.5 14'],\n  ' ': [5.5, ''],\n  '-': [7, 'M1 7.5 L6 7.5'],\n  '+': [8, 'M4 3.8 L4 11.2 M0.3 7.5 L7.7 7.5'],\n  '.': [3.5, 'M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3'],\n  ',': [3.5, 'M2.4 12.4 Q2.6 14.6 1.1 16'],\n  ':': [3.5, 'M1.05 4.7 Q1.05 4 1.75 4 Q2.45 4 2.45 4.7 Q2.45 5.4 1.75 5.4 Q1.05 5.4 1.05 4.7 M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3'],\n  '·': [3.8, 'M1.2 7.5 Q1.2 6.8 1.9 6.8 Q2.6 6.8 2.6 7.5 Q2.6 8.2 1.9 8.2 Q1.2 8.2 1.2 7.5'],\n  '°': [6.6, 'M3.25 0 Q5.55 0 5.55 2.3 Q5.55 4.6 3.25 4.6 Q0.95 4.6 0.95 2.3 Q0.95 0 3.25 0'],\n  '%': [11, 'M2.6 0.6 Q4.6 0.6 4.6 2.7 Q4.6 4.8 2.6 4.8 Q0.6 4.8 0.6 2.7 Q0.6 0.6 2.6 0.6 M10.4 0.5 L0.6 13.5 M8.4 9.2 Q10.4 9.2 10.4 11.3 Q10.4 13.4 8.4 13.4 Q6.4 13.4 6.4 11.3 Q6.4 9.2 8.4 9.2'],\n  '/': [7, 'M6.5 0 L0.5 14'],\n  \"'\": [2.6, 'M1.3 0 L1.1 3.6'],\n  '(': [4.6, 'M4 -0.5 Q1 3 1 7 Q1 11 4 14.5'],\n  ')': [4.6, 'M0.6 -0.5 Q3.6 3 3.6 7 Q3.6 11 0.6 14.5'],\n}\n\nconst ACCENTS = {\n  'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A', 'Æ': 'A',\n  'Ç': 'C',\n  'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',\n  'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',\n  'Ñ': 'N',\n  'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O', 'Ø': 'O',\n  'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',\n  'Ý': 'Y', 'Š': 'S', 'Ž': 'Z',\n}\n\nconst TRACKING = 1.8\n\nfunction glyphFor(ch) {\n  let up = ch.toUpperCase()\n  if (ACCENTS[up]) {\n    up = ACCENTS[up]\n  }\n  return GLYPHS[up]\n}\n\nfunction textUnits(str) {\n  let units = 0\n  for (let i = 0; i < str.length; i++) {\n    const g = glyphFor(str.charAt(i))\n    if (g) {\n      units += g[0] + TRACKING\n    }\n  }\n  return units > 0 ? units - TRACKING : 0\n}\n\nfunction textWidth(str, size) {\n  return (textUnits(str) * size) / 14\n}\n\n// Shrink `size` until `str` fits in maxWidth.\nfunction fitSize(str, size, maxWidth) {\n  const w = textWidth(str, size)\n  return w > maxWidth ? (size * maxWidth) / w : size\n}\n\n// Draw `str` with the baseline at (x, y). anchor: start | middle | end.\nfunction text(str, x, y, size, color, weight, anchor) {\n  const s = size / 14\n  let startX = x\n  if (anchor === 'middle') {\n    startX = x - textWidth(str, size) / 2\n  } else if (anchor === 'end') {\n    startX = x - textWidth(str, size)\n  }\n  const sw = (weight / s).toFixed(3)\n  const parts = []\n  let cx = 0\n  for (let i = 0; i < str.length; i++) {\n    const g = glyphFor(str.charAt(i))\n    if (!g) {\n      continue\n    }\n    if (g[1]) {\n      parts.push('<path d=\"' + g[1] + '\" transform=\"translate(' + cx.toFixed(2) + ' 0)\"/>')\n    }\n    cx += g[0] + TRACKING\n  }\n  return (\n    '<g transform=\"translate(' + startX.toFixed(2) + ' ' + (y - size).toFixed(2) + ') scale(' + s.toFixed(4) + ')\"' +\n    ' fill=\"none\" stroke=\"' + color + '\" stroke-width=\"' + sw + '\" stroke-linecap=\"round\" stroke-linejoin=\"round\">' +\n    parts.join('') + '</g>'\n  )\n}\n\n// ---------------------------------------------------------------------------\n// Small helpers\n// ---------------------------------------------------------------------------\n\nfunction clamp(v, lo, hi) {\n  return v < lo ? lo : v > hi ? hi : v\n}\n\nfunction hexToRgb(hex) {\n  const h = hex.charAt(0) === '#' ? hex.substring(1) : hex\n  return [\n    parseInt(h.substring(0, 2), 16),\n    parseInt(h.substring(2, 4), 16),\n    parseInt(h.substring(4, 6), 16),\n  ]\n}\n\nfunction rgbToHex(r, g, b) {\n  const to2 = (v) => {\n    const s = Math.round(clamp(v, 0, 255)).toString(16)\n    return s.length < 2 ? '0' + s : s\n  }\n  return '#' + to2(r) + to2(g) + to2(b)\n}\n\nfunction mix(hexA, hexB, t) {\n  const a = hexToRgb(hexA)\n  const b = hexToRgb(hexB)\n  return rgbToHex(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)\n}\n\n// Temperature to color, anchored on celsius; fahrenheit values are converted.\nconst TEMP_STOPS = [\n  [-15, '#7FA9F0'],\n  [0, '#7CC4E8'],\n  [10, '#8FD0A8'],\n  [18, '#F2C94C'],\n  [27, '#F2994A'],\n  [38, '#EB5757'],\n]\n\nfunction tempColor(value, unit) {\n  let c = value\n  if (unit && unit.indexOf('F') >= 0) {\n    c = ((value - 32) * 5) / 9\n  }\n  if (c <= TEMP_STOPS[0][0]) {\n    return TEMP_STOPS[0][1]\n  }\n  for (let i = 1; i < TEMP_STOPS.length; i++) {\n    if (c <= TEMP_STOPS[i][0]) {\n      const t = (c - TEMP_STOPS[i - 1][0]) / (TEMP_STOPS[i][0] - TEMP_STOPS[i - 1][0])\n      return mix(TEMP_STOPS[i - 1][1], TEMP_STOPS[i][1], t)\n    }\n  }\n  return TEMP_STOPS[TEMP_STOPS.length - 1][1]\n}\n\nfunction parseIso(iso) {\n  // \"2026-01-18T22:15\" -> parts; no Date object to stay deterministic.\n  const datePart = iso.split('T')[0]\n  const timePart = iso.split('T')[1] || '00:00'\n  const d = datePart.split('-')\n  const t = timePart.split(':')\n  return {\n    y: parseInt(d[0], 10),\n    mo: parseInt(d[1], 10),\n    d: parseInt(d[2], 10),\n    h: parseInt(t[0], 10),\n    mi: parseInt(t[1] || '0', 10),\n  }\n}\n\nconst DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']\nconst MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']\n\nfunction dayOfWeek(y, mo, d) {\n  // Sakamoto's algorithm, 0 = Sunday.\n  const t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]\n  let yy = y\n  if (mo < 3) {\n    yy -= 1\n  }\n  return (yy + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) + t[mo - 1] + d) % 7\n}\n\nfunction fmtTemp(v) {\n  const r = Math.round(v)\n  return (r === 0 ? 0 : r) + '°'\n}\n\nfunction unitLetter(unit) {\n  return ('' + (unit || '°C')).indexOf('F') >= 0 ? 'F' : 'C'\n}\n\nfunction fmtPrecip(v) {\n  return Math.round(v * 10) / 10 + ''\n}\n\nfunction fmtClock(iso) {\n  const p = iso.split('T')\n  return p.length > 1 ? p[1] : iso\n}\n\nfunction iconFragment(iconSet, code, isDay, x, y, size) {\n  if (!iconSet || !iconSet.icons) {\n    return ''\n  }\n  const map = iconSet.map || {}\n  const icons = iconSet.icons\n  let key = map['' + code] || 'cloudy'\n  if (!isDay && icons[key + '-night']) {\n    key = key + '-night'\n  }\n  if (!icons[key]) {\n    key = icons['cloudy'] ? 'cloudy' : ''\n  }\n  if (!key) {\n    return ''\n  }\n  const vb = iconSet.viewBox || 64\n  const s = size / vb\n  return '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + s.toFixed(4) + ')\">' + icons[key] + '</g>'\n}\n\nfunction conditionLabel(iconSet, code) {\n  if (iconSet && iconSet.labels && iconSet.labels['' + code]) {\n    return iconSet.labels['' + code]\n  }\n  return 'CODE ' + code\n}\n\n// ---------------------------------------------------------------------------\n// Themes\n// ---------------------------------------------------------------------------\n\nfunction skyFor(code, isDay) {\n  if (code >= 95) {\n    return ['#252A40', '#4A5578']\n  }\n  if (code >= 71 && code <= 86 && code !== 80 && code !== 81 && code !== 82) {\n    return isDay ? ['#5D7A9C', '#A9BFD6'] : ['#1F2A3F', '#44546F']\n  }\n  if (code >= 51) {\n    return isDay ? ['#3E5C7A', '#7395B0'] : ['#141E2C', '#31445C']\n  }\n  if (code >= 45) {\n    return isDay ? ['#6E7B8A', '#A3AEBA'] : ['#242B34', '#4A545F']\n  }\n  if (code >= 2) {\n    return isDay ? ['#3E6FB0', '#84AED6'] : ['#161E38', '#35426A']\n  }\n  return isDay ? ['#2E6FD0', '#7FB8EE'] : ['#111834', '#2C3B6E']\n}\n\nfunction themeFor(code, isDay, lowContrast) {\n  if (lowContrast) {\n    return {\n      flat: true,\n      bgTop: '#FFFFFF',\n      bgBottom: '#FFFFFF',\n      text: '#111111',\n      sub: '#3D3D3D',\n      faint: '#8A8A8A',\n      line: '#111111',\n      grid: '#C8C8C8',\n      rain: '#111111',\n      areaFill: 'none',\n      barSolid: '#111111',\n    }\n  }\n  const sky = skyFor(code, isDay)\n  return {\n    flat: false,\n    bgTop: sky[0],\n    bgBottom: sky[1],\n    text: '#FFFFFF',\n    sub: 'rgba(255,255,255,0.78)',\n    faint: 'rgba(255,255,255,0.45)',\n    line: '#FFFFFF',\n    grid: 'rgba(255,255,255,0.22)',\n    rain: '#9BDCFF',\n    areaFill: 'rgba(255,255,255,0.16)',\n    barSolid: '',\n  }\n}\n\n// ---------------------------------------------------------------------------\n// Data extraction\n// ---------------------------------------------------------------------------\n\nfunction hourlySeries(forecast, count) {\n  const hourly = forecast.hourly || {}\n  const times = hourly.time || []\n  const cur = forecast.current_weather || {}\n  const nowIso = cur.time || (times.length ? times[0] : '')\n  let start = 0\n  for (let i = 0; i < times.length; i++) {\n    if (times[i] >= nowIso.substring(0, 14) + '00') {\n      start = i\n      break\n    }\n    if (i === times.length - 1) {\n      start = i\n    }\n  }\n  const out = []\n  for (let i = start; i < times.length && out.length < count; i++) {\n    const p = parseIso(times[i])\n    out.push({\n      iso: times[i],\n      hour: p.h,\n      dow: dayOfWeek(p.y, p.mo, p.d),\n      temp: (hourly.temperature_2m || [])[i],\n      precip: (hourly.precipitation || [])[i] || 0,\n      code: (hourly.weathercode || [])[i] || 0,\n      wind: (hourly.windspeed_10m || [])[i],\n      isDay: hourIsDay(p.h, forecast),\n    })\n  }\n  return out\n}\n\nfunction hourIsDay(hour, forecast) {\n  // Approximate day/night per hour from the first day's sunrise/sunset.\n  const daily = forecast.daily || {}\n  const sunrise = (daily.sunrise || [])[0]\n  const sunset = (daily.sunset || [])[0]\n  if (!sunrise || !sunset) {\n    return hour >= 7 && hour < 20\n  }\n  const riseH = parseIso(sunrise).h\n  const setH = parseIso(sunset).h\n  return hour >= riseH && hour <= setH\n}\n\nfunction dailySeries(forecast, count) {\n  const daily = forecast.daily || {}\n  const times = daily.time || []\n  const out = []\n  for (let i = 0; i < times.length && out.length < count; i++) {\n    const p = parseIso(times[i])\n    out.push({\n      iso: times[i],\n      dow: dayOfWeek(p.y, p.mo, p.d),\n      dayNum: p.d,\n      min: (daily.temperature_2m_min || [])[i],\n      max: (daily.temperature_2m_max || [])[i],\n      precip: (daily.precipitation_sum || [])[i] || 0,\n      code: (daily.weathercode || [])[i] || 0,\n    })\n  }\n  return out\n}\n\n// ---------------------------------------------------------------------------\n// Shared chrome\n// ---------------------------------------------------------------------------\n\nfunction backgroundSvg(p) {\n  if (p.theme.flat) {\n    return '<rect x=\"0\" y=\"0\" width=\"' + p.W + '\" height=\"' + p.H + '\" fill=\"' + p.theme.bgTop + '\"/>'\n  }\n  return (\n    '<linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"' + p.H + '\">' +\n    '<stop offset=\"0\" stop-color=\"' + p.theme.bgTop + '\"/>' +\n    '<stop offset=\"1\" stop-color=\"' + p.theme.bgBottom + '\"/>' +\n    '</linearGradient>' +\n    '<rect x=\"0\" y=\"0\" width=\"' + p.W + '\" height=\"' + p.H + '\" fill=\"url(#bg)\"/>'\n  )\n}\n\nfunction headerSvg(p, title) {\n  const parts = []\n  const size = p.base\n  const y = p.pad + size\n  if (p.showLocation && p.locationName) {\n    parts.push(text(p.locationName, p.pad, y, size, p.theme.text, size * 0.14, 'start'))\n    parts.push(text(title, p.W - p.pad, y, size * 0.82, p.theme.sub, size * 0.1, 'end'))\n  } else {\n    parts.push(text(title, p.pad, y, size * 0.9, p.theme.sub, size * 0.12, 'start'))\n  }\n  return { svg: parts.join(''), bottom: y + size * 0.6 }\n}\n\nfunction windArrow(x, y, r, deg, color, lw) {\n  // Arrow points in the direction the wind blows toward.\n  const d = 'M0 ' + (-r).toFixed(2) + ' L' + (r * 0.62).toFixed(2) + ' ' + (r * 0.85).toFixed(2) +\n    ' L0 ' + (r * 0.35).toFixed(2) + ' L' + (-r * 0.62).toFixed(2) + ' ' + (r * 0.85).toFixed(2) + ' Z'\n  return (\n    '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') rotate(' + ((deg + 180) % 360).toFixed(1) + ')\">' +\n    '<path d=\"' + d + '\" fill=\"' + color + '\" stroke=\"' + color + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/></g>'\n  )\n}\n\n// ---------------------------------------------------------------------------\n// Current conditions panel\n// ---------------------------------------------------------------------------\n\nfunction renderCurrent(p) {\n  const parts = []\n  const cur = p.forecast.current_weather || {}\n  const units = p.forecast.current_weather_units || {}\n  const daily = p.forecast.daily || {}\n  const isDay = cur.is_day === 1\n  const compact = p.H < 240 || (p.H < 300 && !p.showDetails)\n\n  let top = p.pad\n  if (p.showLocation) {\n    const dateIso = (cur.time || p.weather.date || '').substring(0, 10)\n    let title = ''\n    if (dateIso) {\n      const dp = parseIso(dateIso)\n      title = DAY_NAMES[dayOfWeek(dp.y, dp.mo, dp.d)] + ' ' + dp.d + ' ' + MONTH_NAMES[dp.mo - 1]\n    }\n    const h = headerSvg(p, title)\n    parts.push(h.svg)\n    top = h.bottom\n  }\n\n  const detailsH = p.showDetails && !compact ? clamp(p.H * 0.2, 54, 92) : 0\n  const feelsH = compact ? p.base * 1.4 : p.base * 1.9\n  const condH = compact ? p.base * 1.7 : p.base * 2.2\n\n  // Hero: icon + temperature side by side, centered.\n  const heroTop = top\n  const heroBottom = p.H - p.pad - detailsH - condH - feelsH\n  const heroH = Math.max(40, heroBottom - heroTop)\n  const iconSize = clamp(Math.min(heroH * 0.94, p.W * 0.4), 34, 300)\n  const tempSize = clamp(Math.min(heroH * 0.62, p.W * 0.26), 26, 240)\n  const tempStr = fmtTemp(cur.temperature || 0)\n  const unitStr = (units.temperature || '°C').indexOf('F') >= 0 ? 'F' : 'C'\n  const unitSize = tempSize * 0.3\n  const gapHero = iconSize * 0.12\n  const tempW = textWidth(tempStr, tempSize)\n  const heroW = iconSize + gapHero + tempW + unitSize * 0.75\n  const heroX = (p.W - heroW) / 2\n  const heroMidY = heroTop + heroH / 2\n  parts.push(iconFragment(p.icons, cur.weathercode || 0, isDay, heroX, heroMidY - iconSize / 2, iconSize))\n  const tempBase = heroMidY + tempSize * 0.42\n  parts.push(text(tempStr, heroX + iconSize + gapHero, tempBase, tempSize, p.theme.text, tempSize * 0.15, 'start'))\n  parts.push(\n    text(unitStr, heroX + iconSize + gapHero + tempW + unitSize * 0.3, tempBase - tempSize + unitSize, unitSize, p.theme.sub, unitSize * 0.13, 'start')\n  )\n\n  // Condition label + feels like / hi-lo line.\n  const condY = heroBottom + condH * 0.72\n  parts.push(text(conditionLabel(p.icons, cur.weathercode || 0), p.W / 2, condY, condH * 0.5, p.theme.text, condH * 0.07, 'middle'))\n\n  const bits = []\n  const apparent = currentApparent(p.forecast)\n  if (apparent !== null) {\n    bits.push('FEELS ' + fmtTemp(apparent))\n  }\n  if ((daily.temperature_2m_max || []).length) {\n    bits.push('H ' + fmtTemp(daily.temperature_2m_max[0]) + ' L ' + fmtTemp(daily.temperature_2m_min[0]))\n  }\n  if (bits.length) {\n    parts.push(text(bits.join(' · '), p.W / 2, condY + feelsH * 0.7, feelsH * 0.42, p.theme.sub, feelsH * 0.055, 'middle'))\n  }\n\n  if (detailsH > 0) {\n    parts.push(renderDetailCells(p, cur, units, daily, p.H - p.pad - detailsH, detailsH))\n  }\n  return parts.join('')\n}\n\nfunction currentApparent(forecast) {\n  const hourly = forecast.hourly || {}\n  const cur = forecast.current_weather || {}\n  const times = hourly.time || []\n  const apparent = hourly.apparent_temperature || []\n  if (!times.length || !apparent.length || !cur.time) {\n    return null\n  }\n  const key = cur.time.substring(0, 14) + '00'\n  for (let i = 0; i < times.length; i++) {\n    if (times[i] === key) {\n      return apparent[i]\n    }\n  }\n  return null\n}\n\nfunction renderDetailCells(p, cur, units, daily, top, height) {\n  const parts = []\n  const cells = []\n  const windUnit = (units.windspeed || 'km/h').toUpperCase()\n  cells.push({\n    label: 'WIND',\n    value: Math.round(cur.windspeed || 0) + ' ' + windUnit,\n    arrow: cur.winddirection,\n  })\n  const dailyUnits = p.forecast.daily_units || {}\n  const precip = (daily.precipitation_sum || [])[0]\n  cells.push({\n    label: 'PRECIP',\n    value: (precip === undefined ? '0' : Math.round(precip * 10) / 10) + ' ' + (dailyUnits.precipitation_sum || 'mm').toUpperCase(),\n  })\n  const sunrise = (daily.sunrise || [])[0]\n  const sunset = (daily.sunset || [])[0]\n  if (sunrise) {\n    cells.push({ label: 'SUNRISE', value: fmtClock(sunrise) })\n  }\n  if (sunset) {\n    cells.push({ label: 'SUNSET', value: fmtClock(sunset) })\n  }\n\n  parts.push(\n    '<line x1=\"' + p.pad + '\" y1=\"' + top.toFixed(2) + '\" x2=\"' + (p.W - p.pad) + '\" y2=\"' + top.toFixed(2) +\n    '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n  )\n\n  const n = cells.length\n  const cellW = (p.W - p.pad * 2) / n\n  const innerW = cellW * 0.86\n  const labelBase = clamp(height * 0.16, 7, 12)\n  const valueBase = clamp(height * 0.26, 9, 19)\n  for (let i = 0; i < n; i++) {\n    const cx = p.pad + cellW * (i + 0.5)\n    const cell = cells[i]\n    const labelSize = fitSize(cell.label, labelBase, innerW)\n    parts.push(text(cell.label, cx, top + height * 0.34, labelSize, p.theme.faint, labelSize * 0.13, 'middle'))\n    const hasArrow = cell.arrow !== undefined\n    const midY = top + height * 0.68\n    let valueSize = fitSize(cell.value, valueBase, hasArrow ? innerW - valueBase * 0.9 : innerW)\n    const valueW = textWidth(cell.value, valueSize)\n    const arrowW = hasArrow ? valueSize * 0.85 : 0\n    const groupX = cx - (valueW + arrowW) / 2\n    if (hasArrow) {\n      parts.push(windArrow(groupX + arrowW * 0.36, midY, valueSize * 0.34, cell.arrow || 0, p.theme.sub, 1))\n    }\n    parts.push(text(cell.value, groupX + arrowW, midY + valueSize * 0.36, valueSize, p.theme.text, valueSize * 0.12, 'start'))\n    if (i > 0) {\n      const lx = p.pad + cellW * i\n      parts.push(\n        '<line x1=\"' + lx.toFixed(2) + '\" y1=\"' + (top + height * 0.22).toFixed(2) + '\" x2=\"' + lx.toFixed(2) +\n        '\" y2=\"' + (top + height * 0.82).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Hourly forecast panel\n// ---------------------------------------------------------------------------\n\nfunction renderHourly(p) {\n  const availW = p.W - p.pad * 2\n  const wanted = clamp(p.hours, 2, 24)\n  const horizontalFit = Math.floor(availW / 32)\n  if (horizontalFit < Math.min(wanted, 5)) {\n    return renderHourlyList(p, wanted)\n  }\n  return renderHourlyChart(p, Math.min(wanted, horizontalFit))\n}\n\nfunction renderHourlyChart(p, count) {\n  const parts = []\n  const series = hourlySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO HOURLY DATA')\n  }\n  const h = headerSvg(p, 'NEXT ' + series.length + ' HOURS')\n  parts.push(h.svg)\n\n  const left = p.pad\n  const right = p.W - p.pad\n  const availW = right - left\n  const colW = availW / series.length\n\n  // The panel has two optional parts: the values row (icons + temperatures)\n  // and the graph (temperature curve + precipitation bars).\n  const showGraph = p.showGraph\n  const showValues = p.showValues || !showGraph\n\n  const timeH = clamp(p.base * 1.5, 14, 26)\n  const iconSize = showValues ? clamp(colW * (showGraph ? 0.78 : 0.95), 15, showGraph ? 46 : 64) : 0\n  const tempSize = showValues ? clamp(colW * (showGraph ? 0.34 : 0.4), 9, showGraph ? 20 : 24) : 0\n  const precipH = showGraph ? clamp(p.H * 0.07, 8, 34) : 0\n\n  // Cap the curve height and center the whole block vertically.\n  const availBand = p.H - p.pad - timeH - (h.bottom + p.base * 0.4)\n  const valuesH = showValues ? iconSize + tempSize * 1.25 + tempSize * 0.8 : 0\n  const fixedH = valuesH + (showGraph ? precipH + 6 : 0)\n  const chartH = showGraph ? clamp(availBand - fixedH, 40, p.H * (showValues ? 0.4 : 0.62)) : 0\n  const offset = Math.max(0, (availBand - fixedH - chartH) / 2)\n\n  const iconTop = h.bottom + p.base * 0.4 + offset\n  const tempY = iconTop + iconSize + tempSize * 1.25\n  const chartTop = iconTop + valuesH\n  const chartBottom = chartTop + chartH\n  const bottom = chartBottom + precipH + (showGraph ? 6 : 0)\n\n  // Temperature curve scale.\n  let tMin = series[0].temp\n  let tMax = series[0].temp\n  let pMax = 0.4\n  for (let i = 0; i < series.length; i++) {\n    tMin = Math.min(tMin, series[i].temp)\n    tMax = Math.max(tMax, series[i].temp)\n    pMax = Math.max(pMax, series[i].precip)\n  }\n  if (tMax - tMin < 2) {\n    tMax += 1\n    tMin -= 1\n  }\n  const ys = []\n  const xs = []\n  for (let i = 0; i < series.length; i++) {\n    xs.push(left + colW * (i + 0.5))\n    ys.push(chartBottom - ((series[i].temp - tMin) / (tMax - tMin)) * (chartBottom - chartTop))\n  }\n\n  // Per-column icons, temps, precipitation bars and time labels. The first\n  // temperature and the first precipitation value carry the units.\n  const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'\n  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()\n  const tempLabels = []\n  let fittedTempSize = tempSize\n  for (let i = 0; i < series.length; i++) {\n    tempLabels.push(fmtTemp(series[i].temp) + (i === 0 ? unitLetter(unit) : ''))\n    if (showValues) {\n      fittedTempSize = Math.min(fittedTempSize, fitSize(tempLabels[i], tempSize, colW * 0.96))\n    }\n  }\n  const dividerTop = showValues ? iconTop + iconSize * 0.2 : chartTop\n  let precipLabeled = false\n  for (let i = 0; i < series.length; i++) {\n    const cx = xs[i]\n    const item = series[i]\n    if (showValues) {\n      parts.push(iconFragment(p.icons, item.code, item.isDay, cx - iconSize / 2, iconTop, iconSize))\n      parts.push(text(tempLabels[i], cx, tempY, fittedTempSize, p.theme.text, fittedTempSize * 0.13, 'middle'))\n    }\n    if (showGraph && item.precip > 0.05) {\n      const bh = Math.max(2.5, (Math.min(item.precip, pMax) / pMax) * precipH)\n      const bw = Math.max(3, colW * 0.24)\n      const barTop = bottom - 4 - bh\n      parts.push(\n        '<rect x=\"' + (cx - bw / 2).toFixed(2) + '\" y=\"' + barTop.toFixed(2) + '\" width=\"' + bw.toFixed(2) +\n        '\" height=\"' + bh.toFixed(2) + '\" fill=\"' + p.theme.rain + '\"/>'\n      )\n      const precipSize = clamp(colW * 0.24, 7, 10)\n      let precipLabel = fmtPrecip(item.precip)\n      if (!precipLabeled && textWidth(precipLabel + ' ' + precipUnit, precipSize) <= colW * 1.5) {\n        precipLabel = precipLabel + ' ' + precipUnit\n        precipLabeled = true\n      }\n      parts.push(text(precipLabel, cx, barTop - precipSize * 0.4, precipSize, p.theme.rain, precipSize * 0.13, 'middle'))\n    }\n    const isMidnight = item.hour === 0\n    const label = isMidnight ? DAY_NAMES[item.dow] : '' + item.hour\n    const labelSize = clamp(colW * 0.3, 8, 13)\n    parts.push(\n      text(label, cx, bottom + timeH * 0.75, labelSize, isMidnight ? p.theme.text : p.theme.sub, labelSize * 0.12, 'middle')\n    )\n    if (isMidnight && i > 0) {\n      const lx = left + colW * i\n      parts.push(\n        '<line x1=\"' + lx.toFixed(2) + '\" y1=\"' + dividerTop.toFixed(2) + '\" x2=\"' + lx.toFixed(2) +\n        '\" y2=\"' + bottom.toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n\n  if (!showGraph) {\n    return parts.join('')\n  }\n\n  // Smooth temperature curve (Catmull-Rom converted to cubic beziers).\n  let d = 'M ' + xs[0].toFixed(2) + ' ' + ys[0].toFixed(2)\n  for (let i = 0; i < xs.length - 1; i++) {\n    const x0 = i > 0 ? xs[i - 1] : xs[i]\n    const y0 = i > 0 ? ys[i - 1] : ys[i]\n    const x3 = i + 2 < xs.length ? xs[i + 2] : xs[i + 1]\n    const y3 = i + 2 < ys.length ? ys[i + 2] : ys[i + 1]\n    const c1x = xs[i] + (xs[i + 1] - x0) / 6\n    const c1y = ys[i] + (ys[i + 1] - y0) / 6\n    const c2x = xs[i + 1] - (x3 - xs[i]) / 6\n    const c2y = ys[i + 1] - (y3 - ys[i]) / 6\n    d += ' C ' + c1x.toFixed(2) + ' ' + c1y.toFixed(2) + ' ' + c2x.toFixed(2) + ' ' + c2y.toFixed(2) +\n      ' ' + xs[i + 1].toFixed(2) + ' ' + ys[i + 1].toFixed(2)\n  }\n  if (p.theme.areaFill !== 'none') {\n    const area = d + ' L ' + xs[xs.length - 1].toFixed(2) + ' ' + chartBottom.toFixed(2) +\n      ' L ' + xs[0].toFixed(2) + ' ' + chartBottom.toFixed(2) + ' Z'\n    parts.push('<path d=\"' + area + '\" fill=\"' + p.theme.areaFill + '\"/>')\n  }\n  const curveColor = p.theme.flat ? p.theme.line : tempColor((tMin + tMax) / 2, unit)\n  parts.push(\n    '<path d=\"' + d + '\" fill=\"none\" stroke=\"' + curveColor + '\" stroke-width=\"' + clamp(colW * 0.06, 1.5, 3) +\n    '\" stroke-linecap=\"round\"/>'\n  )\n  for (let i = 0; i < xs.length; i++) {\n    parts.push('<circle cx=\"' + xs[i].toFixed(2) + '\" cy=\"' + ys[i].toFixed(2) + '\" r=\"' + clamp(colW * 0.07, 1.8, 3.4) + '\" fill=\"' +\n      (p.theme.flat ? p.theme.bgTop : curveColor) + '\" stroke=\"' + (p.theme.flat ? p.theme.line : p.theme.text) + '\" stroke-width=\"1.4\"/>')\n  }\n  return parts.join('')\n}\n\nfunction renderHourlyList(p, wanted) {\n  const parts = []\n  const h = headerSvg(p, 'HOURLY')\n  parts.push(h.svg)\n  const top = h.bottom + p.base * 0.3\n  const availH = p.H - p.pad - top\n  const rowH = clamp(availH / wanted, 26, 54)\n  const count = Math.max(1, Math.floor(availH / rowH))\n  const series = hourlySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO HOURLY DATA')\n  }\n  const size = clamp(rowH * 0.42, 9, 20)\n  const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'\n  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()\n  let precipLabeled = false\n  for (let i = 0; i < series.length; i++) {\n    const item = series[i]\n    const midY = top + rowH * (i + 0.5)\n    const baseY = midY + size * 0.36\n    const label = item.hour === 0 ? DAY_NAMES[item.dow] : (item.hour < 10 ? '0' : '') + item.hour + ':00'\n    parts.push(text(label, p.pad, baseY, size, p.theme.sub, size * 0.12, 'start'))\n    parts.push(iconFragment(p.icons, item.code, item.isDay, p.W * 0.36, midY - rowH * 0.42, rowH * 0.84))\n    parts.push(\n      text(fmtTemp(item.temp) + (i === 0 ? unitLetter(unit) : ''), p.W * 0.66, baseY, size * 1.15, p.theme.text, size * 0.15, 'middle')\n    )\n    if (item.precip > 0.05) {\n      const precipLabel = fmtPrecip(item.precip) + (precipLabeled ? '' : ' ' + precipUnit)\n      precipLabeled = true\n      parts.push(text(precipLabel, p.W - p.pad, baseY, size * 0.92, p.theme.rain, size * 0.11, 'end'))\n    }\n    if (i > 0) {\n      parts.push(\n        '<line x1=\"' + p.pad + '\" y1=\"' + (top + rowH * i).toFixed(2) + '\" x2=\"' + (p.W - p.pad) +\n        '\" y2=\"' + (top + rowH * i).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Daily forecast panel\n// ---------------------------------------------------------------------------\n\nfunction renderDaily(p) {\n  const parts = []\n  const h = headerSvg(p, 'DAILY')\n  parts.push(h.svg)\n  const top = h.bottom + p.base * 0.3\n  const availH = p.H - p.pad - top\n  const wanted = clamp(p.days, 1, 16)\n  const rowH = clamp(availH / wanted, 26, 72)\n  const count = Math.max(1, Math.min(wanted, Math.floor(availH / rowH)))\n  const series = dailySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO DAILY DATA')\n  }\n\n  let tMin = series[0].min\n  let tMax = series[0].max\n  for (let i = 0; i < series.length; i++) {\n    tMin = Math.min(tMin, series[i].min)\n    tMax = Math.max(tMax, series[i].max)\n  }\n  if (tMax - tMin < 1) {\n    tMax += 1\n  }\n\n  const unit = (p.forecast.daily_units || {}).temperature_2m_max || '°C'\n  const size = clamp(rowH * 0.34, 9, 21)\n\n  // Measured column budget: day | icon | (precip) | min | bar | max.\n  const todayLabel = p.W >= 380 ? 'TODAY' : DAY_NAMES[series[0].dow]\n  const dayLabels = series.map((item, i) => (i === 0 ? todayLabel : DAY_NAMES[item.dow]))\n  let dayW = 0\n  for (let i = 0; i < dayLabels.length; i++) {\n    dayW = Math.max(dayW, textWidth(dayLabels[i], size))\n  }\n  dayW += size * 0.8\n  const iconS = clamp(rowH * 0.78, 16, 48)\n  const tempW = textWidth('-88°', size) + size * 0.6\n  let precipW = p.W >= 430 ? textWidth('88.8', size * 0.88) + size : 0\n  let barLeft = p.pad + dayW + iconS + precipW + tempW\n  let barRight = p.W - p.pad - tempW\n  if (barRight - barLeft < p.W * 0.16) {\n    precipW = 0\n    barLeft = p.pad + dayW + iconS + tempW\n  }\n  const scaleX = (t) => barLeft + ((t - tMin) / (tMax - tMin)) * (barRight - barLeft)\n\n  for (let i = 0; i < series.length; i++) {\n    const item = series[i]\n    const midY = top + rowH * (i + 0.5)\n    const baseY = midY + size * 0.36\n    parts.push(text(dayLabels[i], p.pad, baseY, size, p.theme.text, size * 0.13, 'start'))\n    parts.push(iconFragment(p.icons, item.code, true, p.pad + dayW, midY - iconS / 2, iconS))\n    if (precipW > 0 && item.precip > 0.05) {\n      parts.push(\n        text(Math.round(item.precip * 10) / 10 + '', p.pad + dayW + iconS + precipW * 0.85, baseY, size * 0.88, p.theme.rain, size * 0.1, 'end')\n      )\n    }\n    parts.push(text(fmtTemp(item.min), barLeft - size * 0.7, baseY, size, p.theme.sub, size * 0.12, 'end'))\n    parts.push(text(fmtTemp(item.max), barRight + size * 0.7, baseY, size, p.theme.text, size * 0.13, 'start'))\n\n    // Temperature range bar on a shared scale.\n    const x1 = scaleX(item.min)\n    const x2 = Math.max(scaleX(item.max), x1 + 2)\n    const bw = clamp(rowH * 0.18, 4, 10)\n    if (p.theme.flat) {\n      parts.push(\n        '<line x1=\"' + x1.toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + x2.toFixed(2) + '\" y2=\"' + midY.toFixed(2) +\n        '\" stroke=\"' + p.theme.barSolid + '\" stroke-width=\"' + bw + '\" stroke-linecap=\"round\"/>'\n      )\n    } else {\n      // Track + gradient bar built from butt-capped segments with round ends.\n      parts.push(\n        '<line x1=\"' + barLeft.toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + barRight.toFixed(2) + '\" y2=\"' + midY.toFixed(2) +\n        '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"' + bw + '\" stroke-linecap=\"round\"/>'\n      )\n      const segments = 10\n      for (let s = 0; s < segments; s++) {\n        const t0 = s / segments\n        const t1 = (s + 1) / segments\n        const temp = item.min + (item.max - item.min) * ((t0 + t1) / 2)\n        const sx1 = x1 + (x2 - x1) * t0\n        const sx2 = x1 + (x2 - x1) * t1\n        const isFirst = s === 0\n        const isLast = s === segments - 1\n        parts.push(\n          '<line x1=\"' + (isFirst ? sx1 : sx1 - 0.4).toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + sx2.toFixed(2) +\n          '\" y2=\"' + midY.toFixed(2) + '\" stroke=\"' + tempColor(temp, unit) + '\" stroke-width=\"' + bw +\n          '\" stroke-linecap=\"' + (isFirst || isLast ? 'round' : 'butt') + '\"/>'\n        )\n      }\n    }\n    if (i > 0) {\n      parts.push(\n        '<line x1=\"' + p.pad + '\" y1=\"' + (top + rowH * i).toFixed(2) + '\" x2=\"' + (p.W - p.pad) +\n        '\" y2=\"' + (top + rowH * i).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Fallbacks\n// ---------------------------------------------------------------------------\n\nfunction renderMessage(p, message) {\n  return text(message, p.W / 2, p.H / 2, clamp(p.W * 0.05, 10, 24), p.theme.sub, 2, 'middle')\n}\n\nfunction renderErrorPanel(W, H, lowContrast, message) {\n  const theme = themeFor(3, true, lowContrast)\n  const p = { W: W, H: H, theme: theme }\n  const parts = [backgroundSvg(p)]\n  const size = clamp(Math.min(W, H) * 0.06, 10, 26)\n  parts.push(text('WEATHER UNAVAILABLE', W / 2, H / 2 - size * 0.4, size, theme.text, size * 0.13, 'middle'))\n  if (message) {\n    const sub = ('' + message).substring(0, 60)\n    parts.push(text(sub, W / 2, H / 2 + size * 1.4, size * 0.55, theme.sub, size * 0.07, 'middle'))\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Entry point\n// ---------------------------------------------------------------------------\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  let W = Number(app.config.width) || 0\n  let H = Number(app.config.height) || 0\n  if (W <= 0) {\n    W = context.imageWidth || app.frame.width\n  }\n  if (H <= 0) {\n    H = context.imageHeight || app.frame.height\n  }\n\n  const weather = app.config.weather\n  const lowContrast = app.config.lowContrast === true\n  let body\n  if (!weather || weather.error || !weather.forecast) {\n    body = renderErrorPanel(W, H, lowContrast, weather ? weather.error : 'no data')\n  } else {\n    const forecast = weather.forecast\n    const cur = forecast.current_weather || {}\n    // Kept outside the object literal: the FrameOS TS transpiler misreads\n    // `key: value !== x` inside object literals as a type annotation.\n    const showLocation = app.config.showLocation !== false\n    const showDetails = app.config.showDetails !== false\n    const showValues = app.config.showValues !== false\n    const showGraph = app.config.showGraph !== false\n    const p = {\n      W: W,\n      H: H,\n      pad: clamp(Math.min(W, H) * 0.055, 8, 30),\n      base: clamp(Math.min(W, H) * 0.052, 9, 24),\n      weather: weather,\n      forecast: forecast,\n      icons: app.config.icons,\n      theme: themeFor(cur.weathercode || 0, cur.is_day === 1, lowContrast),\n      hours: Number(app.config.hours) || 10,\n      days: Number(app.config.days) || 7,\n      showLocation: showLocation,\n      showDetails: showDetails,\n      showValues: showValues,\n      showGraph: showGraph,\n      locationName: weather.location && weather.location.name ? weather.location.name : '',\n    }\n    const mode = app.config.mode || 'current'\n    if (mode === 'hourly') {\n      body = backgroundSvg(p) + renderHourly(p)\n    } else if (mode === 'daily') {\n      body = backgroundSvg(p) + renderDaily(p)\n    } else {\n      body = backgroundSvg(p) + renderCurrent(p)\n    }\n  }\n\n  const svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"' + W + '\" height=\"' + H + '\" viewBox=\"0 0 ' + W + ' ' + H + '\">' + body + '</svg>'\n  return frameos.svg(svg, { width: W, height: H })\n}\n",
+        "config.json": "{\n  \"name\": \"Weather panel (JS)\",\n  \"category\": \"data\",\n  \"description\": \"High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"weather\",\n      \"label\": \"Weather data (from Weather app)\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"icons\",\n      \"label\": \"Icon set (from Weather icon set app)\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"mode\",\n      \"label\": \"Mode\",\n      \"type\": \"select\",\n      \"options\": [\"current\", \"hourly\", \"daily\"],\n      \"value\": \"current\"\n    },\n    {\n      \"name\": \"hours\",\n      \"label\": \"Hours to show\",\n      \"type\": \"integer\",\n      \"value\": \"10\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"days\",\n      \"label\": \"Days to show\",\n      \"type\": \"integer\",\n      \"value\": \"7\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"daily\" }]\n    },\n    {\n      \"name\": \"showValues\",\n      \"label\": \"Show icons and temperatures (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"showGraph\",\n      \"label\": \"Show graph (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"lowContrast\",\n      \"label\": \"Low contrast\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"showLocation\",\n      \"label\": \"Show location header\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"showDetails\",\n      \"label\": \"Show detail row\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"current\" }]\n    },\n    {\n      \"name\": \"width\",\n      \"label\": \"Width (0 = fit canvas)\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    },\n    {\n      \"name\": \"height\",\n      \"label\": \"Height (0 = fit canvas)\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "db5c1ca9-2727-54fe-a819-3af995834a49",
+      "type": "event",
+      "position": {
+        "x": -500,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "a25f3930-ba17-55c1-a155-698052541700",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "center"
+        }
+      },
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "type": "app",
+      "position": {
+        "x": -100,
+        "y": 300
+      },
+      "data": {
+        "keyword": "weatherPanel",
+        "config": {
+          "mode": "daily"
+        }
+      },
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "1ad15ca1-5d27-5e71-ace2-e35d3c28d803",
+      "type": "app",
+      "position": {
+        "x": -500,
+        "y": 300
+      },
+      "data": {
+        "keyword": "weatherIcons",
+        "config": {}
+      },
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "fa168dfc-804f-5159-b7f4-ce00dbfa7225",
+      "type": "state",
+      "position": {
+        "x": -500,
+        "y": 560
+      },
+      "data": {
+        "keyword": "weather"
+      },
+      "width": 160,
+      "height": 60
+    },
+    {
+      "id": "c3dcd048-34b5-5e08-a24d-10a177caa708",
+      "type": "state",
+      "position": {
+        "x": -820,
+        "y": 300
+      },
+      "data": {
+        "keyword": "lowContrast"
+      },
+      "width": 160,
+      "height": 60
+    },
+    {
+      "id": "24942d7a-95e0-5863-88e5-7fcd5114b280",
+      "type": "state",
+      "position": {
+        "x": -500,
+        "y": 760
+      },
+      "data": {
+        "keyword": "days"
+      },
+      "width": 160,
+      "height": 60
+    }
+  ],
+  "edges": [
+    {
+      "id": "6dd474d1-cd23-5e88-af7b-753846da85f4",
+      "source": "db5c1ca9-2727-54fe-a819-3af995834a49",
+      "sourceHandle": "next",
+      "target": "a25f3930-ba17-55c1-a155-698052541700",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "fac23f81-9d90-5ec3-8cf9-f6d942f9b739",
+      "source": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "sourceHandle": "fieldOutput",
+      "target": "a25f3930-ba17-55c1-a155-698052541700",
+      "targetHandle": "fieldInput/image",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "03bcf4de-2f46-53e7-becb-ffb998bb0237",
+      "source": "fa168dfc-804f-5159-b7f4-ce00dbfa7225",
+      "sourceHandle": "fieldOutput",
+      "target": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "targetHandle": "fieldInput/weather",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "3c6d207c-75b4-5b63-80ef-3205a45ffd9b",
+      "source": "1ad15ca1-5d27-5e71-ace2-e35d3c28d803",
+      "sourceHandle": "fieldOutput",
+      "target": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "targetHandle": "fieldInput/icons",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "9af25626-8879-5be6-99df-c03a38151b74",
+      "source": "c3dcd048-34b5-5e08-a24d-10a177caa708",
+      "sourceHandle": "fieldOutput",
+      "target": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "targetHandle": "fieldInput/lowContrast",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "d7c810b5-1325-5672-bf95-f3470e5eaaad",
+      "source": "c3dcd048-34b5-5e08-a24d-10a177caa708",
+      "sourceHandle": "fieldOutput",
+      "target": "1ad15ca1-5d27-5e71-ace2-e35d3c28d803",
+      "targetHandle": "fieldInput/lowContrast",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "62005aa4-3e6d-5f68-82c3-fc8d1928617b",
+      "source": "24942d7a-95e0-5863-88e5-7fcd5114b280",
+      "sourceHandle": "fieldOutput",
+      "target": "40361721-6591-5ba2-a8be-5fdcef4ef199",
+      "targetHandle": "fieldInput/days",
+      "type": "codeNodeEdge"
+    }
+  ]
+}

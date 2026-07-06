@@ -1,0 +1,56 @@
+{
+  "name": "Weather icon (JS)",
+  "category": "data",
+  "description": "Render a single weather icon (or a contact sheet of the whole set) as an image. Wire the icons input from the Weather icon set app.",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "icons",
+      "label": "Icon set (from Weather icon set app)",
+      "type": "json",
+      "required": true
+    },
+    {
+      "name": "weathercode",
+      "label": "WMO weather code",
+      "type": "integer",
+      "value": "0"
+    },
+    {
+      "name": "isDay",
+      "label": "Day time",
+      "type": "boolean",
+      "value": "true"
+    },
+    {
+      "name": "size",
+      "label": "Size in pixels (0 = fit frame)",
+      "type": "integer",
+      "value": "0"
+    },
+    {
+      "name": "background",
+      "label": "Background color",
+      "type": "color",
+      "value": "#00000000"
+    },
+    {
+      "name": "sheet",
+      "label": "Render the full set as a sheet",
+      "type": "boolean",
+      "value": "false"
+    },
+    {
+      "name": "columns",
+      "label": "Sheet columns",
+      "type": "integer",
+      "value": "4"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}

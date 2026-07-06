@@ -1,6 +1,7 @@
 {
   "name": "Webcam RSTP",
   "description": "Using ffmpeg, extract an image from an RSTP feed and render it",
+  "embedded": false,
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 480,

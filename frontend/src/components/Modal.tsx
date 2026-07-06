@@ -6,12 +6,13 @@ export interface ModalProps {
   footer?: JSX.Element | string
   open?: boolean
   onClose: () => void
+  initialFocus?: React.RefObject<HTMLElement>
 }
 
-export function Modal({ open, children, title, footer, onClose }: ModalProps): JSX.Element {
+export function Modal({ open, children, title, footer, onClose, initialFocus }: ModalProps): JSX.Element {
   const isOpen = open === undefined || open
   return (
-    <Dialog open={isOpen} onClose={onClose} className="relative z-[120]">
+    <Dialog open={isOpen} onClose={onClose} initialFocus={initialFocus} className="relative z-[120]">
       <div className="fixed inset-0 z-[120] bg-slate-950/35 backdrop-blur-sm" />
       <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-[130] outline-none focus:outline-none">
         <Dialog.Panel className="relative w-auto my-6 mx-auto max-w-[767px] w-full">
@@ -25,9 +26,7 @@ export function Modal({ open, children, title, footer, onClose }: ModalProps): J
                       className="frameos-icon-button ml-auto flex h-9 w-9 items-center justify-center rounded-xl border-0 text-3xl leading-none font-semibold outline-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                       onClick={onClose}
                     >
-                      <span className="block h-6 w-6 text-2xl leading-5 outline-none focus:outline-none">
-                        ×
-                      </span>
+                      <span className="block h-6 w-6 text-2xl leading-5 outline-none focus:outline-none">×</span>
                     </button>
                   ) : null}
                 </div>

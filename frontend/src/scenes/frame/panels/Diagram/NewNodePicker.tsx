@@ -5,8 +5,20 @@ import { usePopper } from 'react-popper'
 import { useActions, useValues } from 'kea'
 import { diagramLogic } from './diagramLogic'
 import clsx from 'clsx'
+import { Tag, type TagProps } from '../../../../components/Tag'
 import { TextInput } from '../../../../components/TextInput'
 import { newNodePickerLogic } from './newNodePickerLogic'
+
+const categoryTagColors: Record<string, TagProps['color']> = {
+  code: 'blue',
+  render: 'teal',
+  logic: 'orange',
+  data: 'purple',
+  dispatch: 'red',
+  event: 'green',
+  scene: 'pink',
+  state: 'gray',
+}
 
 export function NewNodePicker() {
   const { sceneId, frameId } = useValues(diagramLogic)
@@ -55,7 +67,7 @@ export function NewNodePicker() {
               {open ? (
                 <Menu.Items
                   static
-                  className="frameos-dropdown-menu absolute right-0 w-56 mt-2 origin-top-right rounded-md focus:outline-none"
+                  className="frameos-dropdown-menu absolute right-0 w-[300px] mt-2 origin-top-right rounded-md focus:outline-none"
                   ref={setPopperElement}
                   style={styles.popper}
                   {...attributes.popper}
@@ -83,7 +95,7 @@ export function NewNodePicker() {
                       }}
                     />
                   </div>
-                  <div className="py-1" style={{ maxHeight: 200, overflowX: 'auto', overflowY: 'auto' }}>
+                  <div className="py-1" style={{ maxHeight: 270, overflowX: 'auto', overflowY: 'auto' }}>
                     {newNodeOptions.map((option) => (
                       <Menu.Item key={option.value || option.label}>
                         {({ active }) => (
@@ -91,7 +103,7 @@ export function NewNodePicker() {
                             key={option.value || option.label}
                             href="#"
                             className={clsx(
-                              'frameos-dropdown-item px-4 py-1 text-sm flex gap-2',
+                              'frameos-dropdown-item px-4 py-1 text-sm flex items-center gap-2',
                               active && !option.disabledReason && 'frameos-dropdown-item-active',
                               option.disabledReason && 'cursor-not-allowed opacity-50'
                             )}
@@ -109,7 +121,12 @@ export function NewNodePicker() {
                               }
                             }}
                           >
-                            {option.label}
+                            {option.category ? (
+                              <Tag color={categoryTagColors[option.category] ?? 'gray'} className="shrink-0">
+                                {option.category}
+                              </Tag>
+                            ) : null}
+                            <span className="min-w-0 truncate">{option.label}</span>
                           </a>
                         )}
                       </Menu.Item>

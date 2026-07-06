@@ -107,9 +107,28 @@ suite "frame api route behavior":
       check xkcd.kind == JObject
 
       if xkcd.kind == JObject:
-        check xkcd["scenes"].kind == JArray
-        check xkcd["scenes"].len > 0
+        check not xkcd.hasKey("scenes")
+        check xkcd["scenesUrl"].getStr() == "/api/repositories/system/samples/templates/XKCD/scenes.json"
         check xkcd["image"].getStr() == "/api/repositories/system/samples/templates/XKCD/image"
+
+    let scenes = httpRequest(
+      server.port,
+      "GET",
+      "/api/repositories/system/samples/templates/XKCD/scenes.json",
+      headers = [("Cookie", adminCookie)],
+    )
+    check scenes.status == 200
+    check scenes.header("content-type") == "application/json"
+    let scenesPayload = parseJson(scenes.body)
+    check scenesPayload.kind == JArray
+    check scenesPayload.len > 0
+
+    let scenesUnauthorized = httpRequest(
+      server.port,
+      "GET",
+      "/api/repositories/system/samples/templates/XKCD/scenes.json",
+    )
+    check scenesUnauthorized.status == 401
 
     let image = httpRequest(
       server.port,
