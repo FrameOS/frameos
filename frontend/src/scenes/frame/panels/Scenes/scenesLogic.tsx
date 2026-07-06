@@ -391,7 +391,7 @@ export const scenesLogic = kea<scenesLogicType>([
   selectors({
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
-    rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
+    rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame?.scenes ?? []],
     undeployedSceneIds: [
       (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],
       (scenes, frame, isFrameAdminMode): Set<string> => {
@@ -415,8 +415,10 @@ export const scenesLogic = kea<scenesLogicType>([
     unsavedSceneIds: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): Set<string> => {
-        const frameScenes = frame.scenes || []
-        const unsavedScenes = frameForm?.scenes || frame.scenes || []
+        // frame is null until framesModel has loaded, e.g. when the workspace
+        // scene control panel mounts this logic on a fresh page load.
+        const frameScenes = frame?.scenes || []
+        const unsavedScenes = frameForm?.scenes || frame?.scenes || []
         const unsaved = new Set<string>()
         unsavedScenes.forEach((scene) => {
           const original = frameScenes.find((s) => s.id === scene.id)
