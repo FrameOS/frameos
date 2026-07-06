@@ -1590,9 +1590,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
       const validFrameId = Number.isFinite(frameId) ? frameId : null
       const skipDeployDrawerPreserve = Boolean(cache.skipNextDeployDrawerPreserve)
       cache.skipNextDeployDrawerPreserve = false
-      const preservedSearch = validFrameId && !skipDeployDrawerPreserve
-        ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
-        : null
+      const preservedSearch =
+        validFrameId && !skipDeployDrawerPreserve
+          ? deployDrawerSearchFromPreviousLocation(validFrameId, search, previousLocation)
+          : null
       const effectiveSearch =
         preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan' ? preservedSearch : search
       if (validFrameId) {
@@ -1696,6 +1697,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
       const mobileWorkspaceQuery = window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY)
       const syncScrollGuardForViewport = () => {
         if (cache.scrollGuardUnmounted) {
+          return
+        }
+        if (isMobileWorkspaceViewport() && values.secondarySidebarOpen) {
+          // shrinking from desktop into the mobile layout: the sidebar state is
+          // "open" on desktop, but the mobile overlay should start closed
+          actions.closeSecondarySidebar()
           return
         }
         applyWorkspaceScrollGuard(values.secondarySidebarOpen)
