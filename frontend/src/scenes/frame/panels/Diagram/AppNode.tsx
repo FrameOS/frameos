@@ -30,8 +30,7 @@ import { FontSelect } from '../../../../components/FontSelect'
 import { ColorInput } from '../../../../components/ColorInput'
 import { NodeZoomLabel } from './NodeZoomLabel'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import * as ReactJsonModule from '@microlink/react-json-view'
-const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
+import { ReactJsonComponent as ReactJson } from '../../../../utils/reactJsonView'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
@@ -529,14 +528,20 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                               title={
                                 <div className="frameos-inset p-2">
                                   <div className="min-w-[40vw] w-[500px] max-w-[90vw] max-h-[60vh] overflow-auto">
-                                    <ReactJson
-                                      collapsed={2}
-                                      theme="ocean"
-                                      src={output}
-                                      name={`example output for ${out.name}`}
-                                      enableClipboard={false}
-                                      displayDataTypes={false}
-                                    />
+                                    {ReactJson ? (
+                                      <ReactJson
+                                        collapsed={2}
+                                        theme="ocean"
+                                        src={output}
+                                        name={`example output for ${out.name}`}
+                                        enableClipboard={false}
+                                        displayDataTypes={false}
+                                      />
+                                    ) : (
+                                      <pre className="whitespace-pre-wrap text-xs">
+                                        {JSON.stringify(output, null, 2)}
+                                      </pre>
+                                    )}
                                   </div>
                                 </div>
                               }

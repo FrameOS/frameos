@@ -35,6 +35,8 @@ export function Tooltip({
       { name: 'flip', options: { padding: 8 } },
       // altAxis keeps tall panels (e.g. large JSON output examples) inside the viewport
       { name: 'preventOverflow', options: { padding: 8, altAxis: true, tether: false } },
+      // adaptive right/bottom anchoring miscomputes against the #popper portal; always anchor top-left
+      { name: 'computeStyles', options: { adaptive: false } },
     ],
   })
 
@@ -52,14 +54,16 @@ export function Tooltip({
             {children ?? <InformationCircleIcon className="w-5 h-5" aria-label="Popover" />}
           </Popover.Button>
           {ReactDOM.createPortal(
+            // opacity only: a transform on this wrapper would become the containing
+            // block for the fixed-positioned panel and break popper's coordinates
             <Transition
               show={open}
               enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
+              enterFrom="opacity-0"
+              enterTo="opacity-100"
               leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
+              leaveFrom="opacity-100"
+              leaveTo="opacity-0"
             >
               <Popover.Panel
                 static
