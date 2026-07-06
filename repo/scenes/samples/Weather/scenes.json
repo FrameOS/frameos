@@ -172,7 +172,7 @@
         "value": "false",
         "access": "public",
         "persist": "disk",
-        "label": "Low contrast (e-ink friendly)"
+        "label": "Low contrast"
       },
       {
         "name": "temperatureUnit",

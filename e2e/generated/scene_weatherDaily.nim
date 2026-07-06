@@ -15,7 +15,7 @@ import frameos/js_app_runtime as js_app_runtime
 
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
-  StateField(name: "lowContrast", label: "Low contrast (e-ink friendly)", fieldType: "boolean", options: @[], placeholder: "", required: false, secret: false, value: %*(false)),
+  StateField(name: "lowContrast", label: "Low contrast", fieldType: "boolean", options: @[], placeholder: "", required: false, secret: false, value: %*(false)),
   StateField(name: "days", label: "Days to show", fieldType: "integer", options: @[], placeholder: "", required: false, secret: false, value: %*(7))
 ]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]

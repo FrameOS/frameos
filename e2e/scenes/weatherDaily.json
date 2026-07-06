@@ -20,7 +20,7 @@
       "value": "false",
       "access": "public",
       "persist": "memory",
-      "label": "Low contrast (e-ink friendly)"
+      "label": "Low contrast"
     },
     {
       "name": "days",

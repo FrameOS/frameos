@@ -18,7 +18,7 @@ import frameos/js_app_runtime as js_app_runtime
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
   StateField(name: "mode", label: "Display mode", fieldType: "select", options: @["current", "hourly", "daily", "stacked"], placeholder: "", required: false, secret: false, value: %*("stacked")),
-  StateField(name: "lowContrast", label: "Low contrast (e-ink friendly)", fieldType: "boolean", options: @[], placeholder: "", required: false, secret: false, value: %*(false)),
+  StateField(name: "lowContrast", label: "Low contrast", fieldType: "boolean", options: @[], placeholder: "", required: false, secret: false, value: %*(false)),
   StateField(name: "stackedMode", label: "Forecast shown in stacked mode", fieldType: "select", options: @["hourly", "daily"], placeholder: "", required: false, secret: false, value: %*("hourly"), showIf: parseJson("[{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"stacked\"}]")),
   StateField(name: "hours", label: "Hours to show", fieldType: "integer", options: @[], placeholder: "", required: false, secret: false, value: %*(8), showIf: parseJson("[{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\"}, {\"and\": [{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"stacked\"}, {\"field\": \"stackedMode\", \"operator\": \"eq\", \"value\": \"hourly\"}]}]")),
   StateField(name: "days", label: "Days to show", fieldType: "integer", options: @[], placeholder: "", required: false, secret: false, value: %*(7), showIf: parseJson("[{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"daily\"}, {\"and\": [{\"field\": \"mode\", \"operator\": \"eq\", \"value\": \"stacked\"}, {\"field\": \"stackedMode\", \"operator\": \"eq\", \"value\": \"daily\"}]}]")),
