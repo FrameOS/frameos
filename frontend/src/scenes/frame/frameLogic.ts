@@ -310,6 +310,29 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   embedded: '2026.6.26',
 }
 
+// These fields are edited through text inputs, so frameForm may hold strings like
+// "1080" while the backend returns numbers. Normalize before comparing or submitting,
+// otherwise a saved frame still counts as having unsaved changes.
+const NUMERIC_FRAME_KEYS = new Set<keyof FrameType>([
+  'frame_port',
+  'ssh_port',
+  'server_port',
+  'width',
+  'height',
+  'interval',
+  'metrics_interval',
+  'max_http_response_bytes',
+  'rotate',
+])
+
+function normalizeNumericFrameValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'device',
@@ -827,6 +850,10 @@ function normalizeRemoteForComparison(value: unknown): Record<string, unknown> {
 }
 
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (NUMERIC_FRAME_KEYS.has(key)) {
+    return normalizeNumericFrameValue(value)
+  }
+
   if (key === 'image_engine') {
     return value ?? ''
   }
@@ -1263,6 +1290,11 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
     ...frame,
     timezone_updater: compactTimezoneUpdaterForSubmit(frame.timezone_updater),
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)),
+  }
+  for (const key of NUMERIC_FRAME_KEYS) {
+    if (key in normalizedFrame && normalizedFrame[key] !== undefined) {
+      ;(normalizedFrame as Record<string, unknown>)[key] = normalizeNumericFrameValue(normalizedFrame[key])
+    }
   }
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
