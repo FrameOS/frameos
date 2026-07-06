@@ -11,6 +11,7 @@ type
   AppConfig* = object
     location*: string
     date*: string
+    forecastDays*: int
     temperatureUnit*: string
     windSpeedUnit*: string
     precipitationUnit*: string
@@ -72,7 +73,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       params.add("start_date=" & requestedDate)
       params.add("end_date=" & requestedDate)
     else:
-      params.add("forecast_days=1")
+      params.add("forecast_days=" & $max(1, min(16, self.appConfig.forecastDays)))
 
     let forecastUrl = "https://api.open-meteo.com/v1/forecast?" & params.join("&")
     let forecastJson = self.fetchJson(forecastUrl)
