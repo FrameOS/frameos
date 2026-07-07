@@ -153,8 +153,8 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
               }}
             />
             {previewStatus === 'loading' ? (
-              <div className="absolute inset-0 flex items-center justify-center gap-2 bg-slate-900/60 text-sm text-white">
-                <Spinner color="white" />
+              <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm">
+                <Spinner />
                 Rendering scene in your browser…
               </div>
             ) : null}
