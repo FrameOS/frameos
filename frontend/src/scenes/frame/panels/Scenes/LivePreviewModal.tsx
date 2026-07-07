@@ -202,20 +202,19 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     }
     return state
   }
-  const previewOnFrameButton = (size: 'small' | 'tiny'): JSX.Element | null =>
-    isFrameScene ? (
-      <Button
-        size={size}
-        color="secondary"
-        className={clsx('flex items-center gap-1', size === 'tiny' && '!px-2')}
-        onClick={() => previewScene(livePreviewSceneId, buildPublicState())}
-        disabled={isPreviewingOnFrame}
-        title="Temporarily show this scene on the frame, without saving or deploying"
-      >
-        <EyeIcon className="h-4 w-4" />
-        {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
-      </Button>
-    ) : null
+  const previewOnFrameButton = isFrameScene ? (
+    <Button
+      size="small"
+      color="secondary"
+      className="flex items-center gap-1"
+      onClick={() => previewScene(livePreviewSceneId, buildPublicState())}
+      disabled={isPreviewingOnFrame}
+      title="Temporarily show this scene on the frame, without saving or deploying"
+    >
+      <EyeIcon className="h-4 w-4" />
+      {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
+    </Button>
+  ) : null
 
   const submitEditState = (): void => {
     if (!editStateValues) {
@@ -318,7 +317,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                 {button.label || `GPIO ${button.pin}`}
               </Button>
             ))}
-            {stateEntries.length === 0 ? previewOnFrameButton('small') : null}
+            {previewOnFrameButton}
             <span className="frameos-muted ml-auto text-xs">
               {renderCount > 0 ? (
                 <>
@@ -355,7 +354,6 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                     Edit
                   </Button>
                 ) : null}
-                {previewOnFrameButton('tiny')}
               </div>
               <div className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
                 {visibleStateEntries.length > 0 ? (
