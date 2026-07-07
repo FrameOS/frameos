@@ -26,6 +26,18 @@ export interface LivePreviewLogLine {
 
 const MAX_LOG_LINES = 200
 
+// Apps excluded from the wasm build (see frameos/src/apps/apps.nim) — they
+// need child processes or external binaries the browser can't provide.
+const WASM_UNAVAILABLE_APPS: Record<string, string> = {
+  'data/chromiumScreenshot': 'requires Playwright/Chromium',
+  'data/rstpSnapshot': 'requires FFmpeg',
+}
+
+export interface WasmUnsupportedApp {
+  keyword: string
+  reason: string
+}
+
 // Hash param that keeps the in-browser preview open across reloads.
 // ExpandedScene re-opens the preview on mount when it matches its scene.
 export const LIVE_PREVIEW_HASH_KEY = 'livePreview'
@@ -148,6 +160,31 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     gpioButtons: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): GPIOButton[] => frameForm?.gpio_buttons ?? frame?.gpio_buttons ?? [],
+    ],
+    // Apps used by the previewed scene (or any scene it references) that are
+    // not compiled into the wasm bundle — surfaced as a notice in the modal.
+    wasmUnsupportedApps: [
+      (s) => [s.livePreviewSceneId, s.livePreviewScenes, s.scenes],
+      (livePreviewSceneId, livePreviewScenes, scenes): WasmUnsupportedApp[] => {
+        if (!livePreviewSceneId) {
+          return []
+        }
+        const sceneList = livePreviewScenes && livePreviewScenes.length ? livePreviewScenes : scenes
+        const rootScene = sceneList.find((scene) => scene.id === livePreviewSceneId)
+        if (!rootScene) {
+          return []
+        }
+        const found = new Map<string, string>()
+        for (const scene of collectScenePreviewPayloadScenes(rootScene, sceneList, null)) {
+          for (const node of scene.nodes ?? []) {
+            const keyword = String((node.data as Record<string, any>)?.keyword ?? '')
+            if (WASM_UNAVAILABLE_APPS[keyword]) {
+              found.set(keyword, WASM_UNAVAILABLE_APPS[keyword])
+            }
+          }
+        }
+        return Array.from(found, ([keyword, reason]) => ({ keyword, reason }))
+      },
     ],
     previewDimensions: [
       (s) => [s.frame],

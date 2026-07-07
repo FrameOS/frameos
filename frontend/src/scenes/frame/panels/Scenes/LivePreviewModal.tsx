@@ -110,6 +110,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     previewSceneEvents,
     previewDimensions,
     gpioButtons,
+    wasmUnsupportedApps,
     lastRenderMs,
     renderCount,
   } = useValues(livePreviewLogic({ frameId }))
@@ -214,6 +215,21 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
           {previewStatus === 'error' && previewError ? (
             <div className="shrink-0 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
               {previewError}
+            </div>
+          ) : null}
+
+          {wasmUnsupportedApps.length > 0 ? (
+            <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
+              This scene uses {wasmUnsupportedApps.length === 1 ? 'an app' : 'apps'} not available in the browser
+              preview:{' '}
+              {wasmUnsupportedApps.map((app, index) => (
+                <span key={app.keyword}>
+                  {index > 0 ? ', ' : ''}
+                  <span className="font-semibold">{app.keyword}</span> ({app.reason})
+                </span>
+              ))}
+              . {wasmUnsupportedApps.length === 1 ? 'That node' : 'Those nodes'} will fail here but{' '}
+              {wasmUnsupportedApps.length === 1 ? 'works' : 'work'} on the frame.
             </div>
           ) : null}
 
