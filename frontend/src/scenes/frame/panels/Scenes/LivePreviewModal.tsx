@@ -186,7 +186,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     <Modal
       open
       onClose={closeLivePreview}
-      title={`In-browser preview: ${livePreviewScene?.name ?? 'scene'}`}
+      title={`Browser preview: ${livePreviewScene?.name ?? 'scene'}`}
       panelClassName="max-w-[960px]"
       bodyClassName="h-[calc(100dvh-9rem)]"
     >

@@ -27,7 +27,7 @@ interface SceneActionsButtonProps {
 /**
  * The standard scene action control: a main button that runs the selected
  * action, plus a dropdown listing every available action. Picking an option
- * runs it immediately and becomes the button's (globally remembered) default.
+ * only arms the button (globally remembered) — clicking the button runs it.
  */
 export function SceneActionsButton({ options, defaultKey, size, className }: SceneActionsButtonProps): JSX.Element {
   const { preferredSceneAction } = useValues(sceneActionsLogic)
@@ -71,7 +71,6 @@ export function SceneActionsButton({ options, defaultKey, size, className }: Sce
           disabled: option.disabled,
           onClick: () => {
             setPreferredSceneAction(option.key)
-            option.onRun()
           },
         }))}
       />
