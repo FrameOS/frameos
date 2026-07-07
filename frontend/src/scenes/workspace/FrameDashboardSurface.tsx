@@ -1,17 +1,20 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
+import { useState } from 'react'
 import type { CSSProperties, DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   CalendarDaysIcon,
   ChartBarIcon,
+  CheckIcon,
   CircleStackIcon,
   CommandLineIcon,
   DocumentTextIcon,
   PlusIcon,
   SignalIcon,
   SparklesIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline'
 
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
@@ -389,6 +392,9 @@ function FrameSceneTile({
   childrenExpanded,
   nested,
   onToggleChildren,
+  multiSelectEnabled,
+  multiSelected,
+  onToggleMultiSelected,
 }: {
   frame: FrameType
   scene: FrameScene
@@ -400,11 +406,22 @@ function FrameSceneTile({
   childrenExpanded?: boolean
   nested?: boolean
   onToggleChildren?: () => void
+  multiSelectEnabled?: boolean
+  multiSelected?: boolean
+  onToggleMultiSelected?: () => void
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const compiled = sceneIsCompiled(scene, frame.mode)
   const hasChildScenes = (childSceneCount ?? 0) > 0
+
+  const handleTileClick = (): void => {
+    if (multiSelectEnabled) {
+      onToggleMultiSelected?.()
+      return
+    }
+    handleOpenSceneControl()
+  }
 
   const handleOpenSceneControl = (): void => {
     hideForm()
@@ -434,21 +451,35 @@ function FrameSceneTile({
 
   const tile = (
     <div
-      draggable
+      draggable={!multiSelectEnabled}
       data-workspace-scene-tile={scene.id}
       data-workspace-scene-tile-frame={frame.id}
       onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
         'frameos-card group relative z-[1] h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         nested && 'frameos-scene-child-tile',
-        highlighted
+        highlighted || (multiSelectEnabled && multiSelected)
           ? selectedSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <button type="button" onClick={handleOpenSceneControl} className="flex h-full w-full flex-col">
+      <button type="button" onClick={handleTileClick} className="flex h-full w-full flex-col">
         {buttonContent}
       </button>
+      {multiSelectEnabled ? (
+        <div className="pointer-events-none absolute right-2 top-2 z-20">
+          <div
+            className={clsx(
+              'flex h-6 w-6 items-center justify-center rounded-md border-2 shadow-sm backdrop-blur-sm transition',
+              multiSelected
+                ? 'frameos-primary-fill border-transparent text-white'
+                : 'border-slate-400 bg-white/80 text-transparent'
+            )}
+          >
+            <CheckIcon className="h-4 w-4" />
+          </div>
+        </div>
+      ) : null}
       {compiled || active ? (
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
           {compiled ? (
@@ -463,7 +494,7 @@ function FrameSceneTile({
           ) : null}
         </div>
       ) : null}
-      {hasChildScenes ? (
+      {hasChildScenes && !multiSelectEnabled ? (
         <button
           type="button"
           aria-label={`${childrenExpanded ? 'Hide' : 'Show'} ${childSceneCount} nested ${
@@ -480,7 +511,7 @@ function FrameSceneTile({
           {childSceneCount}
         </button>
       ) : null}
-      {showMenu ? (
+      {showMenu && !multiSelectEnabled ? (
         <WorkspaceSceneDropDown
           frame={frame}
           scene={scene}
@@ -563,8 +594,46 @@ function FrameScenesBlock({
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
+  const { applyTemplateAndSave, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
+  const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(() => new Set())
+
+  const setMultiSelect = (enabled: boolean): void => {
+    setMultiSelectEnabled(enabled)
+    if (!enabled) {
+      setSelectedSceneIds(new Set())
+    }
+  }
+
+  const toggleSceneSelected = (sceneId: string): void => {
+    setSelectedSceneIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sceneId)) {
+        next.delete(sceneId)
+      } else {
+        next.add(sceneId)
+      }
+      return next
+    })
+  }
+
+  const deleteSelectedScenes = (): void => {
+    if (selectedSceneIds.size === 0) {
+      return
+    }
+    if (
+      !window.confirm(
+        `Delete ${selectedSceneIds.size} ${selectedSceneIds.size === 1 ? 'scene' : 'scenes'}? This cannot be undone.`
+      )
+    ) {
+      return
+    }
+    const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
+    setFrameFormValues({ scenes: currentScenes.filter((candidate) => !selectedSceneIds.has(candidate.id)) })
+    setMultiSelect(false)
+  }
   const searchIsActive = search.trim().length > 0
   const allScenes = searchIsActive ? frame.scenes ?? scenes : scenes
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
@@ -627,7 +696,31 @@ function FrameScenesBlock({
             {label}
           </A>
         ))}
-        <SceneDependencyFormatMenu frameId={frame.id} surface="overview" />
+        <SceneDependencyFormatMenu
+          frameId={frame.id}
+          surface="overview"
+          multiSelect={{ enabled: multiSelectEnabled, onToggle: setMultiSelect }}
+        />
+        {multiSelectEnabled ? (
+          <>
+            <button
+              type="button"
+              onClick={deleteSelectedScenes}
+              disabled={selectedSceneIds.size === 0}
+              className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <TrashIcon className="h-4 w-4" />
+              {selectedSceneIds.size > 0 ? `Delete (${selectedSceneIds.size})` : 'Delete'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMultiSelect(false)}
+              className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Done
+            </button>
+          </>
+        ) : null}
       </div>
       {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">
@@ -654,6 +747,9 @@ function FrameScenesBlock({
                 onToggleChildren={() =>
                   setFrameAssetFolderExpanded(frame.id, sceneChildExpansionPath(scene.id), !childrenExpanded)
                 }
+                multiSelectEnabled={multiSelectEnabled}
+                multiSelected={selectedSceneIds.has(scene.id)}
+                onToggleMultiSelected={() => toggleSceneSelected(scene.id)}
               />
             )
           })}
