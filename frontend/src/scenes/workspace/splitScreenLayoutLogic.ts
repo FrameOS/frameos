@@ -1,4 +1,5 @@
 import { actions, beforeUnmount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { v4 as uuidv4 } from 'uuid'
 import type { splitScreenLayoutLogicType } from './splitScreenLayoutLogicType'
 import {
   assignSceneToSplitLayoutLeaf,
@@ -7,12 +8,18 @@ import {
   defaultSplitScreenBackground,
   configuredSplitLayoutLeafCount,
   defaultSplitScreenSceneLayout,
+  removeSplitLayoutLeaf,
   rotateSplitLayoutNode,
   splitLayoutPresetById,
   splitScreenLayoutPresets,
+  splitSplitLayoutLeaf,
+  setSplitLayoutLeafDimension,
   setSplitLayoutLeafStateValue,
+  swapSplitLayoutLeafContents,
   updateSplitLayoutAdjacentRatio,
+  type SplitLayoutAxis,
   type SplitLayoutBranch,
+  type SplitLayoutDirection,
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
 import type { StateField } from '../../types'
@@ -87,6 +94,15 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
     setBackgroundOpacity: (opacity: number) => ({ opacity }),
     setSceneSearch: (search: string) => ({ search }),
     setLeafSceneStateValue: (leafId: string, field: StateField, value: any) => ({ field, leafId, value }),
+    setLeafDimension: (leafId: string, axis: SplitLayoutAxis, fraction: number) => ({ axis, fraction, leafId }),
+    splitLeaf: (leafId: string, direction: SplitLayoutDirection) => ({
+      direction,
+      leafId,
+      newLeafId: uuidv4(),
+      newSplitId: uuidv4(),
+    }),
+    removeLeaf: (leafId: string) => ({ leafId }),
+    swapLeafContents: (leafIdA: string, leafIdB: string) => ({ leafIdA, leafIdB }),
     assignSceneToLeaf: (leafId: string, sceneId: string | null) => ({ leafId, sceneId }),
     startResize: (
       parentId: string,
@@ -141,6 +157,7 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         closeGenerator: () => null,
         selectPreset: () => null,
         selectLeaf: (_, { leafId }) => leafId,
+        removeLeaf: (state, { leafId }) => (state === leafId ? null : state),
       },
     ],
     sceneSearch: [
@@ -189,6 +206,22 @@ export const splitScreenLayoutLogic = kea<splitScreenLayoutLogicType>([
         setLeafSceneStateValue: (state, { leafId, field, value }) => ({
           ...state,
           root: setSplitLayoutLeafStateValue(state.root, leafId, field, value),
+        }),
+        setLeafDimension: (state, { leafId, axis, fraction }) => ({
+          ...state,
+          root: setSplitLayoutLeafDimension(state.root, leafId, axis, fraction),
+        }),
+        splitLeaf: (state, { leafId, direction, newSplitId, newLeafId }) => ({
+          ...state,
+          root: splitSplitLayoutLeaf(state.root, leafId, direction, newSplitId, newLeafId),
+        }),
+        removeLeaf: (state, { leafId }) => ({
+          ...state,
+          root: removeSplitLayoutLeaf(state.root, leafId),
+        }),
+        swapLeafContents: (state, { leafIdA, leafIdB }) => ({
+          ...state,
+          root: swapSplitLayoutLeafContents(state.root, leafIdA, leafIdB),
         }),
         resizeLayout: (state, { parentId, index, positionRatio }) => ({
           ...state,

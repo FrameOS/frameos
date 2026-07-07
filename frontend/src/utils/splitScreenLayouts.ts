@@ -447,6 +447,189 @@ export function updateSplitLayoutAdjacentRatio(
   }) as SplitLayoutBranch
 }
 
+export type SplitLayoutAxis = 'width' | 'height'
+
+const MIN_DIMENSION_SHARE = 0.05
+
+interface LeafAxisTarget {
+  splitId: string
+  childIndex: number
+  // Fraction (0-1) of the whole canvas that the controlling split spans along the axis.
+  spanFraction: number
+}
+
+// Find the deepest ancestor split that controls a leaf's size along the given axis.
+// Width is controlled by 'row' splits, height by 'column' splits. A leaf that has no
+// such ancestor (e.g. it always spans the full axis) returns null.
+function findLeafAxisTarget(
+  root: SplitLayoutBranch,
+  leafId: string,
+  axis: SplitLayoutAxis
+): LeafAxisTarget | null {
+  const wantDirection: SplitLayoutDirection = axis === 'width' ? 'row' : 'column'
+  let result: LeafAxisTarget | null = null
+
+  const visit = (node: SplitLayoutNode, spanW: number, spanH: number): boolean => {
+    if (node.type === 'leaf') {
+      return node.id === leafId
+    }
+    const ratios = normalizeRatios(node.ratios, node.children.length)
+    const total = ratios.reduce((sum, ratio) => sum + ratio, 0) || 1
+    for (let index = 0; index < node.children.length; index++) {
+      const share = ratios[index] / total
+      const childWidth = node.direction === 'row' ? spanW * share : spanW
+      const childHeight = node.direction === 'column' ? spanH * share : spanH
+      if (visit(node.children[index], childWidth, childHeight)) {
+        // The recursion unwinds deepest-first, so the first same-direction ancestor we
+        // hit on the way up is the deepest one — the one that directly sizes the leaf.
+        if (!result && node.direction === wantDirection && node.children.length > 1) {
+          result = { splitId: node.id, childIndex: index, spanFraction: axis === 'width' ? spanW : spanH }
+        }
+        return true
+      }
+    }
+    return false
+  }
+
+  visit(root, 1, 1)
+  return result
+}
+
+export function splitLayoutLeafAxisAdjustable(
+  root: SplitLayoutBranch,
+  leafId: string,
+  axis: SplitLayoutAxis
+): boolean {
+  return findLeafAxisTarget(root, leafId, axis) !== null
+}
+
+// Resize a single leaf so it spans `targetFraction` (0-1) of the whole canvas along the
+// given axis, adjusting the controlling split's ratios and scaling its other children to fit.
+export function setSplitLayoutLeafDimension(
+  root: SplitLayoutBranch,
+  leafId: string,
+  axis: SplitLayoutAxis,
+  targetFraction: number
+): SplitLayoutBranch {
+  const target = findLeafAxisTarget(root, leafId, axis)
+  if (!target || target.spanFraction <= 0 || !Number.isFinite(targetFraction)) {
+    return root
+  }
+
+  return mapSplitLayoutNode(root, (node) => {
+    if (node.type !== 'split' || node.id !== target.splitId) {
+      return node
+    }
+    const ratios = normalizeRatios(node.ratios, node.children.length)
+    const count = node.children.length
+    const total = ratios.reduce((sum, ratio) => sum + ratio, 0) || count
+    const maxShare = 1 - MIN_DIMENSION_SHARE * (count - 1)
+    const desiredShare = Math.max(MIN_DIMENSION_SHARE, Math.min(maxShare, targetFraction / target.spanFraction))
+    const nextIndexRatio = desiredShare * total
+    const remaining = total - nextIndexRatio
+    const othersTotal = total - ratios[target.childIndex]
+    const nextRatios = ratios.map((ratio, index) => {
+      if (index === target.childIndex) {
+        return nextIndexRatio
+      }
+      return othersTotal > 0 ? (ratio / othersTotal) * remaining : remaining / (count - 1)
+    })
+    return { ...node, ratios: nextRatios }
+  }) as SplitLayoutBranch
+}
+
+// Replace a leaf with a split of the original leaf plus a new empty leaf. The original leaf
+// keeps its id and content, so any selection referencing it stays valid.
+export function splitSplitLayoutLeaf(
+  root: SplitLayoutBranch,
+  leafId: string,
+  direction: SplitLayoutDirection,
+  newSplitId: string,
+  newLeafId: string
+): SplitLayoutBranch {
+  const transform = (node: SplitLayoutNode): SplitLayoutNode => {
+    if (node.type === 'leaf') {
+      if (node.id !== leafId) {
+        return node
+      }
+      const existing: SplitLayoutLeaf = { ...node }
+      const created: SplitLayoutLeaf = { id: newLeafId, type: 'leaf', sceneId: null, state: {} }
+      return { id: newSplitId, type: 'split', direction, ratios: [1, 1], children: [existing, created] }
+    }
+    return { ...node, children: node.children.map(transform) }
+  }
+  return transform(root) as SplitLayoutBranch
+}
+
+function pruneSplitLayoutLeaf(node: SplitLayoutNode, leafId: string): SplitLayoutNode | null {
+  if (node.type === 'leaf') {
+    return node.id === leafId ? null : node
+  }
+  const children: SplitLayoutNode[] = []
+  const ratios: number[] = []
+  node.children.forEach((child, index) => {
+    const pruned = pruneSplitLayoutLeaf(child, leafId)
+    if (pruned) {
+      children.push(pruned)
+      ratios.push(node.ratios[index] ?? 1)
+    }
+  })
+  if (children.length === 0) {
+    return null
+  }
+  // A split with a single remaining child collapses into that child.
+  if (children.length === 1) {
+    return children[0]
+  }
+  return { ...node, children, ratios }
+}
+
+// A leaf can be removed as long as doing so leaves at least a two-way split at the root.
+export function canRemoveSplitLayoutLeaf(root: SplitLayoutBranch, leafId: string): boolean {
+  const pruned = pruneSplitLayoutLeaf(root, leafId)
+  return pruned !== null && pruned.type === 'split'
+}
+
+export function removeSplitLayoutLeaf(root: SplitLayoutBranch, leafId: string): SplitLayoutBranch {
+  const pruned = pruneSplitLayoutLeaf(root, leafId)
+  if (!pruned || pruned.type !== 'split') {
+    return root
+  }
+  return pruned
+}
+
+// Swap the scene + state between two leaves (used when dragging one cell onto another).
+export function swapSplitLayoutLeafContents(
+  root: SplitLayoutBranch,
+  leafIdA: string,
+  leafIdB: string
+): SplitLayoutBranch {
+  if (leafIdA === leafIdB) {
+    return root
+  }
+  const leaves = splitLayoutLeaves(root)
+  const first = leaves.find((candidate) => candidate.id === leafIdA)
+  const second = leaves.find((candidate) => candidate.id === leafIdB)
+  if (!first || !second) {
+    return root
+  }
+  const firstContent = { sceneId: first.sceneId ?? null, state: { ...(first.state ?? {}) } }
+  const secondContent = { sceneId: second.sceneId ?? null, state: { ...(second.state ?? {}) } }
+
+  return mapSplitLayoutNode(root, (node) => {
+    if (node.type !== 'leaf') {
+      return node
+    }
+    if (node.id === leafIdA) {
+      return { ...node, sceneId: secondContent.sceneId, state: { ...secondContent.state } }
+    }
+    if (node.id === leafIdB) {
+      return { ...node, sceneId: firstContent.sceneId, state: { ...firstContent.state } }
+    }
+    return node
+  }) as SplitLayoutBranch
+}
+
 export function splitLayoutLeaves(node: SplitLayoutNode): SplitLayoutLeaf[] {
   if (node.type === 'leaf') {
     return [node]
