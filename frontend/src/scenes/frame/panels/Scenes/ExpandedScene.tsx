@@ -168,7 +168,7 @@ export function ExpandedScene({
               title="Run this scene in your browser via WebAssembly"
             >
               <EyeIcon className="h-5 w-5" />
-              Live preview
+              In-browser preview
             </Button>
           </div>
         </div>
@@ -231,7 +231,7 @@ export function ExpandedScene({
                   title="Run this scene in your browser via WebAssembly"
                 >
                   <EyeIcon className="h-5 w-5" />
-                  Live preview
+                  In-browser preview
                 </Button>
               </div>
             </div>

@@ -1,9 +1,23 @@
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
+import { useEffect, useRef } from 'react'
 
 import { Button } from '../../../../components/Button'
 import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
 import { livePreviewLogic } from './livePreviewLogic'
+
+// Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
+// The preview's runtime lines are raw strings, so classify them by content.
+function logLineColor(line: string): string {
+  if (/error|failed|exception/i.test(line)) {
+    return 'text-red-300'
+  }
+  if (line.startsWith('event:')) {
+    return 'text-blue-300'
+  }
+  return 'text-slate-100'
+}
 
 export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element | null {
   const {
@@ -22,6 +36,15 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     livePreviewLogic({ frameId })
   )
 
+  // Stick the runtime log to the bottom as new lines arrive, like the real logs.
+  const logRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = logRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [previewLogs])
+
   if (!livePreviewSceneId) {
     return null
   }
@@ -29,7 +52,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   const stateEntries = Object.entries(previewState)
 
   return (
-    <Modal open onClose={closeLivePreview} title={`Live preview: ${livePreviewScene?.name ?? 'scene'}`}>
+    <Modal open onClose={closeLivePreview} title={`In-browser preview: ${livePreviewScene?.name ?? 'scene'}`}>
       <div className="space-y-4 p-5">
         <div className="relative flex items-center justify-center rounded-lg bg-slate-900/90 p-2">
           <canvas
@@ -79,10 +102,14 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
         {stateEntries.length > 0 ? (
           <div className="space-y-1">
             <div className="frameos-muted text-xs font-semibold uppercase">Scene state</div>
-            <div className="rounded-lg bg-slate-100/80 p-2 font-mono text-xs dark:bg-slate-800/80">
+            <div className="rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
               {stateEntries.map(([key, value]) => (
-                <div key={key}>
-                  {key}: {typeof value === 'string' ? value : JSON.stringify(value)}
+                <div key={key} className="break-all">
+                  <span className="text-slate-400">{key}</span>
+                  <span className="text-slate-500">: </span>
+                  <span className="text-slate-100">
+                    {typeof value === 'string' ? value : JSON.stringify(value)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -92,9 +119,16 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
         {previewLogs.length > 0 ? (
           <div className="space-y-1">
             <div className="frameos-muted text-xs font-semibold uppercase">Runtime log</div>
-            <pre className="max-h-40 overflow-y-auto rounded-lg bg-slate-100/80 p-2 text-xs dark:bg-slate-800/80">
-              {previewLogs.slice(-50).join('\n')}
-            </pre>
+            <div
+              ref={logRef}
+              className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs leading-5"
+            >
+              {previewLogs.slice(-200).map((line, index) => (
+                <div key={index} className={clsx('whitespace-pre-wrap break-all', logLineColor(line))}>
+                  {line}
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
