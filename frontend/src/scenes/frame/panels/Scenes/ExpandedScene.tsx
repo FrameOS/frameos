@@ -162,7 +162,7 @@ export function ExpandedScene({
               </Button>
             )}
             <Button
-              onClick={() => openLivePreview(sceneId)}
+              onClick={() => openLivePreview(sceneId, buildNextState())}
               color="secondary"
               className="inline-flex items-center gap-2"
               title="Run this scene in your browser via WebAssembly"
@@ -224,7 +224,7 @@ export function ExpandedScene({
                   Reset
                 </Button>
                 <Button
-                  onClick={() => openLivePreview(sceneId)}
+                  onClick={() => openLivePreview(sceneId, buildNextState())}
                   color="secondary"
                   className="inline-flex items-center gap-2"
                   title="Run this scene in your browser via WebAssembly"

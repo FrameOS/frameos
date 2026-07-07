@@ -31,7 +31,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], scenesLogic({ frameId }), ['scenes']],
   })),
   actions({
-    openLivePreview: (sceneId: string) => ({ sceneId }),
+    openLivePreview: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state: state ?? null }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
     previewReady: true,
@@ -139,7 +139,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     ],
   }),
   listeners(({ actions, values, cache, props }) => ({
-    openLivePreview: async ({ sceneId }) => {
+    openLivePreview: async ({ sceneId, state }) => {
       cache.worker?.terminate()
       cache.worker = null
       cache.pendingFrame = null
@@ -150,7 +150,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         return
       }
 
-      const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, null)
+      // Seed the scene's public fields with the values the user entered in the
+      // form so the in-browser preview reflects their input, not stored defaults.
+      const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, state ?? null)
       const { width, height } = values.previewDimensions
 
       const frameId = values.frame?.id ?? props.frameId

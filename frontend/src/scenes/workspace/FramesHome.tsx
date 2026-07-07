@@ -948,22 +948,22 @@ function SceneControlPanelContent({
                     scenes={frame.scenes ?? [scene]}
                     horizontal
                     buttonColor="none"
-                    className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    className="frameos-secondary-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   />
                   <A
                     href={urls.scenes(frame.id, scene.id)}
-                    className="frameos-secondary-button inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    className="frameos-secondary-button inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
-                    <PencilSquareIcon className="h-5 w-5" />
+                    <PencilSquareIcon className="h-4 w-4" />
                     Open editor
                   </A>
                   {splitLayout ? (
                     <button
                       type="button"
                       onClick={handleEditSplit}
-                      className="frameos-secondary-button inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                      className="frameos-secondary-button inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                     >
-                      <Squares2X2Icon className="h-5 w-5" />
+                      <Squares2X2Icon className="h-4 w-4" />
                       Edit split
                     </button>
                   ) : null}
