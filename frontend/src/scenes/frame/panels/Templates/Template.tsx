@@ -14,9 +14,11 @@ import {
   DocumentPlusIcon,
   CheckIcon,
   EyeIcon,
+  WindowIcon,
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
+import { Tag } from '../../../../components/Tag'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
@@ -32,6 +34,8 @@ import { Field } from '../../../../components/Field'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
+import { livePreviewLogic } from '../Scenes/livePreviewLogic'
+import { LivePreviewModal } from '../Scenes/LivePreviewModal'
 
 interface TemplateProps {
   template: TemplateType
@@ -76,7 +80,7 @@ export function TemplateRow({
     scenes: templateScenes,
     canLoadRemoteScenes,
   } = useValues(templateRowLogic({ frameId, template }))
-  const { startTryScene, closeTrySceneModal, submitTrySceneState } = useActions(templateRowLogic({ frameId, template }))
+  const { startTryScene, closeTrySceneModal, submitTryScene } = useActions(templateRowLogic({ frameId, template }))
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
@@ -104,6 +108,10 @@ export function TemplateRow({
   const unsupported = compatibility?.supported === false
   const unsupportedReason = compatibility?.reason ?? 'This scene is not supported on ESP32 frames.'
   const canInstall = !unsupported
+  // Mirrors the preview button's visibility: scenes exist, but none run interpreted,
+  // so there's nothing the (browser or on-frame) live preview could execute.
+  const compiledOnly = templateScenes.length > 0 && !trySceneConfig && !canLoadRemoteScenes
+  const showFavourite = Boolean(favouriteId && onToggleFavourite)
 
   return (
     <div
@@ -119,16 +127,32 @@ export function TemplateRow({
       }}
       title={unsupported ? unsupportedReason : undefined}
       className={clsx(
-        'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
+        'frame-tool-card @container relative break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
         templateDragData && canInstall && 'cursor-grab active:cursor-grabbing',
         unsupported && 'opacity-60 grayscale'
       )}
     >
+      {showFavourite ? (
+        <button
+          type="button"
+          className="absolute right-1.5 top-1.5 z-10 rounded-full p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          aria-label={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+          aria-pressed={favourite}
+          title={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+          onClick={() => favouriteId && onToggleFavourite?.(favouriteId)}
+        >
+          {favourite ? (
+            <StarSolidIcon className="h-5 w-5 text-amber-400" />
+          ) : (
+            <StarOutlineIcon className="h-5 w-5 opacity-50 transition hover:opacity-100" />
+          )}
+        </button>
+      ) : null}
       <div className="flex items-start justify-between gap-2">
         {imageUrl ? (
           <div
             className={clsx(
-              'h-[90px] w-[90px] flex-shrink-0 rounded-2xl border border-slate-500/20 bg-cover bg-center',
+              'h-[90px] w-[90px] flex-shrink-0 rounded-xl border border-slate-500/20 bg-cover bg-center',
               templateDragData && canInstall && 'cursor-grab active:cursor-grabbing'
             )}
             style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
@@ -137,9 +161,20 @@ export function TemplateRow({
         <div className="break-inside-avoid space-y-1 w-full">
           <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
             <div className="flex-1">
-              <H6>{template.name}</H6>
+              <H6>
+                {template.name}
+                {compiledOnly ? (
+                  <Tag
+                    color="gray"
+                    className="ml-2 normal-case"
+                    title="This template only contains compiled scenes — deploy it to the frame to run it; live preview is unavailable"
+                  >
+                    compiled
+                  </Tag>
+                ) : null}
+              </H6>
             </div>
-            <div className="flex gap-1">
+            <div className={clsx('flex gap-1', showFavourite && 'pr-6')}>
               {applyTemplate ? (
                 <Button
                   className="!px-2 flex gap-1"
@@ -175,26 +210,9 @@ export function TemplateRow({
                     startTryScene()
                   }}
                   disabled={!frameId || !canInstall}
-                  title={unsupported ? unsupportedReason : 'Preview this interpreted scene on the frame'}
+                  title={unsupported ? unsupportedReason : 'Preview this scene on the frame or in your browser'}
                 >
                   <EyeIcon className="w-5 h-5" />
-                </Button>
-              ) : null}
-              {favouriteId && onToggleFavourite ? (
-                <Button
-                  className="!px-2 flex gap-1"
-                  size="small"
-                  color="secondary"
-                  aria-label={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
-                  aria-pressed={favourite}
-                  title={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
-                  onClick={() => onToggleFavourite(favouriteId)}
-                >
-                  {favourite ? (
-                    <StarSolidIcon className="h-5 w-5 text-amber-400" />
-                  ) : (
-                    <StarOutlineIcon className="h-5 w-5" />
-                  )}
                 </Button>
               ) : null}
               <DropdownMenu
@@ -322,17 +340,43 @@ export function TemplateRow({
             ) : (
               <div className="frame-tool-muted text-sm">This scene does not export publicly controllable state.</div>
             )}
-            <div className="flex justify-end gap-2 border-t border-slate-500/20 pt-4">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-500/20 pt-4">
               <Button onClick={closeTrySceneModal} color="secondary">
                 Cancel
               </Button>
-              <Button onClick={submitTrySceneState} color="primary" disabled={!frameId}>
-                Preview scene
+              <Button
+                onClick={() => submitTryScene('browser')}
+                color="secondary"
+                className="inline-flex items-center gap-2"
+                disabled={!frameId}
+                title="Run this scene in your browser via WebAssembly"
+              >
+                <WindowIcon className="h-5 w-5" />
+                Preview in browser
+              </Button>
+              <Button
+                onClick={() => submitTryScene('device')}
+                color="primary"
+                className="inline-flex items-center gap-2"
+                disabled={!frameId}
+                title="Send this scene to the frame as a temporary preview"
+              >
+                <EyeIcon className="h-5 w-5" />
+                Preview on frame
               </Button>
             </div>
           </Form>
         </Modal>
       ) : null}
+      {frameId && trySceneConfig ? (
+        <TemplateBrowserPreviewModal frameId={frameId} sceneId={trySceneConfig.mainScene.id} />
+      ) : null}
     </div>
   )
+}
+
+/** Renders the in-browser WASM preview modal for a template's entry scene. */
+function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element | null {
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
+  return livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null
 }

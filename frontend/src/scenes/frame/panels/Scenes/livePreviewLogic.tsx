@@ -18,6 +18,11 @@ export interface LivePreviewSceneEvent {
   label: string | null
 }
 
+export interface LivePreviewLogLine {
+  timestamp: string
+  line: string
+}
+
 const MAX_LOG_LINES = 200
 
 /** Events a scene reacts to on its own; not useful as interactive buttons. */
@@ -31,13 +36,17 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], scenesLogic({ frameId }), ['scenes']],
   })),
   actions({
-    openLivePreview: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state: state ?? null }),
+    openLivePreview: (sceneId: string, state?: Record<string, any> | null, scenes?: FrameScene[] | null) => ({
+      sceneId,
+      state: state ?? null,
+      scenes: scenes ?? null,
+    }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
     previewReady: true,
     previewFrame: (width: number, height: number, renderMs: number) => ({ width, height, renderMs }),
     previewErrored: (message: string) => ({ message }),
-    appendPreviewLog: (message: string) => ({ message }),
+    appendPreviewLog: (message: string) => ({ message, timestamp: new Date().toISOString() }),
     setPreviewState: (state: Record<string, any>) => ({ state }),
     dispatchPreviewEvent: (name: string, payload: Record<string, any>) => ({ name, payload }),
     forcePreviewRender: true,
@@ -66,10 +75,21 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       },
     ],
     previewLogs: [
-      [] as string[],
+      [] as LivePreviewLogLine[],
       {
         openLivePreview: () => [],
-        appendPreviewLog: (state, { message }) => [...state.slice(-(MAX_LOG_LINES - 1)), message],
+        appendPreviewLog: (state, { message, timestamp }) => [
+          ...state.slice(-(MAX_LOG_LINES - 1)),
+          { timestamp, line: message },
+        ],
+      },
+    ],
+    // Scenes passed explicitly to openLivePreview (e.g. template previews);
+    // lets selectors resolve scene metadata for scenes not installed on the frame.
+    livePreviewScenes: [
+      null as FrameScene[] | null,
+      {
+        openLivePreview: (_, { scenes }) => scenes,
       },
     ],
     previewState: [
@@ -96,9 +116,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
   }),
   selectors({
     livePreviewScene: [
-      (s) => [s.livePreviewSceneId, s.scenes],
-      (livePreviewSceneId, scenes): FrameScene | null =>
-        livePreviewSceneId ? (scenes.find((scene) => scene.id === livePreviewSceneId) ?? null) : null,
+      (s) => [s.livePreviewSceneId, s.livePreviewScenes, s.scenes],
+      (livePreviewSceneId, livePreviewScenes, scenes): FrameScene | null =>
+        livePreviewSceneId
+          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+            scenes.find((scene) => scene.id === livePreviewSceneId) ??
+            null)
+          : null,
     ],
     previewDimensions: [
       (s) => [s.frame],
@@ -139,12 +163,16 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     ],
   }),
   listeners(({ actions, values, cache, props }) => ({
-    openLivePreview: async ({ sceneId, state }) => {
+    openLivePreview: async ({ sceneId, state, scenes }) => {
       cache.worker?.terminate()
       cache.worker = null
       cache.pendingFrame = null
 
-      const scene = values.scenes.find((item: FrameScene) => item.id === sceneId)
+      // An explicit `scenes` list lets callers preview scenes that aren't installed
+      // on the frame yet (e.g. templates in the "add scene" panel); otherwise fall
+      // back to the frame's own scenes.
+      const sceneList = scenes && scenes.length ? scenes : values.scenes
+      const scene = sceneList.find((item: FrameScene) => item.id === sceneId)
       if (!scene) {
         actions.previewErrored('Scene not found')
         return
@@ -152,7 +180,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
 
       // Seed the scene's public fields with the values the user entered in the
       // form so the in-browser preview reflects their input, not stored defaults.
-      const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, state ?? null)
+      const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, state ?? null)
       const { width, height } = values.previewDimensions
 
       const frameId = values.frame?.id ?? props.frameId

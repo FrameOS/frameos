@@ -1,8 +1,9 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/Button'
+import { Checkbox } from '../../../../components/Checkbox'
 import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
 import { livePreviewLogic } from './livePreviewLogic'
@@ -17,6 +18,16 @@ function logLineColor(line: string): string {
     return 'text-blue-300'
   }
   return 'text-slate-100'
+}
+
+// Same timestamp format as the real logs panel (Logs.tsx formatTimestamp).
+function formatTimestamp(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}-${date.getMonth() + 1 < 10 ? '0' : ''}${date.getMonth() + 1}-${
+    date.getDate() < 10 ? '0' : ''
+  }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
+    date.getMinutes() < 10 ? '0' : ''
+  }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
 }
 
 export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element | null {
@@ -36,11 +47,16 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     livePreviewLogic({ frameId })
   )
 
-  // Stick the runtime log to the bottom as new lines arrive, like the real logs.
+  const [showPublicState, setShowPublicState] = useState(true)
+  const [showPrivateState, setShowPrivateState] = useState(false)
+
+  // Stick the runtime log to the bottom as new lines arrive, like the real
+  // logs — but only while the user hasn't scrolled up to read older lines.
   const logRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
   useEffect(() => {
     const el = logRef.current
-    if (el) {
+    if (el && stickToBottomRef.current) {
       el.scrollTop = el.scrollHeight
     }
   }, [previewLogs])
@@ -49,12 +65,27 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     return null
   }
 
+  const publicFieldNames = new Set(
+    (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public').map((field) => field.name)
+  )
   const stateEntries = Object.entries(previewState)
+  const publicEntries = stateEntries.filter(([key]) => publicFieldNames.has(key))
+  const privateEntries = stateEntries.filter(([key]) => !publicFieldNames.has(key))
+  const visibleStateEntries = [
+    ...(showPublicState ? publicEntries : []),
+    ...(showPrivateState ? privateEntries : []),
+  ]
 
   return (
-    <Modal open onClose={closeLivePreview} title={`In-browser preview: ${livePreviewScene?.name ?? 'scene'}`}>
-      <div className="space-y-4 p-5">
-        <div className="relative flex items-center justify-center rounded-lg bg-slate-900/90 p-2">
+    <Modal
+      open
+      onClose={closeLivePreview}
+      title={`In-browser preview: ${livePreviewScene?.name ?? 'scene'}`}
+      panelClassName="max-w-[960px]"
+      bodyClassName="h-[calc(100dvh-9rem)]"
+    >
+      <div className="flex h-full min-h-0 flex-col gap-4 p-5">
+        <div className="relative flex shrink-0 items-center justify-center rounded-lg bg-slate-900/90 p-2">
           <canvas
             ref={registerCanvas}
             width={previewDimensions.width}
@@ -71,10 +102,12 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
         </div>
 
         {previewStatus === 'error' && previewError ? (
-          <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{previewError}</div>
+          <div className="shrink-0 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            {previewError}
+          </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button size="small" color="secondary" onClick={forcePreviewRender}>
             Re-render
           </Button>
@@ -100,39 +133,67 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
         </div>
 
         {stateEntries.length > 0 ? (
-          <div className="space-y-1">
-            <div className="frameos-muted text-xs font-semibold uppercase">Scene state</div>
-            <div className="rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
-              {stateEntries.map(([key, value]) => (
-                <div key={key} className="break-all">
-                  <span className="text-slate-400">{key}</span>
-                  <span className="text-slate-500">: </span>
-                  <span className="text-slate-100">
-                    {typeof value === 'string' ? value : JSON.stringify(value)}
-                  </span>
-                </div>
-              ))}
+          <div className="shrink-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="frameos-muted text-xs font-semibold uppercase">Scene state</div>
+              <Checkbox
+                value={showPublicState}
+                onChange={setShowPublicState}
+                label={`public (${publicEntries.length})`}
+              />
+              <Checkbox
+                value={showPrivateState}
+                onChange={setShowPrivateState}
+                label={`private (${privateEntries.length})`}
+              />
+            </div>
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
+              {visibleStateEntries.length > 0 ? (
+                visibleStateEntries.map(([key, value]) => (
+                  <div key={key} className="break-all">
+                    <span className="text-slate-400">{key}</span>
+                    <span className="text-slate-500">: </span>
+                    <span className="text-slate-100">
+                      {typeof value === 'string' ? value : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-slate-500">No state fields selected</div>
+              )}
             </div>
           </div>
         ) : null}
 
-        {previewLogs.length > 0 ? (
-          <div className="space-y-1">
-            <div className="frameos-muted text-xs font-semibold uppercase">Runtime log</div>
-            <div
-              ref={logRef}
-              className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs leading-5"
-            >
-              {previewLogs.slice(-200).map((line, index) => (
-                <div key={index} className={clsx('whitespace-pre-wrap break-all', logLineColor(line))}>
-                  {line}
+        <div className="flex min-h-[8rem] flex-1 flex-col gap-1">
+          <div className="frameos-muted shrink-0 text-xs font-semibold uppercase">Runtime log</div>
+          <div
+            ref={logRef}
+            onScroll={(event) => {
+              const el = event.currentTarget
+              stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+            }}
+            className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-sm leading-5"
+          >
+            {previewLogs.length > 0 ? (
+              previewLogs.map((log, index) => (
+                <div key={index} className="flex gap-2">
+                  <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
+                  <div
+                    className={clsx('min-w-0 flex-1 break-words', logLineColor(log.line))}
+                    style={{ wordBreak: 'break-word' }}
+                  >
+                    {log.line}
+                  </div>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <div className="flex h-full items-center justify-center text-slate-500">No logs yet</div>
+            )}
           </div>
-        ) : null}
+        </div>
 
-        <div className="frameos-muted text-xs">
+        <div className="frameos-muted shrink-0 text-xs">
           Runs the scene with the FrameOS interpreter compiled to WebAssembly, in your browser. Apps that fetch
           external URLs are routed through the backend to get around browser CORS restrictions, so images and data
           load — the device itself fetches them directly. Device-only apps (screenshots, camera snapshots) are

@@ -8,6 +8,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { fetchTemplateScenes } from './templatesLogic'
+import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 
 import type { templateRowLogicType } from './templateRowLogicType'
 
@@ -20,12 +21,16 @@ export const templateRowLogic = kea<templateRowLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Templates', 'templateRowLogic']),
   props({} as TemplateRowLogicProps),
   key((props: TemplateRowLogicProps) => `${props.frameId ?? 'no-frame'}-${props.template.id ?? props.template.name}`),
-  connect({
+  connect((props: TemplateRowLogicProps) => ({
     values: [framesModel, ['frames']],
-  }),
+    // Mount the frame's live-preview logic so the browser-preview submit can
+    // drive it and the LivePreviewModal renders the same instance.
+    logic: props.frameId ? [livePreviewLogic({ frameId: props.frameId })] : [],
+  })),
   actions({
     tryScene: (state?: Record<string, any>) => ({ state }),
     startTryScene: true,
+    submitTryScene: (target: 'device' | 'browser') => ({ target }),
     setRemoteScenes: (scenes: FrameScene[]) => ({ scenes }),
     openTrySceneModal: true,
     closeTrySceneModal: true,
@@ -36,6 +41,13 @@ export const templateRowLogic = kea<templateRowLogicType>([
       {
         openTrySceneModal: () => true,
         closeTrySceneModal: () => false,
+      },
+    ],
+    // Where the state form submits to: the physical frame or the in-browser WASM preview.
+    trySceneTarget: [
+      'device' as 'device' | 'browser',
+      {
+        submitTryScene: (_, { target }) => target,
       },
     ],
     // Scenes fetched lazily from template.scenesUrl; repository listings only carry metadata.
@@ -59,6 +71,14 @@ export const templateRowLogic = kea<templateRowLogicType>([
           if (value !== undefined && value !== null) {
             state[field.name] = String(value)
           }
+        }
+        if (values.trySceneTarget === 'browser') {
+          const { mainScene, payloadScenes } = values.trySceneConfig
+          actions.closeTrySceneModal()
+          // Run the template's scenes in the in-browser WASM preview. The scenes
+          // aren't installed on the frame, so pass them explicitly.
+          livePreviewLogic({ frameId: props.frameId }).actions.openLivePreview(mainScene.id, state, payloadScenes)
+          return
         }
         actions.tryScene(state)
       },
@@ -147,12 +167,14 @@ export const templateRowLogic = kea<templateRowLogicType>([
       if (!values.trySceneConfig) {
         return
       }
-      if (values.trySceneFields.length === 0) {
-        actions.resetTrySceneState({})
-        actions.submitTrySceneState()
-        return
-      }
+      // Always open the modal — the user picks the preview target (device or
+      // browser) there, even when the scene exports no public state fields.
       actions.openTrySceneModal()
+    },
+    submitTryScene: () => {
+      // trySceneTarget reducer has already stored the target; run the form
+      // submit so field values are validated/coerced the same way for both.
+      actions.submitTrySceneState()
     },
     openTrySceneModal: () => {
       actions.resetTrySceneState(values.defaultTrySceneState)
