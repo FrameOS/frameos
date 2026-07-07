@@ -26,11 +26,13 @@ export interface LivePreviewLogLine {
 
 const MAX_LOG_LINES = 200
 
-// Apps excluded from the wasm build (see frameos/src/apps/apps.nim) — they
-// need child processes or external binaries the browser can't provide.
+// Apps that can't work in the browser preview: excluded from the wasm build
+// (see frameos/src/apps/apps.nim — child processes, external binaries) or
+// dependent on the frame's local filesystem.
 const WASM_UNAVAILABLE_APPS: Record<string, string> = {
   'data/chromiumScreenshot': 'requires Playwright/Chromium',
   'data/rstpSnapshot': 'requires FFmpeg',
+  'data/localImage': "reads images from the frame's local storage",
 }
 
 export interface WasmUnsupportedApp {

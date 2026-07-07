@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
-import { CursorArrowRaysIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { CursorArrowRaysIcon, EyeIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
@@ -11,6 +11,7 @@ import { Spinner } from '../../../../components/Spinner'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { livePreviewLogic } from './livePreviewLogic'
+import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
@@ -33,6 +34,24 @@ function formatTimestamp(isoTimestamp: string): string {
   }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
     date.getMinutes() < 10 ? '0' : ''
   }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
+}
+
+// Open the current canvas image in a new tab. The window is opened
+// synchronously so popup blockers count it as user-initiated; the blob URL is
+// filled in once the canvas has been encoded.
+function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
+  const win = window.open('', '_blank')
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      win?.close()
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    if (win) {
+      win.location.href = url
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }, 'image/png')
 }
 
 // Runtime log lines are mostly JSON like {"event":"debug","message":"..."}.
@@ -117,6 +136,8 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   const { closeLivePreview, registerCanvas, dispatchPreviewEvent, forcePreviewRender } = useActions(
     livePreviewLogic({ frameId })
   )
+  const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
+  const { previewScene } = useActions(scenesLogic({ frameId }))
 
   const [showPublicState, setShowPublicState] = useState(true)
   const [showPrivateState, setShowPrivateState] = useState(false)
@@ -166,6 +187,36 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     setEditStateValues(values)
   }
 
+  // "Preview on frame": send the scene to the frame with the preview's
+  // current public state. Hidden for template previews — those scenes aren't
+  // installed on the frame, so scenesLogic can't upload them.
+  const isFrameScene = frameScenes.some((scene) => scene.id === livePreviewSceneId)
+  const isPreviewingOnFrame = previewingSceneId === livePreviewSceneId
+  const buildPublicState = (): Record<string, any> => {
+    const state: Record<string, any> = {}
+    for (const field of publicFields) {
+      const value = previewState[field.name] ?? field.value
+      if (value !== undefined && value !== null) {
+        state[field.name] = String(value)
+      }
+    }
+    return state
+  }
+  const previewOnFrameButton = (size: 'small' | 'tiny'): JSX.Element | null =>
+    isFrameScene ? (
+      <Button
+        size={size}
+        color="secondary"
+        className={clsx('flex items-center gap-1', size === 'tiny' && '!px-2')}
+        onClick={() => previewScene(livePreviewSceneId, buildPublicState())}
+        disabled={isPreviewingOnFrame}
+        title="Temporarily show this scene on the frame, without saving or deploying"
+      >
+        <EyeIcon className="h-4 w-4" />
+        {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
+      </Button>
+    ) : null
+
   const submitEditState = (): void => {
     if (!editStateValues) {
       return
@@ -198,7 +249,9 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
               ref={registerCanvas}
               width={previewDimensions.width}
               height={previewDimensions.height}
-              className="max-h-[50vh] max-w-full"
+              className="max-h-[50vh] max-w-full cursor-zoom-in"
+              title="Open image in a new tab"
+              onClick={(event) => openCanvasImageInNewTab(event.currentTarget)}
               style={{
                 imageRendering: 'pixelated',
                 aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}`,
@@ -265,6 +318,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                 {button.label || `GPIO ${button.pin}`}
               </Button>
             ))}
+            {stateEntries.length === 0 ? previewOnFrameButton('small') : null}
             <span className="frameos-muted ml-auto text-xs">
               {renderCount > 0 ? (
                 <>
@@ -301,6 +355,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                     Edit
                   </Button>
                 ) : null}
+                {previewOnFrameButton('tiny')}
               </div>
               <div className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
                 {visibleStateEntries.length > 0 ? (
