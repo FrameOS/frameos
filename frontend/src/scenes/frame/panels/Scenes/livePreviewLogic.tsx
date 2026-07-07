@@ -1,4 +1,5 @@
 import { actions, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { router } from 'kea-router'
 
 import { FrameScene } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
@@ -24,6 +25,26 @@ export interface LivePreviewLogLine {
 }
 
 const MAX_LOG_LINES = 200
+
+// Hash param that keeps the in-browser preview open across reloads.
+// ExpandedScene re-opens the preview on mount when it matches its scene.
+export const LIVE_PREVIEW_HASH_KEY = 'livePreview'
+
+function setLivePreviewHash(sceneId: string | null): void {
+  const hashParams = { ...router.values.hashParams }
+  if (sceneId === null) {
+    if (!(LIVE_PREVIEW_HASH_KEY in hashParams)) {
+      return
+    }
+    delete hashParams[LIVE_PREVIEW_HASH_KEY]
+  } else {
+    if (hashParams[LIVE_PREVIEW_HASH_KEY] === sceneId) {
+      return
+    }
+    hashParams[LIVE_PREVIEW_HASH_KEY] = sceneId
+  }
+  router.actions.replace(router.values.location.pathname, router.values.searchParams, hashParams)
+}
 
 /** Events a scene reacts to on its own; not useful as interactive buttons. */
 const LIFECYCLE_EVENTS = new Set(['render', 'init', 'open', 'close', 'setSceneState', 'setCurrentScene'])
@@ -178,6 +199,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         return
       }
 
+      // Persist in the URL hash so a reload reopens the preview. Only for the
+      // frame's own scenes — template previews can't be restored after a
+      // reload because their scenes aren't installed on the frame.
+      if (!scenes) {
+        setLivePreviewHash(sceneId)
+      }
+
       // Seed the scene's public fields with the values the user entered in the
       // form so the in-browser preview reflects their input, not stored defaults.
       const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, state ?? null)
@@ -277,6 +305,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker = null
       cache.pendingFrame = null
       cache.canvas = null
+      setLivePreviewHash(null)
     },
     registerCanvas: ({ canvas }) => {
       cache.canvas = canvas

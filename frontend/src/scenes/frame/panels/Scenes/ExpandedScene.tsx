@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { expandedSceneLogic } from './expandedSceneLogic'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
@@ -13,7 +15,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { livePreviewLogic } from './livePreviewLogic'
+import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
 import { LivePreviewModal } from './LivePreviewModal'
 
 export interface ExpandedSceneProps {
@@ -46,6 +48,16 @@ export function ExpandedScene({
   const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
+
+  // Reopen the in-browser preview after a reload: openLivePreview stores the
+  // scene id in the URL hash, and by the time this card is mounted the frame's
+  // scenes are guaranteed to be loaded.
+  useEffect(() => {
+    if (router.values.hashParams[LIVE_PREVIEW_HASH_KEY] === sceneId && livePreviewSceneId !== sceneId) {
+      openLivePreview(sceneId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const currentState = states[sceneId] ?? {}
   const sceneIsUndeployed = isUndeployed ?? undeployedSceneIds.has(sceneId)
