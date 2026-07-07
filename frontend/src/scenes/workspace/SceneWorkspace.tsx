@@ -2,13 +2,13 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
+  BoltIcon,
   ClipboardDocumentIcon,
   CodeBracketIcon,
-  CodeBracketSquareIcon,
   Cog6ToothIcon,
-  ListBulletIcon,
   PhotoIcon,
   PlusIcon,
+  PuzzlePieceIcon,
   ServerStackIcon,
   SparklesIcon,
   VariableIcon,
@@ -67,8 +67,8 @@ interface UtilityDefinition {
 const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'state', label: 'Preview', icon: <PlayIcon className="h-5 w-5" /> },
   { panel: 'stateVariables', label: 'State variables', icon: <VariableIcon className="h-5 w-5" /> },
-  { panel: 'apps', label: 'Apps', icon: <CodeBracketSquareIcon className="h-5 w-5" /> },
-  { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
+  { panel: 'apps', label: 'Apps', icon: <PuzzlePieceIcon className="h-5 w-5" /> },
+  { panel: 'events', label: 'Events', icon: <BoltIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
   { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
@@ -497,7 +497,8 @@ function UtilityToolbar({
   const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
   const { closeChatDrawer, closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
   const utilityPanelIsVisible = !chatDrawerSelection
-  const definitions = sceneUtilityDefinitions(scene, frameMode)
+  // Scene settings ('info') is rendered separately at the top of the toolbar, above AI chat.
+  const definitions = sceneUtilityDefinitions(scene, frameMode).filter((definition) => definition.panel !== 'info')
 
   return (
     <div className="scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
@@ -539,9 +540,10 @@ function SceneDiagramOverlay({
   scene: FrameScene | null
   sceneId: string | null
 }): JSX.Element {
-  const { chatDrawerSelection } = useValues(workspaceLogic)
-  const { closeChatDrawer, closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
+  const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
+  const { closeChatDrawer, closeUtilityPanel, openChatDrawer, openUtilityPanel } = useActions(workspaceLogic)
   const chatDrawerIsOpen = chatDrawerSelection?.frameId === frameId && chatDrawerSelection.sceneId === sceneId
+  const sceneSettingsActive = !chatDrawerSelection && utilityPanel === 'info'
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
@@ -550,6 +552,25 @@ function SceneDiagramOverlay({
           {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
         </div>
         <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
+          <button
+            type="button"
+            title="Scene settings"
+            onClick={() => {
+              if (sceneSettingsActive) {
+                closeUtilityPanel()
+                return
+              }
+              closeChatDrawer()
+              openUtilityPanel('info')
+            }}
+            className={clsx(
+              'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              sceneSettingsActive ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
+            )}
+          >
+            <Cog6ToothIcon className="h-5 w-5" />
+          </button>
+          <UtilityToolbar scene={scene} frameMode={frameMode} />
           <button
             type="button"
             title="Open AI chat"
@@ -568,7 +589,6 @@ function SceneDiagramOverlay({
           >
             <SparklesIcon className="h-5 w-5" />
           </button>
-          <UtilityToolbar scene={scene} frameMode={frameMode} />
         </div>
       </div>
     </div>
