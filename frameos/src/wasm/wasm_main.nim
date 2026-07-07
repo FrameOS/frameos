@@ -9,7 +9,7 @@
 # emscripten JS-library hooks (log + event notifications go out through
 # postMessage, HTTP comes in through synchronous XHR).
 
-import std/[json, locks, options, strformat, strutils, tables]
+import std/[json, locks, math, options, strformat, strutils, tables, times]
 import pixie
 
 import frameos/types
@@ -283,6 +283,10 @@ proc frameos_wasm_render(): cint {.exportc, cdecl.} =
     if not ensureScene():
       setLastError("no scene selected")
       return 2
+    # Log like the device's runner does, so the preview's runtime log shows
+    # each render happening even when cached apps return an identical image.
+    log($(%*{"event": "render:scene", "width": frameConfig.width, "height": frameConfig.height}))
+    let renderStarted = epochTime()
     let context = ExecutionContext(
       scene: currentScene,
       event: "render",
@@ -298,6 +302,11 @@ proc frameos_wasm_render(): cint {.exportc, cdecl.} =
       return 2
     lastImage = image
     lastNextSleep = context.nextSleep
+    log($(%*{
+      "event": "render:done",
+      "sceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
+      "ms": round((epochTime() - renderStarted) * 1000, 3)
+    }))
     # Scene graphs often dispatch "render" while handling the render event
     # itself; that must not loop the preview forever.
     renderRequested = false
