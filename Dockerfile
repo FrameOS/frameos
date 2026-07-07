@@ -188,7 +188,10 @@ RUN set -eux; \
 
 # Interpreted-scene runtime compiled to WebAssembly for the frontend's live
 # preview modal; lands in frontend/public/frameos-wasm so the frontend build
-# below copies it into dist.
+# below copies it into dist. build_wasm.sh runs makeapploaders.py, which loads
+# the Nim codegen from backend/app/codegen (self-contained, no backend
+# package imports), so copy just that directory into this stage.
+COPY backend/app/codegen /app/backend/app/codegen
 RUN set -eux; \
     git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk; \
     /opt/emsdk/emsdk install "${EMSCRIPTEN_VERSION}"; \
