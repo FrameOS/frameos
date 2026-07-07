@@ -1,7 +1,7 @@
 import { actions, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
-import { FrameScene } from '../../../../types'
+import { FrameScene, GPIOButton } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
@@ -144,6 +144,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
             null)
           : null,
+    ],
+    gpioButtons: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): GPIOButton[] => frameForm?.gpio_buttons ?? frame?.gpio_buttons ?? [],
     ],
     previewDimensions: [
       (s) => [s.frame],

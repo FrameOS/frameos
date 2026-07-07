@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
-import { PencilSquareIcon } from '@heroicons/react/24/outline'
+import { CursorArrowRaysIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
@@ -72,6 +72,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     previewState,
     previewSceneEvents,
     previewDimensions,
+    gpioButtons,
     lastRenderMs,
     renderCount,
   } = useValues(livePreviewLogic({ frameId }))
@@ -98,6 +99,13 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   if (!livePreviewSceneId) {
     return null
   }
+
+  // GPIO buttons get their own dedicated buttons below; hide the generic
+  // "button: label" scene-event entry when it duplicates a configured one.
+  const gpioLabels = new Set(gpioButtons.map((button) => button.label))
+  const sceneEventButtons = previewSceneEvents.filter(
+    (event) => !(event.keyword === 'button' && event.label && gpioLabels.has(event.label))
+  )
 
   const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
@@ -170,7 +178,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
             <Button size="small" color="secondary" onClick={forcePreviewRender}>
               Re-render
             </Button>
-            {previewSceneEvents.map((event) => (
+            {sceneEventButtons.map((event) => (
               <Button
                 key={`${event.keyword}:${event.label ?? ''}`}
                 size="small"
@@ -179,6 +187,23 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
               >
                 {event.keyword}
                 {event.label ? `: ${event.label}` : ''}
+              </Button>
+            ))}
+            {gpioButtons.map((button) => (
+              <Button
+                key={`gpio:${button.pin}`}
+                size="small"
+                color="secondary"
+                className="flex items-center gap-1"
+                title={`GPIO pin ${button.pin}`}
+                onClick={() =>
+                  // Same event the device's GPIO driver sends on a button
+                  // press (level 0 = falling edge).
+                  dispatchPreviewEvent('button', { pin: button.pin, label: button.label, level: 0 })
+                }
+              >
+                <CursorArrowRaysIcon className="h-4 w-4" />
+                {button.label || `GPIO ${button.pin}`}
               </Button>
             ))}
             <span className="frameos-muted ml-auto text-xs">
