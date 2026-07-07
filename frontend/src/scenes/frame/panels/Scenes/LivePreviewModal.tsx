@@ -62,7 +62,44 @@ function renderLogLine(line: string): JSX.Element | string {
   return line
 }
 
+// The preview can be hosted from several components (scene card, diagram
+// toolbar, template row) that may be mounted at the same time. Only ONE of
+// them may render the dialog: two identical stacked dialogs close each other,
+// because a click inside one counts as an outside-click for the other.
+const modalHostStacks = new Map<number, symbol[]>()
+const modalHostListeners = new Map<number, Set<() => void>>()
+
+function useLivePreviewModalOwnership(frameId: number): boolean {
+  const idRef = useRef<symbol | null>(null)
+  if (idRef.current === null) {
+    idRef.current = Symbol('LivePreviewModal')
+  }
+  const id = idRef.current
+  const [, forceRender] = useState(0)
+  useEffect(() => {
+    const stack = modalHostStacks.get(frameId) ?? []
+    stack.push(id)
+    modalHostStacks.set(frameId, stack)
+    const notify = () => forceRender((count) => count + 1)
+    const notifiers = modalHostListeners.get(frameId) ?? new Set()
+    notifiers.add(notify)
+    modalHostListeners.set(frameId, notifiers)
+    notifiers.forEach((fn) => fn())
+    return () => {
+      modalHostStacks.set(
+        frameId,
+        (modalHostStacks.get(frameId) ?? []).filter((hostId) => hostId !== id)
+      )
+      notifiers.delete(notify)
+      // Ownership may have moved to another mounted host — let them recheck.
+      notifiers.forEach((fn) => fn())
+    }
+  }, [frameId, id])
+  return (modalHostStacks.get(frameId) ?? [])[0] === id
+}
+
 export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element | null {
+  const isModalOwner = useLivePreviewModalOwnership(frameId)
   const {
     livePreviewSceneId,
     livePreviewScene,
@@ -96,16 +133,22 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     }
   }, [previewLogs])
 
-  if (!livePreviewSceneId) {
+  if (!livePreviewSceneId || !isModalOwner) {
     return null
   }
 
-  // GPIO buttons get their own dedicated buttons below; hide the generic
-  // "button: label" scene-event entry when it duplicates a configured one.
-  const gpioLabels = new Set(gpioButtons.map((button) => button.label))
-  const sceneEventButtons = previewSceneEvents.filter(
-    (event) => !(event.keyword === 'button' && event.label && gpioLabels.has(event.label))
-  )
+  // GPIO buttons get their own dedicated buttons below. Hide "button"
+  // scene-event entries: the configured GPIO buttons cover them, and an
+  // unlabeled "button" entry sends an event no handler can distinguish.
+  const sceneEventButtons = previewSceneEvents.filter((event) => {
+    if (event.keyword !== 'button') {
+      return true
+    }
+    if (gpioButtons.length > 0) {
+      return false
+    }
+    return Boolean(event.label)
+  })
 
   const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
