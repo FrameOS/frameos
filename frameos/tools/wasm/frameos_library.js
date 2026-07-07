@@ -83,7 +83,9 @@ addToLibrary({
           bodyBase64 = btoa(bin)
         }
         xhr.setRequestHeader('Content-Type', 'application/json')
-        xhr.send(JSON.stringify({ method: method, url: url, headers: headers, bodyBase64: bodyBase64 }))
+        xhr.send(
+          JSON.stringify({ method: method, url: url, headers: headers, bodyBase64: bodyBase64, timeoutMs: timeoutMs })
+        )
       } else {
         xhr.open(method, url, false)
         try {

@@ -1850,8 +1850,8 @@ async def api_frame_scene_preview_proxy(
     (image galleries, weather, ...) fetch external URLs that the browser can't
     reach directly because of CORS; the preview routes those requests here so
     they behave like the device, which fetches server-side. Project-authed and
-    SSRF-guarded. Request body: {method, url, headers, bodyBase64}. The response
-    mirrors the upstream status code and body bytes."""
+    SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
+    The response mirrors the upstream status code and body bytes."""
     try:
         envelope = await request.json()
     except Exception:
@@ -1865,6 +1865,14 @@ async def api_frame_scene_preview_proxy(
     method = (envelope.get("method") or "GET").upper()
     req_headers = envelope.get("headers") or {}
     body_b64 = envelope.get("bodyBase64") or ""
+
+    # Honor the app's requested timeout (e.g. openaiImage asks for 300s — DALL-E
+    # is slow), clamped so one preview can't tie up the backend indefinitely.
+    try:
+        timeout_ms = int(envelope.get("timeoutMs") or 0)
+    except (TypeError, ValueError):
+        timeout_ms = 0
+    timeout_seconds = 30.0 if timeout_ms <= 0 else min(max(timeout_ms / 1000.0, 5.0), 300.0)
 
     parsed = httpx.URL(url) if url else None
     if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
@@ -1880,11 +1888,16 @@ async def api_frame_scene_preview_proxy(
         if isinstance(k, str) and k.lower() not in ("host", "content-length", "connection")
     }
 
+    # Short connect timeout, long read timeout for slow APIs (image generation).
+    timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 15.0))
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
             upstream = await client.request(method, url, headers=forward_headers, content=body_bytes)
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Proxy fetch failed: {exc}")
+        # Timeout exceptions often stringify empty; include the type so the
+        # failure is diagnosable in the preview's runtime log.
+        detail = str(exc).strip() or type(exc).__name__
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Proxy fetch failed: {detail}")
 
     media_type = upstream.headers.get("content-type", "application/octet-stream")
     return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
