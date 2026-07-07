@@ -19,9 +19,9 @@ when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
-when not defined(frameosEmbedded):
-  # No child processes on FreeRTOS: ImageMagick/exiftool fallbacks are
-  # compiled out and pixie does all decoding.
+when not defined(frameosEmbedded) and not defined(frameosWasm):
+  # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
+  # fallbacks are compiled out and pixie does all decoding.
   import frameos/utils/process
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
@@ -129,7 +129,7 @@ proc decodeImageMagickOutput(output: string): Option[Image] =
     return none(Image)
 
 proc runImageMagick(args: seq[string]; input = ""): Option[string] =
-  when defined(frameosEmbedded):
+  when defined(frameosEmbedded) or defined(frameosWasm):
     none(string)
   else:
     let cmd = imageMagickCommand()
@@ -677,7 +677,7 @@ proc parseExifJson(output: string): Option[JsonNode] =
   return none(JsonNode)
 
 proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
-  when defined(frameosEmbedded):
+  when defined(frameosEmbedded) or defined(frameosWasm):
     none(JsonNode)
   else:
     let exiftool = findExe("exiftool")
@@ -697,7 +697,7 @@ proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
     return none(JsonNode)
 
 proc getExifMetadataFromData*(data: string): Option[JsonNode] =
-  when defined(frameosEmbedded):
+  when defined(frameosEmbedded) or defined(frameosWasm):
     none(JsonNode)
   else:
     let exiftool = findExe("exiftool")

@@ -18,7 +18,7 @@ when defined(frameosEmbedded):
     # Keep headroom for the packed framebuffer, preview snapshot and the
     # C-side HTTP/TLS buffers that also live in PSRAM.
     EmbeddedReserveBytes = 1_536_000
-elif defined(linux):
+elif defined(linux) and not defined(frameosWasm):
   import std/[strutils, os]
 
   const
@@ -53,7 +53,7 @@ proc availableRenderBytes*(): int =
     # Image buffers need one contiguous block; fragmented PSRAM can have
     # plenty free but no block large enough.
     max(0, min(largest, free - EmbeddedReserveBytes))
-  elif defined(linux):
+  elif defined(linux) and not defined(frameosWasm):
     let available = memAvailableBytes()
     if available <= 0:
       0
@@ -86,7 +86,7 @@ proc setupRenderMemory*() =
   ## after the first large frees, after which multi-MB decode buffers come
   ## from the sbrk arena and stay resident forever; pinning the threshold
   ## keeps them mmap'd (munmap on free) at negligible syscall cost.
-  when defined(linux) and not defined(frameosEmbedded):
+  when defined(linux) and not defined(frameosEmbedded) and not defined(frameosWasm):
     proc mallopt(param: cint, value: cint): cint {.importc, header: "<malloc.h>".}
     const M_TRIM_THRESHOLD = cint(-1)
     const M_MMAP_THRESHOLD = cint(-3)
@@ -104,6 +104,6 @@ proc reclaimRenderMemory*() =
   ## free heap pages to the OS on Linux frame targets.
   GC_fullCollect()
 
-  when defined(linux) and not defined(frameosEmbedded):
+  when defined(linux) and not defined(frameosEmbedded) and not defined(frameosWasm):
     proc malloc_trim(pad: csize_t): cint {.importc: "malloc_trim", header: "<malloc.h>".}
     discard malloc_trim(0.csize_t)

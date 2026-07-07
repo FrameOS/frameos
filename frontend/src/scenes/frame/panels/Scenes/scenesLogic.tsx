@@ -63,7 +63,7 @@ function referencedSceneIds(scene: FrameScene): string[] {
   return Array.from(sceneIds)
 }
 
-function collectScenePreviewPayloadScenes(
+export function collectScenePreviewPayloadScenes(
   rootScene: FrameScene,
   scenes: FrameScene[],
   resolvedState: Record<string, any> | null

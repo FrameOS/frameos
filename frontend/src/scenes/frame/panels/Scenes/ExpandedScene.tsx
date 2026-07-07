@@ -11,8 +11,10 @@ import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { livePreviewLogic } from './livePreviewLogic'
+import { LivePreviewModal } from './LivePreviewModal'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -39,6 +41,8 @@ export function ExpandedScene({
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
+  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
@@ -157,6 +161,15 @@ export function ExpandedScene({
                 {activateLabel}
               </Button>
             )}
+            <Button
+              onClick={() => openLivePreview(sceneId)}
+              color="secondary"
+              className="inline-flex items-center gap-2"
+              title="Run this scene in your browser via WebAssembly"
+            >
+              <EyeIcon className="h-5 w-5" />
+              Live preview
+            </Button>
           </div>
         </div>
       ) : (
@@ -211,11 +224,21 @@ export function ExpandedScene({
                 <Button onClick={() => resetStateChanges()} color="secondary">
                   Reset
                 </Button>
+                <Button
+                  onClick={() => openLivePreview(sceneId)}
+                  color="secondary"
+                  className="inline-flex items-center gap-2"
+                  title="Run this scene in your browser via WebAssembly"
+                >
+                  <EyeIcon className="h-5 w-5" />
+                  Live preview
+                </Button>
               </div>
             </div>
           ) : null}
         </Form>
       )}
+      {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
     </div>
   )
 }

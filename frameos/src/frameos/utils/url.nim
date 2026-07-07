@@ -1,9 +1,9 @@
 import strformat
 import strutils
 import frameos/types
-when not defined(frameosEmbedded):
-  # setup_proxy pulls std/net + OpenSSL; the embedded firmware has no
-  # hotspot setup proxy.
+when not defined(frameosEmbedded) and not defined(frameosWasm):
+  # setup_proxy pulls std/net + OpenSSL; the embedded firmware and the wasm
+  # bundle have no hotspot setup proxy.
   import frameos/setup_proxy
 import frameos/utils/http_client
 
@@ -20,7 +20,7 @@ proc publicHost*(config: FrameConfig): string =
   if config.frameHost.len > 0: config.frameHost else: "localhost"
 
 proc hotspotSetupPort*(config: FrameConfig): int =
-  when not defined(frameosEmbedded):
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
     if config.httpsProxy.enable and config.httpsProxy.exposeOnlyPort:
       let port = setupProxyPort()
       if port > 0:

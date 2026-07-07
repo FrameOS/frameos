@@ -1,6 +1,7 @@
-when defined(frameosEmbedded):
-  # No mummy (epoll/threads) or asyncdispatch on FreeRTOS; the embedded
-  # firmware serves HTTP through esp_http_server on the C side instead.
+when defined(frameosEmbedded) or defined(frameosWasm):
+  # No mummy (epoll/threads) or asyncdispatch on FreeRTOS or WebAssembly;
+  # the embedded firmware serves HTTP through esp_http_server on the C side,
+  # and the wasm preview bundle has no server at all.
   import json, pixie, locks, tables, options
 else:
   import json, pixie, locks, tables, options, asyncdispatch, mummy
@@ -165,9 +166,9 @@ type
   Logger* = ref object
     frameConfig*: FrameConfig
     lock*: Lock
-    when not defined(frameosEmbedded):
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
       # The logger thread + channel only exist on OS-threaded builds; the
-      # embedded build logs synchronously through a C hook.
+      # embedded and wasm builds log synchronously through a host hook.
       thread*: Thread[FrameConfig]
       channel*: Channel[SerializedLog]
     log*: proc (payload: JsonNode)
@@ -353,7 +354,7 @@ type
     scenes*: Table[SceneId, FrameScene]
     currentSceneId*: SceneId
     lastRenderAt*: float
-    when not defined(frameosEmbedded):
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
       sleepFuture*: Option[Future[void]]
     isRendering*: bool = false
     triggerRenderNext*: bool = false
@@ -366,12 +367,12 @@ type
 
   ConnectionsState* = ref object
     lock*: Lock
-    when not defined(frameosEmbedded):
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
       items*: seq[WebSocket]
 
   Server* = ref object
     frameConfig*: FrameConfig
-    when not defined(frameosEmbedded):
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
       # esp_http_server handles HTTP on the embedded firmware's C side.
       mummy*: mummy.Server
     httpWorkerThreads*: int

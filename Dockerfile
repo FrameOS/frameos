@@ -112,6 +112,8 @@ FROM nim-toolchain AS app-builder
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 ARG QUICKJS_VERSION=2026-06-04
 ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
+# emscripten, for the wasm live-preview bundle served by the frontend
+ARG EMSCRIPTEN_VERSION=6.0.2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -183,6 +185,15 @@ RUN set -eux; \
     strip /app/frameos/quickjs/qjs; \
     /app/frameos/quickjs/qjs -e 'console.log("quickjs ok")'; \
     rm -rf /tmp/quickjs-source /tmp/quickjs-source.tar.xz
+
+# Interpreted-scene runtime compiled to WebAssembly for the frontend's live
+# preview modal; lands in frontend/public/frameos-wasm so the frontend build
+# below copies it into dist.
+RUN set -eux; \
+    git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk; \
+    /opt/emsdk/emsdk install "${EMSCRIPTEN_VERSION}"; \
+    /opt/emsdk/emsdk activate "${EMSCRIPTEN_VERSION}"
+RUN bash -c 'source /opt/emsdk/emsdk_env.sh && bash /app/frameos/tools/build_wasm.sh'
 
 WORKDIR /app/frontend
 RUN pnpm run build

@@ -1,4 +1,4 @@
-when defined(frameosEmbedded):
+when defined(frameosEmbedded) or defined(frameosWasm):
   proc getAvailableDiskSpace*(path: string): int64 =
     ## No statvfs on the embedded VFS; callers treat -1 as "unknown".
     -1
