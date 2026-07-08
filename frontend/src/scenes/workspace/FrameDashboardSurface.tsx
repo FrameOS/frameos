@@ -608,7 +608,7 @@ function FrameScenesBlock({
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
-  const { applyTemplateAndSave, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(() => new Set())
@@ -680,9 +680,9 @@ function FrameScenesBlock({
       event.preventDefault()
       event.stopPropagation()
       if (templateDragData.repository) {
-        applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+        applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplateAndSave(templateDragData.template)
+        applyTemplate(templateDragData.template)
       }
       return
     }
@@ -797,7 +797,7 @@ export function FrameDashboardSurface({
   sectionId,
   showSceneMenus = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
-  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
 
   const handleFrameDragOver = (event: DragEvent<HTMLElement>) => {
@@ -817,9 +817,9 @@ export function FrameDashboardSurface({
     event.preventDefault()
     event.stopPropagation()
     if (templateDragData.repository) {
-      applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+      applyRemoteToFrame(templateDragData.repository, templateDragData.template)
     } else {
-      applyTemplateAndSave(templateDragData.template)
+      applyTemplate(templateDragData.template)
     }
   }
 

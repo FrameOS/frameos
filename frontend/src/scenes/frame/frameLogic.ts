@@ -1606,14 +1606,11 @@ export const frameLogic = kea<frameLogicType>([
     clearNextAction: true,
     resetUnsavedChanges: true,
     resetUndeployedChanges: true,
-    applyTemplate: (template: Partial<TemplateType>) => ({
-      template,
-    }),
-    applyTemplateAndSave: (template: Partial<TemplateType>, openDrawer?: boolean) => ({
+    applyTemplate: (template: Partial<TemplateType>, openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
       template,
     }),
-    createBlankSceneAndSave: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
+    createBlankScene: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
       name,
       openEditor: openEditor ?? false,
       openDrawer: openDrawer ?? false,
@@ -2226,7 +2223,8 @@ export const frameLogic = kea<frameLogicType>([
     ],
     frameSyncSectionsWithChanges: [
       (s) => [s.frameSyncStatus],
-      (frameSyncStatus: FrameSyncStatus | null) => frameSyncStatus?.sections.filter((section) => section.has_changes) ?? [],
+      (frameSyncStatus: FrameSyncStatus | null) =>
+        frameSyncStatus?.sections.filter((section) => section.has_changes) ?? [],
     ],
     hasFrameSyncChanges: [
       (s) => [s.frameSyncStatus, s.isFrameAdminMode, s.frame, s.frameSyncIgnoredToken],
@@ -2272,7 +2270,9 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   listeners(({ asyncActions, actions, values, props }) => {
-    const appendTemplatesAndSave = async (templates: Partial<TemplateType>[], openDrawer: boolean): Promise<void> => {
+    // Adds the templates' scenes to the frame form without saving; the user
+    // reviews and saves/deploys the change through the normal flow.
+    const appendTemplates = async (templates: Partial<TemplateType>[], openDrawer: boolean): Promise<void> => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
       const oldScenes = frameForm.scenes || []
       const sceneGroups = templates
@@ -2286,11 +2286,7 @@ export const frameLogic = kea<frameLogicType>([
         return
       }
 
-      const scenes = [...oldScenes, ...newScenes]
-      const nextFrameForm = { ...frameForm, scenes }
-      actions.setFrameFormValues({ scenes })
-      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
-      framesModel.actions.loadFrame(props.frameId)
+      actions.setFrameFormValues({ scenes: [...oldScenes, ...newScenes] })
       if (openDrawer) {
         openSceneControlDrawer(props.frameId, newScenes[0].id)
       }
@@ -2313,7 +2309,10 @@ export const frameLogic = kea<frameLogicType>([
         } else {
           await asyncActions.submitFrameForm()
         }
-        framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
+        framesModel.actions.deployFrame(
+          props.frameId,
+          frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
+        )
       },
       saveAndFastDeployFrame: async () => {
         const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
@@ -2342,7 +2341,10 @@ export const frameLogic = kea<frameLogicType>([
       rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
       stopFrame: () => framesModel.actions.stopFrame(props.frameId),
       deployFrame: () => {
-        framesModel.actions.deployFrame(props.frameId, frameCanUseFastDeploy(values.frame, values.requiresRecompilation))
+        framesModel.actions.deployFrame(
+          props.frameId,
+          frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
+        )
       },
       fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
       fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
@@ -2381,29 +2383,13 @@ export const frameLogic = kea<frameLogicType>([
           console.error(`Node ${nodeId} not found in scene ${sceneId}`)
         }
       },
-      applyTemplate: async ({ template }) => {
-        if ('scenes' in template) {
-          const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-          const oldScenes = frameForm.scenes || []
-          const newScenes = buildScenesFromTemplate(template, frameForm)
-          actions.setFrameFormValues({
-            scenes: [...oldScenes, ...newScenes],
-          })
-
-          await saveTemplateSceneImages(props.frameId, template, newScenes)
-        }
+      applyTemplate: async ({ template, openDrawer }) => {
+        await appendTemplates(templatesFromPayload(template), openDrawer)
       },
-      applyTemplateAndSave: async ({ template, openDrawer }) => {
-        await appendTemplatesAndSave(templatesFromPayload(template), openDrawer)
-      },
-      createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
+      createBlankScene: async ({ name, openEditor, openDrawer }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
         const scene = buildBlankScene(frameForm, name)
-        const scenes = [...(frameForm.scenes ?? []), scene]
-        const nextFrameForm = { ...frameForm, scenes }
-        actions.setFrameFormValues({ scenes })
-        await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
-        framesModel.actions.loadFrame(props.frameId)
+        actions.setFrameFormValues({ scenes: [...(frameForm.scenes ?? []), scene] })
         if (openEditor) {
           router.actions.push(urls.scenes(props.frameId, scene.id))
         } else if (openDrawer) {

@@ -501,7 +501,7 @@ export function TemplateDrawer(): JSX.Element | null {
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                 <AddSceneDrawerActions frame={frame} />
-                <Templates persistOnInstall />
+                <Templates />
               </div>
             )}
             <EditTemplateModal />
@@ -560,7 +560,7 @@ function NewBlankSceneModal({
 }
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
-  const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -657,7 +657,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           onClose={() => setNewBlankSceneModalOpen(false)}
           onCreate={(name) => {
             setNewBlankSceneModalOpen(false)
-            createBlankSceneAndSave(name, false, true)
+            createBlankScene(name, false, true)
           }}
         />
       ) : null}

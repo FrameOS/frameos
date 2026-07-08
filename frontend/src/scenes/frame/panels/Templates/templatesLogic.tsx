@@ -86,7 +86,7 @@ export const templatesLogic = kea<templatesLogicType>([
       repositoriesModel,
       ['updateRepository'],
       frameLogic(props),
-      ['applyTemplate', 'applyTemplateAndSave'],
+      ['applyTemplate'],
     ],
   })),
   actions({
@@ -95,14 +95,8 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (
-      repository: RepositoryType,
-      template: TemplateType,
-      persistOnInstall?: boolean,
-      openDrawer?: boolean
-    ) => ({
+    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
-      persistOnInstall: persistOnInstall ?? false,
       repository,
       template,
     }),
@@ -430,14 +424,9 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.updateTemplate(await response.json())
       }
     },
-    applyRemoteToFrame: async ({ template, repository, persistOnInstall, openDrawer }) => {
+    applyRemoteToFrame: async ({ template, repository, openDrawer }) => {
       const scenes = await loadRepositoryTemplateScenes(repository, template)
-      const loadedTemplate = templateWithSceneOrigins({ ...template, scenes }, repository)
-      if (persistOnInstall) {
-        actions.applyTemplateAndSave(loadedTemplate, openDrawer)
-      } else {
-        actions.applyTemplate(loadedTemplate)
-      }
+      actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer)
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
       const templates: Partial<TemplateType>[] = []
@@ -457,7 +446,7 @@ export const templatesLogic = kea<templatesLogicType>([
       }
 
       if (templates.length) {
-        actions.applyTemplateAndSave({ __templateBatch: templates } as Partial<TemplateType>, openDrawer)
+        actions.applyTemplate({ __templateBatch: templates } as Partial<TemplateType>, openDrawer)
       }
     },
     saveAsTemplate: () => {

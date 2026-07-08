@@ -628,10 +628,7 @@ export const chatLogic = kea<chatLogicType>([
           return
         }
         const response = await apiFetch(
-          projectApiPathForProject(
-            projectId,
-            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
-          )
+          projectApiPathForProject(projectId, `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`)
         )
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
@@ -663,7 +660,7 @@ export const chatLogic = kea<chatLogicType>([
         const response = await apiFetch(
           projectApiPathForProject(
             projectId,
-            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`,
+            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
           )
         )
         if (!response.ok) {
@@ -1000,7 +997,7 @@ export const chatLogic = kea<chatLogicType>([
               },
             }
           })
-          await frameStore.asyncActions.applyTemplateAndSave({
+          await frameStore.asyncActions.applyTemplate({
             scenes: sanitizedScenes,
             name: payload?.title || 'AI Generated Scene',
           })
