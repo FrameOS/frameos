@@ -1,10 +1,11 @@
+import asyncio
 import json
 
 import pytest
 from httpx import AsyncClient, MockTransport, Response
 
-from app.ha import discovery
-from app.ha.client import RestConfig
+from app.ha import HA_SYNC_REQUEST_KEY, discovery
+from app.ha.client import MqttConfig, RestConfig
 from app.ha.sync import HomeAssistantSync
 from app.models import new_frame, update_frame
 from app.models.settings import Settings
@@ -78,6 +79,59 @@ async def test_full_sync_publishes_frames_and_skips_archived(db, redis, service)
     # Summary sensor counts only the active frame
     summary = json.loads(service._mqtt.payload_for(discovery.summary_state_topic(project_id)))
     assert summary == {"count": 1, "frames": ["Kitchen"]}
+    assert service._synced_counts == {project_id: 1}
+
+
+async def _next_pubsub_message(pubsub, timeout=5.0):
+    async def read():
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+            if message is not None:
+                return message
+    return await asyncio.wait_for(read(), timeout)
+
+
+@pytest.mark.asyncio
+async def test_sync_request_is_claimed_and_answered(db, redis, service):
+    await redis.set(HA_SYNC_REQUEST_KEY, json.dumps({"reply_channel": "ha_sync:reply:test", "project_id": 1}))
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("ha_sync:reply:test")
+    try:
+        await service._claim_sync_request()
+        assert await redis.get(HA_SYNC_REQUEST_KEY) is None
+
+        service._enabled = {1: {"syncEnabled": True}}
+        service._synced_counts = {1: 3}
+        await service._reply_to_sync_request(MqttConfig(host="core-mosquitto", port=1883))
+
+        reply = json.loads((await _next_pubsub_message(pubsub))["data"])
+        assert reply["ok"] is True
+        assert reply["mqtt"] == {"host": "core-mosquitto", "port": 1883}
+        assert reply["frames_shared"] == {"1": 3}
+
+        # The request is consumed: a second reply publishes nothing
+        await service._reply_to_sync_request(None, error="boom")
+        assert await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.2) is None
+    finally:
+        await pubsub.unsubscribe("ha_sync:reply:test")
+        await pubsub.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_request_error_reply(db, redis, service):
+    await redis.set(HA_SYNC_REQUEST_KEY, json.dumps({"reply_channel": "ha_sync:reply:err", "project_id": 1}))
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("ha_sync:reply:err")
+    try:
+        await service._claim_sync_request()
+        await service._reply_to_sync_request(None, error="mqtt connect failed")
+        reply = json.loads((await _next_pubsub_message(pubsub))["data"])
+        assert reply["ok"] is False
+        assert reply["error"] == "mqtt connect failed"
+        assert reply["mqtt"] is None
+    finally:
+        await pubsub.unsubscribe("ha_sync:reply:err")
+        await pubsub.close()
 
 
 @pytest.mark.asyncio

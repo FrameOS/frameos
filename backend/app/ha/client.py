@@ -7,6 +7,7 @@ firing events on the HA event bus.
 
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from httpx import AsyncClient
 
@@ -72,20 +73,32 @@ async def fetch_supervisor_mqtt(client: AsyncClient) -> Optional[MqttConfig]:
         return None
 
 
+def ha_url_hostname(ha_settings: dict) -> Optional[str]:
+    url = str(ha_settings.get("url") or "").strip()
+    if not url:
+        return None
+    try:
+        return urlparse(url if "//" in url else f"//{url}").hostname
+    except ValueError:
+        return None
+
+
 def mqtt_config_from_settings(ha_settings: dict) -> Optional[MqttConfig]:
     host = str(ha_settings.get("mqttHost") or "").strip()
+    username = str(ha_settings.get("mqttUsername") or "").strip() or None
+    password = str(ha_settings.get("mqttPassword") or "") or None
     if not host:
-        return None
+        # The broker usually runs on the Home Assistant box itself, so
+        # credentials alone are enough: default the host to the HA URL's
+        # hostname. No fields at all means MQTT is intentionally skipped.
+        if not username:
+            return None
+        host = ha_url_hostname(ha_settings) or "homeassistant.local"
     try:
         port = int(ha_settings.get("mqttPort") or 1883)
     except (TypeError, ValueError):
         port = 1883
-    return MqttConfig(
-        host=host,
-        port=port,
-        username=str(ha_settings.get("mqttUsername") or "").strip() or None,
-        password=str(ha_settings.get("mqttPassword") or "") or None,
-    )
+    return MqttConfig(host=host, port=port, username=username, password=password)
 
 
 async def resolve_mqtt_config(client: AsyncClient, ha_settings: dict) -> Optional[MqttConfig]:

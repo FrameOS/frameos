@@ -1,4 +1,4 @@
-import messg, { error, success } from 'messg'
+import messg, { error, success, warning } from 'messg'
 import 'messg/index.css'
 
 const messgInstance = messg as typeof messg & { position: string; max: number | null }
@@ -14,7 +14,16 @@ function configureMessg(): void {
   configured = true
 }
 
-export function showWorkingMessage(text: string): { success: (message: string) => void; error: (message: string) => void } {
+// Long messages need time to be read (~50ms per character); a click still dismisses instantly.
+function readableDuration(text: string, minimum: number): number {
+  return Math.min(Math.max(minimum, text.length * 50), 20000)
+}
+
+export function showWorkingMessage(text: string): {
+  success: (message: string) => void
+  warning: (message: string) => void
+  error: (message: string) => void
+} {
   configureMessg()
 
   const message = messg(
@@ -24,21 +33,25 @@ export function showWorkingMessage(text: string): { success: (message: string) =
   return {
     success: (successMessage: string) => {
       message?.hide()
-      success(successMessage, 3500)
+      success(successMessage, readableDuration(successMessage, 3500))
+    },
+    warning: (warningMessage: string) => {
+      message?.hide()
+      warning(warningMessage, readableDuration(warningMessage, 4500))
     },
     error: (errorMessage: string) => {
       message?.hide()
-      error(errorMessage, 4500)
+      error(errorMessage, readableDuration(errorMessage, 4500))
     },
   }
 }
 
 export function showSuccessMessage(text: string): void {
   configureMessg()
-  success(text, 3500)
+  success(text, readableDuration(text, 3500))
 }
 
 export function showErrorMessage(text: string): void {
   configureMessg()
-  error(text, 4500)
+  error(text, readableDuration(text, 4500))
 }

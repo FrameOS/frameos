@@ -310,6 +310,7 @@ export function Settings() {
     isTestingBuildHost,
     isTestingModalSandbox,
     isSyncingHomeAssistant,
+    homeAssistantMqttHostDefault,
   } = useValues(settingsLogic)
   const { framesList } = useValues(framesModel)
   const detectedBackendAddress = detectedBackendAddressParts()
@@ -324,7 +325,6 @@ export function Settings() {
     testModalSandbox,
     syncHomeAssistant,
     deleteCustomFont,
-    setSettingsValue,
     toggleSshKeyExpanded,
     toggleOpenAiModelOverrides,
   } = useActions(settingsLogic)
@@ -938,33 +938,6 @@ export function Settings() {
                     Home Assistant
                   </H6>
                   <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      Share your frames with Home Assistant: each frame becomes a device with a live image and
-                      status/scene sensors (via MQTT discovery), and frame events are forwarded to the Home Assistant
-                      event bus as <code>frameos_event</code> for use in automations. Archived frames are not shared.
-                    </p>
-                    <Field name="syncEnabled" label="Share frames with Home Assistant">
-                      <Switch fullWidth />
-                    </Field>
-                    {settings?.homeAssistant?.syncEnabled ? (
-                      <div className="pt-1">
-                        <Button
-                          size="small"
-                          color="secondary"
-                          onClick={syncHomeAssistant}
-                          disabled={isSyncingHomeAssistant}
-                        >
-                          {isSyncingHomeAssistant ? 'Syncing...' : 'Save & sync now'}
-                        </Button>
-                      </div>
-                    ) : null}
-                    {isHassioIngress ? (
-                      <p className="frameos-muted text-sm leading-loose">
-                        Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker
-                        (Mosquitto add-on) are discovered automatically. The URL and access token below are only
-                        needed by Home Assistant apps running on your frames.
-                      </p>
-                    ) : null}
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
                     </Field>
@@ -975,30 +948,64 @@ export function Settings() {
                     >
                       <TextInput />
                     </Field>
-                    {!isHassioIngress && settings?.homeAssistant?.syncEnabled ? (
-                      <div className="space-y-2 border-t border-slate-500/20 pt-3">
-                        <p className="text-sm leading-loose">
-                          MQTT broker used to publish frame devices and images. Leave empty to skip MQTT; events are
-                          still sent to the event bus using the URL and access token above.
+                    <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                      <Field
+                        name="syncEnabled"
+                        label="Share frames with Home Assistant"
+                        tooltip={
+                          <>
+                            Each frame becomes a device with a live image and status/scene sensors (via MQTT
+                            discovery), and frame events are forwarded to the Home Assistant event bus as{' '}
+                            <code>frameos_event</code> for use in automations. Archived frames are not shared.
+                          </>
+                        }
+                      >
+                        <Switch fullWidth />
+                      </Field>
+                      {isHassioIngress ? (
+                        <p className="frameos-muted text-sm leading-loose">
+                          Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker
+                          (Mosquitto add-on) are discovered automatically. The URL and access token above are only
+                          needed by Home Assistant apps running on your frames.
                         </p>
-                        <Field name="mqttHost" label="MQTT host">
-                          <TextInput placeholder="homeassistant.local" />
-                        </Field>
-                        <Field name="mqttPort" label="MQTT port">
-                          <NumberTextInput placeholder="1883" />
-                        </Field>
-                        <Field name="mqttUsername" label="MQTT username">
-                          <TextInput />
-                        </Field>
-                        <Field
-                          name="mqttPassword"
-                          label="MQTT password"
-                          secret={!!savedSettings?.homeAssistant?.mqttPassword}
-                        >
-                          <TextInput />
-                        </Field>
-                      </div>
-                    ) : null}
+                      ) : null}
+                      {!isHassioIngress && settings?.homeAssistant?.syncEnabled ? (
+                        <>
+                          <p className="text-sm leading-loose">
+                            To get an MQTT login, in Home Assistant go to Settings → Apps → Mosquitto broker →
+                            Configuration → Logins → Add. Then press the Save button.
+                          </p>
+                          <Field name="mqttUsername" label="MQTT username">
+                            <TextInput />
+                          </Field>
+                          <Field
+                            name="mqttPassword"
+                            label="MQTT password"
+                            secret={!!savedSettings?.homeAssistant?.mqttPassword}
+                          >
+                            <TextInput />
+                          </Field>
+                          <Field name="mqttHost" label="MQTT host (optional)">
+                            <TextInput placeholder={homeAssistantMqttHostDefault} />
+                          </Field>
+                          <Field name="mqttPort" label="MQTT port (optional)">
+                            <NumberTextInput placeholder="1883" />
+                          </Field>
+                        </>
+                      ) : null}
+                      {settings?.homeAssistant?.syncEnabled ? (
+                        <div className="pt-1">
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={syncHomeAssistant}
+                            disabled={isSyncingHomeAssistant}
+                          >
+                            {isSyncingHomeAssistant ? 'Syncing...' : 'Save & sync now'}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                   </Box>
                 </Group>
                 <Group name="github">

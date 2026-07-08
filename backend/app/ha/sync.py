@@ -11,6 +11,9 @@ Runs as a single asyncio task inside the arq worker process (the add-on runs
 two uvicorns plus the worker; the worker is the one singleton). It reacts to
 the same Redis `broadcast_channel` messages that feed the websockets, plus
 control messages on `ha_sync` ({"event": "settings_changed" | "sync_now"}).
+"Sync now" API requests are additionally left in HA_SYNC_REQUEST_KEY; the
+service claims the key on (re)connect and answers on the request's reply
+channel with what actually happened (broker used, frames shared, or the error).
 """
 
 import asyncio
@@ -22,9 +25,9 @@ from redis.asyncio import from_url as create_redis
 
 from app.config import config
 from app.database import SessionLocal
-from app.ha import HA_SYNC_CHANNEL
+from app.ha import HA_SYNC_CHANNEL, HA_SYNC_REQUEST_KEY
 from app.ha import discovery
-from app.ha.client import RestConfig, fire_ha_event, resolve_mqtt_config, resolve_rest_config
+from app.ha.client import MqttConfig, RestConfig, fire_ha_event, resolve_mqtt_config, resolve_rest_config
 from app.redis import get_shared_redis
 
 BROADCAST_CHANNEL = "broadcast_channel"
@@ -41,6 +44,8 @@ class HomeAssistantSync:
         self._rest: dict[int, RestConfig] = {}  # project_id -> HA event bus access
         self._frames: dict[int, dict] = {}  # frame_id -> {project_id, name, archived}
         self._last_image_publish: dict[int, float] = {}
+        self._sync_request: Optional[dict] = None  # pending "sync now" API request awaiting a reply
+        self._synced_counts: dict[int, int] = {}  # project_id -> frames shared in the last full sync
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -54,22 +59,28 @@ class HomeAssistantSync:
                 raise
             except Exception as e:
                 print(f"🔴 Home Assistant sync error, retrying in {backoff:.0f}s: {e}")
+                await self._reply_to_sync_request(None, error=str(e))
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 
     async def _run_once(self):
-        self._enabled = self._load_enabled_projects()
-        self._rest = {
-            project_id: rest
-            for project_id, ha_settings in self._enabled.items()
-            if (rest := resolve_rest_config(ha_settings)) is not None
-        }
         redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
         async with AsyncClient() as http:
             self._http = http
             try:
                 pubsub = redis_sub.pubsub()
                 await pubsub.subscribe(BROADCAST_CHANNEL, HA_SYNC_CHANNEL)
+                # Claim a pending "sync now" request only after subscribing:
+                # requests written later nudge HA_SYNC_CHANNEL, which we now see.
+                await self._claim_sync_request()
+
+                self._enabled = self._load_enabled_projects()
+                self._rest = {
+                    project_id: rest
+                    for project_id, ha_settings in self._enabled.items()
+                    if (rest := resolve_rest_config(ha_settings)) is not None
+                }
+                self._synced_counts = {}
 
                 mqtt_config = None
                 if self._enabled:
@@ -84,25 +95,48 @@ class HomeAssistantSync:
                     will = aiomqtt.Will(
                         topic=discovery.AVAILABILITY_TOPIC, payload="offline", qos=1, retain=True
                     )
-                    async with aiomqtt.Client(
-                        hostname=mqtt_config.host,
-                        port=mqtt_config.port,
-                        username=mqtt_config.username,
-                        password=mqtt_config.password,
-                        will=will,
-                    ) as mqtt:
-                        self._mqtt = mqtt
-                        print(f"🟢 Home Assistant sync: connected to MQTT broker at {mqtt_config.host}:{mqtt_config.port}")
-                        try:
-                            await self._publish(discovery.AVAILABILITY_TOPIC, "online", retain=True)
-                            await self._full_sync()
-                            await self._listen(pubsub)
-                        finally:
+                    connected = False
+                    try:
+                        async with aiomqtt.Client(
+                            hostname=mqtt_config.host,
+                            port=mqtt_config.port,
+                            username=mqtt_config.username,
+                            password=mqtt_config.password,
+                            will=will,
+                        ) as mqtt:
+                            self._mqtt = mqtt
+                            connected = True
+                            print(f"🟢 Home Assistant sync: connected to MQTT broker at {mqtt_config.host}:{mqtt_config.port}")
                             try:
-                                await self._publish(discovery.AVAILABILITY_TOPIC, "offline", retain=True)
-                            except Exception:
-                                pass
-                            self._mqtt = None
+                                await self._publish(discovery.AVAILABILITY_TOPIC, "online", retain=True)
+                                await self._full_sync()
+                                await self._reply_to_sync_request(mqtt_config)
+                                await self._listen(pubsub)
+                            finally:
+                                try:
+                                    await self._publish(discovery.AVAILABILITY_TOPIC, "offline", retain=True)
+                                except Exception:
+                                    pass
+                                self._mqtt = None
+                    except aiomqtt.MqttError as e:
+                        broker = f"{mqtt_config.host}:{mqtt_config.port}"
+                        if connected:
+                            # Credentials were fine: the broker accepted us and then cut the
+                            # connection (oversized messages and duplicate client IDs are
+                            # common causes) — its own log has the reason.
+                            raise RuntimeError(
+                                f"MQTT broker {broker} dropped the connection while syncing: {e}. "
+                                "See the Mosquitto broker log in Home Assistant for the reason "
+                                "(for example a message size limit)."
+                            ) from e
+                        credentials_hint = (
+                            "the Mosquitto add-on's configuration"
+                            if config.SUPERVISOR_TOKEN
+                            else "the MQTT settings under Settings → Home Assistant"
+                        )
+                        raise RuntimeError(
+                            f"MQTT broker {broker} connection failed: {e}. Check {credentials_hint}."
+                        ) from e
                 else:
                     if self._enabled:
                         print(
@@ -110,6 +144,7 @@ class HomeAssistantSync:
                             "(install the Mosquitto add-on or set an MQTT broker in settings). "
                             "Events are still forwarded to the HA event bus."
                         )
+                    await self._reply_to_sync_request(None)
                     await self._listen(pubsub)
             finally:
                 self._http = None
@@ -133,12 +168,46 @@ class HomeAssistantSync:
                     print("🔄 Home Assistant sync: settings changed, reloading")
                     return  # run() reconnects with fresh settings
                 if parsed.get("event") == "sync_now":
-                    self._enabled = self._load_enabled_projects()
-                    await self._full_sync()
+                    print("🔄 Home Assistant sync: full sync requested, reloading")
+                    return  # run() reconnects, resyncs, and answers the pending request
                 continue
             data = parsed.get("data")
             if isinstance(data, dict):
                 await self._handle_broadcast(parsed.get("event"), data)
+
+    # ---- sync-now request/reply ----------------------------------------------
+
+    async def _claim_sync_request(self):
+        try:
+            redis = get_shared_redis()
+            raw = await redis.get(HA_SYNC_REQUEST_KEY)
+            if not raw:
+                return
+            await redis.delete(HA_SYNC_REQUEST_KEY)
+            request = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        except Exception:
+            return
+        if isinstance(request, dict) and request.get("reply_channel"):
+            self._sync_request = request
+
+    async def _reply_to_sync_request(self, mqtt_config: Optional[MqttConfig], error: Optional[str] = None):
+        """Answer a pending "Save & sync now" API request with what actually happened."""
+        request, self._sync_request = self._sync_request, None
+        if not request:
+            return
+        payload = {
+            "ok": error is None and mqtt_config is not None,
+            "error": error,
+            "supervisor": bool(config.SUPERVISOR_TOKEN),
+            "mqtt": {"host": mqtt_config.host, "port": mqtt_config.port} if mqtt_config else None,
+            "enabled_project_ids": sorted(self._enabled.keys()),
+            "event_bus_project_ids": sorted(self._rest.keys()),
+            "frames_shared": {str(project_id): count for project_id, count in self._synced_counts.items()},
+        }
+        try:
+            await get_shared_redis().publish(str(request["reply_channel"]), json.dumps(payload))
+        except Exception as e:
+            print(f"🔴 Home Assistant sync: failed to answer sync request: {e}")
 
     # ---- event handling ------------------------------------------------------
 
@@ -219,9 +288,11 @@ class HomeAssistantSync:
     # ---- sync ----------------------------------------------------------------
 
     async def _full_sync(self):
+        self._synced_counts = {}
         for project_id in self._enabled:
             frames = self._load_project_frames(project_id)
             active = [frame for frame in frames if not frame.get("archived")]
+            self._synced_counts[project_id] = len(active)
             for frame in frames:
                 self._frames[frame["id"]] = {
                     "project_id": project_id,
