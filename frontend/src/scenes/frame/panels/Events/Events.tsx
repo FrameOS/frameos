@@ -215,6 +215,36 @@ export function Events({ frameId, sceneId }: EventsProps) {
                           {event.description}
                           {fieldsSummary(event.fields)}
                         </div>
+                        {event.name?.trim() ? (
+                          <div className="mt-2 flex gap-2">
+                            <div
+                              className="frame-tool-row dndnode flex cursor-move items-center gap-1.5 rounded-lg py-1 pl-0.5 pr-3 text-sm"
+                              style={{ border: '1px solid color-mix(in srgb, currentColor 25%, transparent)' }}
+                              draggable
+                              onDragStart={(e) => onDragStart(e, 'event', event.name)}
+                            >
+                              <div
+                                className="frame-tool-drag-handle"
+                                style={{ minHeight: '1.25rem' }}
+                                aria-hidden="true"
+                              />
+                              Listen
+                            </div>
+                            <div
+                              className="frame-tool-row dndnode flex cursor-move items-center gap-1.5 rounded-lg py-1 pl-0.5 pr-3 text-sm"
+                              style={{ border: '1px solid color-mix(in srgb, currentColor 25%, transparent)' }}
+                              draggable
+                              onDragStart={(e) => onDragStart(e, 'dispatch', event.name)}
+                            >
+                              <div
+                                className="frame-tool-drag-handle"
+                                style={{ minHeight: '1.25rem' }}
+                                aria-hidden="true"
+                              />
+                              Dispatch
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </Box>
                   )}
