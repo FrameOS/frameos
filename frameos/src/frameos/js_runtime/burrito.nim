@@ -88,6 +88,13 @@ when defined(frameosEmbedded):
   # no passL/passC. quickjs-libc (std/os modules, POSIX handlers) is not
   # available on FreeRTOS and is compiled out below.
   discard
+elif defined(frameosWasm):
+  # The wasm bundle links a QuickJS static library compiled with emcc by
+  # tools/build_wasm.sh. quickjs-libc (std/os modules, POSIX handlers) is
+  # compiled out, matching the embedded surface — scenes get their API from
+  # the Nim js_runtime bridge.
+  {.passC: "-I.".}
+  {.passL: "build/wasm/quickjs/libquickjs.a".}
 else:
   const
     quickjsPath = when defined(windows):
@@ -129,8 +136,8 @@ type
   JSCFunctionData* = proc(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst, magic: cint,
       data: ptr JSValue): JSValue {.cdecl.}
 
-# Standard library module bindings from quickjs-libc.h (not built on embedded)
-when not defined(frameosEmbedded):
+# Standard library module bindings from quickjs-libc.h (not built on embedded/wasm)
+when not defined(frameosEmbedded) and not defined(frameosWasm):
   {.push importc, header: "quickjs/quickjs-libc.h".}
 
   proc js_init_module_std*(ctx: ptr JSContext, module_name: cstring): ptr JSModuleDef
@@ -259,8 +266,8 @@ proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: 
 
 {.pop.}
 
-# Bytecode evaluation from quickjs-libc.h (not built on embedded)
-when not defined(frameosEmbedded):
+# Bytecode evaluation from quickjs-libc.h (not built on embedded/wasm)
+when not defined(frameosEmbedded) and not defined(frameosWasm):
   {.push importc, header: "quickjs/quickjs-libc.h".}
   proc js_std_eval_binary*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint)
   {.pop.}
@@ -984,7 +991,7 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
     JS_FreeRuntime(rt)
     raise newException(JSException, "Failed to create QuickJS context")
 
-  when not defined(frameosEmbedded):
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
     # Initialize standard handlers if requested
     if config.enableStdHandlers:
       js_std_init_handlers(rt)
@@ -1023,7 +1030,7 @@ proc close*(js: var QuickJS) =
     # Clear context opaque data first to avoid circular references
     JS_SetContextOpaque(js.context, nil)
 
-    when not defined(frameosEmbedded):
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
       # Process the std event loop to complete any pending operations
       # This is critical when modules have been evaluated
       if js.config.enableStdHandlers:
@@ -1100,7 +1107,7 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
   JS_FreeValue(js.context, val)
 
   # Run the event loop to execute the module
-  when not defined(frameosEmbedded):
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
     if js.config.enableStdHandlers:
       js_std_loop(js.context)
 
@@ -1188,7 +1195,7 @@ proc evalBytecode*(js: QuickJS, bytecode: openArray[byte], loadOnly: bool = fals
   if bytecode.len == 0:
     raise newException(ValueError, "Empty bytecode")
 
-  when not defined(frameosEmbedded):
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
     # First, check if this is qjsc-compiled bytecode (larger, complex bytecode)
     # vs. simple compiled values from compileToBytecode
     let shouldUseStdEval = js.config.enableStdHandlers and bytecode.len > 100
@@ -1350,6 +1357,6 @@ proc processStdLoop*(js: QuickJS) =
   ## Process the QuickJS standard event loop once
   ## This handles timers, I/O, and other async operations
   ## Note: Only available when enableStdHandlers is true
-  when not defined(frameosEmbedded):
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
     if js.config.enableStdHandlers:
       js_std_loop(js.context)

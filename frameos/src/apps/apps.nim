@@ -37,8 +37,8 @@ import apps/render/split/app_loader as render_split_loader
 import apps/render/svg/app_loader as render_svg_loader
 import apps/render/text/app_loader as render_text_loader
 import apps/render/zoomPan/app_loader as render_zoomPan_loader
-when not defined(frameosEmbedded):
-  # Excluded from embedded builds: these apps depend on host-only
+when not defined(frameosEmbedded) and not defined(frameosWasm):
+  # Excluded from embedded and wasm builds: these apps depend on host-only
   # runtime features such as child processes and external binaries.
   import apps/data/chromiumScreenshot/app_loader as data_chromiumScreenshot_loader
   import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
@@ -47,8 +47,8 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.init(node, scene)
   of "data/chromiumScreenshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
     else:
       data_chromiumScreenshot_loader.init(node, scene)
   of "data/clock": data_clock_loader.init(node, scene)
@@ -71,8 +71,8 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/resizeImage": data_resizeImage_loader.init(node, scene)
   of "data/rotateImage": data_rotateImage_loader.init(node, scene)
   of "data/rstpSnapshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
     else:
       data_rstpSnapshot_loader.init(node, scene)
   of "data/unsplash": data_unsplash_loader.init(node, scene)
@@ -99,8 +99,8 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.setField(app, field, value)
   of "data/chromiumScreenshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
     else:
       data_chromiumScreenshot_loader.setField(app, field, value)
   of "data/clock": data_clock_loader.setField(app, field, value)
@@ -123,8 +123,8 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/resizeImage": data_resizeImage_loader.setField(app, field, value)
   of "data/rotateImage": data_rotateImage_loader.setField(app, field, value)
   of "data/rstpSnapshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
     else:
       data_rstpSnapshot_loader.setField(app, field, value)
   of "data/unsplash": data_unsplash_loader.setField(app, field, value)
@@ -169,8 +169,8 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   case keyword:
   of "data/beRecycle": data_beRecycle_loader.get(app, context)
   of "data/chromiumScreenshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/chromiumScreenshot' is not available on this build target")
     else:
       data_chromiumScreenshot_loader.get(app, context)
   of "data/clock": data_clock_loader.get(app, context)
@@ -193,8 +193,8 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/resizeImage": data_resizeImage_loader.get(app, context)
   of "data/rotateImage": data_rotateImage_loader.get(app, context)
   of "data/rstpSnapshot":
-    when defined(frameosEmbedded):
-      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on embedded builds")
+    when defined(frameosEmbedded) or defined(frameosWasm):
+      raise newException(ValueError, "App 'data/rstpSnapshot' is not available on this build target")
     else:
       data_rstpSnapshot_loader.get(app, context)
   of "data/unsplash": data_unsplash_loader.get(app, context)

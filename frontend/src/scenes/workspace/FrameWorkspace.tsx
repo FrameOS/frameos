@@ -651,7 +651,7 @@ function FrameScenesSurface({
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
   const { openScheduleDrawer, openSceneControl } = useActions(workspaceLogic)
-  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
@@ -668,9 +668,9 @@ function FrameScenesSurface({
     if (templateDragData) {
       event.preventDefault()
       if (templateDragData.repository) {
-        applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+        applyRemoteToFrame(templateDragData.repository, templateDragData.template)
       } else {
-        applyTemplateAndSave(templateDragData.template)
+        applyTemplate(templateDragData.template)
       }
       return
     }

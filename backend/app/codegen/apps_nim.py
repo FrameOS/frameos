@@ -87,11 +87,11 @@ def _app_call_case(app_id: str, call: str) -> str:
     if app_id not in EMBEDDED_UNAVAILABLE_APPS:
         return f'  of "{app_id}": {call}'
 
-    error = f"App '{app_id}' is not available on embedded builds"
+    error = f"App '{app_id}' is not available on this build target"
     return "\n".join(
         [
             f'  of "{app_id}":',
-            "    when defined(frameosEmbedded):",
+            "    when defined(frameosEmbedded) or defined(frameosWasm):",
             f'      raise newException(ValueError, "{error}")',
             "    else:",
             f"      {call}",
@@ -150,8 +150,8 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
         items.append((app_id, alias, app_capabilities.get(app_id, set())))
 
     if embedded_unavailable_imports:
-        imports.append("when not defined(frameosEmbedded):")
-        imports.append("  # Excluded from embedded builds: these apps depend on host-only")
+        imports.append("when not defined(frameosEmbedded) and not defined(frameosWasm):")
+        imports.append("  # Excluded from embedded and wasm builds: these apps depend on host-only")
         imports.append("  # runtime features such as child processes and external binaries.")
         imports.extend(f"  {import_line}" for import_line in embedded_unavailable_imports)
 

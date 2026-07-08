@@ -20,7 +20,7 @@ const
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
 
-when defined(frameosEmbedded):
+when defined(frameosEmbedded) or defined(frameosWasm):
   import std/[strformat, strutils]
 
   type

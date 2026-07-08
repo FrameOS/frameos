@@ -28,10 +28,11 @@ when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})
-elif defined(frameosEmbedded):
-  # Single-task embedded runtime: no OS threads, so no Nim channels. Logs and
-  # events go straight through hooks that the embedded runtime installs (logs
-  # end up at ESP_LOGI via the firmware's C log hook; events trigger renders).
+elif defined(frameosEmbedded) or defined(frameosWasm):
+  # Single-task embedded/wasm runtime: no OS threads, so no Nim channels.
+  # Logs and events go straight through hooks that the host runtime installs
+  # (ESP_LOGI via the firmware's C log hook on ESP32; postMessage via the
+  # emscripten JS glue in the browser). Events trigger renders.
   import json
   import options
   import frameos/ids

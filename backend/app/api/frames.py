@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
+import base64
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 import contextlib
@@ -10,11 +11,13 @@ import asyncssh
 import gzip
 import hashlib
 import io
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import shlex
+import socket
 import shutil
 import sys
 import tempfile
@@ -47,6 +50,7 @@ from arq import ArqRedis as Redis
 from app.models.frame import (
     Frame,
     compact_timezone_updater,
+    get_frame_json,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -1788,6 +1792,115 @@ async def api_frame_get(
     data["active_connections"] = int(active or 0)
     data["active_scene_id"] = await _active_scene_id_from_cache(redis, frame.id)
     return {"frame": data}
+
+
+@api_project.get("/frames/{id:int}/scene_preview_settings")
+async def api_frame_scene_preview_settings(
+    id: int,
+    db: Session = Depends(get_db),
+):
+    """Settings (incl. app API keys) the in-browser wasm live preview needs to
+    run this frame's scenes, assembled exactly like the config the device
+    receives (get_frame_json). Project-authenticated: only returns secrets to a
+    caller already authorized to view/edit them in the settings UI."""
+    frame = _project_frame(db, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    frame_json = get_frame_json(db, frame)
+    return {"settings": frame_json.get("settings") or {}}
+
+
+def _preview_proxy_host_is_blocked(host: str) -> bool:
+    """Best-effort SSRF guard for the live-preview HTTP proxy: reject hosts that
+    resolve to loopback / private / link-local / reserved addresses so an
+    authenticated project user can't turn the backend into an internal-network
+    probe. DNS is resolved once here; a rebind between this check and the fetch
+    is a residual risk accepted for a project-authenticated preview feature."""
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr.split("%", 1)[0])
+        except ValueError:
+            return True
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+@api_project.post("/frames/{id:int}/scene_preview_proxy")
+async def api_frame_scene_preview_proxy(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Server-side HTTP fetch for the in-browser wasm live preview. Data apps
+    (image galleries, weather, ...) fetch external URLs that the browser can't
+    reach directly because of CORS; the preview routes those requests here so
+    they behave like the device, which fetches server-side. Project-authed and
+    SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
+    The response mirrors the upstream status code and body bytes."""
+    try:
+        envelope = await request.json()
+    except Exception:
+        _bad_request("Invalid proxy request body")
+
+    frame = _project_frame(db, id)
+    if frame is None:
+        _not_found()
+
+    url = (envelope.get("url") or "").strip()
+    method = (envelope.get("method") or "GET").upper()
+    req_headers = envelope.get("headers") or {}
+    body_b64 = envelope.get("bodyBase64") or ""
+
+    # Honor the app's requested timeout (e.g. openaiImage asks for 300s — DALL-E
+    # is slow), clamped so one preview can't tie up the backend indefinitely.
+    try:
+        timeout_ms = int(envelope.get("timeoutMs") or 0)
+    except (TypeError, ValueError):
+        timeout_ms = 0
+    timeout_seconds = 30.0 if timeout_ms <= 0 else min(max(timeout_ms / 1000.0, 5.0), 300.0)
+
+    parsed = httpx.URL(url) if url else None
+    if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
+        _bad_request(f"Invalid proxy URL: {url}")
+    if _preview_proxy_host_is_blocked(parsed.host):
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Proxy target host is not allowed")
+
+    body_bytes = base64.b64decode(body_b64) if body_b64 else None
+    # Drop hop-by-hop / host-scoped headers; forward app-supplied ones (API keys etc.).
+    forward_headers = {
+        k: v
+        for k, v in req_headers.items()
+        if isinstance(k, str) and k.lower() not in ("host", "content-length", "connection")
+    }
+
+    # Short connect timeout, long read timeout for slow APIs (image generation).
+    timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 15.0))
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            upstream = await client.request(method, url, headers=forward_headers, content=body_bytes)
+    except httpx.HTTPError as exc:
+        # Timeout exceptions often stringify empty; include the type so the
+        # failure is diagnosable in the preview's runtime log.
+        detail = str(exc).strip() or type(exc).__name__
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Proxy fetch failed: {detail}")
+
+    media_type = upstream.headers.get("content-type", "application/octet-stream")
+    return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
 
 
 @api_project.get("/frames/{id:int}/sync")

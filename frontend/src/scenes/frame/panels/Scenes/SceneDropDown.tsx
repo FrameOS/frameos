@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuProps } from '../../../../components/Dropdown
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import {
+  ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
   Cog6ToothIcon,
@@ -41,10 +42,9 @@ export function SceneDropDown({
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(frameEditorsLogic)
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
-  const { scenes } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, updateSceneFromRepo } =
+    useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
@@ -76,6 +76,15 @@ export function SceneDropDown({
       className={className}
       horizontal={horizontal}
       items={[
+        sceneUpdateVersions[sceneId]
+          ? {
+              label: 'Update scene',
+              confirm:
+                'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.',
+              onClick: () => updateSceneFromRepo(scene.id),
+              icon: <ArrowPathIcon className="w-5 h-5" />,
+            }
+          : null,
         context === 'scenes'
           ? {
               label: 'Preview',

@@ -1,12 +1,16 @@
+import json
 from http import HTTPStatus
 from types import SimpleNamespace
 
+from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.ha import HA_SYNC_CHANNEL
 from app.models.settings import get_settings_dict, Settings
+from app.redis import get_redis
 from app.schemas.settings import SettingsResponse, SettingsUpdateRequest
 from app.tenancy import current_project_id
 from app.utils.build_environment import selected_build_environment_provider
@@ -21,7 +25,7 @@ async def get_settings(db: Session = Depends(get_db)):
     return get_settings_dict(db, project_id=current_project_id())
 
 @api_project.post("/settings", response_model=SettingsResponse)
-async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db)):
+async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
     project_id = current_project_id()
     payload = data.to_dict()
     if not payload:
@@ -51,7 +55,25 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
     updated_settings = get_settings_dict(db, project_id=project_id)
     if "posthog" in payload:
         initialize_posthog(updated_settings, project_id=project_id)
+    if "homeAssistant" in payload:
+        # Wake the sync service (it lives in the worker process) so it picks up
+        # the new configuration and republishes discovery data.
+        await redis.publish(HA_SYNC_CHANNEL, json.dumps({"event": "settings_changed", "project_id": project_id}))
     return updated_settings
+
+
+@api_project.post("/settings/home_assistant/sync")
+async def home_assistant_sync_now(db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    project_id = current_project_id()
+    settings = get_settings_dict(db, project_id=project_id)
+    home_assistant = settings.get("homeAssistant") or {}
+    if not isinstance(home_assistant, dict) or not home_assistant.get("syncEnabled"):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Enable 'Share frames with Home Assistant' first",
+        )
+    await redis.publish(HA_SYNC_CHANNEL, json.dumps({"event": "sync_now", "project_id": project_id}))
+    return {"ok": True}
 
 
 @api_project.post("/settings/test_build_host")

@@ -3,6 +3,7 @@ import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
+import { sceneUpdatesLogic } from './sceneUpdatesLogic'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
@@ -63,7 +64,7 @@ function referencedSceneIds(scene: FrameScene): string[] {
   return Array.from(sceneIds)
 }
 
-function collectScenePreviewPayloadScenes(
+export function collectScenePreviewPayloadScenes(
   rootScene: FrameScene,
   scenes: FrameScene[],
   resolvedState: Record<string, any> | null
@@ -104,6 +105,8 @@ export const scenesLogic = kea<scenesLogicType>([
       ['apps'],
       controlLogic({ frameId }),
       ['sceneId as activeSceneId', 'uploadedScenes', 'uploadedScenesLoading', 'states'],
+      sceneUpdatesLogic({ frameId }),
+      ['sceneUpdateVersions'],
     ],
     actions: [
       frameLogic({ frameId }),
@@ -112,6 +115,8 @@ export const scenesLogic = kea<scenesLogicType>([
       ['editScene', 'closeSceneEditors'],
       controlLogic({ frameId }),
       ['sync as syncActiveScene'],
+      sceneUpdatesLogic({ frameId }),
+      ['updateSceneFromRepo'],
     ],
   })),
   actions({
@@ -145,7 +150,11 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
-    previewScene: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state }),
+    previewScene: (sceneId: string, state?: Record<string, any> | null, scenes?: FrameScene[] | null) => ({
+      sceneId,
+      state,
+      scenes: scenes ?? null,
+    }),
     previewSceneSuccess: true,
     previewSceneFailure: true,
     setAiPrompt: (prompt: string) => ({ prompt }),
@@ -675,8 +684,11 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.uploadImageFailure()
       }
     },
-    previewScene: async ({ sceneId, state }) => {
-      const scene = values.scenes.find((item) => item.id === sceneId)
+    previewScene: async ({ sceneId, state, scenes }) => {
+      // An explicit `scenes` list lets callers preview scenes that aren't
+      // installed on the frame, e.g. template previews.
+      const sceneList = scenes?.length ? scenes : values.scenes
+      const scene = sceneList.find((item) => item.id === sceneId)
       if (!scene) {
         actions.previewSceneFailure()
         return
@@ -691,7 +703,7 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
-        const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, resolvedState)
+        const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, resolvedState)
         const payload = {
           scenes: payloadScenes,
           sceneId: scene.id,
@@ -721,11 +733,12 @@ export const scenesLogic = kea<scenesLogicType>([
           frameId: props.frameId,
           kind: taskKind,
           sceneId,
-          detail: error instanceof Error
-            ? error.message
-            : values.isFrameAdminMode
-            ? 'Failed to activate the scene'
-            : 'Failed to preview the scene',
+          detail:
+            error instanceof Error
+              ? error.message
+              : values.isFrameAdminMode
+              ? 'Failed to activate the scene'
+              : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
       }

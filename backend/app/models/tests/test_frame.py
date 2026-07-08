@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch, AsyncMock
 
 import pytest
@@ -245,6 +246,41 @@ async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
     frame.image_engine = "imagemagick"
     data = get_frame_json(db, frame)
     assert data["imageEngine"] == "imagemagick"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_keeps_sync_internals_out_of_home_assistant_settings(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(
+        Settings(
+            project_id=frame.project_id,
+            key="homeAssistant",
+            value={
+                "url": "http://ha.local:8123",
+                "accessToken": "token123",
+                "syncEnabled": True,
+                "mqttHost": "ha.local",
+                "mqttPassword": "mqtt-secret",
+            },
+        )
+    )
+    db.commit()
+    frame.scenes = [
+        {
+            "id": "scene-1",
+            "nodes": [
+                {
+                    "type": "app",
+                    "data": {"sources": {"config.json": json.dumps({"settings": ["homeAssistant"]})}},
+                }
+            ],
+        }
+    ]
+
+    data = get_frame_json(db, frame)
+
+    assert data["settings"]["homeAssistant"] == {"url": "http://ha.local:8123", "accessToken": "token123"}
 
 
 @pytest.mark.asyncio

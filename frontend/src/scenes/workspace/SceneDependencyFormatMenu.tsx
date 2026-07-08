@@ -14,12 +14,17 @@ interface SceneDependencyFormatMenuProps {
   frameId: number
   surface: SceneDependencyGroupingSurface
   className?: string
+  multiSelect?: {
+    enabled: boolean
+    onToggle: (enabled: boolean) => void
+  }
 }
 
 export function SceneDependencyFormatMenu({
   frameId,
   surface,
   className,
+  multiSelect,
 }: SceneDependencyFormatMenuProps): JSX.Element {
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
@@ -43,6 +48,20 @@ export function SceneDependencyFormatMenu({
             />
           ),
         },
+        ...(multiSelect
+          ? [
+              {
+                content: () => (
+                  <Switch
+                    label="Select multiple scenes"
+                    value={multiSelect.enabled}
+                    onChange={(enabled) => multiSelect.onToggle(enabled)}
+                    fullWidth
+                  />
+                ),
+              },
+            ]
+          : []),
       ]}
     />
   )

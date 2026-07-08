@@ -5,7 +5,7 @@
 ## all: importing this module there is a compile-time error, which is the
 ## point — code that forks must stay out of the embedded dependency graph.
 
-when defined(frameosEmbedded):
+when defined(frameosEmbedded) or defined(frameosWasm):
   {.error: "frameos/hal/processes: child processes do not exist on embedded targets".}
 else:
   import frameos/utils/process

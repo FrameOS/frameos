@@ -1,6 +1,5 @@
 import React, { forwardRef, ReactNode } from 'react'
 import { clsx } from 'clsx'
-import { Label } from './Label'
 
 export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
   label?: ReactNode
@@ -23,7 +22,11 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
         onChange={(event) => onChange?.(event.target.checked)}
         className={clsx('h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-400', className)}
       />
-      {label ? <Label className="cursor-pointer">{label}</Label> : null}
+      {/* A <span>, not <Label>: nesting a <label> element inside a <label> is
+          invalid HTML and swallows clicks instead of toggling the checkbox. */}
+      {label ? (
+        <span className={clsx('frameos-form-label text-sm font-medium', !disabled && 'cursor-pointer')}>{label}</span>
+      ) : null}
     </label>
   )
 })

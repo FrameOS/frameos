@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { expandedSceneLogic } from './expandedSceneLogic'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
@@ -11,8 +13,13 @@ import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
+import { WindowIcon } from '@heroicons/react/24/outline'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
+import { LivePreviewModal } from './LivePreviewModal'
+import { SceneActionsButton, SceneActionOption } from './SceneActionsButton'
+import { SceneActionKey } from './sceneActionsLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -31,17 +38,27 @@ export function ExpandedScene({
   isUnsaved,
   isUndeployed,
 }: ExpandedSceneProps) {
-  const { stateChanges, hasStateChanges, fields, visibleFields } = useValues(
-    expandedSceneLogic({ frameId, sceneId, scene })
-  )
+  const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
+  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   const { editScene } = useActions(frameEditorsLogic)
   const fieldCount = visibleFields.length
   const frameAdminMode = isInFrameAdminMode()
+
+  // Reopen the in-browser preview after a reload: openLivePreview stores the
+  // scene id in the URL hash, and by the time this card is mounted the frame's
+  // scenes are guaranteed to be loaded.
+  useEffect(() => {
+    if (router.values.hashParams[LIVE_PREVIEW_HASH_KEY] === sceneId && livePreviewSceneId !== sceneId) {
+      openLivePreview(sceneId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const currentState = states[sceneId] ?? {}
   const sceneIsUndeployed = isUndeployed ?? undeployedSceneIds.has(sceneId)
@@ -56,7 +73,6 @@ export function ExpandedScene({
       : sceneId === currentSceneId
       ? 'Update active scene'
       : 'Activate scene'
-  const previewLabel = 'Preview scene with changes'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }
@@ -128,6 +144,35 @@ export function ExpandedScene({
     }
   }
 
+  const actionOptions: SceneActionOption[] = [
+    {
+      key: 'activate',
+      label: activateLabel,
+      description: sceneHasChanges
+        ? 'Save your changes, deploy them and make this the active scene'
+        : 'Make this the active scene on the frame',
+      icon: <PlayIcon className="h-4 w-4 shrink-0" />,
+      onRun: () => void handleActivate(),
+    },
+    {
+      key: 'preview-frame',
+      label: 'Preview on frame',
+      description: 'Temporarily show this scene on the frame, without saving or deploying',
+      icon: <EyeIcon className="h-4 w-4 shrink-0" />,
+      onRun: handlePreview,
+    },
+    {
+      key: 'preview-browser',
+      label: 'Preview in browser',
+      description: 'Run this scene in your browser via WebAssembly',
+      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
+      onRun: () => openLivePreview(sceneId, buildNextState()),
+    },
+  ]
+  // Matches the old standalone buttons: with unsaved/undeployed changes the
+  // primary action was the on-frame preview, otherwise activate.
+  const defaultActionKey: SceneActionKey = canPreviewUnsavedChanges ? 'preview-frame' : 'activate'
+
   return (
     <div className="space-y-3">
       {showEditButton ? (
@@ -143,20 +188,7 @@ export function ExpandedScene({
       {fieldCount === 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            {canPreviewUnsavedChanges ? (
-              <Button onClick={handlePreview} color="primary">
-                {previewLabel}
-              </Button>
-            ) : (
-              <Button
-                onClick={handleActivate}
-                color={sceneId !== currentSceneId && !canPreviewUnsavedChanges ? 'primary' : 'secondary'}
-                className="inline-flex items-center gap-2"
-              >
-                <PlayIcon className="h-5 w-5" />
-                {activateLabel}
-              </Button>
-            )}
+            <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
           </div>
         </div>
       ) : (
@@ -193,21 +225,8 @@ export function ExpandedScene({
           {fieldCount > 0 ? (
             <div className="flex w-full items-center gap-2">
               <div className="@md:w-1/3 hidden @md:block" />
-              <div className="flex w-full items-center gap-2">
-                {canPreviewUnsavedChanges ? (
-                  <Button onClick={handlePreview} color="primary">
-                    {previewLabel}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleActivate}
-                    color={sceneId !== currentSceneId || hasStateChanges ? 'primary' : 'secondary'}
-                    className="inline-flex items-center gap-2"
-                  >
-                    <PlayIcon className="h-5 w-5" />
-                    {activateLabel}
-                  </Button>
-                )}
+              <div className="flex w-full flex-wrap items-center gap-2">
+                <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
                 <Button onClick={() => resetStateChanges()} color="secondary">
                   Reset
                 </Button>
@@ -216,6 +235,7 @@ export function ExpandedScene({
           ) : null}
         </Form>
       )}
+      {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
     </div>
   )
 }

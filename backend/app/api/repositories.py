@@ -1,6 +1,8 @@
 import logging
 import asyncio
+import hashlib
 import json
+from functools import lru_cache
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
@@ -37,6 +39,15 @@ def _system_template_subject(repository_slug: str, template_slug: str) -> str:
     return f"system-template={repository_slug}/{template_slug}"
 
 
+@lru_cache(maxsize=256)
+def _scenes_file_version(path: str, mtime_ns: int, size: int) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as scenes_file:
+        for chunk in iter(lambda: scenes_file.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:12]
+
+
 def _load_template_definition(repository_slug: str, template_dir: Path):
     template_path = template_dir / "template.json"
     if not template_path.is_file():
@@ -45,9 +56,16 @@ def _load_template_definition(repository_slug: str, template_dir: Path):
     with template_path.open("r", encoding="utf-8") as template_file:
         template_data = json.load(template_file)
 
+    template_data.setdefault("id", template_dir.name)
+
     image_path = template_data.get("image")
     if image_path:
         template_data["image"] = f"/api/repositories/system/{repository_slug}/templates/{template_dir.name}/image"
+
+    # Installed scenes track the template version they came from, so clients
+    # can offer updates. An explicit "version" in template.json wins; otherwise
+    # the version is a content hash of the scenes, so any change counts.
+    version = template_data.get("version")
 
     # Scenes can be large (embedded app sources), so the listing only carries
     # a URL; clients fetch the scenes on install or when otherwise needed.
@@ -58,8 +76,18 @@ def _load_template_definition(repository_slug: str, template_dir: Path):
             template_data["scenesUrl"] = (
                 f"/api/repositories/system/{repository_slug}/templates/{template_dir.name}/scenes.json"
             )
+            if not version:
+                scenes_stat = scenes_path.stat()
+                version = _scenes_file_version(str(scenes_path), scenes_stat.st_mtime_ns, scenes_stat.st_size)
     elif isinstance(scenes_reference, list):
         template_data["scenes"] = scenes_reference
+        if not version:
+            version = hashlib.sha256(
+                json.dumps(scenes_reference, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:12]
+
+    if version:
+        template_data["version"] = str(version)
 
     return template_data
 

@@ -24,7 +24,6 @@ import { templateFavouriteId } from './templateFavourites'
 
 interface TemplatesProps {
   openInstalledSceneDrawer?: boolean
-  persistOnInstall?: boolean
 }
 
 interface CompatibleTemplateRow {
@@ -41,9 +40,9 @@ function isSystemRepository(repository: RepositoryType): boolean {
   return Boolean(repository.id?.startsWith('system-') || repository.url?.startsWith('/api/repositories/system/'))
 }
 
-export function Templates({ openInstalledSceneDrawer = false, persistOnInstall = false }: TemplatesProps = {}) {
+export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
-  const { applyTemplate, applyTemplateAndSave } = useActions(frameLogic)
+  const { applyTemplate } = useActions(frameLogic)
   const { frameId, mode, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
@@ -186,11 +185,7 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                       exportTemplate={exportTemplate}
                       removeTemplate={removeTemplate}
                       applyTemplate={(template: TemplateType) => {
-                        if (persistOnInstall) {
-                          applyTemplateAndSave(template, openInstalledSceneDrawer)
-                        } else {
-                          applyTemplate(template)
-                        }
+                        applyTemplate(template, openInstalledSceneDrawer)
                       }}
                       editTemplate={editLocalTemplate}
                       installedTemplatesByName={installedTemplatesByName}
@@ -277,6 +272,7 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                           key={template.id ?? -index}
                           template={template}
                           frameId={frameId}
+                          repository={repository}
                           favourite={favouriteTemplateIds.has(favouriteId)}
                           favouriteId={favouriteId}
                           onToggleFavourite={togglePersonalFavouriteTemplate}
@@ -284,12 +280,7 @@ export function Templates({ openInstalledSceneDrawer = false, persistOnInstall =
                             !inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined
                           }
                           applyTemplate={(template) => {
-                            applyRemoteToFrame(
-                              repository,
-                              template,
-                              persistOnInstall,
-                              persistOnInstall && openInstalledSceneDrawer
-                            )
+                            applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
                           }}
                           installedTemplatesByName={installedTemplatesByName}
                           templateDragData={

@@ -727,7 +727,12 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
 
     final_settings = {}
     for key in setting_keys:
-        final_settings[key] = all_settings.get(key, None)
+        value = all_settings.get(key, None)
+        if key == "homeAssistant" and isinstance(value, dict):
+            # Frame apps only need the URL + token; keep the backend sync
+            # internals (MQTT credentials, sync flags) off the devices.
+            value = {k: v for k, v in value.items() if k in ("url", "accessToken")}
+        final_settings[key] = value
 
     frame_admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
 

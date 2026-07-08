@@ -1,4 +1,4 @@
-import { TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import {
   ArrowDownTrayIcon,
@@ -17,6 +17,7 @@ import {
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
+import { Tag } from '../../../../components/Tag'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
@@ -26,16 +27,15 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
-import { Modal } from '../../../../components/Modal'
-import { Form } from 'kea-forms'
-import { Field } from '../../../../components/Field'
-import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
+import { livePreviewLogic } from '../Scenes/livePreviewLogic'
+import { LivePreviewModal } from '../Scenes/LivePreviewModal'
 
 interface TemplateProps {
   template: TemplateType
   frameId?: number
+  repository?: RepositoryType
   applyTemplate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
@@ -52,6 +52,7 @@ interface TemplateProps {
 export function TemplateRow({
   template,
   frameId,
+  repository,
   exportTemplate,
   removeTemplate,
   applyTemplate,
@@ -70,18 +71,11 @@ export function TemplateRow({
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
   const {
     trySceneConfig,
-    trySceneModalOpen,
-    visibleTrySceneFields,
-    trySceneState,
     scenes: templateScenes,
     canLoadRemoteScenes,
-  } = useValues(templateRowLogic({ frameId, template }))
-  const { startTryScene, closeTrySceneModal, submitTrySceneState } = useActions(templateRowLogic({ frameId, template }))
+  } = useValues(templateRowLogic({ frameId, template, repository }))
+  const { startTryScene } = useActions(templateRowLogic({ frameId, template, repository }))
   const imageEntity = useMemo(() => {
-    if (template.id) {
-      return `templates/${template.id}`
-    }
-
     if (typeof template.image === 'string') {
       const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
       if (match) {
@@ -89,8 +83,14 @@ export function TemplateRow({
       }
     }
 
+    // Repository templates carry an `id` too (their directory name), but only
+    // locally saved templates have an image at /templates/{id}/image.
+    if (template.id && !repository) {
+      return `templates/${template.id}`
+    }
+
     return null
-  }, [template.id, template.image])
+  }, [template.id, template.image, repository])
 
   // I know the order of hooks is weird here, but the "if" should never change for this component
   const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')
@@ -104,6 +104,10 @@ export function TemplateRow({
   const unsupported = compatibility?.supported === false
   const unsupportedReason = compatibility?.reason ?? 'This scene is not supported on ESP32 frames.'
   const canInstall = !unsupported
+  // Mirrors the preview button's visibility: scenes exist, but none run interpreted,
+  // so there's nothing the (browser or on-frame) live preview could execute.
+  const compiledOnly = templateScenes.length > 0 && !trySceneConfig && !canLoadRemoteScenes
+  const showFavourite = Boolean(favouriteId && onToggleFavourite)
 
   return (
     <div
@@ -119,16 +123,32 @@ export function TemplateRow({
       }}
       title={unsupported ? unsupportedReason : undefined}
       className={clsx(
-        'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
+        'frame-tool-card @container relative break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
         templateDragData && canInstall && 'cursor-grab active:cursor-grabbing',
         unsupported && 'opacity-60 grayscale'
       )}
     >
+      {showFavourite ? (
+        <button
+          type="button"
+          className="absolute right-1.5 top-1.5 z-10 rounded-full p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          aria-label={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+          aria-pressed={favourite}
+          title={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
+          onClick={() => favouriteId && onToggleFavourite?.(favouriteId)}
+        >
+          {favourite ? (
+            <StarSolidIcon className="h-5 w-5 text-amber-400" />
+          ) : (
+            <StarOutlineIcon className="h-5 w-5 opacity-50 transition hover:opacity-100" />
+          )}
+        </button>
+      ) : null}
       <div className="flex items-start justify-between gap-2">
         {imageUrl ? (
           <div
             className={clsx(
-              'h-[90px] w-[90px] flex-shrink-0 rounded-2xl border border-slate-500/20 bg-cover bg-center',
+              'h-[90px] w-[90px] flex-shrink-0 rounded-xl border border-slate-500/20 bg-cover bg-center',
               templateDragData && canInstall && 'cursor-grab active:cursor-grabbing'
             )}
             style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
@@ -137,9 +157,20 @@ export function TemplateRow({
         <div className="break-inside-avoid space-y-1 w-full">
           <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
             <div className="flex-1">
-              <H6>{template.name}</H6>
+              <H6>
+                {template.name}
+                {compiledOnly ? (
+                  <Tag
+                    color="gray"
+                    className="ml-2 normal-case"
+                    title="This template only contains compiled scenes — deploy it to the frame to run it; live preview is unavailable"
+                  >
+                    compiled
+                  </Tag>
+                ) : null}
+              </H6>
             </div>
-            <div className="flex gap-1">
+            <div className={clsx('flex gap-1', showFavourite && 'pr-6')}>
               {applyTemplate ? (
                 <Button
                   className="!px-2 flex gap-1"
@@ -175,26 +206,9 @@ export function TemplateRow({
                     startTryScene()
                   }}
                   disabled={!frameId || !canInstall}
-                  title={unsupported ? unsupportedReason : 'Preview this interpreted scene on the frame'}
+                  title={unsupported ? unsupportedReason : 'Preview this scene on the frame or in your browser'}
                 >
                   <EyeIcon className="w-5 h-5" />
-                </Button>
-              ) : null}
-              {favouriteId && onToggleFavourite ? (
-                <Button
-                  className="!px-2 flex gap-1"
-                  size="small"
-                  color="secondary"
-                  aria-label={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
-                  aria-pressed={favourite}
-                  title={favourite ? 'Remove from personal favourites' : 'Add to personal favourites'}
-                  onClick={() => onToggleFavourite(favouriteId)}
-                >
-                  {favourite ? (
-                    <StarSolidIcon className="h-5 w-5 text-amber-400" />
-                  ) : (
-                    <StarOutlineIcon className="h-5 w-5" />
-                  )}
                 </Button>
               ) : null}
               <DropdownMenu
@@ -291,48 +305,15 @@ export function TemplateRow({
         setSettingsValue={setSettingsValue}
         submitSettings={submitSettings}
       />
-      {trySceneConfig ? (
-        <Modal
-          open={trySceneModalOpen}
-          onClose={closeTrySceneModal}
-          title={`Preview "${trySceneConfig.mainScene.name || template.name}"`}
-        >
-          <Form
-            logic={templateRowLogic}
-            props={{ frameId, template }}
-            formKey="trySceneState"
-            className="space-y-4 p-5"
-          >
-            {visibleTrySceneFields.length ? (
-              <div className="space-y-2 @container">
-                {visibleTrySceneFields.map((field) => (
-                  <Field key={field.name} name={field.name} label={field.label || field.name}>
-                    {({ value, onChange }) => (
-                      <StateFieldEdit
-                        field={field}
-                        value={value}
-                        onChange={onChange}
-                        currentState={{}}
-                        stateChanges={trySceneState}
-                      />
-                    )}
-                  </Field>
-                ))}
-              </div>
-            ) : (
-              <div className="frame-tool-muted text-sm">This scene does not export publicly controllable state.</div>
-            )}
-            <div className="flex justify-end gap-2 border-t border-slate-500/20 pt-4">
-              <Button onClick={closeTrySceneModal} color="secondary">
-                Cancel
-              </Button>
-              <Button onClick={submitTrySceneState} color="primary" disabled={!frameId}>
-                Preview scene
-              </Button>
-            </div>
-          </Form>
-        </Modal>
+      {frameId && trySceneConfig ? (
+        <TemplateBrowserPreviewModal frameId={frameId} sceneId={trySceneConfig.mainScene.id} />
       ) : null}
     </div>
   )
+}
+
+/** Renders the in-browser WASM preview modal for a template's entry scene. */
+function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element | null {
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
+  return livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null
 }

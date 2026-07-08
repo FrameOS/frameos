@@ -31,7 +31,7 @@ import { StateNode } from './StateNode'
 import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
+import { ArrowsPointingInIcon, EyeIcon, WindowIcon } from '@heroicons/react/24/outline'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
@@ -41,6 +41,10 @@ import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePi
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
 import { controlLogic } from '../Scenes/controlLogic'
+import { livePreviewLogic } from '../Scenes/livePreviewLogic'
+import { LivePreviewModal } from '../Scenes/LivePreviewModal'
+import { SceneActionsButton, SceneActionOption } from '../Scenes/SceneActionsButton'
+import { SceneActionKey } from '../Scenes/sceneActionsLogic'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
@@ -146,6 +150,8 @@ export function DiagramToolbar({
   const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
     scenesLogic({ frameId })
   )
+  const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
+  const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
   const isPreviewing = previewingSceneId === sceneId
   const isActiveScene = linkedActiveSceneId === sceneId
@@ -157,11 +163,42 @@ export function DiagramToolbar({
     : 'No unsaved changes to preview'
   const floating = variant === 'floating'
 
+  const actionOptions: SceneActionOption[] = [
+    {
+      key: 'activate',
+      label: isActivatingScene ? 'Activating…' : 'Activate scene',
+      description: 'Make this the active scene on the frame',
+      icon: isActivatingScene ? <Spinner className="h-4 w-4 shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />,
+      disabled: isActiveScene || isActivatingScene,
+      title: isActiveScene ? 'This scene is already active' : undefined,
+      onRun: () => setCurrentScene(sceneId),
+    },
+    {
+      key: 'preview-frame',
+      label: 'Preview on frame',
+      description: 'Temporarily show this scene on the frame, without saving or deploying',
+      icon: <EyeIcon className="h-4 w-4 shrink-0" />,
+      disabled: isPreviewing,
+      title: previewTitle,
+      onRun: () => previewScene(sceneId),
+    },
+    {
+      key: 'preview-browser',
+      label: 'Preview in browser',
+      description: 'Run this scene in your browser via WebAssembly',
+      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
+      onRun: () => openLivePreview(sceneId),
+    },
+  ]
+  // Matches the old standalone buttons: preview while there are changes,
+  // activate otherwise.
+  const defaultActionKey: SceneActionKey = sceneHasChanges ? 'preview-frame' : 'activate'
+
   return (
     <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar pointer-events-none')}>
       {showSceneAction ? (
-        sceneHasChanges ? (
-          floating ? (
+        floating ? (
+          sceneHasChanges ? (
             <FloatingDiagramButton
               onClick={() => previewScene(sceneId)}
               title={previewTitle}
@@ -171,43 +208,21 @@ export function DiagramToolbar({
               <EyeIcon className="h-5 w-5" />
             </FloatingDiagramButton>
           ) : (
-            <Button
-              size="tiny"
-              onClick={() => previewScene(sceneId)}
-              title={previewTitle}
-              color="secondary"
-              disabled={isPreviewing}
+            <FloatingDiagramButton
+              onClick={() => setCurrentScene(sceneId)}
+              title={isActiveScene ? 'This scene is already active' : 'Activate'}
+              disabled={isActiveScene || isActivatingScene}
+              active={isActiveScene || isActivatingScene}
             >
-              <EyeIcon className="w-5 h-5" />
-            </Button>
+              {isActivatingScene ? (
+                <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
+              ) : (
+                <PlayIcon className="h-5 w-5" />
+              )}
+            </FloatingDiagramButton>
           )
-        ) : floating ? (
-          <FloatingDiagramButton
-            onClick={() => setCurrentScene(sceneId)}
-            title={isActiveScene ? 'This scene is already active' : 'Activate'}
-            disabled={isActiveScene || isActivatingScene}
-            active={isActiveScene || isActivatingScene}
-          >
-            {isActivatingScene ? (
-              <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
-            ) : (
-              <PlayIcon className="h-5 w-5" />
-            )}
-          </FloatingDiagramButton>
         ) : (
-          <Button
-            size="tiny"
-            onClick={() => setCurrentScene(sceneId)}
-            title={isActiveScene ? 'This scene is already active' : 'Activate'}
-            color="primary"
-            disabled={isActiveScene || isActivatingScene}
-          >
-            {isActivatingScene ? (
-              <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-            ) : (
-              <PlayIcon className="w-5 h-5" />
-            )}
-          </Button>
+          <SceneActionsButton size="tiny" options={actionOptions} defaultKey={defaultActionKey} />
         )
       ) : null}
       {floating ? (
@@ -236,6 +251,7 @@ export function DiagramToolbar({
           <SceneDropDown sceneId={sceneId} context="editDiagram" />
         </>
       )}
+      {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
     </div>
   )
 }

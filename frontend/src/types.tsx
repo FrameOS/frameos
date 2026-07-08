@@ -295,6 +295,8 @@ export interface TemplateType {
   scenes?: FrameScene[]
   /** Repository templates ship metadata only; fetch the scenes from here on install or when needed. */
   scenesUrl?: string
+  /** Template version (explicit or a content hash of the scenes); used to detect scene updates. */
+  version?: string
   /** Set to false in template.json when the template cannot run on embedded (ESP32) frames. */
   embedded?: boolean
   image?: any
@@ -651,6 +653,20 @@ export interface FrameSceneSettings {
   splitScreenLayout?: Record<string, any>
 }
 
+/** Where an installed scene came from, so we can offer updates when the source template changes. */
+export interface SceneOrigin {
+  /** Repository id, e.g. "system-gallery" or a database uuid. */
+  repositoryId?: string
+  repositoryUrl?: string
+  /** Template id/slug within the repository; matching falls back to templateName when absent. */
+  templateId?: string
+  templateName?: string
+  /** The scene's id inside the template's scenes.json, used to re-link scenes on update. */
+  sceneId?: string
+  /** Template version at install time. */
+  version?: string
+}
+
 export interface FrameScene {
   id: string
   name: string
@@ -661,6 +677,7 @@ export interface FrameScene {
   customEvents?: FrameEvent[]
   default?: boolean
   settings?: FrameSceneSettings
+  origin?: SceneOrigin
 }
 
 export interface FrameSceneIndexed {
@@ -717,6 +734,11 @@ export interface FrameOSSettings {
   homeAssistant?: {
     url?: string
     accessToken?: string
+    syncEnabled?: boolean
+    mqttHost?: string
+    mqttPort?: string | number
+    mqttUsername?: string
+    mqttPassword?: string
   }
   frameOS?: {
     apiKey?: string

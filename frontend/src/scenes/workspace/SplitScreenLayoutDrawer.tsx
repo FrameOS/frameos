@@ -1,7 +1,16 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useRef, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react'
-import { ArrowLeftIcon, EllipsisHorizontalIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type RefObject,
+} from 'react'
+import { ArrowLeftIcon, EllipsisHorizontalIcon, TrashIcon, ViewColumnsIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import { entityImagesModel } from '../../models/entityImagesModel'
@@ -13,12 +22,17 @@ import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
 import { visiblePublicStateFields } from '../../utils/showIf'
 import {
   assignSceneToSplitLayoutLeaf,
+  canRemoveSplitLayoutLeaf,
   splitLayoutLeafBorderEdges,
   splitLayoutDividers,
   splitLayoutLeafRects,
   splitLayoutLeaves,
   splitLayoutOuterBorderEdges,
+  splitLayoutLeafAxisAdjustable,
   splitScreenLayoutPresets,
+  type SplitLayoutAxis,
+  type SplitLayoutBranch,
+  type SplitLayoutDirection,
   type SplitLayoutDivider,
   type SplitLayoutLeaf,
   type SplitLayoutLeafBorderEdges,
@@ -27,7 +41,13 @@ import {
   type SplitScreenBackground,
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
-import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import {
+  getFrameosSceneDragData,
+  getFrameosSplitLeafDragData,
+  hasFrameosSceneDragData,
+  setFrameosSceneDragData,
+  setFrameosSplitLeafDragData,
+} from './sceneDrag'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
 import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
@@ -293,28 +313,132 @@ async function saveSplitScreenThumbnail(
   }
 }
 
+function frameAxisPixels(frame: FrameType): { width: number; height: number } | null {
+  const width = frame.rotate === 90 || frame.rotate === 270 ? frame.height : frame.width
+  const height = frame.rotate === 90 || frame.rotate === 270 ? frame.width : frame.height
+  if (!width || !height || width <= 0 || height <= 0) {
+    return null
+  }
+  return { width, height }
+}
+
+function DimensionInput({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: number
+  disabled?: boolean
+  onCommit: (value: number) => void
+}): JSX.Element {
+  const [text, setText] = useState(String(value))
+  useEffect(() => {
+    setText(String(value))
+  }, [value])
+
+  const commit = (): void => {
+    const parsed = Math.round(Number(text))
+    if (Number.isFinite(parsed) && parsed > 0 && parsed !== value) {
+      onCommit(parsed)
+    } else {
+      setText(String(value))
+    }
+  }
+
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={1}
+      value={text}
+      disabled={disabled}
+      title={disabled ? 'This dimension spans the full frame' : 'Set exact pixels'}
+      onChange={(event) => setText(event.target.value)}
+      onClick={(event) => {
+        event.stopPropagation()
+        event.currentTarget.select()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.currentTarget.blur()
+        }
+      }}
+      onBlur={commit}
+      className="frameos-form-control w-11 rounded px-1 py-0.5 text-center text-[10px] font-semibold tabular-nums outline-none transition focus:ring-1 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+    />
+  )
+}
+
+function CellDimensionEditor({
+  frame,
+  leafId,
+  rect,
+  root,
+  onSetDimension,
+}: {
+  frame: FrameType
+  leafId: string
+  rect: SplitLayoutLeafRect
+  root: SplitLayoutBranch
+  onSetDimension: (leafId: string, axis: SplitLayoutAxis, fraction: number) => void
+}): JSX.Element | null {
+  const pixels = frameAxisPixels(frame)
+  if (!pixels) {
+    return null
+  }
+  const widthPx = Math.max(1, Math.round((rect.width / 100) * pixels.width))
+  const heightPx = Math.max(1, Math.round((rect.height / 100) * pixels.height))
+  const widthAdjustable = splitLayoutLeafAxisAdjustable(root, leafId, 'width')
+  const heightAdjustable = splitLayoutLeafAxisAdjustable(root, leafId, 'height')
+
+  const commit = (axis: SplitLayoutAxis, px: number): void => {
+    const axisPixels = axis === 'width' ? pixels.width : pixels.height
+    onSetDimension(leafId, axis, px / axisPixels)
+  }
+
+  return (
+    <div
+      draggable={false}
+      className="frameos-muted flex items-center justify-center gap-1 text-[10px] font-semibold"
+      onClick={(event) => event.stopPropagation()}
+      onDragStart={(event) => event.stopPropagation()}
+    >
+      <DimensionInput value={widthPx} disabled={!widthAdjustable} onCommit={(px) => commit('width', px)} />
+      <span aria-hidden>×</span>
+      <DimensionInput value={heightPx} disabled={!heightAdjustable} onCommit={(px) => commit('height', px)} />
+    </div>
+  )
+}
+
 function SplitPreviewCell({
   borderEdges,
   borderWidth,
   frame,
   outerBorderWidth,
   rect,
+  root,
   scene,
   selected,
   onDropScene,
   onRemoveScene,
   onSelect,
+  onSetDimension,
+  onSwapScene,
 }: {
   borderEdges: SplitLayoutLeafBorderEdges
   borderWidth: number
   frame: FrameType
   outerBorderWidth: number
   rect: SplitLayoutLeafRect
+  root: SplitLayoutBranch
   scene: FrameScene | null
   selected: boolean
   onDropScene: (leafId: string, sceneId: string) => void
   onRemoveScene: (leafId: string) => void
   onSelect: (leafId: string) => void
+  onSetDimension: (leafId: string, axis: SplitLayoutAxis, fraction: number) => void
+  onSwapScene: (sourceLeafId: string, targetLeafId: string) => void
 }): JSX.Element {
   const handleDragOver = (event: DragEvent<HTMLDivElement>): void => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -324,7 +448,24 @@ function SplitPreviewCell({
     event.dataTransfer.dropEffect = 'copy'
   }
 
+  const handleCellDragStart = (event: DragEvent<HTMLDivElement>): void => {
+    if (!scene) {
+      return
+    }
+    setFrameosSplitLeafDragData(event.dataTransfer, rect.leafId, scene.id)
+  }
+
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
+    // A drag that started on another cell carries a source leaf id — swap the two cells.
+    const sourceLeafId = getFrameosSplitLeafDragData(event.dataTransfer)
+    if (sourceLeafId) {
+      event.preventDefault()
+      if (sourceLeafId !== rect.leafId) {
+        onSelect(rect.leafId)
+        onSwapScene(sourceLeafId, rect.leafId)
+      }
+      return
+    }
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
     if (!sceneId) {
       return
@@ -369,9 +510,11 @@ function SplitPreviewCell({
       }}
     >
       <div
+        draggable={Boolean(scene)}
+        onDragStart={handleCellDragStart}
         className={clsx(
           'frameos-split-cell relative h-full w-full overflow-hidden',
-          scene ? 'shadow-inner' : 'frameos-split-cell-empty'
+          scene ? 'shadow-inner cursor-grab active:cursor-grabbing' : 'frameos-split-cell-empty'
         )}
       >
         {scene ? (
@@ -384,8 +527,15 @@ function SplitPreviewCell({
               objectFit="cover"
               className="h-full w-full rounded-none"
             />
-            <div className="frameos-split-cell-label frameos-strong absolute inset-x-0 bottom-0 px-2 py-1 text-xs font-semibold backdrop-blur">
-              <span className="block truncate">{scene.name || 'Untitled scene'}</span>
+            <div className="frameos-split-cell-label frameos-strong absolute inset-x-0 bottom-0 flex items-center gap-1.5 px-2 py-1 text-xs font-semibold backdrop-blur">
+              <CellDimensionEditor
+                frame={frame}
+                leafId={rect.leafId}
+                rect={rect}
+                root={root}
+                onSetDimension={onSetDimension}
+              />
+              <span className="min-w-0 flex-1 truncate">{scene.name || 'Untitled scene'}</span>
             </div>
             <button
               type="button"
@@ -398,8 +548,15 @@ function SplitPreviewCell({
             </button>
           </>
         ) : (
-          <div className="frameos-muted flex h-full w-full items-center justify-center px-2 text-center text-xs font-semibold">
+          <div className="frameos-muted flex h-full w-full flex-col items-center justify-center gap-1.5 px-2 text-center text-xs font-semibold">
             <span className="frameos-split-drop-label">Drop scene</span>
+            <CellDimensionEditor
+              frame={frame}
+              leafId={rect.leafId}
+              rect={rect}
+              root={root}
+              onSetDimension={onSetDimension}
+            />
           </div>
         )}
       </div>
@@ -567,80 +724,129 @@ function SplitRenderControls({
   )
 }
 
+function SplitLeafControls({
+  leafId,
+  canRemove,
+  onSplitLeaf,
+  onRemoveLeaf,
+}: {
+  leafId: string
+  canRemove: boolean
+  onSplitLeaf: (leafId: string, direction: SplitLayoutDirection) => void
+  onRemoveLeaf: (leafId: string) => void
+}): JSX.Element {
+  const buttonClass =
+    'frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" title="Split into left and right" onClick={() => onSplitLeaf(leafId, 'row')} className={buttonClass}>
+        <ViewColumnsIcon className="h-4 w-4" />
+        Split vertically
+      </button>
+      <button
+        type="button"
+        title="Split into top and bottom"
+        onClick={() => onSplitLeaf(leafId, 'column')}
+        className={buttonClass}
+      >
+        <ViewColumnsIcon className="h-4 w-4 rotate-90" />
+        Split horizontally
+      </button>
+      <button
+        type="button"
+        title={canRemove ? 'Remove this panel' : 'A split needs at least two panels'}
+        onClick={() => onRemoveLeaf(leafId)}
+        disabled={!canRemove}
+        className={clsx(buttonClass, '!text-red-600 disabled:cursor-not-allowed disabled:opacity-40')}
+      >
+        <TrashIcon className="h-4 w-4" />
+        Remove
+      </button>
+    </div>
+  )
+}
+
 function SplitSceneOptionsPanel({
   leaf,
   scene,
+  canRemove,
   onSetSceneStateValue,
+  onSplitLeaf,
+  onRemoveLeaf,
 }: {
   leaf: SplitLayoutLeaf | null
   scene: FrameScene | null
+  canRemove: boolean
   onSetSceneStateValue: (leafId: string, field: StateField, value: any) => void
+  onSplitLeaf: (leafId: string, direction: SplitLayoutDirection) => void
+  onRemoveLeaf: (leafId: string) => void
 }): JSX.Element {
   if (!leaf) {
     return (
       <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
-        <span className="frameos-muted">Click a scene panel to set its options.</span>
-      </div>
-    )
-  }
-
-  if (!leaf.sceneId) {
-    return (
-      <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
-        <span className="frameos-muted">Drop a scene into the selected panel before setting options.</span>
-      </div>
-    )
-  }
-
-  if (!scene) {
-    return (
-      <div className="frameos-inset rounded-lg border border-dashed px-3 py-3 text-sm font-semibold">
-        <span className="frameos-muted">The selected scene is not available.</span>
+        <span className="frameos-muted">Click a scene panel to split it or set its options.</span>
       </div>
     )
   }
 
   const state = leaf.state ?? {}
-  const fields = visiblePublicStateFields(scene.fields ?? [], state)
+  const fields = scene ? visiblePublicStateFields(scene.fields ?? [], state) : []
+
+  let body: JSX.Element
+  if (!leaf.sceneId) {
+    body = (
+      <div className="frameos-muted text-sm font-semibold">Drop a scene into this panel before setting options.</div>
+    )
+  } else if (!scene) {
+    body = <div className="frameos-muted text-sm font-semibold">The selected scene is not available.</div>
+  } else if (fields.length === 0) {
+    body = <div className="frameos-muted text-sm font-semibold">This scene does not expose public options.</div>
+  } else {
+    body = (
+      <div className="space-y-3 @container">
+        {fields.map((field) => {
+          const changed = Object.prototype.hasOwnProperty.call(state, field.name)
+          return (
+            <div key={field.name} className="space-y-1 @md:flex @md:gap-2">
+              <label className="frameos-muted text-sm font-semibold @md:w-1/3">
+                {field.label || field.name}
+                {changed ? <span className="frameos-primary-text ml-1 text-xs">modified</span> : null}
+              </label>
+              <div className="w-full">
+                <StateFieldEdit
+                  field={field}
+                  value={state[field.name] ?? field.value ?? ''}
+                  onChange={(value) => onSetSceneStateValue(leaf.id, field, value)}
+                  currentState={{}}
+                  stateChanges={state}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
-    <div className="frameos-card rounded-lg border px-3 py-3 shadow-sm">
-      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+    <div className="frameos-card space-y-3 rounded-lg border px-3 py-3 shadow-sm">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scene options</div>
-          <div className="frameos-strong truncate text-sm font-semibold">{scene.name || 'Untitled scene'}</div>
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">
+            {scene ? 'Scene options' : 'Panel'}
+          </div>
+          <div className="frameos-strong truncate text-sm font-semibold">
+            {scene?.name || (leaf.sceneId ? 'Untitled scene' : 'Empty panel')}
+          </div>
         </div>
         {Object.keys(state).length > 0 ? (
           <span className="frameos-muted shrink-0 text-xs font-semibold">{Object.keys(state).length} changed</span>
         ) : null}
       </div>
 
-      {fields.length === 0 ? (
-        <div className="frameos-muted text-sm font-semibold">This scene does not expose public options.</div>
-      ) : (
-        <div className="space-y-3 @container">
-          {fields.map((field) => {
-            const changed = Object.prototype.hasOwnProperty.call(state, field.name)
-            return (
-              <div key={field.name} className="space-y-1 @md:flex @md:gap-2">
-                <label className="frameos-muted text-sm font-semibold @md:w-1/3">
-                  {field.label || field.name}
-                  {changed ? <span className="frameos-primary-text ml-1 text-xs">modified</span> : null}
-                </label>
-                <div className="w-full">
-                  <StateFieldEdit
-                    field={field}
-                    value={state[field.name] ?? field.value ?? ''}
-                    onChange={(value) => onSetSceneStateValue(leaf.id, field, value)}
-                    currentState={{}}
-                    stateChanges={state}
-                  />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      <SplitLeafControls leafId={leaf.id} canRemove={canRemove} onSplitLeaf={onSplitLeaf} onRemoveLeaf={onRemoveLeaf} />
+
+      {body}
     </div>
   )
 }
@@ -704,11 +910,15 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     setBackgroundOpacity,
     setBackgroundScene,
     setBorderWidth,
+    setLeafDimension,
     setLeafSceneStateValue,
     setLayoutName,
     setOuterBorderWidth,
     setSceneSearch,
     showMorePresets,
+    splitLeaf,
+    removeLeaf,
+    swapLeafContents,
     startResize,
   } = useActions(logic)
   const { updateScene } = useActions(frameKea)
@@ -922,11 +1132,14 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
                 frame={frame}
                 outerBorderWidth={layout.outerBorderWidth}
                 rect={rect}
+                root={layout.root}
                 scene={rect.sceneId ? scenes.get(rect.sceneId) ?? null : null}
                 selected={selectedLeafId === rect.leafId}
                 onDropScene={handleDropScene}
                 onRemoveScene={(leafId) => assignSceneWithTitle(leafId, null)}
                 onSelect={selectPreviewLeaf}
+                onSetDimension={setLeafDimension}
+                onSwapScene={swapLeafContents}
               />
             ))}
             {dividers.map((divider) => (
@@ -942,7 +1155,10 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
           <SplitSceneOptionsPanel
             leaf={selectedLeaf}
             scene={selectedLeafScene}
+            canRemove={selectedLeaf ? canRemoveSplitLayoutLeaf(layout.root, selectedLeaf.id) : false}
             onSetSceneStateValue={setLeafSceneStateValue}
+            onSplitLeaf={splitLeaf}
+            onRemoveLeaf={removeLeaf}
           />
         </div>
 

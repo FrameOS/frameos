@@ -79,7 +79,7 @@ def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
 
     apps_nim = write_apps_nim(str(tmp_path))
 
-    assert "when not defined(frameosEmbedded):" in apps_nim
+    assert "when not defined(frameosEmbedded) and not defined(frameosWasm):" in apps_nim
     assert "  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader" in apps_nim
-    assert 'of "data/rstpSnapshot":\n    when defined(frameosEmbedded):' in apps_nim
-    assert "App 'data/rstpSnapshot' is not available on embedded builds" in apps_nim
+    assert 'of "data/rstpSnapshot":\n    when defined(frameosEmbedded) or defined(frameosWasm):' in apps_nim
+    assert "App 'data/rstpSnapshot' is not available on this build target" in apps_nim

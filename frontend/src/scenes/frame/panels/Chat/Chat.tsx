@@ -36,7 +36,6 @@ export function Chat() {
     isLoadingChats,
     isLoadingMoreChats,
     chatMessagesLoading,
-    isCreatingChat,
     contextSelectionSummary,
     logExpanded,
     chatLabelForChat,
@@ -49,7 +48,6 @@ export function Chat() {
     toggleLogExpanded,
     selectChat,
     backToList,
-    createChat,
     loadMoreChats,
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const { editApp } = useActions(frameEditorsLogic({ frameId }))
@@ -404,11 +402,6 @@ export function Chat() {
       <div className="flex items-center justify-between">
         <div className="frame-tool-muted text-sm flex items-center gap-2">
           {isChatView ? (
-            <Button color="secondary" size="small" onClick={() => backToList()}>
-              <ChevronLeftIcon className="h-4 w-4" />
-            </Button>
-          ) : null}
-          {isChatView ? (
             chatSceneName ? (
               <span>
                 Chat about{' '}
@@ -439,9 +432,6 @@ export function Chat() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button color="secondary" size="small" onClick={() => createChat()} disabled={isCreatingChat}>
-            {isCreatingChat ? 'Creating…' : 'New chat'}
-          </Button>
           {isChatView ? (
             <Button
               color="secondary"

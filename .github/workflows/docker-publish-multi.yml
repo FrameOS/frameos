@@ -66,6 +66,37 @@ jobs:
           echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
+  release-notes:
+    name: Generate Release Notes
+    needs: update-versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Generate release notes
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          RELEASE_TAG: ${{ needs.update-versions.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.update-versions.outputs.release_sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 tools/generate_release_notes.py \
+            --version "$DOCKER_VERSION" \
+            --release-tag "$RELEASE_TAG" \
+            --head "$RELEASE_SHA" \
+            --output release-notes.md
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes-${{ needs.update-versions.outputs.docker_version }}
+          path: release-notes.md
+          if-no-files-found: error
+
   determine-release-targets:
     needs: update-versions
     runs-on: ubuntu-24.04
@@ -337,7 +368,7 @@ jobs:
 
   update-addon-repo:
     name: Update Home Assistant Addon
-    needs: [update-versions, push-multiarch]
+    needs: [update-versions, push-multiarch, release-notes]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout frameos
@@ -354,6 +385,11 @@ jobs:
           ref: main
           path: home-assistant-addon
 
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes-${{ needs.update-versions.outputs.docker_version }}
+
       - name: Read Docker version
         shell: bash
         run: |
@@ -365,6 +401,39 @@ jobs:
           cd home-assistant-addon/frameos
           echo "Updating version in config.yaml to ${{ env.DOCKER_VERSION }}"
           sed -i "s/^version: .*/version: ${{ env.DOCKER_VERSION }}/" config.yaml
+
+      - name: Prepend release notes to the addon changelog
+        run: |
+          python3 - <<'EOF'
+          import datetime
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["DOCKER_VERSION"]
+          date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+          notes = Path("release-notes.md").read_text()
+          # Keep version headers at the top level: demote "## New features" -> "###"
+          notes = re.sub(r"^(##+)", r"#\1", notes, flags=re.M)
+          # The "Docker images" block is appended later for the GitHub release only
+          notes = re.sub(r"\n?### Docker images\n(?:.*\n?)*?(?=\n### |\Z)", "", notes).strip()
+          section = f"## {version} ({date})\n\n{notes}\n"
+
+          path = Path("home-assistant-addon/frameos/CHANGELOG.md")
+          header = "# Changelog\n\n"
+          changelog = path.read_text() if path.exists() else header
+          if f"\n## {version} " in changelog:
+              print(f"Changelog already contains {version}, skipping")
+          else:
+              first_entry = changelog.find("\n## ")
+              if first_entry == -1:
+                  changelog = changelog.rstrip() + "\n\n" + section
+              else:
+                  changelog = changelog[: first_entry + 1] + section + "\n" + changelog[first_entry + 1 :]
+              path.write_text(changelog)
+              print(f"Added changelog entry for {version}")
+          EOF
 
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
@@ -378,7 +447,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, update-addon-repo]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, update-addon-repo, release-notes]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release commit
@@ -394,20 +463,19 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes-${{ needs.update-versions.outputs.docker_version }}
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
           RELEASE_TAG: ${{ needs.update-versions.outputs.release_tag }}
           RELEASE_SHA: ${{ needs.update-versions.outputs.release_sha }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           ls -lh release-assets
-          python3 tools/generate_release_notes.py \
-            --version "$DOCKER_VERSION" \
-            --release-tag "$RELEASE_TAG" \
-            --head "$RELEASE_SHA" \
-            --output release-notes.md
 
           cat >> release-notes.md <<EOF
 

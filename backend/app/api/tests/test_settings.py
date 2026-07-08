@@ -1,4 +1,19 @@
+import asyncio
+import json
+
 import pytest
+
+from app.ha import HA_SYNC_CHANNEL
+
+
+async def next_pubsub_message(pubsub, timeout=5.0):
+    async def read():
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+            if message is not None:
+                return message
+    return await asyncio.wait_for(read(), timeout)
+
 
 @pytest.mark.asyncio
 async def test_get_settings(async_client):
@@ -70,6 +85,48 @@ async def test_set_settings_no_payload(async_client):
     response = await async_client.post('/api/settings', json={})
     assert response.status_code == 400
     assert response.json()['detail'] == "No JSON payload received"
+
+
+@pytest.mark.asyncio
+async def test_set_home_assistant_settings_notifies_sync_service(async_client, redis):
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(HA_SYNC_CHANNEL)
+    try:
+        response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
+        assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+        assert response.json()["homeAssistant"]["syncEnabled"] is True
+
+        message = await next_pubsub_message(pubsub)
+        assert json.loads(message["data"])["event"] == "settings_changed"
+    finally:
+        await pubsub.unsubscribe(HA_SYNC_CHANNEL)
+        await pubsub.close()
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_sync_now_requires_sync_enabled(async_client):
+    response = await async_client.post('/api/settings/home_assistant/sync')
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Enable 'Share frames with Home Assistant' first"
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_sync_now_publishes_sync_message(async_client, redis):
+    response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
+    assert response.status_code == 200
+
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(HA_SYNC_CHANNEL)
+    try:
+        response = await async_client.post('/api/settings/home_assistant/sync')
+        assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+        assert response.json() == {"ok": True}
+
+        message = await next_pubsub_message(pubsub)
+        assert json.loads(message["data"])["event"] == "sync_now"
+    finally:
+        await pubsub.unsubscribe(HA_SYNC_CHANNEL)
+        await pubsub.close()
 
 
 @pytest.mark.asyncio

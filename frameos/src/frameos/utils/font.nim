@@ -5,7 +5,7 @@ import algorithm
 import tables
 import strutils
 import assets/fonts as fontAssets
-when defined(frameosEmbedded):
+when defined(frameosEmbedded) or defined(frameosWasm):
   import zippy
 
 const defaultFont = "Ubuntu-Regular.ttf" # compiled into the binary by nimassets
@@ -15,9 +15,9 @@ var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 var typefaceLock: Lock
 
 proc readEmbeddedFont(path: string): string =
-  when defined(frameosEmbedded):
+  when defined(frameosEmbedded) or defined(frameosWasm):
     # zippy's gzip path verifies the trailer with `dst.len mod (1 shl 32)`,
-    # and `1 shl 32` overflows a 32-bit Xtensa int to 0 -> divide-by-zero.
+    # and `1 shl 32` overflows a 32-bit int (Xtensa, wasm32) to 0 -> divide-by-zero.
     # The compiled assets use a plain 10-byte gzip header (flags=0), so strip
     # the header + 8-byte trailer and raw-inflate, skipping that check.
     let gz = fontAssets.getCompressedAsset(path)

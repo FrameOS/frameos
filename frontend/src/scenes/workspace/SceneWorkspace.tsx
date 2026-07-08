@@ -2,13 +2,15 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
+  ArrowPathIcon,
+  BoltIcon,
   ClipboardDocumentIcon,
   CodeBracketIcon,
-  CodeBracketSquareIcon,
   Cog6ToothIcon,
-  ListBulletIcon,
+  InformationCircleIcon,
   PhotoIcon,
   PlusIcon,
+  PuzzlePieceIcon,
   ServerStackIcon,
   SparklesIcon,
   VariableIcon,
@@ -47,6 +49,7 @@ import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragDa
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface SceneWorkspaceProps {
@@ -67,8 +70,8 @@ interface UtilityDefinition {
 const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'state', label: 'Preview', icon: <PlayIcon className="h-5 w-5" /> },
   { panel: 'stateVariables', label: 'State variables', icon: <VariableIcon className="h-5 w-5" /> },
-  { panel: 'apps', label: 'Apps', icon: <CodeBracketSquareIcon className="h-5 w-5" /> },
-  { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
+  { panel: 'apps', label: 'Apps', icon: <PuzzlePieceIcon className="h-5 w-5" /> },
+  { panel: 'events', label: 'Events', icon: <BoltIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
   { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
@@ -127,7 +130,9 @@ function SceneSelector({
   sidebarActions?: JSX.Element
 }): JSX.Element {
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
-  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
+  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions } = useValues(
+    scenesLogic({ frameId: frame.id })
+  )
   const frameGroups = groupFramesByStatus(frames)
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -228,8 +233,13 @@ function SceneSelector({
               const active = scene.id === linkedActiveSceneId
               const unsaved = unsavedSceneIds.has(scene.id)
               const undeployed = undeployedSceneIds.has(scene.id)
+              const updateAvailable = !!sceneUpdateVersions[scene.id]
               const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Undeployed changes' : null
-              const sceneStatusTitle = [active ? 'Active scene' : 'Inactive scene', changeStatusLabel]
+              const sceneStatusTitle = [
+                active ? 'Active scene' : 'Inactive scene',
+                changeStatusLabel,
+                updateAvailable ? 'Scene update available' : null,
+              ]
                 .filter(Boolean)
                 .join(' · ')
               const compiled = sceneIsCompiled(scene, frame.mode)
@@ -295,6 +305,15 @@ function SceneSelector({
                             className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
                           >
                             {unsaved ? 'unsaved' : 'undeployed'}
+                          </Tag>
+                        ) : null}
+                        {updateAvailable ? (
+                          <Tag
+                            color="teal"
+                            title="A newer version of this scene is available in the repository"
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                          >
+                            update
                           </Tag>
                         ) : null}
                       </span>
@@ -497,7 +516,8 @@ function UtilityToolbar({
   const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
   const { closeChatDrawer, closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
   const utilityPanelIsVisible = !chatDrawerSelection
-  const definitions = sceneUtilityDefinitions(scene, frameMode)
+  // Scene settings ('info') is rendered separately at the top of the toolbar, above AI chat.
+  const definitions = sceneUtilityDefinitions(scene, frameMode).filter((definition) => definition.panel !== 'info')
 
   return (
     <div className="scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
@@ -539,9 +559,10 @@ function SceneDiagramOverlay({
   scene: FrameScene | null
   sceneId: string | null
 }): JSX.Element {
-  const { chatDrawerSelection } = useValues(workspaceLogic)
-  const { closeChatDrawer, closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
+  const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
+  const { closeChatDrawer, closeUtilityPanel, openChatDrawer, openUtilityPanel } = useActions(workspaceLogic)
   const chatDrawerIsOpen = chatDrawerSelection?.frameId === frameId && chatDrawerSelection.sceneId === sceneId
+  const sceneSettingsActive = !chatDrawerSelection && utilityPanel === 'info'
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
@@ -550,6 +571,25 @@ function SceneDiagramOverlay({
           {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
         </div>
         <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
+          <button
+            type="button"
+            title="Scene settings"
+            onClick={() => {
+              if (sceneSettingsActive) {
+                closeUtilityPanel()
+                return
+              }
+              closeChatDrawer()
+              openUtilityPanel('info')
+            }}
+            className={clsx(
+              'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              sceneSettingsActive ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
+            )}
+          >
+            <Cog6ToothIcon className="h-5 w-5" />
+          </button>
+          <UtilityToolbar scene={scene} frameMode={frameMode} />
           <button
             type="button"
             title="Open AI chat"
@@ -568,7 +608,6 @@ function SceneDiagramOverlay({
           >
             <SparklesIcon className="h-5 w-5" />
           </button>
-          <UtilityToolbar scene={scene} frameMode={frameMode} />
         </div>
       </div>
     </div>
@@ -640,7 +679,9 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
-  const { renameScene } = useActions(scenesLogic({ frameId }))
+  const { renameScene, updateSceneFromRepo } = useActions(scenesLogic({ frameId }))
+  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
+  const availableUpdateVersion = sceneUpdateVersions[scene.id]
   const nodes = scene.nodes ?? []
   const edges = scene.edges ?? []
   const sceneApps = scene.apps ?? {}
@@ -688,6 +729,40 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
           <span>Rename</span>
         </button>
       </div>
+      {availableUpdateVersion ? (
+        <div className="frame-tool-row flex items-center justify-between gap-3 rounded-xl p-3">
+          <div className="min-w-0 text-sm">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <InformationCircleIcon className="h-4 w-4 shrink-0" />
+              Scene update available
+            </div>
+            <div className="frame-tool-muted truncate">
+              {scene.origin?.templateName ? `"${scene.origin.templateName}" ` : 'This scene '}
+              has a newer version in the repository
+              {scene.origin?.version
+                ? ` (${shortSceneVersion(scene.origin.version)} → ${shortSceneVersion(availableUpdateVersion)})`
+                : ''}
+              .
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.'
+                )
+              ) {
+                updateSceneFromRepo(scene.id)
+              }
+            }}
+            className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ArrowPathIcon className="h-4 w-4" />
+            <span>Update scene</span>
+          </button>
+        </div>
+      ) : null}
       <div className="grid grid-cols-3 gap-2">
         {stats.map((stat) => (
           <div key={stat.label} className="frame-tool-row rounded-xl px-3 py-2">
