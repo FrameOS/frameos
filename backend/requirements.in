@@ -1,4 +1,5 @@
 aiofiles
+aiomqtt
 alembic
 arq
 asyncssh

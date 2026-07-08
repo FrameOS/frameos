@@ -83,8 +83,10 @@ export const settingsLogic = kea<settingsLogicType>([
     newBuildHostKey: true,
     testBuildHost: true,
     testModalSandbox: true,
+    syncHomeAssistant: true,
     setTestingBuildHost: (testing: boolean) => ({ testing }),
     setTestingModalSandbox: (testing: boolean) => ({ testing }),
+    setSyncingHomeAssistant: (syncing: boolean) => ({ syncing }),
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
   }),
   loaders(({ values }) => ({
@@ -170,6 +172,12 @@ export const settingsLogic = kea<settingsLogicType>([
       false,
       {
         setTestingBuildHost: (_, { testing }) => testing,
+      },
+    ],
+    isSyncingHomeAssistant: [
+      false,
+      {
+        setSyncingHomeAssistant: (_, { syncing }) => syncing,
       },
     ],
   }),
@@ -371,6 +379,38 @@ export const settingsLogic = kea<settingsLogicType>([
         throw error
       } finally {
         actions.setTestingBuildHost(false)
+      }
+    },
+    syncHomeAssistant: async () => {
+      actions.setSyncingHomeAssistant(true)
+      const workingMessage = showWorkingMessage('Syncing frames to Home Assistant...')
+      try {
+        // Save the section first so the sync uses what's on screen
+        const homeAssistant = { ...(values.settings.homeAssistant ?? {}), syncEnabled: true }
+        const saveResponse = await apiFetch(`/api/settings`, {
+          method: 'POST',
+          body: JSON.stringify({ homeAssistant }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!saveResponse.ok) {
+          throw new Error('Failed to save Home Assistant settings')
+        }
+        actions.updateSavedSettings(await saveResponse.json())
+
+        const response = await apiFetch(`/api/settings/home_assistant/sync`, {
+          method: 'POST',
+        })
+        if (!response.ok) {
+          const data = await response.json().catch(() => null)
+          throw new Error(data?.detail || 'Home Assistant sync failed')
+        }
+        workingMessage.success('Sync requested. Check Home Assistant for your frames in a few seconds.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Home Assistant sync failed'
+        workingMessage.error(message)
+        throw error
+      } finally {
+        actions.setSyncingHomeAssistant(false)
       }
     },
     testModalSandbox: async () => {

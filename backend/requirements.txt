@@ -8,6 +8,8 @@ aiofiles==24.1.0
     # via -r requirements.in
 aiohappyeyeballs==2.6.2
     # via aiohttp
+aiomqtt==2.5.1
+    # via -r requirements.in
 aiohttp==3.14.0
     # via modal
 aiosignal==1.4.0
@@ -158,6 +160,8 @@ packaging==23.2
     #   -r requirements.in
     #   build
     #   pytest
+paho-mqtt==2.1.0
+    # via aiomqtt
 pillow==11.3.0
     # via -r requirements.in
 pip-tools==7.5.3

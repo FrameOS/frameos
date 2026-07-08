@@ -4,6 +4,7 @@ backend/app/tasks/worker.py
 Defines the arq worker settings and the task functions that run via arq.
 """
 
+import asyncio
 from functools import wraps
 from httpx import AsyncClient
 from typing import Any, Awaitable, Callable, Dict
@@ -49,12 +50,24 @@ def with_db_session(task_func: Callable[..., Awaitable[Any]]) -> Callable[..., A
 async def startup(ctx: Dict[str, Any]):
     ctx['client'] = AsyncClient()
     ctx['redis'] = create_redis_connection()
+    # The Home Assistant sync service runs in the worker because it must be a
+    # singleton: the HA add-on starts two uvicorns (public + ingress) but only
+    # one worker process.
+    if not config.TEST:
+        from app.ha.sync import ha_sync_service
+        ctx['ha_sync_task'] = asyncio.create_task(ha_sync_service.run())
     print("Worker startup: created shared HTTPX client and Redis")
 
 # Optional: on_shutdown logic
 async def shutdown(ctx: Dict[str, Any]):
     if 'client' in ctx:
         await ctx['client'].aclose()
+    if task := ctx.pop('ha_sync_task', None):
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
     if 'redis' in ctx:
         await close_redis_connection(ctx['redis'])
 

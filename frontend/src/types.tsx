@@ -734,6 +734,11 @@ export interface FrameOSSettings {
   homeAssistant?: {
     url?: string
     accessToken?: string
+    syncEnabled?: boolean
+    mqttHost?: string
+    mqttPort?: string | number
+    mqttUsername?: string
+    mqttPassword?: string
   }
   frameOS?: {
     apiKey?: string
