@@ -1,7 +1,7 @@
 import { actions, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
-import { FrameScene, GPIOButton } from '../../../../types'
+import { FrameScene, GPIOButton, RepositoryType, TemplateType } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
@@ -22,6 +22,12 @@ export interface LivePreviewSceneEvent {
 export interface LivePreviewLogLine {
   timestamp: string
   line: string
+}
+
+/** The template a preview was opened from, so the modal can offer "Add to frame". */
+export interface LivePreviewSourceTemplate {
+  template: TemplateType
+  repository?: RepositoryType
 }
 
 const MAX_LOG_LINES = 200
@@ -71,10 +77,16 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], scenesLogic({ frameId }), ['scenes']],
   })),
   actions({
-    openLivePreview: (sceneId: string, state?: Record<string, any> | null, scenes?: FrameScene[] | null) => ({
+    openLivePreview: (
+      sceneId: string,
+      state?: Record<string, any> | null,
+      scenes?: FrameScene[] | null,
+      sourceTemplate?: LivePreviewSourceTemplate | null
+    ) => ({
       sceneId,
       state: state ?? null,
       scenes: scenes ?? null,
+      sourceTemplate: sourceTemplate ?? null,
     }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
@@ -127,6 +139,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         openLivePreview: (_, { scenes }) => scenes,
       },
     ],
+    livePreviewSourceTemplate: [
+      null as LivePreviewSourceTemplate | null,
+      {
+        openLivePreview: (_, { sourceTemplate }) => sourceTemplate,
+        closeLivePreview: () => null,
+      },
+    ],
     previewState: [
       {} as Record<string, any>,
       {
@@ -154,9 +173,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       (s) => [s.livePreviewSceneId, s.livePreviewScenes, s.scenes],
       (livePreviewSceneId, livePreviewScenes, scenes): FrameScene | null =>
         livePreviewSceneId
-          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+          ? (livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
-            null)
+            null
           : null,
     ],
     gpioButtons: [

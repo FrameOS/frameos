@@ -272,6 +272,7 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
                           key={template.id ?? -index}
                           template={template}
                           frameId={frameId}
+                          repository={repository}
                           favourite={favouriteTemplateIds.has(favouriteId)}
                           favouriteId={favouriteId}
                           onToggleFavourite={togglePersonalFavouriteTemplate}

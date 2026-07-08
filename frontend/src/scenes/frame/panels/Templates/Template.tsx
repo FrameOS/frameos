@@ -1,4 +1,4 @@
-import { TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import {
   ArrowDownTrayIcon,
@@ -35,6 +35,7 @@ import { LivePreviewModal } from '../Scenes/LivePreviewModal'
 interface TemplateProps {
   template: TemplateType
   frameId?: number
+  repository?: RepositoryType
   applyTemplate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
   exportTemplate?: (id: string, format?: string) => void
@@ -51,6 +52,7 @@ interface TemplateProps {
 export function TemplateRow({
   template,
   frameId,
+  repository,
   exportTemplate,
   removeTemplate,
   applyTemplate,
@@ -71,8 +73,8 @@ export function TemplateRow({
     trySceneConfig,
     scenes: templateScenes,
     canLoadRemoteScenes,
-  } = useValues(templateRowLogic({ frameId, template }))
-  const { startTryScene } = useActions(templateRowLogic({ frameId, template }))
+  } = useValues(templateRowLogic({ frameId, template, repository }))
+  const { startTryScene } = useActions(templateRowLogic({ frameId, template, repository }))
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`

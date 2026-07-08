@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
-import { CursorArrowRaysIcon, EyeIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { CheckIcon, CursorArrowRaysIcon, EyeIcon, FolderPlusIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
@@ -10,6 +10,8 @@ import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { frameLogic } from '../../frameLogic'
+import { templatesLogic } from '../Templates/templatesLogic'
 import { livePreviewLogic } from './livePreviewLogic'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
@@ -123,6 +125,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     livePreviewSceneId,
     livePreviewScene,
     livePreviewScenes,
+    livePreviewSourceTemplate,
     previewStatus,
     previewError,
     previewLogs,
@@ -139,6 +142,8 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   )
   const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
+  const { applyTemplate } = useActions(frameLogic({ frameId }))
+  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId }))
 
   const [showPublicState, setShowPublicState] = useState(true)
   const [showPrivateState, setShowPrivateState] = useState(false)
@@ -206,9 +211,9 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   const previewOnFrameButton =
     isFrameScene || livePreviewScenes?.length ? (
       <Button
-        size="small"
+        size="tiny"
         color="secondary"
-        className="flex items-center gap-1"
+        className="!px-2 flex items-center gap-1"
         onClick={() =>
           previewScene(livePreviewSceneId, buildPublicState(), isFrameScene ? undefined : livePreviewScenes)
         }
@@ -219,6 +224,35 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
         {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
       </Button>
     ) : null
+
+  // "Add to frame": offered when the preview was opened from a template row.
+  // Installed templates are matched by scene name, same as the template list.
+  const sourceTemplateAdded = Boolean(
+    livePreviewSourceTemplate && frameScenes.some((scene) => scene.name === livePreviewSourceTemplate.template.name)
+  )
+  const addToFrameButton = livePreviewSourceTemplate ? (
+    <Button
+      size="tiny"
+      color="secondary"
+      className="!px-2 flex items-center gap-1"
+      disabled={sourceTemplateAdded}
+      onClick={() => {
+        if (livePreviewSourceTemplate.repository) {
+          applyRemoteToFrame(livePreviewSourceTemplate.repository, livePreviewSourceTemplate.template)
+        } else {
+          applyTemplate(livePreviewSourceTemplate.template)
+        }
+      }}
+      title={
+        sourceTemplateAdded
+          ? 'This scene is already on the frame'
+          : 'Add this scene to the frame (saved when you save the frame)'
+      }
+    >
+      {sourceTemplateAdded ? <CheckIcon className="h-4 w-4" /> : <FolderPlusIcon className="h-4 w-4" />}
+      {sourceTemplateAdded ? 'Added' : 'Add to frame'}
+    </Button>
+  ) : null
 
   const submitEditState = (): void => {
     if (!editStateValues) {
@@ -321,7 +355,6 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                 {button.label || `GPIO ${button.pin}`}
               </Button>
             ))}
-            {previewOnFrameButton}
             <span className="frameos-muted ml-auto text-xs">
               {renderCount > 0 ? (
                 <>
@@ -332,33 +365,39 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
             </span>
           </div>
 
-          {stateEntries.length > 0 ? (
-            <div className="shrink-0 space-y-1">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="frameos-muted text-xs font-semibold uppercase">Scene state</div>
-                <Checkbox
-                  value={showPublicState}
-                  onChange={setShowPublicState}
-                  label={`public (${publicEntries.length})`}
-                />
-                <Checkbox
-                  value={showPrivateState}
-                  onChange={setShowPrivateState}
-                  label={`private (${privateEntries.length})`}
-                />
-                {publicFields.length > 0 ? (
-                  <Button
-                    size="tiny"
-                    color="secondary"
-                    className="!px-2 flex items-center gap-1"
-                    onClick={openEditState}
-                    title="Edit the scene's public state and update the preview"
-                  >
-                    <PencilSquareIcon className="h-4 w-4" />
-                    Edit
-                  </Button>
-                ) : null}
-              </div>
+          <div className="shrink-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="frameos-muted text-xs font-semibold uppercase">Scene state</div>
+              {stateEntries.length > 0 ? (
+                <>
+                  <Checkbox
+                    value={showPublicState}
+                    onChange={setShowPublicState}
+                    label={`public (${publicEntries.length})`}
+                  />
+                  <Checkbox
+                    value={showPrivateState}
+                    onChange={setShowPrivateState}
+                    label={`private (${privateEntries.length})`}
+                  />
+                </>
+              ) : null}
+              {publicFields.length > 0 ? (
+                <Button
+                  size="tiny"
+                  color="secondary"
+                  className="!px-2 flex items-center gap-1"
+                  onClick={openEditState}
+                  title="Edit the scene's public state and update the preview"
+                >
+                  <PencilSquareIcon className="h-4 w-4" />
+                  Edit
+                </Button>
+              ) : null}
+              {previewOnFrameButton}
+              {addToFrameButton}
+            </div>
+            {stateEntries.length > 0 ? (
               <div className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-xs">
                 {visibleStateEntries.length > 0 ? (
                   visibleStateEntries.map(([key, value]) => (
@@ -374,8 +413,8 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
                   <div className="text-slate-500">No state fields selected</div>
                 )}
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
           <div className="flex min-h-[8rem] flex-1 flex-col gap-1">
             <div className="frameos-muted shrink-0 text-xs font-semibold uppercase">Runtime log</div>
