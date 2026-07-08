@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers } from 'kea'
+import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
@@ -228,6 +228,24 @@ export const settingsLogic = kea<settingsLogicType>([
       },
     },
   })),
+  // After forms(): the `settings` selector this depends on is created there
+  selectors({
+    // Mirrors the backend default: MQTT host falls back to the HA URL's hostname
+    homeAssistantMqttHostDefault: [
+      (s) => [s.settings],
+      (settings): string => {
+        const url = (settings.homeAssistant?.url ?? '').trim()
+        if (url) {
+          try {
+            return new URL(url.includes('://') ? url : `http://${url}`).hostname || 'homeassistant.local'
+          } catch {
+            // fall through to the generic default
+          }
+        }
+        return 'homeassistant.local'
+      },
+    ],
+  }),
   afterMount(({ actions }) => {
     if (isFrameControlMode() && !isInFrameAdminMode()) {
       return
@@ -383,28 +401,39 @@ export const settingsLogic = kea<settingsLogicType>([
     },
     syncHomeAssistant: async () => {
       actions.setSyncingHomeAssistant(true)
-      const workingMessage = showWorkingMessage('Syncing frames to Home Assistant...')
+      const workingMessage = showWorkingMessage('Saving settings and syncing frames to Home Assistant...')
       try {
-        // Save the section first so the sync uses what's on screen
-        const homeAssistant = { ...(values.settings.homeAssistant ?? {}), syncEnabled: true }
+        // Save the whole settings form (like the Save button) so the sync uses
+        // what's on screen and the form no longer counts as unsaved.
+        const formValues = {
+          ...values.settings,
+          homeAssistant: { ...(values.settings.homeAssistant ?? {}), syncEnabled: true },
+        }
         const saveResponse = await apiFetch(`/api/settings`, {
           method: 'POST',
-          body: JSON.stringify({ homeAssistant }),
+          body: JSON.stringify(formValues),
           headers: { 'Content-Type': 'application/json' },
         })
         if (!saveResponse.ok) {
-          throw new Error('Failed to save Home Assistant settings')
+          throw new Error('Failed to save settings')
         }
-        actions.updateSavedSettings(await saveResponse.json())
+        const updatedSettings = await saveResponse.json()
+        actions.updateSavedSettings(updatedSettings)
+        actions.resetSettings(setDefaultSettings(updatedSettings))
 
         const response = await apiFetch(`/api/settings/home_assistant/sync`, {
           method: 'POST',
         })
+        const data = await response.json().catch(() => null)
         if (!response.ok) {
-          const data = await response.json().catch(() => null)
           throw new Error(data?.detail || 'Home Assistant sync failed')
         }
-        workingMessage.success('Sync requested. Check Home Assistant for your frames in a few seconds.')
+        const message = data?.message || 'Synced frames to Home Assistant.'
+        if (data?.warning) {
+          workingMessage.warning(message)
+        } else {
+          workingMessage.success(message)
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Home Assistant sync failed'
         workingMessage.error(message)

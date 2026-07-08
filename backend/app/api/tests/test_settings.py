@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.ha import HA_SYNC_CHANNEL
+from app.ha import HA_SYNC_CHANNEL, HA_SYNC_REQUEST_KEY
 
 
 async def next_pubsub_message(pubsub, timeout=5.0):
@@ -13,6 +13,20 @@ async def next_pubsub_message(pubsub, timeout=5.0):
             if message is not None:
                 return message
     return await asyncio.wait_for(read(), timeout)
+
+
+async def answer_next_sync_request(redis, build_reply, timeout=5.0):
+    """Play the sync service: claim the request key and reply on its channel."""
+    async def run():
+        while True:
+            raw = await redis.get(HA_SYNC_REQUEST_KEY)
+            if raw:
+                await redis.delete(HA_SYNC_REQUEST_KEY)
+                request = json.loads(raw)
+                await redis.publish(request["reply_channel"], json.dumps(build_reply(request)))
+                return
+            await asyncio.sleep(0.02)
+    await asyncio.wait_for(run(), timeout)
 
 
 @pytest.mark.asyncio
@@ -111,22 +125,78 @@ async def test_home_assistant_sync_now_requires_sync_enabled(async_client):
 
 
 @pytest.mark.asyncio
-async def test_home_assistant_sync_now_publishes_sync_message(async_client, redis):
+async def test_home_assistant_sync_now_reports_shared_frames(async_client, redis):
     response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
     assert response.status_code == 200
 
-    pubsub = redis.pubsub()
-    await pubsub.subscribe(HA_SYNC_CHANNEL)
-    try:
-        response = await async_client.post('/api/settings/home_assistant/sync')
-        assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
-        assert response.json() == {"ok": True}
+    def build_reply(request):
+        return {
+            "ok": True,
+            "supervisor": True,
+            "mqtt": {"host": "core-mosquitto", "port": 1883},
+            "frames_shared": {str(request["project_id"]): 2},
+            "event_bus_project_ids": [request["project_id"]],
+        }
 
-        message = await next_pubsub_message(pubsub)
-        assert json.loads(message["data"])["event"] == "sync_now"
-    finally:
-        await pubsub.unsubscribe(HA_SYNC_CHANNEL)
-        await pubsub.close()
+    worker = asyncio.create_task(answer_next_sync_request(redis, build_reply))
+    response = await async_client.post('/api/settings/home_assistant/sync')
+    await worker
+
+    assert response.status_code == 200, f"Got {response.status_code} and {response.json()}"
+    data = response.json()
+    assert data["ok"] is True
+    assert data["frames_shared"] == 2
+    assert "Shared 2 frames" in data["message"]
+    assert "core-mosquitto:1883" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_sync_now_warns_about_missing_mqtt_broker(async_client, redis):
+    response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
+    assert response.status_code == 200
+
+    def build_reply(request):
+        return {"ok": False, "supervisor": True, "mqtt": None, "frames_shared": {}}
+
+    worker = asyncio.create_task(answer_next_sync_request(redis, build_reply))
+    response = await async_client.post('/api/settings/home_assistant/sync')
+    await worker
+
+    # MQTT is optional: events still reach the event bus, so this is a warning, not an error
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["warning"] is True
+    assert "Mosquitto broker" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_sync_now_fails_without_any_ha_connection(async_client, redis):
+    response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
+    assert response.status_code == 200
+
+    def build_reply(request):
+        return {"ok": False, "supervisor": False, "mqtt": None, "frames_shared": {}, "event_bus_project_ids": []}
+
+    worker = asyncio.create_task(answer_next_sync_request(redis, build_reply))
+    response = await async_client.post('/api/settings/home_assistant/sync')
+    await worker
+
+    assert response.status_code == 502
+    assert "Nothing was synced" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_sync_now_times_out_without_worker(async_client, redis, monkeypatch):
+    monkeypatch.setattr("app.api.settings.HA_SYNC_REPLY_TIMEOUT_SECONDS", 0.3)
+    response = await async_client.post('/api/settings', json={"homeAssistant": {"syncEnabled": True}})
+    assert response.status_code == 200
+
+    response = await async_client.post('/api/settings/home_assistant/sync')
+    assert response.status_code == 504
+    assert "background worker" in response.json()["detail"]
+    # The request stays claimable in Redis until it expires
+    assert await redis.get(HA_SYNC_REQUEST_KEY) is not None
 
 
 @pytest.mark.asyncio
