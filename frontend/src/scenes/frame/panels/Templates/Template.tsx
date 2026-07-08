@@ -76,10 +76,6 @@ export function TemplateRow({
   } = useValues(templateRowLogic({ frameId, template, repository }))
   const { startTryScene } = useActions(templateRowLogic({ frameId, template, repository }))
   const imageEntity = useMemo(() => {
-    if (template.id) {
-      return `templates/${template.id}`
-    }
-
     if (typeof template.image === 'string') {
       const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
       if (match) {
@@ -87,8 +83,14 @@ export function TemplateRow({
       }
     }
 
+    // Repository templates carry an `id` too (their directory name), but only
+    // locally saved templates have an image at /templates/{id}/image.
+    if (template.id && !repository) {
+      return `templates/${template.id}`
+    }
+
     return null
-  }, [template.id, template.image])
+  }, [template.id, template.image, repository])
 
   // I know the order of hooks is weird here, but the "if" should never change for this component
   const { imageUrl: managedImageUrl } = useEntityImage(imageEntity, 'image')

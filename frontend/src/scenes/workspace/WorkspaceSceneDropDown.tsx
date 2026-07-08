@@ -17,7 +17,7 @@ import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
 import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
-import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
+import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -44,8 +44,10 @@ export function WorkspaceSceneDropDown({
   const [templateModalMounted, setTemplateModalMounted] = useState(false)
   const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
   const { setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
-  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId: frame.id }))
-  const { updateSceneFromRepo } = useActions(scenesLogic({ frameId: frame.id }))
+  // sceneUpdatesLogic and not scenesLogic: this dropdown renders on the frames
+  // home, and scenesLogic would mount controlLogic, which fetches frame state.
+  const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
+  const { updateSceneFromRepo } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId: frame.id }))
   const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes

@@ -26,7 +26,7 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
-import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
+import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -414,7 +414,9 @@ function FrameSceneTile({
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
-  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId: frame.id }))
+  // sceneUpdatesLogic and not scenesLogic: these tiles render on the frames
+  // home, and scenesLogic would mount controlLogic, which fetches frame state.
+  const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const compiled = sceneIsCompiled(scene, frame.mode)
   const updateVersion = sceneUpdateVersions[scene.id]
   const hasChildScenes = (childSceneCount ?? 0) > 0
