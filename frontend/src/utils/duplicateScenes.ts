@@ -14,6 +14,11 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
       return newId
     }
   }
+  return remapSceneIds(newScenes, getNewSceneId)
+}
+
+/** Rewrite each scene's id and every scene-to-scene reference through the given id mapper. */
+export function remapSceneIds(newScenes: FrameScene[], getNewSceneId: (id: string) => string): FrameScene[] {
   return newScenes.map((scene: FrameScene): FrameScene => {
     const id = getNewSceneId(scene.id)
     const frameScene: FrameScene = {
@@ -54,6 +59,7 @@ export function duplicateScenes(newScenes: FrameScene[]): FrameScene[] {
                 if ('type' in field && field.type === 'scene') {
                   return { ...field, value: field.value ? getNewSceneId(field.value) : field.value }
                 }
+                return field
               })
               return {
                 ...node,

@@ -11,6 +11,7 @@ import {
   CircleStackIcon,
   CommandLineIcon,
   DocumentTextIcon,
+  InformationCircleIcon,
   PlusIcon,
   SignalIcon,
   SparklesIcon,
@@ -25,6 +26,7 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -412,7 +414,9 @@ function FrameSceneTile({
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
+  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId: frame.id }))
   const compiled = sceneIsCompiled(scene, frame.mode)
+  const updateVersion = sceneUpdateVersions[scene.id]
   const hasChildScenes = (childSceneCount ?? 0) > 0
 
   const handleTileClick = (): void => {
@@ -480,7 +484,7 @@ function FrameSceneTile({
           </div>
         </div>
       ) : null}
-      {compiled || active ? (
+      {compiled || active || updateVersion ? (
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
           {compiled ? (
             <div className="pointer-events-auto">
@@ -490,6 +494,15 @@ function FrameSceneTile({
           {active ? (
             <div className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
               Active
+            </div>
+          ) : null}
+          {updateVersion ? (
+            <div
+              title="Scene update available — use the scene menu to update"
+              className="pointer-events-auto flex items-center gap-1 rounded-full border border-sky-500/45 bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 shadow-sm backdrop-blur-sm"
+            >
+              <InformationCircleIcon className="h-3.5 w-3.5" />
+              <span>Update</span>
             </div>
           ) : null}
         </div>

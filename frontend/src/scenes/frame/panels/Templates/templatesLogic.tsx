@@ -11,6 +11,7 @@ import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
 
 export interface TemplateLogicProps {
@@ -26,6 +27,36 @@ export async function fetchTemplateScenes(template: TemplateType): Promise<Frame
     throw new Error('Template has no scenes to load')
   }
   const response = await apiFetch(template.scenesUrl)
+  if (!response.ok) {
+    throw new Error('Failed to load template scenes')
+  }
+  return await response.json()
+}
+
+/** Resolve a repository template's scenes from inline data, its scenes URL, or its zip archive. */
+export async function loadRepositoryTemplateScenes(
+  repository: RepositoryType,
+  template: TemplateType
+): Promise<FrameScene[]> {
+  if (template.scenes?.length || template.scenesUrl) {
+    return fetchTemplateScenes(template)
+  }
+
+  const templateWithZip = template as TemplateType & { zip?: string }
+  let zipPath = templateWithZip.zip
+  if (!zipPath) {
+    throw new Error('Failed to load template')
+  }
+  if (zipPath.startsWith('./')) {
+    const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
+    zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+  }
+
+  const response = await apiFetch(`/api/templates`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format: 'scenes', url: zipPath }),
+  })
   if (!response.ok) {
     throw new Error('Failed to load template scenes')
   }
@@ -400,51 +431,8 @@ export const templatesLogic = kea<templatesLogicType>([
       }
     },
     applyRemoteToFrame: async ({ template, repository, persistOnInstall, openDrawer }) => {
-      if (template.scenes?.length) {
-        if (persistOnInstall) {
-          actions.applyTemplateAndSave(template, openDrawer)
-        } else {
-          actions.applyTemplate(template)
-        }
-        return
-      }
-
-      if (template.scenesUrl) {
-        const loadedTemplate = { ...template, scenes: await fetchTemplateScenes(template) }
-        if (persistOnInstall) {
-          actions.applyTemplateAndSave(loadedTemplate, openDrawer)
-        } else {
-          actions.applyTemplate(loadedTemplate)
-        }
-        return
-      }
-
-      const request: Record<string, any> = {
-        format: 'scenes',
-      }
-
-      const templateWithZip = template as TemplateType & { zip?: string }
-      let zipPath = templateWithZip.zip
-      if (!zipPath) {
-        throw new Error('Failed to load template')
-      }
-
-      if (zipPath.startsWith('./')) {
-        const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
-        zipPath = `${repositoryPath}/${zipPath.slice(2)}`
-      }
-
-      request['url'] = zipPath
-
-      const response = await apiFetch(`/api/templates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      })
-      if (!response.ok) {
-        throw new Error('Failed to update frame')
-      }
-      const loadedTemplate = { ...template, scenes: await response.json() }
+      const scenes = await loadRepositoryTemplateScenes(repository, template)
+      const loadedTemplate = templateWithSceneOrigins({ ...template, scenes }, repository)
       if (persistOnInstall) {
         actions.applyTemplateAndSave(loadedTemplate, openDrawer)
       } else {
@@ -459,36 +447,13 @@ export const templatesLogic = kea<templatesLogicType>([
           continue
         }
 
-        if (row.template.scenes?.length) {
-          templates.push(row.template)
-          continue
-        }
-
-        if (row.template.scenesUrl) {
-          templates.push({ ...row.template, scenes: await fetchTemplateScenes(row.template) })
-          continue
-        }
-
         const templateWithZip = row.template as TemplateType & { zip?: string }
-        let zipPath = templateWithZip.zip
-        if (!zipPath) {
+        if (!row.template.scenes?.length && !row.template.scenesUrl && !templateWithZip.zip) {
           continue
         }
 
-        if (zipPath.startsWith('./')) {
-          const repositoryPath = row.repository.url.replace(/\/[^/]+$/, '')
-          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
-        }
-
-        const response = await apiFetch(`/api/templates`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ format: 'scenes', url: zipPath }),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to load favourite scene')
-        }
-        templates.push({ ...row.template, scenes: await response.json() })
+        const scenes = await loadRepositoryTemplateScenes(row.repository, row.template)
+        templates.push(templateWithSceneOrigins({ ...row.template, scenes }, row.repository))
       }
 
       if (templates.length) {

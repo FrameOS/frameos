@@ -2,10 +2,12 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
+  ArrowPathIcon,
   BoltIcon,
   ClipboardDocumentIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
+  InformationCircleIcon,
   PhotoIcon,
   PlusIcon,
   PuzzlePieceIcon,
@@ -47,6 +49,7 @@ import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragDa
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface SceneWorkspaceProps {
@@ -127,7 +130,9 @@ function SceneSelector({
   sidebarActions?: JSX.Element
 }): JSX.Element {
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
-  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
+  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions } = useValues(
+    scenesLogic({ frameId: frame.id })
+  )
   const frameGroups = groupFramesByStatus(frames)
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -228,8 +233,13 @@ function SceneSelector({
               const active = scene.id === linkedActiveSceneId
               const unsaved = unsavedSceneIds.has(scene.id)
               const undeployed = undeployedSceneIds.has(scene.id)
+              const updateAvailable = !!sceneUpdateVersions[scene.id]
               const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Undeployed changes' : null
-              const sceneStatusTitle = [active ? 'Active scene' : 'Inactive scene', changeStatusLabel]
+              const sceneStatusTitle = [
+                active ? 'Active scene' : 'Inactive scene',
+                changeStatusLabel,
+                updateAvailable ? 'Scene update available' : null,
+              ]
                 .filter(Boolean)
                 .join(' · ')
               const compiled = sceneIsCompiled(scene, frame.mode)
@@ -295,6 +305,15 @@ function SceneSelector({
                             className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
                           >
                             {unsaved ? 'unsaved' : 'undeployed'}
+                          </Tag>
+                        ) : null}
+                        {updateAvailable ? (
+                          <Tag
+                            color="teal"
+                            title="A newer version of this scene is available in the repository"
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                          >
+                            update
                           </Tag>
                         ) : null}
                       </span>
@@ -660,7 +679,9 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
-  const { renameScene } = useActions(scenesLogic({ frameId }))
+  const { renameScene, updateSceneFromRepo } = useActions(scenesLogic({ frameId }))
+  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
+  const availableUpdateVersion = sceneUpdateVersions[scene.id]
   const nodes = scene.nodes ?? []
   const edges = scene.edges ?? []
   const sceneApps = scene.apps ?? {}
@@ -708,6 +729,40 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
           <span>Rename</span>
         </button>
       </div>
+      {availableUpdateVersion ? (
+        <div className="frame-tool-row flex items-center justify-between gap-3 rounded-xl p-3">
+          <div className="min-w-0 text-sm">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <InformationCircleIcon className="h-4 w-4 shrink-0" />
+              Scene update available
+            </div>
+            <div className="frame-tool-muted truncate">
+              {scene.origin?.templateName ? `"${scene.origin.templateName}" ` : 'This scene '}
+              has a newer version in the repository
+              {scene.origin?.version
+                ? ` (${shortSceneVersion(scene.origin.version)} → ${shortSceneVersion(availableUpdateVersion)})`
+                : ''}
+              .
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.'
+                )
+              ) {
+                updateSceneFromRepo(scene.id)
+              }
+            }}
+            className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ArrowPathIcon className="h-4 w-4" />
+            <span>Update scene</span>
+          </button>
+        </div>
+      ) : null}
       <div className="grid grid-cols-3 gap-2">
         {stats.map((stat) => (
           <div key={stat.label} className="frame-tool-row rounded-xl px-3 py-2">

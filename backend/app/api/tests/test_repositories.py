@@ -43,11 +43,17 @@ async def test_get_system_repositories_includes_packaged_templates(async_client)
     assert all(repo.get("templates") for repo in repos)
 
     # Listings carry metadata only; scenes are fetched separately via scenesUrl.
+    # Every template has a stable id (its directory slug) and a version (an
+    # explicit template.json version or a content hash of its scenes), so
+    # installed scenes can track their origin and detect updates.
     for repo in repos:
         for template in repo["templates"]:
             assert "scenes" not in template
             assert template["scenesUrl"].startswith("/api/repositories/system/")
             assert template["scenesUrl"].endswith("/scenes.json")
+            assert template["id"]
+            assert template["scenesUrl"].split("/templates/")[1] == f'{template["id"]}/scenes.json'
+            assert isinstance(template["version"], str) and len(template["version"]) > 0
 
     # Templates that cannot run on ESP32 frames carry embedded: false.
     samples = next(repo for repo in repos if repo["id"] == "system-samples")

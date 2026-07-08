@@ -3,6 +3,15 @@ import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene, SceneNodeData } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
+import { repositoriesModel } from '../../../../models/repositoriesModel'
+import { loadRepositoryTemplateScenes } from '../Templates/templatesLogic'
+import {
+  findTemplateForOrigin,
+  sameTemplateOrigin,
+  sceneOriginForTemplate,
+  sceneUpdateVersion,
+} from '../../../../utils/sceneOrigin'
+import { remapSceneIds } from '../../../../utils/duplicateScenes'
 import { forms } from 'kea-forms'
 import { v4 as uuidv4 } from 'uuid'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
@@ -104,10 +113,12 @@ export const scenesLogic = kea<scenesLogicType>([
       ['apps'],
       controlLogic({ frameId }),
       ['sceneId as activeSceneId', 'uploadedScenes', 'uploadedScenesLoading', 'states'],
+      repositoriesModel,
+      ['repositories'],
     ],
     actions: [
       frameLogic({ frameId }),
-      ['applyTemplate', 'sendEvent'],
+      ['applyTemplate', 'sendEvent', 'updateScene'],
       frameEditorsLogic({ frameId }),
       ['editScene', 'closeSceneEditors'],
       controlLogic({ frameId }),
@@ -169,6 +180,7 @@ export const scenesLogic = kea<scenesLogicType>([
     installMissingActiveSceneFailure: true,
     focusScene: (sceneId: string) => ({ sceneId }),
     clearFocusedScene: true,
+    updateSceneFromRepo: (sceneId: string) => ({ sceneId }),
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -427,6 +439,19 @@ export const scenesLogic = kea<scenesLogicType>([
           }
         })
         return unsaved
+      },
+    ],
+    sceneUpdateVersions: [
+      (s) => [s.rawScenes, s.repositories],
+      (rawScenes, repositories): Record<string, string> => {
+        const versions: Record<string, string> = {}
+        for (const scene of rawScenes) {
+          const version = sceneUpdateVersion(scene, repositories)
+          if (version) {
+            versions[scene.id] = version
+          }
+        }
+        return versions
       },
     ],
     scenes: [
@@ -721,11 +746,12 @@ export const scenesLogic = kea<scenesLogicType>([
           frameId: props.frameId,
           kind: taskKind,
           sceneId,
-          detail: error instanceof Error
-            ? error.message
-            : values.isFrameAdminMode
-            ? 'Failed to activate the scene'
-            : 'Failed to preview the scene',
+          detail:
+            error instanceof Error
+              ? error.message
+              : values.isFrameAdminMode
+              ? 'Failed to activate the scene'
+              : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
       }
@@ -804,6 +830,52 @@ export const scenesLogic = kea<scenesLogicType>([
       }
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
         scenes: [...values.scenes, { ...scene, default: false, id: uuidv4() }],
+      })
+    },
+    updateSceneFromRepo: async ({ sceneId }) => {
+      const installedScenes = values.rawScenes
+      const scene = installedScenes.find((s) => s.id === sceneId)
+      const origin = scene?.origin
+      if (!scene || !origin) {
+        return
+      }
+      const match = findTemplateForOrigin(values.repositories, origin)
+      if (!match) {
+        console.error('Cannot update scene: source template not found in any repository', origin)
+        return
+      }
+      const { repository, template } = match
+      const templateScenes = await loadRepositoryTemplateScenes(repository, template)
+
+      // Multi-scene templates are updated as a group: every installed scene from
+      // this template keeps its id, so links between scenes keep working.
+      const installedIdByTemplateSceneId: Record<string, string> = {}
+      for (const installed of installedScenes) {
+        if (installed.origin?.sceneId && sameTemplateOrigin(installed.origin, origin)) {
+          installedIdByTemplateSceneId[installed.origin.sceneId] = installed.id
+        }
+      }
+      // Duplicated scenes share an origin; make sure the clicked scene claims its slot.
+      if (origin.sceneId) {
+        installedIdByTemplateSceneId[origin.sceneId] = scene.id
+      }
+      const remapped = remapSceneIds(templateScenes, (id) => installedIdByTemplateSceneId[id] ?? id)
+      remapped.forEach((nextScene, index) => {
+        const templateSceneId = templateScenes[index].id
+        const installedId = installedIdByTemplateSceneId[templateSceneId]
+        if (!installedId) {
+          return
+        }
+        // Replace the scene's content but keep its id, name and default flag.
+        actions.updateScene(installedId, {
+          nodes: nextScene.nodes,
+          edges: nextScene.edges,
+          apps: nextScene.apps,
+          fields: nextScene.fields,
+          customEvents: nextScene.customEvents,
+          settings: nextScene.settings,
+          origin: sceneOriginForTemplate(repository, template, templateSceneId),
+        })
       })
     },
     renameScene: ({ sceneId }) => {

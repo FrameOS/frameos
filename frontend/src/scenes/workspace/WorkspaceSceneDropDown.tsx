@@ -2,6 +2,7 @@ import { BindLogic, useActions, useValues } from 'kea'
 import { useState, type FormEvent } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
+  ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
@@ -16,6 +17,7 @@ import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
 import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
+import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -42,6 +44,8 @@ export function WorkspaceSceneDropDown({
   const [templateModalMounted, setTemplateModalMounted] = useState(false)
   const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
   const { setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
+  const { sceneUpdateVersions } = useValues(scenesLogic({ frameId: frame.id }))
+  const { updateSceneFromRepo } = useActions(scenesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId: frame.id }))
   const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
@@ -72,6 +76,17 @@ export function WorkspaceSceneDropDown({
         className={className}
         horizontal={horizontal}
         items={[
+          ...(sceneUpdateVersions[scene.id]
+            ? [
+                {
+                  label: 'Update scene',
+                  confirm:
+                    'Update this scene to the latest version from the repository? Any local changes to the scene will be replaced.',
+                  onClick: () => updateSceneFromRepo(scene.id),
+                  icon: <ArrowPathIcon className="h-5 w-5" />,
+                },
+              ]
+            : []),
           {
             label: 'Preview',
             onClick: () => openScenePreview(frame.id, scene.id),
