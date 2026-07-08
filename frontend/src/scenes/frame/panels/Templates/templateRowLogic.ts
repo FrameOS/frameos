@@ -1,12 +1,8 @@
 import { actions, connect, kea, key, path, props, reducers, selectors, listeners } from 'kea'
-import { forms } from 'kea-forms'
 import { FrameScene, SceneNodeData, TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
-import { apiFetch } from '../../../../utils/apiFetch'
-import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
-import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { fetchTemplateScenes } from './templatesLogic'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 
@@ -28,28 +24,10 @@ export const templateRowLogic = kea<templateRowLogicType>([
     logic: props.frameId ? [livePreviewLogic({ frameId: props.frameId })] : [],
   })),
   actions({
-    tryScene: (state?: Record<string, any>) => ({ state }),
     startTryScene: true,
-    submitTryScene: (target: 'device' | 'browser') => ({ target }),
     setRemoteScenes: (scenes: FrameScene[]) => ({ scenes }),
-    openTrySceneModal: true,
-    closeTrySceneModal: true,
   }),
   reducers({
-    trySceneModalOpen: [
-      false,
-      {
-        openTrySceneModal: () => true,
-        closeTrySceneModal: () => false,
-      },
-    ],
-    // Where the state form submits to: the physical frame or the in-browser WASM preview.
-    trySceneTarget: [
-      'device' as 'device' | 'browser',
-      {
-        submitTryScene: (_, { target }) => target,
-      },
-    ],
     // Scenes fetched lazily from template.scenesUrl; repository listings only carry metadata.
     remoteScenes: [
       null as FrameScene[] | null,
@@ -58,32 +36,6 @@ export const templateRowLogic = kea<templateRowLogicType>([
       },
     ],
   }),
-  forms(({ values, props, actions }) => ({
-    trySceneState: {
-      defaults: {} as Record<string, any>,
-      submit: async (formValues) => {
-        if (!props.frameId || !values.trySceneConfig) {
-          return
-        }
-        const state: Record<string, any> = {}
-        for (const field of values.trySceneFields) {
-          const value = formValues[field.name] ?? field.value
-          if (value !== undefined && value !== null) {
-            state[field.name] = String(value)
-          }
-        }
-        if (values.trySceneTarget === 'browser') {
-          const { mainScene, payloadScenes } = values.trySceneConfig
-          actions.closeTrySceneModal()
-          // Run the template's scenes in the in-browser WASM preview. The scenes
-          // aren't installed on the frame, so pass them explicitly.
-          livePreviewLogic({ frameId: props.frameId }).actions.openLivePreview(mainScene.id, state, payloadScenes)
-          return
-        }
-        actions.tryScene(state)
-      },
-    },
-  })),
   selectors({
     scenes: [
       (s) => [(_, props: TemplateRowLogicProps) => props.template?.scenes, s.remoteScenes],
@@ -137,22 +89,6 @@ export const templateRowLogic = kea<templateRowLogicType>([
       (s) => [s.trySceneConfig],
       (trySceneConfig) => (trySceneConfig?.mainScene?.fields ?? []).filter((field) => field.access === 'public'),
     ],
-    visibleTrySceneFields: [
-      (s) => [s.trySceneFields, s.trySceneState],
-      (trySceneFields, trySceneState) => visiblePublicStateFields(trySceneFields, trySceneState),
-    ],
-    defaultTrySceneState: [
-      (s) => [s.trySceneFields],
-      (trySceneFields) => {
-        const defaults: Record<string, any> = {}
-        for (const field of trySceneFields) {
-          if (field.value !== undefined) {
-            defaults[field.name] = field.value
-          }
-        }
-        return defaults
-      },
-    ],
   }),
   listeners(({ actions, values, props }) => ({
     startTryScene: async () => {
@@ -164,64 +100,20 @@ export const templateRowLogic = kea<templateRowLogicType>([
           return
         }
       }
-      if (!values.trySceneConfig) {
-        return
-      }
-      // Always open the modal — the user picks the preview target (device or
-      // browser) there, even when the scene exports no public state fields.
-      actions.openTrySceneModal()
-    },
-    submitTryScene: () => {
-      // trySceneTarget reducer has already stored the target; run the form
-      // submit so field values are validated/coerced the same way for both.
-      actions.submitTrySceneState()
-    },
-    openTrySceneModal: () => {
-      actions.resetTrySceneState(values.defaultTrySceneState)
-    },
-    tryScene: async ({ state }) => {
       if (!props.frameId || !values.trySceneConfig) {
         return
       }
-      const sceneId =
-        values.trySceneConfig.payloadScenes.length > 1
-          ? values.trySceneConfig.mainScene.id
-          : values.trySceneConfig.payloadScenes[0]?.id
-      const detail = values.trySceneConfig.mainScene.name || props.template.name
-      actions.closeTrySceneModal()
-      longRunningTasksModel.actions.startTask({
-        frameId: props.frameId,
-        kind: 'preview',
-        sceneId,
-        title: 'Previewing scene',
-        detail,
-      })
-      try {
-        const payload: Record<string, any> = {
-          scenes: values.trySceneConfig.payloadScenes,
-          sceneId,
+      // Open the in-browser WASM preview directly with the scene's default
+      // public state; the preview modal itself offers "Preview on frame".
+      // The scenes aren't installed on the frame, so pass them explicitly.
+      const { mainScene, payloadScenes } = values.trySceneConfig
+      const state: Record<string, any> = {}
+      for (const field of values.trySceneFields) {
+        if (field.value !== undefined && field.value !== null) {
+          state[field.name] = String(field.value)
         }
-        if (state && Object.keys(state).length > 0) {
-          payload.state = state
-        }
-        const response = await apiFetch(`/api/frames/${props.frameId}/upload_scenes`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (!response.ok) {
-          const message = await response.text()
-          throw new Error(message || 'Failed to send scene to frame')
-        }
-      } catch (error) {
-        console.error('Failed to send scene to frame', error)
-        longRunningTasksModel.actions.taskFailed({
-          frameId: props.frameId,
-          kind: 'preview',
-          sceneId,
-          detail: error instanceof Error ? error.message : 'Failed to send scene to frame',
-        })
       }
+      livePreviewLogic({ frameId: props.frameId }).actions.openLivePreview(mainScene.id, state, payloadScenes)
     },
   })),
 ])

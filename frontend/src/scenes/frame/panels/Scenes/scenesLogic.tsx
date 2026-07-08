@@ -156,7 +156,11 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
-    previewScene: (sceneId: string, state?: Record<string, any> | null) => ({ sceneId, state }),
+    previewScene: (sceneId: string, state?: Record<string, any> | null, scenes?: FrameScene[] | null) => ({
+      sceneId,
+      state,
+      scenes: scenes ?? null,
+    }),
     previewSceneSuccess: true,
     previewSceneFailure: true,
     setAiPrompt: (prompt: string) => ({ prompt }),
@@ -700,8 +704,11 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.uploadImageFailure()
       }
     },
-    previewScene: async ({ sceneId, state }) => {
-      const scene = values.scenes.find((item) => item.id === sceneId)
+    previewScene: async ({ sceneId, state, scenes }) => {
+      // An explicit `scenes` list lets callers preview scenes that aren't
+      // installed on the frame, e.g. template previews.
+      const sceneList = scenes?.length ? scenes : values.scenes
+      const scene = sceneList.find((item) => item.id === sceneId)
       if (!scene) {
         actions.previewSceneFailure()
         return
@@ -716,7 +723,7 @@ export const scenesLogic = kea<scenesLogicType>([
       })
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
-        const payloadScenes = collectScenePreviewPayloadScenes(scene, values.scenes, resolvedState)
+        const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, resolvedState)
         const payload = {
           scenes: payloadScenes,
           sceneId: scene.id,

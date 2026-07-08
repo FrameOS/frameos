@@ -14,7 +14,6 @@ import {
   DocumentPlusIcon,
   CheckIcon,
   EyeIcon,
-  WindowIcon,
   StarIcon as StarOutlineIcon,
 } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
@@ -28,10 +27,6 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
-import { Modal } from '../../../../components/Modal'
-import { Form } from 'kea-forms'
-import { Field } from '../../../../components/Field'
-import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
@@ -74,13 +69,10 @@ export function TemplateRow({
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
   const {
     trySceneConfig,
-    trySceneModalOpen,
-    visibleTrySceneFields,
-    trySceneState,
     scenes: templateScenes,
     canLoadRemoteScenes,
   } = useValues(templateRowLogic({ frameId, template }))
-  const { startTryScene, closeTrySceneModal, submitTryScene } = useActions(templateRowLogic({ frameId, template }))
+  const { startTryScene } = useActions(templateRowLogic({ frameId, template }))
   const imageEntity = useMemo(() => {
     if (template.id) {
       return `templates/${template.id}`
@@ -309,65 +301,6 @@ export function TemplateRow({
         setSettingsValue={setSettingsValue}
         submitSettings={submitSettings}
       />
-      {trySceneConfig ? (
-        <Modal
-          open={trySceneModalOpen}
-          onClose={closeTrySceneModal}
-          title={`Preview "${trySceneConfig.mainScene.name || template.name}"`}
-        >
-          <Form
-            logic={templateRowLogic}
-            props={{ frameId, template }}
-            formKey="trySceneState"
-            className="space-y-4 p-5"
-          >
-            {visibleTrySceneFields.length ? (
-              <div className="space-y-2 @container">
-                {visibleTrySceneFields.map((field) => (
-                  <Field key={field.name} name={field.name} label={field.label || field.name}>
-                    {({ value, onChange }) => (
-                      <StateFieldEdit
-                        field={field}
-                        value={value}
-                        onChange={onChange}
-                        currentState={{}}
-                        stateChanges={trySceneState}
-                      />
-                    )}
-                  </Field>
-                ))}
-              </div>
-            ) : (
-              <div className="frame-tool-muted text-sm">This scene does not export publicly controllable state.</div>
-            )}
-            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-500/20 pt-4">
-              <Button onClick={closeTrySceneModal} color="secondary">
-                Cancel
-              </Button>
-              <Button
-                onClick={() => submitTryScene('browser')}
-                color="secondary"
-                className="inline-flex items-center gap-2"
-                disabled={!frameId}
-                title="Run this scene in your browser via WebAssembly"
-              >
-                <WindowIcon className="h-5 w-5" />
-                Preview in browser
-              </Button>
-              <Button
-                onClick={() => submitTryScene('device')}
-                color="primary"
-                className="inline-flex items-center gap-2"
-                disabled={!frameId}
-                title="Send this scene to the frame as a temporary preview"
-              >
-                <EyeIcon className="h-5 w-5" />
-                Preview on frame
-              </Button>
-            </div>
-          </Form>
-        </Modal>
-      ) : null}
       {frameId && trySceneConfig ? (
         <TemplateBrowserPreviewModal frameId={frameId} sceneId={trySceneConfig.mainScene.id} />
       ) : null}

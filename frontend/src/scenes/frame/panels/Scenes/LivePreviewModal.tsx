@@ -122,6 +122,7 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   const {
     livePreviewSceneId,
     livePreviewScene,
+    livePreviewScenes,
     previewStatus,
     previewError,
     previewLogs,
@@ -188,8 +189,8 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
   }
 
   // "Preview on frame": send the scene to the frame with the preview's
-  // current public state. Hidden for template previews — those scenes aren't
-  // installed on the frame, so scenesLogic can't upload them.
+  // current public state. Template previews aren't installed on the frame,
+  // so their scenes are passed to previewScene explicitly.
   const isFrameScene = frameScenes.some((scene) => scene.id === livePreviewSceneId)
   const isPreviewingOnFrame = previewingSceneId === livePreviewSceneId
   const buildPublicState = (): Record<string, any> => {
@@ -202,19 +203,22 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
     }
     return state
   }
-  const previewOnFrameButton = isFrameScene ? (
-    <Button
-      size="small"
-      color="secondary"
-      className="flex items-center gap-1"
-      onClick={() => previewScene(livePreviewSceneId, buildPublicState())}
-      disabled={isPreviewingOnFrame}
-      title="Temporarily show this scene on the frame, without saving or deploying"
-    >
-      <EyeIcon className="h-4 w-4" />
-      {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
-    </Button>
-  ) : null
+  const previewOnFrameButton =
+    isFrameScene || livePreviewScenes?.length ? (
+      <Button
+        size="small"
+        color="secondary"
+        className="flex items-center gap-1"
+        onClick={() =>
+          previewScene(livePreviewSceneId, buildPublicState(), isFrameScene ? undefined : livePreviewScenes)
+        }
+        disabled={isPreviewingOnFrame}
+        title="Temporarily show this scene on the frame, without saving or deploying"
+      >
+        <EyeIcon className="h-4 w-4" />
+        {isPreviewingOnFrame ? 'Sending…' : 'Preview on frame'}
+      </Button>
+    ) : null
 
   const submitEditState = (): void => {
     if (!editStateValues) {
