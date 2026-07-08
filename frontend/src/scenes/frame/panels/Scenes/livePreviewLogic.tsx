@@ -3,6 +3,7 @@ import { router } from 'kea-router'
 
 import { FrameScene, GPIOButton, RepositoryType, TemplateType } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { assetUrl } from '../../../../utils/assetUrl'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
@@ -301,7 +302,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
 
       let worker: Worker
       try {
-        worker = new Worker('/frameos-wasm/preview-worker.js', { type: 'module' })
+        worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
       } catch (error) {
         actions.previewErrored(
           'Could not start the live preview worker. Is the wasm bundle built? ' +

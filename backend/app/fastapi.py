@@ -68,6 +68,10 @@ if serve_html:
         app.mount("/assets", StaticFiles(directory="../frontend/dist/assets"), name="assets")
         app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
         app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
+        # wasm live-preview bundle (built by frameos/tools/build_wasm.sh into
+        # frontend/public/frameos-wasm, copied into dist by the frontend build)
+        if os.path.exists("../frontend/dist/frameos-wasm"):
+            app.mount("/frameos-wasm", StaticFiles(directory="../frontend/dist/frameos-wasm"), name="frameos-wasm")
 
         try:
             index_html_template = open("../frontend/dist/index.html").read()
