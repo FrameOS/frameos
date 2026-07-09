@@ -2,6 +2,7 @@
 # Keep this as a subset of requirements.in. Docker constrains these packages
 # with requirements.txt, while Flox installs the full development lock.
 aiofiles
+aiomqtt
 alembic
 arq
 asyncssh
