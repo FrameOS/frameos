@@ -26,6 +26,7 @@ import { Label } from '../../components/Label'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
 import { accountLogic } from './accountLogic'
+import { CloudSettingsSection } from './CloudSettings'
 import versions from '../../../../versions.json'
 import { timezoneOptions } from '../../decorators/timezones'
 import { systemInfoLogic } from './systemInfoLogic'
@@ -41,7 +42,10 @@ type SettingsSectionId = string
 const settingsNavSections: readonly SettingsNavSection[] = [
   {
     label: '',
-    items: [['Account', '#settings-account']],
+    items: [
+      ['Account', '#settings-account'],
+      ['FrameOS Cloud', '#settings-cloud'],
+    ],
   },
   {
     label: 'Settings',
@@ -462,6 +466,7 @@ export function Settings() {
         </div>
         <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
           {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection onLogout={logout} />}
+          <CloudSettingsSection />
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
@@ -954,9 +959,9 @@ export function Settings() {
                         label="Share frames with Home Assistant"
                         tooltip={
                           <>
-                            Each frame becomes a device with a live image and status/scene sensors (via MQTT
-                            discovery), and frame events are forwarded to the Home Assistant event bus as{' '}
-                            <code>frameos_event</code> for use in automations. Archived frames are not shared.
+                            Each frame becomes a device with a live image and status/scene sensors (via MQTT discovery),
+                            and frame events are forwarded to the Home Assistant event bus as <code>frameos_event</code>{' '}
+                            for use in automations. Archived frames are not shared.
                           </>
                         }
                       >

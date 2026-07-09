@@ -6,9 +6,11 @@ aiomqtt
 alembic
 arq
 asyncssh
+cryptography
 email_validator
 fastapi[standard]
 fonttools
+httpx
 jwt
 modal>=1.4.0
 openai

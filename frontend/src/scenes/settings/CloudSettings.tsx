@@ -1,0 +1,235 @@
+import { useActions, useValues } from 'kea'
+import { Form } from 'kea-forms'
+import { PencilSquareIcon } from '@heroicons/react/24/solid'
+
+import { Box } from '../../components/Box'
+import { Button } from '../../components/Button'
+import { Field } from '../../components/Field'
+import { H6 } from '../../components/H6'
+import { Label } from '../../components/Label'
+import { Spinner } from '../../components/Spinner'
+import { Tag } from '../../components/Tag'
+import { TextInput } from '../../components/TextInput'
+import { cloudLogic } from './cloudLogic'
+
+function pollErrorMessage(pollError: string): string {
+  switch (pollError) {
+    case 'expired':
+    case 'expired_token':
+      return 'The link code expired before it was approved. Try connecting again.'
+    case 'access_denied':
+      return 'The link request was denied in FrameOS Cloud.'
+    case 'network_error':
+      return 'Could not reach the FrameOS Cloud server. Check the URL and your network.'
+    default:
+      return `Connection failed: ${pollError}`
+  }
+}
+
+function expiresInLabel(expiresAt: string | null): string | null {
+  if (!expiresAt) {
+    return null
+  }
+  const secondsLeft = Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000)
+  if (secondsLeft <= 0) {
+    return 'expired'
+  }
+  if (secondsLeft < 60) {
+    return `expires in ${secondsLeft}s`
+  }
+  return `expires in ${Math.ceil(secondsLeft / 60)} min`
+}
+
+/** "FrameOS Cloud" settings section. Shared between the backend's global
+ * settings page and the on-device frame admin — both servers implement the
+ * same /api/cloud/* endpoints (see docs/cloud-link.md). */
+export function CloudSettingsSection({ headingId = 'settings-cloud' }: { headingId?: string }): JSX.Element | null {
+  const {
+    cloudStatus,
+    cloudStatusLoading,
+    cloudError,
+    providerEditorOpen,
+    isProviderUrlSubmitting,
+    isCloudConnecting,
+    isCloudDisconnecting,
+  } = useValues(cloudLogic)
+  const { connectCloud, disconnectCloud, setProviderEditorOpen } = useActions(cloudLogic)
+
+  if (cloudStatus && !cloudStatus.enabled) {
+    // FRAMEOS_CLOUD_URL=disabled hides the whole section
+    return null
+  }
+
+  const status = cloudStatus?.status ?? 'disconnected'
+  const providerUrl = cloudStatus?.provider_url ?? 'https://cloud.frameos.net'
+  const providerHost = providerUrl.replace(/^https?:\/\//, '')
+  const connection = cloudStatus?.connection
+  const link = cloudStatus?.link
+  const expiresLabel = connection ? expiresInLabel(connection.expires_at) : null
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 pt-4">
+        <H6 id={headingId}>FrameOS Cloud</H6>
+        {status === 'connected' ? <Tag color="teal">Connected</Tag> : null}
+      </div>
+      <Box className="settings-account-card space-y-4">
+        {cloudStatusLoading && !cloudStatus ? (
+          <Spinner />
+        ) : status === 'connected' && link ? (
+          <>
+            <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+              <div className="@md:w-1/3 @md:shrink-0">
+                <Label>Connected to</Label>
+              </div>
+              <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                <span className="frameos-strong font-medium">{providerHost}</span>
+                {link.account_email ? <span className="frameos-muted">as {link.account_email}</span> : null}
+              </div>
+            </div>
+            {link.scopes.length > 0 ? (
+              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Permissions</Label>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-1">
+                  {link.scopes.map((scope) => (
+                    <Tag key={scope} color="gray">
+                      {scope}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div className="@md:flex @md:items-center @md:gap-2">
+              <div className="hidden @md:block @md:w-1/3 @md:shrink-0" />
+              <div className="flex w-full flex-wrap items-center gap-2">
+                <Button
+                  size="small"
+                  color="secondary"
+                  onClick={disconnectCloud}
+                  disabled={isCloudDisconnecting}
+                  className="inline-flex items-center gap-2"
+                >
+                  {isCloudDisconnecting ? <Spinner /> : null}
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : status === 'connecting' && connection ? (
+          <>
+            <div className="frameos-muted text-sm">
+              To link this FrameOS with your cloud account, open the approval page and enter this code:
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="frameos-strong select-all font-mono text-2xl font-bold tracking-widest">
+                {connection.user_code}
+              </span>
+              {connection.verification_uri_complete || connection.verification_uri ? (
+                <Button
+                  size="small"
+                  color="primary"
+                  onClick={() =>
+                    window.open(
+                      connection.verification_uri_complete ?? connection.verification_uri ?? undefined,
+                      '_blank',
+                      'noopener'
+                    )
+                  }
+                >
+                  Open {providerHost}
+                </Button>
+              ) : null}
+            </div>
+            <div className="frameos-muted flex flex-wrap items-center gap-2 text-sm">
+              <Spinner />
+              <span>Waiting for approval{expiresLabel ? ` (${expiresLabel})` : ''}…</span>
+              <button
+                type="button"
+                onClick={disconnectCloud}
+                className="frameos-link font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+              <div className="@md:w-1/3 @md:shrink-0">
+                <Label>Cloud server</Label>
+              </div>
+              {providerEditorOpen ? (
+                <Form
+                  logic={cloudLogic}
+                  formKey="providerUrl"
+                  enableFormOnSubmit
+                  className="flex w-full min-w-0 flex-wrap items-start gap-2"
+                >
+                  <Field name="provider_url" className="min-w-[14rem] flex-1">
+                    <TextInput
+                      placeholder={cloudStatus?.default_provider_url ?? 'https://cloud.frameos.net'}
+                      autoFocus
+                    />
+                  </Field>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      color="secondary"
+                      size="small"
+                      onClick={() => setProviderEditorOpen(false)}
+                      disabled={isProviderUrlSubmitting}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" color="primary" size="small" disabled={isProviderUrlSubmitting}>
+                      {isProviderUrlSubmitting ? <Spinner color="white" /> : null}
+                      Save
+                    </Button>
+                  </div>
+                </Form>
+              ) : (
+                <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                  <span className="frameos-strong font-medium">{providerUrl}</span>
+                  <button
+                    type="button"
+                    onClick={() => setProviderEditorOpen(true)}
+                    title="Edit cloud server URL"
+                    aria-label="Edit cloud server URL"
+                    className="frameos-muted inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent !px-0 !py-0 transition hover:bg-slate-500/10 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <PencilSquareIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="@md:flex @md:items-center @md:gap-2">
+              <div className="hidden @md:block @md:w-1/3 @md:shrink-0" />
+              <div className="flex w-full flex-wrap items-center gap-2">
+                <Button
+                  size="small"
+                  color="primary"
+                  onClick={connectCloud}
+                  disabled={isCloudConnecting || providerEditorOpen}
+                  className="inline-flex items-center gap-2"
+                >
+                  {isCloudConnecting ? <Spinner color="white" /> : null}
+                  Connect to {providerHost}
+                </Button>
+              </div>
+            </div>
+            {cloudStatus?.poll_error ? (
+              <div className="text-sm text-red-500">{pollErrorMessage(cloudStatus.poll_error)}</div>
+            ) : null}
+            <div className="frameos-muted text-sm">
+              Linking is optional and outbound-only: this side asks for a code from cloud, you approve it in your cloud
+              account, and only the permissions you approve are granted. Some cloud services may one day come with plan
+              limits; local alternatives always keep working.
+            </div>
+          </>
+        )}
+        {cloudError ? <div className="text-sm text-red-500">{cloudError}</div> : null}
+      </Box>
+    </div>
+  )
+}
