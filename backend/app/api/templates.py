@@ -29,15 +29,17 @@ from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 
 
-def respond_with_template(template: Template):
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
+def safe_template_name(template: Template) -> str:
     template_name = template.name or 'Template'
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
     template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
-    template_name = ' '.join(template_name.split()) or 'Template'
+    return ' '.join(template_name.split()) or 'Template'
 
+
+def template_zip_bytes(template: Template) -> bytes:
+    """The template interchange zip: {name}/template.json + scenes.json + image.jpg.
+    Also the payload format for cloud template backups (CLOUD-TODO Phase 3)."""
+    template_name = safe_template_name(template)
     template_dict = template.to_dict()
     template_dict.pop('id', None)
     in_memory = io.BytesIO()
@@ -50,8 +52,42 @@ def respond_with_template(template: Template):
         if template.image:
             zf.writestr(f"{template_name}/image.jpg", template.image)
     in_memory.seek(0)
+    return in_memory.getvalue()
+
+
+def parse_template_zip(zip_bytes: bytes) -> dict:
+    """Inverse of template_zip_bytes: returns template fields incl. scenes/image."""
+    zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    folder_name = ''
+    for name_in_zip in zip_file.namelist():
+        if name_in_zip == 'template.json':
+            folder_name = ''
+            break
+        elif name_in_zip.endswith('/template.json'):
+            if folder_name == '' or len(name_in_zip) < len(folder_name):
+                folder_name = name_in_zip[:-len('template.json')]
+
+    data = json.loads(zip_file.read(f'{folder_name}template.json'))
+    data['scenes'] = json.loads(zip_file.read(f'{folder_name}scenes.json'))
+    image = data.get('image')
+    if isinstance(image, str) and image.startswith('./'):
+        image_path = image[len('./'):]
+        try:
+            data['image'] = zip_file.read(f'{folder_name}{image_path}')
+        except KeyError:
+            data['image'] = None
+    else:
+        data['image'] = None
+    return data
+
+
+def respond_with_template(template: Template):
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    template_name = safe_template_name(template)
     return Response(
-        in_memory.getvalue(),
+        template_zip_bytes(template),
         media_type='application/zip',
         headers={"Content-Disposition": f"attachment; filename={template_name}.zip"}
     )

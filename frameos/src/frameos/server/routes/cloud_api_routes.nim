@@ -82,7 +82,8 @@ proc resetLinkState(state: JsonNode, pollError: string = "") =
   let providerUrl = providerUrlFromState(state)
   for key in ["device_code", "user_code", "verification_uri", "verification_uri_complete",
               "expires_epoch", "access_token", "token_reference", "linked_client_id",
-              "account_id", "account_email", "scope", "poll_error"]:
+              "account_id", "account_email", "scope", "poll_error", "local_origin",
+              "connected_at", "last_inventory_sync_at", "login_states"]:
     if state.hasKey(key):
       state.delete(key)
   state["provider_url"] = %providerUrl
@@ -175,6 +176,27 @@ proc localOrigin(request: Request): string =
   if host.len == 0:
     host = "localhost"
   "http://" & host
+
+const CLOUD_LOGIN_STATE_TTL_SECONDS = 600
+
+proc linkHasScope(state: JsonNode, scope: string): bool =
+  scope in state{"scope"}.getStr("").splitWhitespace()
+
+proc pruneLoginStates(state: JsonNode) =
+  ## Drop expired pending login-handoff states (stored under login_states).
+  if state{"login_states"} == nil or state{"login_states"}.kind != JObject:
+    return
+  var expired: seq[string]
+  for key, value in state{"login_states"}:
+    if int64(value{"expires_epoch"}.getInt(0)) <= int64(epochTime()):
+      expired.add(key)
+  for key in expired:
+    state["login_states"].delete(key)
+
+proc redirectResponse(request: Request, location: string) =
+  var headers: mummy.HttpHeaders
+  headers["Location"] = location
+  request.respond(303, headers, "")
 
 proc syncAfterConnect(state: JsonNode, providerUrl, accessToken: string) =
   ## Best effort: report inventory and learn which account owns us.
@@ -272,12 +294,14 @@ proc addCloudApiRoutes*(router: var Router) =
         scopesJson.add(%scope)
       var startResponse: JsonNode
       var startCode = 0
+      let origin = localOrigin(request)
       try:
         (startCode, startResponse) = cloudRequest(providerUrl, "/api/device/start", body = %*{
           "public_display_name": displayName,
-          "local_origin": localOrigin(request),
+          "local_origin": origin,
           "reported_frameos_version": installedFrameOSVersion(),
           "capabilities": {"localFallback": true, "frame": true},
+          "client_kind": "frame",
           "scopes": scopesJson,
         })
       except CatchableError as error:
@@ -293,6 +317,8 @@ proc addCloudApiRoutes*(router: var Router) =
         resetLinkState(state)
         state["provider_url"] = %providerUrl
         state["status"] = %"connecting"
+        # The provider only accepts login-handoff redirects on this origin.
+        state["local_origin"] = %origin
         state["device_code"] = startResponse{"device_code"}
         state["user_code"] = startResponse{"user_code"}
         state["verification_uri"] = startResponse{"verification_uri"}
@@ -369,6 +395,138 @@ proc addCloudApiRoutes*(router: var Router) =
         resetLinkState(state, pollError = (if error.len > 0: error else: "unexpected status " & $pollCode))
         saveCloudLinkState(state)
         jsonResponse(request, Http200, cloudStatusPayload(state))
+  )
+
+  # ---- cloud login for the on-device admin (Phase 1) -------------------------
+  # Open endpoints: the user is not logged in yet. The provider only mints a
+  # login code for the cloud account that owns this frame's link, so a
+  # completed handoff is proof of ownership.
+
+  router.get("/api/cloud/login/options", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        let available = state{"status"}.getStr("") == "connected" and
+          linkHasScope(state, "auth:login") and adminAuthEnabled()
+        jsonResponse(request, Http200, %*{
+          "available": available,
+          "provider_url": providerUrlFromState(state),
+          "local_login_enabled": true,
+          "setup_mode": false,
+        })
+  )
+
+  router.post("/api/cloud/login/start", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      if not adminAuthEnabled():
+        jsonResponse(request, Http409, %*{"detail": "The admin panel is disabled on this frame"})
+        return
+      var providerUrl = ""
+      var accessToken = ""
+      var origin = ""
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if state{"status"}.getStr("") != "connected" or state{"access_token"}.getStr("") == "":
+          jsonResponse(request, Http409, %*{"detail": "This frame is not linked to FrameOS Cloud"})
+          return
+        if not linkHasScope(state, "auth:login"):
+          jsonResponse(request, Http403,
+            %*{"detail": "The cloud link is missing the auth:login permission; reconnect with it enabled"})
+          return
+        providerUrl = providerUrlFromState(state)
+        accessToken = state{"access_token"}.getStr("")
+        origin = state{"local_origin"}.getStr("")
+      if origin.len == 0:
+        origin = localOrigin(request)
+
+      let loginState = secureRandomToken(32)
+      var startCode = 0
+      var startResponse: JsonNode = %*{}
+      try:
+        (startCode, startResponse) = cloudRequest(providerUrl, "/api/frameos/login/start",
+          accessToken = accessToken, body = %*{
+            "redirect_uri": origin & "/api/cloud/login/callback",
+            "state": loginState,
+            "intent": "login",
+          })
+      except CatchableError as error:
+        jsonResponse(request, Http502, %*{"detail": "Could not reach " & providerUrl & ": " & error.msg})
+        return
+      if startCode != 200 or startResponse{"authorization_url"}.getStr("") == "":
+        let detail = startResponse{"error"}.getStr("unexpected status " & $startCode)
+        jsonResponse(request, Http502, %*{"detail": "FrameOS Cloud rejected the login request: " & detail})
+        return
+
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if state{"login_states"} == nil or state{"login_states"}.kind != JObject:
+          state["login_states"] = %*{}
+        pruneLoginStates(state)
+        state["login_states"][loginState] = %*{
+          "expires_epoch": int(epochTime() + float(CLOUD_LOGIN_STATE_TTL_SECONDS)),
+        }
+        saveCloudLinkState(state)
+      jsonResponse(request, Http200, %*{
+        "authorization_url": startResponse{"authorization_url"}.getStr(""),
+      })
+  )
+
+  router.get("/api/cloud/login/callback", proc(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      let stateParam = request.queryParams.getOrDefault("state", "")
+      let code = request.queryParams.getOrDefault("code", "")
+      let errorParam = request.queryParams.getOrDefault("error", "")
+
+      var providerUrl = ""
+      var accessToken = ""
+      var ownerAccountId = ""
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        pruneLoginStates(state)
+        if stateParam.len == 0 or state{"login_states"} == nil or
+            state{"login_states"}{stateParam} == nil:
+          saveCloudLinkState(state)
+          redirectResponse(request, "/login?cloudError=invalid_state")
+          return
+        state["login_states"].delete(stateParam)
+        saveCloudLinkState(state)
+        if state{"status"}.getStr("") != "connected" or state{"access_token"}.getStr("") == "":
+          redirectResponse(request, "/login?cloudError=not_connected")
+          return
+        providerUrl = providerUrlFromState(state)
+        accessToken = state{"access_token"}.getStr("")
+        ownerAccountId = state{"account_id"}.getStr("")
+
+      if errorParam.len > 0:
+        redirectResponse(request, "/login?cloudError=" & errorParam)
+        return
+      if code.len == 0 or not adminAuthEnabled():
+        redirectResponse(request, "/login?cloudError=exchange_failed")
+        return
+
+      var tokenCode = 0
+      var tokenResponse: JsonNode = %*{}
+      try:
+        (tokenCode, tokenResponse) = cloudRequest(providerUrl, "/api/frameos/login/token",
+          accessToken = accessToken, body = %*{"code": code})
+      except CatchableError:
+        redirectResponse(request, "/login?cloudError=network_error")
+        return
+      let claims = tokenResponse{"claims"}
+      if tokenCode != 200 or claims == nil or claims.kind != JObject:
+        redirectResponse(request, "/login?cloudError=exchange_failed")
+        return
+      # The provider only completes a handoff for the account that owns this
+      # link; double-check when we know who that is.
+      if ownerAccountId.len > 0 and claims{"account_id"}.getStr("") != ownerAccountId:
+        redirectResponse(request, "/login?cloudError=linked_client_required")
+        return
+
+      let sessionToken = createAdminSession()
+      var headers: mummy.HttpHeaders
+      headers["Set-Cookie"] = adminSessionCookieHeader(request, sessionToken)
+      headers["Location"] = "/admin"
+      request.respond(303, headers, "")
   )
 
   router.post("/api/cloud/disconnect", proc(request: Request) {.gcsafe.} =

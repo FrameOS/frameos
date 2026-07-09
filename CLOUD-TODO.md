@@ -57,6 +57,13 @@ the base scope plus the subset that makes sense on-device (`auth:login`,
 `backup:assets`, `remote:access`).
 
 Notes:
+- The UI never says "scopes" or "permissions": these are the install's
+  **enabled features**. They change in place through
+  `POST {provider}/api/backends/scopes` (Settings → FrameOS Cloud → Enabled
+  features) — removals apply immediately, additions need a quick owner
+  approval on the provider's device screen; the link token never changes and
+  nothing disconnects. Connecting only offers "Cloud login"; everything else
+  is enabled afterwards.
 - `remote:access` additionally requires an explicit on/off toggle locally;
   granting the scope alone must not open a tunnel.
 - "Paid?" is a product intention, not a commitment; free tiers likely include
@@ -92,23 +99,42 @@ and hold a scoped token. No user-visible service yet beyond "Connected".
 - [x] Protocol documentation: `docs/cloud-link.md` (public, AGPL-side spec).
 - [x] frameos-cloud: widen `allowedDeviceScopes` to the scope table above,
       render requested scopes + paid markers on the consent screen.
-- [ ] frameos-cloud: distinguish backend links from direct frame links
-      (`client_kind` on `linked_clients`).
-- [ ] E2E happy-path test: local backend against a local frameos-cloud dev
-      server.
+- [x] frameos-cloud: distinguish backend links from direct frame links
+      (`client_kind` on `linked_clients` and `device_authorization_requests`,
+      set from the request body or derived from `frame:link`; consent screen
+      and account page say "frame" vs "backend").
+- [x] E2E happy-path test: local backend against a local frameos-cloud dev
+      server. `backend/app/api/tests/test_cloud_e2e.py` (skipped unless
+      `FRAMEOS_CLOUD_E2E_URL` is set); runner: frameos-cloud
+      `scripts/e2e-frameos.sh`. Covers link + login handoff + backups over
+      real HTTP.
 
-### Phase 1 — cloud login (auth)
+### Phase 1 — cloud login (auth) — done
 
-- [ ] "Continue with FrameOS Cloud" on `/login` and first-run `/signup` (setup)
-      screens when a provider is configured (backend login handoff:
-      `POST /api/frameos/login/start` → redirect → code exchange).
-- [ ] Create/link local `User` for a cloud principal (`cloud_identity` table).
-      Email match is NOT proof of ownership; explicit link required.
-- [ ] Local-fallback toggle: disabling local passwords requires a verified,
-      working cloud owner session (`local_fallback_enabled` column exists).
-- [ ] Same for the frame on-device `/admin` login (`frame:link` + `auth:login`).
-- [ ] Grants sync loop (arq worker, `app/ha/sync.py` singleton-service pattern)
-      so cloud-side revocation takes effect quickly.
+- [x] "Continue with FrameOS Cloud" on `/login` and first-run `/signup` (setup)
+      screens when available (login handoff: `POST /api/frameos/login/start` →
+      browser redirect → `POST /api/frameos/login/token`; the provider only
+      completes a handoff for the account that owns the link, and enforces the
+      `auth:login` scope). Frontend: `scenes/auth/cloudLoginLogic.ts`;
+      first-run device-link flow on the signup screen uses the open
+      `/api/cloud/setup/*` endpoints (valid only while no user exists) and
+      creates the first local user from the cloud principal.
+- [x] Create/link local `User` for a cloud principal (`cloud_identity` table,
+      keyed on issuer+subject). Email match is NOT proof of ownership; a
+      logged-in user links explicitly via `POST /api/cloud/identity/link`
+      (same handoff, identity stored instead of a session).
+- [x] Local-fallback toggle (`POST /api/cloud/local-fallback`): disabling
+      requires a connected link with `auth:login`, the user's identity matching
+      the link's owner account, and a live grants check; `/api/login` then
+      rejects passwords. Losing/disconnecting the link always re-enables it.
+- [x] Same for the frame on-device `/admin` login (`frame:link` + `auth:login`):
+      open `/api/cloud/login/{options,start,callback}` in
+      `cloud_api_routes.nim`; a completed handoff mints the admin session.
+      (Also fixed the on-device login form to post to `/api/admin/login`.)
+- [x] Grants sync loop (`app/cloud/sync.py`, arq worker singleton like
+      `app/ha/sync.py`): periodic grants + inventory heartbeat, memberships
+      synced into `cloud_membership`, 401 → local link reset + local login
+      re-enabled. Nudged over Redis channel `cloud_sync` on connect.
 
 ### Phase 2 — store and galleries
 
@@ -120,12 +146,24 @@ and hold a scoped token. No user-visible service yet beyond "Connected".
 - [ ] Photo gallery service (`gallery:read`): curated feeds usable as image
       sources in scenes, quota-limited free tier.
 
-### Phase 3 — config backups
+### Phase 3 — config backups — done
 
-- [ ] Scene template collection backup/restore (`backup:templates`).
-- [ ] Frame metadata + scenes backup (`backup:frames`), automatic after deploy;
-      "Restore from FrameOS Cloud" option in backend first-run setup.
-- [ ] Export everything as a plain tarball too (the self-service alternative).
+- [x] Scene template collection backup/restore (`backup:templates`): the
+      template interchange zip is the payload; push via
+      `POST /api/cloud/backups/templates`, restore via
+      `POST /api/cloud/backups/restore`. Cloud storage:
+      `/api/backends/backups` (account-owned, replace-in-place per
+      `(account, kind, item_key)`, 8 MB/blob, 500/account).
+- [x] Frame metadata + scenes backup (`backup:frames`), automatic after deploy
+      (the cloud sync worker watches `update_frame` broadcasts for a changed
+      `last_successful_deploy_at`). Local secrets (SSH creds, access keys, TLS
+      material, wifi passwords) are stripped before upload
+      (`app/utils/cloud_backup.py`); restores regenerate credentials.
+      Backups are account-owned, so a reinstalled backend that relinks via the
+      first-run cloud setup sees and restores them (Settings → FrameOS Cloud).
+- [x] Export everything as a plain tarball too: `GET /api/backup/export`
+      (manifest + per-project frame JSON + template zips, full fidelity since
+      it stays local).
 
 ### Phase 4 — heavy transport (paid)
 

@@ -2,14 +2,40 @@ import { actions, afterMount, kea, listeners, path, reducers, selectors } from '
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 
-import { CloudStatus } from '../../types'
+import { CloudBackupItem, CloudStatus } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { getCurrentProjectId } from '../../utils/projectApi'
 
 import type { cloudLogicType } from './cloudLogicType'
 
 export interface CloudProviderForm {
   provider_url: string
 }
+
+/** The features a link can enable, in the wording the consent screen uses.
+ * Kept in sync with the scope table in CLOUD-TODO.md. */
+export const CLOUD_FEATURES: { scope: string; label: string; description: string }[] = [
+  {
+    scope: 'auth:login',
+    label: 'Cloud login',
+    description: 'Sign in to this FrameOS with your cloud account',
+  },
+  {
+    scope: 'backup:templates',
+    label: 'Template backups',
+    description: 'Backup scenes into the cloud',
+  },
+  {
+    scope: 'backup:frames',
+    label: 'Frame backups',
+    description: 'Back up frame settings + scenes automatically after each deploy',
+  },
+]
+
+const FEATURE_SCOPES = CLOUD_FEATURES.map(({ scope }) => scope)
+
+const BASE_SCOPES = ['backend:link', 'backend:read']
 
 async function cloudErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
@@ -33,6 +59,17 @@ export const cloudLogic = kea<cloudLogicType>([
     disconnectCloud: true,
     setProviderEditorOpen: (open: boolean) => ({ open }),
     setCloudError: (error: string | null) => ({ error }),
+    toggleEnabledFeature: (scope: string) => ({ scope }),
+    setFeatureDraft: (draft: string[] | null) => ({ draft }),
+    applyFeatureChanges: true,
+    cancelFeatureChange: true,
+    resetFeatureDraft: true,
+    linkCloudIdentity: true,
+    unlinkCloudIdentity: true,
+    setLocalFallback: (enabled: boolean) => ({ enabled }),
+    loadCloudBackups: true,
+    backupAllToCloud: true,
+    restoreCloudBackup: (backupId: string) => ({ backupId }),
   }),
   loaders(({ actions }) => ({
     cloudStatus: [
@@ -44,6 +81,20 @@ export const cloudLogic = kea<cloudLogicType>([
             throw new Error(await cloudErrorMessage(response, 'Failed to load FrameOS Cloud status'))
           }
           return (await response.json()) as CloudStatus
+        },
+      },
+    ],
+    cloudBackups: [
+      null as CloudBackupItem[] | null,
+      {
+        loadCloudBackups: async () => {
+          const response = await apiFetch('/api/cloud/backups')
+          if (!response.ok) {
+            actions.setCloudError(await cloudErrorMessage(response, 'Failed to list cloud backups'))
+            return null
+          }
+          const payload = await response.json()
+          return (payload.backups ?? []) as CloudBackupItem[]
         },
       },
     ],
@@ -81,6 +132,40 @@ export const cloudLogic = kea<cloudLogicType>([
         setCloudError: () => false,
       },
     ],
+    // Staged (unapplied) feature set while connected; null mirrors what is
+    // currently granted. applyFeatureChanges submits it.
+    featureDraft: [
+      null as string[] | null,
+      {
+        setFeatureDraft: (_, { draft }) => draft,
+        resetFeatureDraft: () => null,
+        disconnectCloud: () => null,
+      },
+    ],
+    isFeatureChangeSubmitting: [
+      false,
+      {
+        applyFeatureChanges: () => true,
+        loadCloudStatusSuccess: () => false,
+        setCloudError: () => false,
+      },
+    ],
+    isCloudBackupRunning: [
+      false,
+      {
+        backupAllToCloud: () => true,
+        loadCloudBackupsSuccess: () => false,
+        setCloudError: () => false,
+      },
+    ],
+    restoringBackupId: [
+      null as string | null,
+      {
+        restoreCloudBackup: (_, { backupId }) => backupId,
+        loadCloudBackupsSuccess: () => null,
+        setCloudError: () => null,
+      },
+    ],
   }),
   forms(({ actions }) => ({
     providerUrl: {
@@ -109,13 +194,38 @@ export const cloudLogic = kea<cloudLogicType>([
       (s) => [s.cloudStatus],
       (cloudStatus): string => cloudStatus?.provider_url ?? 'https://cloud.frameos.net',
     ],
+    grantedScopes: [(s) => [s.cloudStatus], (cloudStatus): string[] => cloudStatus?.link?.scopes ?? []],
+    grantedFeatures: [
+      (s) => [s.grantedScopes],
+      (scopes): string[] => scopes.filter((scope) => FEATURE_SCOPES.includes(scope)),
+    ],
+    enabledFeatureDraft: [
+      (s) => [s.featureDraft, s.grantedFeatures],
+      (featureDraft, grantedFeatures): string[] => featureDraft ?? grantedFeatures,
+    ],
+    featureChangesPending: [
+      (s) => [s.featureDraft, s.grantedFeatures],
+      (featureDraft, grantedFeatures): boolean =>
+        featureDraft !== null &&
+        (featureDraft.length !== grantedFeatures.length ||
+          featureDraft.some((scope) => !grantedFeatures.includes(scope))),
+    ],
+    featureUpgradePending: [(s) => [s.cloudStatus], (cloudStatus): boolean => Boolean(cloudStatus?.upgrade)],
+    hasBackupScope: [
+      (s) => [s.grantedScopes],
+      (scopes): boolean => scopes.includes('backup:templates') || scopes.includes('backup:frames'),
+    ],
   }),
   listeners(({ actions, values }) => ({
     connectCloud: async () => {
+      // Connecting asks for nothing beyond the link itself; features are
+      // enabled afterwards. Frames still bundle auth:login (they have no
+      // feature manager yet, and cloud login is their one cloud feature).
+      const scopes = isInFrameAdminMode() ? ['frame:link', 'auth:login'] : [...BASE_SCOPES]
       const response = await apiFetch('/api/cloud/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ scopes }),
       })
       if (!response.ok) {
         actions.setCloudError(await cloudErrorMessage(response, 'Failed to connect to FrameOS Cloud'))
@@ -124,7 +234,7 @@ export const cloudLogic = kea<cloudLogicType>([
       actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
     },
     pollCloud: async (_, breakpoint) => {
-      if (values.cloudStatus?.status !== 'connecting') {
+      if (values.cloudStatus?.status !== 'connecting' && !values.cloudStatus?.upgrade) {
         return
       }
       const response = await apiFetch('/api/cloud/poll', { method: 'POST' })
@@ -142,6 +252,10 @@ export const cloudLogic = kea<cloudLogicType>([
       if (cloudStatus?.status === 'connecting') {
         await breakpoint((cloudStatus.connection?.interval_seconds ?? 5) * 1000)
         actions.pollCloud()
+      } else if (cloudStatus?.upgrade) {
+        // A feature change is waiting for approval on the provider.
+        await breakpoint((cloudStatus.upgrade.interval_seconds ?? 5) * 1000)
+        actions.pollCloud()
       }
     },
     disconnectCloud: async () => {
@@ -158,6 +272,116 @@ export const cloudLogic = kea<cloudLogicType>([
       } else {
         actions.resetProviderUrl()
       }
+    },
+    toggleEnabledFeature: ({ scope }) => {
+      const current = values.enabledFeatureDraft
+      const next = current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]
+      actions.setFeatureDraft(next)
+    },
+    applyFeatureChanges: async () => {
+      const response = await apiFetch('/api/cloud/features', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopes: values.enabledFeatureDraft }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Failed to change the enabled features'))
+        return
+      }
+      actions.resetFeatureDraft()
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    cancelFeatureChange: async () => {
+      const response = await apiFetch('/api/cloud/features/cancel', { method: 'POST' })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Failed to cancel the feature change'))
+        return
+      }
+      actions.resetFeatureDraft()
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    linkCloudIdentity: async () => {
+      // Browser handoff: the callback returns to /settings with the identity stored.
+      const response = await apiFetch('/api/cloud/identity/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next: window.location.pathname }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || !payload.authorization_url) {
+        actions.setCloudError(payload.detail || 'Could not start the cloud account link')
+        return
+      }
+      window.location.href = payload.authorization_url
+    },
+    unlinkCloudIdentity: async () => {
+      const response = await apiFetch('/api/cloud/identity/unlink', { method: 'POST' })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not unlink the cloud account'))
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    setLocalFallback: async ({ enabled }) => {
+      const response = await apiFetch('/api/cloud/local-fallback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not change local password login'))
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    backupAllToCloud: async () => {
+      // Push every frame and template of the current project. Frames are also
+      // backed up automatically after each deploy when the scope is granted.
+      try {
+        const scopes = values.grantedScopes
+        if (scopes.includes('backup:frames')) {
+          const framesResponse = await apiFetch('/api/frames')
+          if (framesResponse.ok) {
+            const frames = (await framesResponse.json()).frames ?? []
+            for (const frame of frames) {
+              await apiFetch('/api/cloud/backups/frames', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_id: frame.id }),
+              })
+            }
+          }
+        }
+        if (scopes.includes('backup:templates')) {
+          const templatesResponse = await apiFetch('/api/templates')
+          if (templatesResponse.ok) {
+            const templates = (await templatesResponse.json()) ?? []
+            for (const template of templates) {
+              await apiFetch('/api/cloud/backups/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template_id: template.id }),
+              })
+            }
+          }
+        }
+      } catch {
+        actions.setCloudError('Backing up to FrameOS Cloud failed')
+      }
+      actions.loadCloudBackups()
+    },
+    restoreCloudBackup: async ({ backupId }) => {
+      const projectId = await getCurrentProjectId()
+      const response = await apiFetch('/api/cloud/backups/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backup_id: backupId, project_id: projectId }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Restore failed'))
+        return
+      }
+      actions.loadCloudBackups()
     },
   })),
   afterMount(({ actions }) => {

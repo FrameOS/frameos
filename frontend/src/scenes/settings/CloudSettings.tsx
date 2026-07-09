@@ -10,7 +10,8 @@ import { Label } from '../../components/Label'
 import { Spinner } from '../../components/Spinner'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
-import { cloudLogic } from './cloudLogic'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { CLOUD_FEATURES, cloudLogic } from './cloudLogic'
 
 function pollErrorMessage(pollError: string): string {
   switch (pollError) {
@@ -52,8 +53,31 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     isProviderUrlSubmitting,
     isCloudConnecting,
     isCloudDisconnecting,
+    enabledFeatureDraft,
+    featureChangesPending,
+    isFeatureChangeSubmitting,
+    cloudBackups,
+    cloudBackupsLoading,
+    isCloudBackupRunning,
+    restoringBackupId,
+    hasBackupScope,
   } = useValues(cloudLogic)
-  const { connectCloud, disconnectCloud, setProviderEditorOpen } = useActions(cloudLogic)
+  const {
+    connectCloud,
+    disconnectCloud,
+    setProviderEditorOpen,
+    toggleEnabledFeature,
+    applyFeatureChanges,
+    cancelFeatureChange,
+    resetFeatureDraft,
+    linkCloudIdentity,
+    unlinkCloudIdentity,
+    setLocalFallback,
+    loadCloudBackups,
+    backupAllToCloud,
+    restoreCloudBackup,
+  } = useActions(cloudLogic)
+  const frameAdminMode = isInFrameAdminMode()
 
   if (cloudStatus && !cloudStatus.enabled) {
     // FRAMEOS_CLOUD_URL=disabled hides the whole section
@@ -85,25 +109,6 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
               <div className="flex w-full flex-wrap items-center gap-2 text-sm">
                 <span className="frameos-strong font-medium">{providerHost}</span>
                 {link.account_email ? <span className="frameos-muted">as {link.account_email}</span> : null}
-              </div>
-            </div>
-            {link.scopes.length > 0 ? (
-              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
-                <div className="@md:w-1/3 @md:shrink-0">
-                  <Label>Permissions</Label>
-                </div>
-                <div className="flex w-full flex-wrap items-center gap-1">
-                  {link.scopes.map((scope) => (
-                    <Tag key={scope} color="gray">
-                      {scope}
-                    </Tag>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <div className="@md:flex @md:items-center @md:gap-2">
-              <div className="hidden @md:block @md:w-1/3 @md:shrink-0" />
-              <div className="flex w-full flex-wrap items-center gap-2">
                 <Button
                   size="small"
                   color="secondary"
@@ -116,6 +121,195 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </Button>
               </div>
             </div>
+            {!frameAdminMode ? (
+              <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Enabled features</Label>
+                </div>
+                <div className="w-full space-y-2 text-sm">
+                  {cloudStatus?.upgrade ? (
+                    <div className="space-y-2">
+                      <div className="frameos-muted">Approve the feature change on the cloud with this code:</div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="frameos-strong select-all font-mono text-xl font-bold tracking-widest">
+                          {cloudStatus.upgrade.user_code}
+                        </span>
+                        <Button
+                          size="small"
+                          color="primary"
+                          onClick={() =>
+                            window.open(
+                              cloudStatus.upgrade?.verification_uri_complete ??
+                                cloudStatus.upgrade?.verification_uri ??
+                                undefined,
+                              '_blank',
+                              'noopener'
+                            )
+                          }
+                        >
+                          Open {providerHost}
+                        </Button>
+                      </div>
+                      <div className="frameos-muted flex flex-wrap items-center gap-2">
+                        <Spinner />
+                        <span>Waiting for approval…</span>
+                        <button
+                          type="button"
+                          onClick={cancelFeatureChange}
+                          className="frameos-link font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {CLOUD_FEATURES.map(({ scope, label, description }) => (
+                        <label key={scope} className="flex cursor-pointer items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={enabledFeatureDraft.includes(scope)}
+                            onChange={() => toggleEnabledFeature(scope)}
+                            className="mt-0.5"
+                          />
+                          <span>
+                            <span className="frameos-strong font-medium">{label}</span>{' '}
+                            <span className="frameos-muted">— {description}</span>
+                          </span>
+                        </label>
+                      ))}
+                      {featureChangesPending ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            size="small"
+                            color="primary"
+                            onClick={applyFeatureChanges}
+                            disabled={isFeatureChangeSubmitting}
+                            className="inline-flex items-center gap-2"
+                          >
+                            {isFeatureChangeSubmitting ? <Spinner color="white" /> : null}
+                            Apply changes
+                          </Button>
+                          <Button size="small" color="secondary" onClick={resetFeatureDraft}>
+                            Revert
+                          </Button>
+                          <span className="frameos-muted">Enabling a feature needs a quick approval on the cloud.</span>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && link.scopes.includes('auth:login') ? (
+              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Cloud login</Label>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                  {cloudStatus?.identity ? (
+                    <>
+                      <span className="frameos-strong font-medium">
+                        Your account is linked as{' '}
+                        {cloudStatus.identity.email ?? cloudStatus.identity.name ?? 'cloud user'}
+                      </span>
+                      <Button size="small" color="secondary" onClick={unlinkCloudIdentity}>
+                        Unlink
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="frameos-muted">Link your cloud account to log in here with FrameOS Cloud.</span>
+                      <Button size="small" color="secondary" onClick={linkCloudIdentity}>
+                        Link my cloud account
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
+              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Local password login</Label>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                  {cloudStatus?.local_fallback_enabled === false ? (
+                    <>
+                      <Tag color="orange">Disabled</Tag>
+                      <Button size="small" color="secondary" onClick={() => setLocalFallback(true)}>
+                        Enable local passwords
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Tag color="teal">Enabled</Tag>
+                      <Button size="small" color="secondary" onClick={() => setLocalFallback(false)}>
+                        Disable local passwords
+                      </Button>
+                      <span className="frameos-muted">
+                        Requires a verified cloud login by the account that owns this install.
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && hasBackupScope ? (
+              <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Cloud backups</Label>
+                </div>
+                <div className="w-full space-y-2 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="small"
+                      color="secondary"
+                      onClick={backupAllToCloud}
+                      disabled={isCloudBackupRunning}
+                      className="inline-flex items-center gap-2"
+                    >
+                      {isCloudBackupRunning ? <Spinner /> : null}
+                      Back up now
+                    </Button>
+                    <Button size="small" color="secondary" onClick={loadCloudBackups} disabled={cloudBackupsLoading}>
+                      {cloudBackups === null ? 'Show backups' : 'Refresh'}
+                    </Button>
+                    <span className="frameos-muted">Frames are also backed up automatically after every deploy.</span>
+                  </div>
+                  {cloudBackupsLoading ? <Spinner /> : null}
+                  {cloudBackups !== null && cloudBackups.length === 0 && !cloudBackupsLoading ? (
+                    <div className="frameos-muted">No backups stored yet.</div>
+                  ) : null}
+                  {cloudBackups && cloudBackups.length > 0 ? (
+                    <div className="space-y-1">
+                      {cloudBackups.map((backup) => (
+                        <div key={backup.id} className="flex flex-wrap items-center gap-2">
+                          <Tag color={backup.kind === 'frames' ? 'blue' : 'gray'}>
+                            {backup.kind === 'frames' ? 'frame' : 'template'}
+                          </Tag>
+                          <span className="frameos-strong font-medium">{backup.name ?? backup.item_key}</span>
+                          <span className="frameos-muted">
+                            {Math.max(1, Math.round(backup.size_bytes / 1024))} KB,{' '}
+                            {new Date(backup.updated_at).toLocaleString()}
+                          </span>
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={() => restoreCloudBackup(backup.id)}
+                            disabled={restoringBackupId === backup.id}
+                            className="inline-flex items-center gap-2"
+                          >
+                            {restoringBackupId === backup.id ? <Spinner /> : null}
+                            Restore
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </>
         ) : status === 'connecting' && connection ? (
           <>
@@ -222,9 +416,8 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
               <div className="text-sm text-red-500">{pollErrorMessage(cloudStatus.poll_error)}</div>
             ) : null}
             <div className="frameos-muted text-sm">
-              Linking is optional and outbound-only: this side asks for a code from cloud, you approve it in your cloud
-              account, and only the permissions you approve are granted. Some cloud services may one day come with plan
-              limits; local alternatives always keep working.
+              Connect this backend to a cloud account to optionally enable a few extra features: cloud login, offsite
+              backups of your frames and templates, etc. Soon also remote access and more.
             </div>
           </>
         )}

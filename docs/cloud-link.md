@@ -84,9 +84,14 @@ POST {provider}/api/device/start
   "local_origin": "https://frameos.example",
   "reported_frameos_version": "2026.7.4",
   "capabilities": { "localFallback": true },
+  "client_kind": "backend",
   "scopes": ["backend:link", "backend:read"]
 }
 ```
+
+`client_kind` is `"backend"` or `"frame"`; when omitted, the provider derives
+it from the base scope (`frame:link` → frame). It is shown on the consent
+screen and stored with the link.
 
 Response `200`:
 
@@ -123,9 +128,24 @@ POST {provider}/api/device/poll
   "token_type": "Bearer",
   "scope": "backend:link backend:read",
   "linked_client_id": "…",
-  "token_reference": "…"
+  "token_reference": "…",
+  "approved_by": {
+    "account_id": "…",
+    "email": "owner@example.com",
+    "email_verified": true,
+    "name": "…",
+    "provider_issuer": "…",
+    "provider_subject": "…",
+    "sub": "…"
+  }
 }
 ```
+
+`approved_by` identifies the account that approved the link, in the same
+claim format as the login handoff. Since the approver is the person doing the
+connecting, FrameOS maps it to the connecting local user right away
+(`cloud_identity`), so cloud login works without a separate linking step. It
+is released once, with the token.
 
 The FrameOS side stores the token encrypted at rest (backend: Fernet keyed off
 `SECRET_KEY`; frame: `0600` state file) and never exposes it over its own API.
@@ -136,8 +156,22 @@ The FrameOS side stores the token encrypted at rest (backend: Fernet keyed off
 POST {provider}/api/backends/inventory     # report version/capabilities/health
 GET  {provider}/api/backends/grants        # who owns this link + granted scopes
 POST {provider}/api/backends/rotate-token  # atomic credential rotation
+POST {provider}/api/backends/scopes        # change enabled features in place
 POST {provider}/api/backends/unlink        # self-revoke on disconnect
 ```
+
+### Changing enabled features (`/api/backends/scopes`)
+
+`{"scopes": ["backend:link", "backend:read", "auth:login", …]}` — the full
+desired set. Removing scopes is applied immediately (`{"status": "updated",
+"scope": "…"}`): the token holder reducing its own privileges needs no
+consent, and the base link scope can never be dropped. Adding scopes returns
+`{"status": "approval_required", "device_code", "user_code",
+"verification_uri(_complete)", "expires_in", "interval"}`: the owner approves
+the change on the provider's device screen (only the account that owns the
+link may approve it), and the FrameOS side polls `POST /api/device/poll` as
+usual. The approved poll response carries the new `scope` and **no**
+`access_token` — the link credential never changes.
 
 `grants` response shape:
 
@@ -152,7 +186,110 @@ POST {provider}/api/backends/unlink        # self-revoke on disconnect
 
 `account_email` is a display snapshot, not an identity key. FrameOS may cache
 grant state across short provider outages, but must honor revocation as soon
-as it can reconnect (an unlinked token gets `401 invalid_link_token`).
+as it can reconnect (an unlinked token gets `401 invalid_link_token`). The
+backend runs a periodic grants sync (`backend/app/cloud/sync.py`); a 401
+resets the local link and re-enables local password login.
+
+## Login handoff (Phase 1, scope `auth:login`)
+
+Signs a browser user in to a FrameOS install with their provider account. The
+provider only completes a handoff for the account that owns the link, so a
+redeemed code is proof of ownership. Flow (all provider calls carry the link's
+Bearer token and require the `auth:login` scope, else `403 insufficient_scope`):
+
+```http
+POST {provider}/api/frameos/login/start
+{ "redirect_uri": "{local_origin}/api/cloud/login/callback", "state": "…", "intent": "login" }
+```
+
+`redirect_uri` must be on the `local_origin` reported at link time. Response:
+`{"authorization_url": "…", "expires_in": 600}`. FrameOS sends the browser to
+`authorization_url`; the provider authenticates the user, checks they own the
+link, and 30x-redirects to `redirect_uri?code=…&state=…` (or `?error=…&state=…`).
+
+```http
+POST {provider}/api/frameos/login/token
+{ "code": "…" }
+```
+
+The code is single-use and bound to the linked client. Response:
+
+```json
+{
+  "claims": { "account_id": "…", "email": "…", "email_verified": true, "name": "…", "provider_subject": "…", "sub": "…" },
+  "provider_issuer": "…"
+}
+```
+
+FrameOS-side behavior (`backend/app/api/cloud.py`, frame:
+`cloud_api_routes.nim`):
+
+- Identity mapping is keyed on `(provider_issuer, provider_subject)` and stored
+  in `cloud_identity`. A matching email is never proof of ownership: an
+  existing local user must link their cloud account explicitly (logged-in
+  handoff via `POST /api/cloud/identity/link`).
+- First-run setup: while no local user exists, the open `/api/cloud/setup/*`
+  endpoints mirror status/provider/connect/poll/disconnect, and a completed
+  login handoff creates the first user from the cloud principal.
+- Local fallback: `POST /api/cloud/local-fallback {"enabled": false}` disables
+  local password login. It requires a connected link with `auth:login`, the
+  current user's identity matching the link's owner account, and a live grants
+  check. Losing or disconnecting the link always re-enables local login.
+- Frames run the same handoff against their own open
+  `/api/cloud/login/{options,start,callback}` routes; a successful callback
+  mints the on-device admin session.
+- Logout: signing out of a FrameOS install that uses cloud login also ends the
+  provider session, or the login screen's cloud button would sign the user
+  straight back in. `POST /api/logout` returns a `cloud_logout_url`
+  (`{provider}/logout?return_to={origin}/login`) when the user has a linked
+  identity; the provider validates `return_to` against the account's linked
+  client origins (loopback hosts are allowed for development) and bounces
+  back to the install's login page.
+
+## Config backups (Phase 3, scopes `backup:templates` / `backup:frames`)
+
+Small replace-in-place blobs owned by the provider **account** (not the linked
+client), so a reinstalled backend that relinks to the same account can restore
+them. All endpoints carry the link's Bearer token and enforce the matching
+scope per kind (`templates` → `backup:templates`, `frames` → `backup:frames`):
+
+```http
+GET    {provider}/api/backends/backups                 # list (kinds the scopes allow)
+POST   {provider}/api/backends/backups                 # save/replace one blob
+GET    {provider}/api/backends/backups/{id}            # metadata + content_base64
+DELETE {provider}/api/backends/backups/{id}
+```
+
+Save request:
+
+```json
+{
+  "kind": "frames",
+  "item_key": "frame-7",
+  "name": "Kitchen frame",
+  "content_base64": "…",
+  "content_type": "application/json"
+}
+```
+
+One live copy exists per `(account, kind, item_key)`; a new save replaces it.
+Providers should cap blob size (cloud.frameos.net: 8 MB) and count per
+account, and answer `413 backup_too_large` / `403 backup_quota_exceeded`.
+
+Payload formats (defined FrameOS-side, opaque to the provider):
+
+- `templates`: the template interchange zip (`{name}/template.json`,
+  `scenes.json`, `image.jpg`) — the same file the local export produces.
+- `frames`: JSON `{"format": "frameos-frame-backup-v1", "saved_at", "project_name", "frame": {…}}`
+  where `frame` is the frame's metadata + scene JSON **with all local secrets
+  stripped** (SSH credentials, access keys, TLS material, wifi passwords —
+  see `backend/app/utils/cloud_backup.py`). Restores regenerate fresh local
+  credentials. Frame backups are pushed automatically after each successful
+  deploy while the scope is granted.
+
+The do-it-yourself alternative that needs no provider: `GET /api/backup/export`
+on the backend returns everything (full fidelity, secrets included — it stays
+local) as a plain `.tar.gz`.
 
 ## The FrameOS-side API
 
@@ -166,6 +303,26 @@ POST /api/cloud/provider    # {"provider_url": "…"} — only while disconnecte
 POST /api/cloud/connect     # optional {"provider_url", "scopes"} — starts the device flow
 POST /api/cloud/poll        # one poll step; the UI calls this on the advertised interval
 POST /api/cloud/disconnect  # best-effort cloud unlink + local reset
+```
+
+Phase 1/3 additions (login endpoints are open — the user is not logged in yet;
+the rest are login-gated; `/setup/*` only answer while no local user exists):
+
+```http
+GET  /api/cloud/login/options     # {"available", "provider_url", "local_login_enabled", "setup_mode"}
+POST /api/cloud/login/start       # {"next"?} → {"authorization_url"}
+GET  /api/cloud/login/callback    # ?code&state → session cookie + redirect
+POST /api/cloud/identity/link     # logged-in handoff that links the identity instead
+POST /api/cloud/identity/unlink
+POST /api/cloud/local-fallback    # {"enabled": bool}
+POST /api/cloud/features          # {"scopes": […]} — change enabled features in place
+POST /api/cloud/features/cancel   # forget a pending feature-change approval
+GET|POST /api/cloud/setup/{status,provider,connect,poll,disconnect}
+GET  /api/cloud/backups           # proxied list from the provider
+POST /api/cloud/backups/templates # {"template_id"} — push one template
+POST /api/cloud/backups/frames    # {"frame_id"} — push one frame
+POST /api/cloud/backups/restore   # {"backup_id", "project_id"}
+GET  /api/backup/export           # local tar.gz of everything (no cloud needed)
 ```
 
 `GET /api/cloud/status` shape (mirrored by `CloudStatus` in

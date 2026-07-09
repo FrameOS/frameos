@@ -6,8 +6,8 @@ import { TextInput } from '../../../../../frontend/src/components/TextInput'
 import { loginLogic } from './loginLogic'
 
 export default function Login() {
-  const { username, password, loading, error, theme } = useValues(loginLogic)
-  const { setUsername, setPassword, submitLogin, toggleTheme } = useActions(loginLogic)
+  const { username, password, loading, error, theme, cloudLoginAvailable } = useValues(loginLogic)
+  const { setUsername, setPassword, submitLogin, toggleTheme, startCloudLogin } = useActions(loginLogic)
   const darkMode = theme === 'dark'
 
   return (
@@ -60,6 +60,15 @@ export default function Login() {
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
+        {cloudLoginAvailable ? (
+          <button
+            type="button"
+            onClick={startCloudLogin}
+            className="frame-local-login-submit h-12 w-full rounded-xl px-5 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Continue with FrameOS Cloud
+          </button>
+        ) : null}
       </form>
     </div>
   )

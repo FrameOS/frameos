@@ -121,3 +121,72 @@ async def backend_unlink(provider_url: str, access_token: str) -> tuple[int, dic
     return await cloud_request(
         "POST", provider_url, "/api/backends/unlink", access_token=access_token, json_body={}
     )
+
+
+async def backend_rotate_token(provider_url: str, access_token: str) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "POST", provider_url, "/api/backends/rotate-token", access_token=access_token, json_body={}
+    )
+
+
+async def backend_set_scopes(
+    provider_url: str, access_token: str, scopes: list[str]
+) -> tuple[int, dict[str, Any]]:
+    """Change the link's enabled features in place. Removals apply directly
+    ("status": "updated"); additions come back as "approval_required" with a
+    device code to poll while the owner approves on the provider."""
+    return await cloud_request(
+        "POST", provider_url, "/api/backends/scopes", access_token=access_token, json_body={"scopes": scopes}
+    )
+
+
+# ---- login handoff (Phase 1) -------------------------------------------------
+
+
+async def frameos_login_start(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    """Ask the provider for an authorization URL for a browser login handoff."""
+    return await cloud_request(
+        "POST", provider_url, "/api/frameos/login/start", access_token=access_token, json_body=payload
+    )
+
+
+async def frameos_login_token(
+    provider_url: str, access_token: str, code: str
+) -> tuple[int, dict[str, Any]]:
+    """Redeem the single-use code from the login callback for identity claims."""
+    return await cloud_request(
+        "POST", provider_url, "/api/frameos/login/token", access_token=access_token, json_body={"code": code}
+    )
+
+
+# ---- config backups (Phase 3) ------------------------------------------------
+
+
+async def backup_list(provider_url: str, access_token: str) -> tuple[int, dict[str, Any]]:
+    return await cloud_request("GET", provider_url, "/api/backends/backups", access_token=access_token)
+
+
+async def backup_save(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "POST", provider_url, "/api/backends/backups", access_token=access_token, json_body=payload
+    )
+
+
+async def backup_get(
+    provider_url: str, access_token: str, backup_id: str
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "GET", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
+    )
+
+
+async def backup_delete(
+    provider_url: str, access_token: str, backup_id: str
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "DELETE", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
+    )

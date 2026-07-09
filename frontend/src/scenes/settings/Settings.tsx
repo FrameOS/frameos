@@ -160,7 +160,7 @@ function AccountSettingsSection({ onLogout }: { onLogout: () => void }): JSX.Ele
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 pt-4">
-        <H6 id="settings-account">Account</H6>
+        <H6 id="settings-account">Local account</H6>
         <Button size="small" color="secondary" onClick={onLogout} className="rounded-lg px-4 py-2">
           Logout
         </Button>

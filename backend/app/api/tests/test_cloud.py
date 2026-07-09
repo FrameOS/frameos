@@ -17,6 +17,15 @@ START_RESPONSE = {
 
 POLL_SUCCESS = {
     "access_token": "link-token-secret",
+    "approved_by": {
+        "account_id": "acc-1",
+        "email": "owner@example.com",
+        "email_verified": True,
+        "name": "Owner",
+        "provider_issuer": PROVIDER,
+        "provider_subject": "subject-1",
+        "sub": "subject-1",
+    },
     "linked_client_id": "lc-1",
     "scope": "backend:link backend:read",
     "token_reference": "tokref-1",
@@ -144,6 +153,59 @@ async def test_poll_pending_then_connected(async_client, cloud_calls, db):
     assert "link-token-secret" not in link.access_token
     assert cloud_link.decrypt_cloud_secret(link.access_token) == "link-token-secret"
     assert link.device_code is None
+
+
+@pytest.mark.asyncio
+async def test_poll_auto_links_identity_of_approver(async_client, cloud_calls, db):
+    """The cloud account that approved the link is the person connecting, so
+    the identity mapping is created without a separate handoff."""
+    from app.models.cloud import CloudIdentity
+    from app.models.user import User
+
+    _calls, responses = cloud_calls
+    await async_client.post("/api/cloud/connect", json={})
+    responses["poll"] = (200, POLL_SUCCESS)
+    response = await async_client.post("/api/cloud/poll")
+    data = response.json()
+    assert data["identity"]["email"] == "owner@example.com"
+
+    identity = db.query(CloudIdentity).first()
+    user = db.query(User).filter_by(email="test@example.com").first()
+    assert identity is not None
+    assert identity.user_id == user.id
+    assert identity.provider_subject == "subject-1"
+    assert identity.cloud_account_id == "acc-1"
+
+
+@pytest.mark.asyncio
+async def test_poll_never_steals_an_existing_identity(async_client, cloud_calls, db):
+    from app.models.cloud import CloudIdentity
+    from app.models.user import User
+
+    other = User(email="other@example.com")
+    other.set_password("password123")
+    db.add(other)
+    db.commit()
+    db.add(
+        CloudIdentity(
+            user_id=other.id,
+            provider_url=PROVIDER,
+            provider_issuer=PROVIDER,
+            provider_subject="subject-1",
+            cloud_account_id="acc-1",
+        )
+    )
+    db.commit()
+
+    _calls, responses = cloud_calls
+    await async_client.post("/api/cloud/connect", json={})
+    responses["poll"] = (200, POLL_SUCCESS)
+    response = await async_client.post("/api/cloud/poll")
+    assert response.json()["status"] == "connected"
+
+    identity = db.query(CloudIdentity).first()
+    assert identity.user_id == other.id  # unchanged
+    assert db.query(CloudIdentity).count() == 1
 
 
 @pytest.mark.asyncio
