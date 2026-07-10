@@ -74,10 +74,33 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
   } = useValues(templatesLogic({ frameId }))
   const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
+  const { setAddTemplateUrlFormValue, submitAddTemplateUrlForm } = useActions(templatesLogic({ frameId }))
+  const { isAddTemplateUrlFormSubmitting } = useValues(templatesLogic({ frameId }))
+
+  // A pasted URL is an install request, not a search: scene pages on
+  // FrameOS Cloud say "copy this link into the Templates search box".
+  const searchedUrl = /^https?:\/\/\S+$/i.test(search.trim()) ? search.trim() : null
 
   return (
     <div className="frame-tool-panel space-y-4">
-      <TextInput placeholder="Search scenes..." onChange={setSearch} value={search} />
+      <TextInput placeholder="Search scenes, or paste a scene URL..." onChange={setSearch} value={search} />
+      {searchedUrl && !inFrameAdminMode ? (
+        <Box className="frame-tool-card space-y-2 rounded-[22px] p-4">
+          <H6>Add scene from URL</H6>
+          <div className="frame-tool-muted break-all text-sm">{searchedUrl}</div>
+          <Button
+            size="small"
+            color="primary"
+            disabled={isAddTemplateUrlFormSubmitting}
+            onClick={() => {
+              setAddTemplateUrlFormValue('url', searchedUrl)
+              submitAddTemplateUrlForm()
+            }}
+          >
+            {isAddTemplateUrlFormSubmitting ? 'Adding…' : 'Add to "My local scenes"'}
+          </Button>
+        </Box>
+      ) : null}
       {showingRemoteTemplate ? (
         <Box className="frame-tool-card space-y-3 rounded-[22px] p-4">
           <H6>Add scene from URL</H6>

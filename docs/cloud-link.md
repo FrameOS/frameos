@@ -319,6 +319,20 @@ version for in-browser live previews (same access rules as the download):
 GET {provider}/api/store/scenes/{id}/scenes.json
 ```
 
+**Install by pasting a page URL.** Scene pages advertise their zip in a meta
+tag, so people can copy a scene page's URL into the search box of a frame's
+Templates panel and install from there:
+
+```html
+<meta name="frameos:zip" content="{absolute or page-relative zip URL}" />
+```
+
+FrameOS' `POST /api/templates {url}` accepts any URL: if the response is not
+a zip, it resolves `frameos:zip` from the HTML and fetches that (attaching
+the link token for provider-host URLs, so the owner's private scene pages
+work too — the provider lets the owner's linked backend fetch them with the
+Bearer token).
+
 frameos.net's website runs these previews with the
 [`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) npm package
 (built from `frontend/wasm` in this repo; its version always equals the

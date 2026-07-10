@@ -239,10 +239,22 @@ export const templatesLogic = kea<templatesLogicType>([
           body: JSON.stringify(request),
         })
         if (!response.ok) {
-          throw new Error('Failed to update frame')
+          let detail = `unexpected status ${response.status}`
+          try {
+            detail = (await response.json())?.detail ?? detail
+          } catch {
+            // keep fallback detail
+          }
+          window.alert(`Could not add the scene: ${detail}`)
+          throw new Error('Failed to add template from URL')
         }
         actions.updateTemplate(await response.json())
         actions.resetAddTemplateUrlForm()
+        // A pasted URL doubles as the search value ("Add scene from URL"
+        // quick action); clear it so the freshly added scene is visible.
+        if (values.search === formValues.url) {
+          actions.setSearch('')
+        }
       },
     },
     uploadTemplateForm: {
