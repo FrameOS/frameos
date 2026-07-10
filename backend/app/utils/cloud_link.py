@@ -190,3 +190,15 @@ async def backup_delete(
     return await cloud_request(
         "DELETE", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
     )
+
+
+# ---- store (scene publishing) --------------------------------------------------
+
+
+async def store_publish(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    """Publish a scene (template zip) to the cloud store (store:publish)."""
+    return await cloud_request(
+        "POST", provider_url, "/api/store/publish", access_token=access_token, json_body=payload
+    )

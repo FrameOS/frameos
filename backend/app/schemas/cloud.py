@@ -53,3 +53,10 @@ class CloudBackupSaveFrameRequest(BaseModel):
 class CloudBackupRestoreRequest(BaseModel):
     backup_id: str
     project_id: int
+
+
+class CloudStorePublishRequest(BaseModel):
+    template_id: str
+    # "private" | "public"; omitted = private on first publish, unchanged on
+    # republish.
+    visibility: str | None = None

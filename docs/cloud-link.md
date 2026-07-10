@@ -291,6 +291,55 @@ The do-it-yourself alternative that needs no provider: `GET /api/backup/export`
 on the backend returns everything (full fidelity, secrets included — it stays
 local) as a plain `.tar.gz`.
 
+## Scene store (Phase 2, scope `store:publish`)
+
+The provider may host an npm-style registry of scenes. Distribution reuses the
+formats FrameOS already speaks, so **browsing and installing needs no new
+protocol at all**: the public store is a plain scenes repository —
+
+```http
+GET {provider}/api/store/repository.json         # public, standard repository JSON
+GET {provider}/api/store/scenes/{id}/download    # public; ?version=N; the template zip
+GET {provider}/api/store/scenes/{id}/image       # public; preview image
+```
+
+A backend with a connected link seeds `{provider}/api/store/repository.json`
+as a normal repository once per project (deleting it is respected).
+
+Publishing carries the link's Bearer token and the `store:publish` scope:
+
+```http
+POST {provider}/api/store/publish
+```
+
+```json
+{
+  "name": "Sunrise Clock",
+  "description": "optional; falls back to the zip's template.json",
+  "visibility": "private | public — optional; private on first publish, unchanged after",
+  "content_base64": "…the template interchange zip…",
+  "content_type": "application/zip"
+}
+```
+
+Response: `{"status": "published", "scene": {"id", "slug", "name",
+"visibility", "version", "url"}}` — `url` is the scene's page on the
+provider's website.
+
+Semantics the provider must honor:
+
+- **Versions are immutable.** A publish appends version N+1; re-publishing the
+  same `name` from the same account updates that scene, a new name creates a
+  new one. Bytes under a published version never change.
+- **Private by default.** A scene is visible only to its owning account until
+  made public (on the provider's website, or by an explicit `visibility`).
+- **Moderation.** Providers can *pull* a scene: it disappears from the index,
+  downloads answer `410`, and republishing over it is rejected
+  (`403 scene_pulled`). Structural validation at publish may reject
+  `invalid_zip`, `missing_template_json`, `missing_scenes`,
+  `413 scene_too_large`, or quota errors (`403 scene_quota_exceeded` /
+  `storage_quota_exceeded`).
+
 ## The FrameOS-side API
 
 Both the backend (FastAPI, login-gated) and the frame's on-device admin server
@@ -323,6 +372,7 @@ POST /api/cloud/backups/templates # {"template_id"} — push one template
 POST /api/cloud/backups/frames    # {"frame_id"} — push one frame
 POST /api/cloud/backups/restore   # {"backup_id", "project_id"}
 GET  /api/backup/export           # local tar.gz of everything (no cloud needed)
+POST /api/cloud/store/publish     # {"template_id", "visibility"?} — publish a scene to the store
 ```
 
 `GET /api/cloud/status` shape (mirrored by `CloudStatus` in

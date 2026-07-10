@@ -31,6 +31,11 @@ export const CLOUD_FEATURES: { scope: string; label: string; description: string
     label: 'Frame backups',
     description: 'Back up frame settings + scenes automatically after each deploy',
   },
+  {
+    scope: 'store:publish',
+    label: 'Store publishing',
+    description: 'Publish scenes from this FrameOS to the FrameOS Cloud store',
+  },
 ]
 
 const FEATURE_SCOPES = CLOUD_FEATURES.map(({ scope }) => scope)

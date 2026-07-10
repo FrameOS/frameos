@@ -284,6 +284,28 @@ async def get_repositories(db: Session = Depends(get_db)):
             db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
+        # Seed the FrameOS Cloud store as a normal repository once per project
+        # when this install is linked to a cloud provider (STORE-TODO Phase 2).
+        # One-time: the settings flag means deleting the row is respected, we
+        # never re-add it behind the user's back.
+        if not db.query(Settings).filter_by(project_id=project_id, key="@system/cloud_store_repository_added").first():
+            from app.models.cloud import current_cloud_backend_link
+
+            link = current_cloud_backend_link(db)
+            if link is not None and link.status == "connected" and link.provider_url:
+                store_url = link.provider_url.rstrip("/") + "/api/store/repository.json"
+                if not db.query(Repository).filter_by(project_id=project_id, url=store_url).first():
+                    store_repository = Repository(
+                        project_id=project_id, name="FrameOS Cloud store", url=store_url
+                    )
+                    try:
+                        await store_repository.update_templates()
+                    except Exception:  # noqa: BLE001 — provider may be unreachable; seed anyway
+                        pass
+                    db.add(store_repository)
+                db.add(Settings(project_id=project_id, key="@system/cloud_store_repository_added", value="true"))
+                db.commit()
+
         repositories = project_query(db, Repository).all()
 
         for r in repositories:

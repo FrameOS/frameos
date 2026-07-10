@@ -138,11 +138,22 @@ and hold a scoped token. No user-visible service yet beyond "Connected".
 
 ### Phase 2 — store and galleries
 
-- [ ] Cloud-hosted scene/app repositories browsable in the existing
-      repositories UI (`store:read`); the current repository JSON format is
-      the interchange format.
-- [ ] Publish a scene/template to a personal cloud collection or the public
-      store (`store:publish`), with review flow on the cloud side.
+The store has its own tracker: `../frameos-cloud/STORE-TODO.md` (decisions,
+threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
+
+- [x] Cloud-hosted scene repositories browsable in the existing repositories
+      UI; the current repository JSON format is the interchange format. The
+      public store is a plain repository at
+      `{provider}/api/store/repository.json`, seeded once per project when a
+      cloud link exists (no `store:read` needed — it's public; the scope stays
+      reserved for private-collection browsing later).
+- [x] Publish a scene/template to the store (`store:publish`):
+      `POST /api/cloud/store/publish` + "Publish to FrameOS Cloud" in the
+      Templates panel. Private by default, made public on the cloud website;
+      npm-style immutable versions; post-moderation (superadmin pull/feature,
+      crates-style yank) instead of a pre-publish review flow.
+- [ ] Apps (not just scenes) in the store — needs a code-review/signing story
+      first (STORE-TODO Phase 3).
 - [ ] Photo gallery service (`gallery:read`): curated feeds usable as image
       sources in scenes, quota-limited free tier.
 
@@ -165,7 +176,7 @@ and hold a scoped token. No user-visible service yet beyond "Connected".
       (manifest + per-project frame JSON + template zips, full fidelity since
       it stays local).
 
-### Phase 4 — heavy transport (paid)
+### Phase 4 — heavy transport
 
 - [ ] Asset backup (`backup:assets`): client-side encryption (age or similar,
       key never leaves the user), content-addressed chunks, resumable.
@@ -175,7 +186,7 @@ and hold a scoped token. No user-visible service yet beyond "Connected".
       cloud.frameos.net. Explicit local toggle, visible "tunnel open" status.
 - [ ] Direct frame login from the cloud via that relay (`/admin` handoff).
 
-### Phase 5 — observability (paid)
+### Phase 5 — observability
 
 - [ ] Log shipping + retention (`telemetry:logs`).
 - [ ] Metrics shipping + dashboards (`telemetry:metrics`).

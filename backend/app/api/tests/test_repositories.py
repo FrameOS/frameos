@@ -151,3 +151,48 @@ async def test_system_repository_image_allows_session_cookie_without_token(no_au
     response = await no_auth_client.get('/api/repositories/system/samples/templates/Calendar/image?t=-1')
     assert response.status_code == 200
     assert response.content
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeypatch):
+    """A connected cloud link seeds the store repository exactly once per
+    project; deleting it is respected (STORE-TODO Phase 2)."""
+    from app.models.cloud import CloudBackendLink
+    from app.utils import cloud_link as cloud_link_utils
+
+    async def fake_update(self):
+        self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    db.add(
+        CloudBackendLink(
+            provider_url="https://cloud.frameos.net",
+            status="connected",
+            access_token=cloud_link_utils.encrypt_cloud_secret("link-token"),
+            linked_client_id="lc-1",
+            scope="backend:link backend:read",
+            local_origin="http://test",
+        )
+    )
+    db.commit()
+
+    store_url = "https://cloud.frameos.net/api/store/repository.json"
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    assert store_url in [r["url"] for r in response.json()]
+
+    repo = db.query(Repository).filter_by(url=store_url).first()
+    delete = await async_client.delete(f'/api/repositories/{repo.id}')
+    assert delete.status_code == 200
+
+    # Not re-added behind the user's back.
+    response = await async_client.get('/api/repositories')
+    assert store_url not in [r["url"] for r in response.json()]
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_does_not_seed_store_without_link(async_client, db):
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    assert all("api/store/repository.json" not in (r["url"] or "") for r in response.json())

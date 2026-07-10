@@ -11,6 +11,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import {
   FolderPlusIcon,
   CloudArrowDownIcon,
+  CloudArrowUpIcon,
   DocumentPlusIcon,
   CheckIcon,
   EyeIcon,
@@ -24,6 +25,8 @@ import clsx from 'clsx'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
+import { cloudLogic } from '../../../settings/cloudLogic'
+import { apiFetch } from '../../../../utils/apiFetch'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
@@ -66,6 +69,7 @@ export function TemplateRow({
   onToggleFavourite,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
+  const { grantedScopes } = useValues(cloudLogic)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
@@ -108,6 +112,39 @@ export function TemplateRow({
   // so there's nothing the (browser or on-frame) live preview could execute.
   const compiledOnly = templateScenes.length > 0 && !trySceneConfig && !canLoadRemoteScenes
   const showFavourite = Boolean(favouriteId && onToggleFavourite)
+  // Only locally saved templates can be published, and only when the cloud
+  // link has the store:publish feature enabled (Settings → FrameOS Cloud).
+  const canPublishToCloud = !repository && Boolean(template.id) && grantedScopes.includes('store:publish')
+
+  async function publishToCloud(): Promise<void> {
+    if (!template.id) {
+      return
+    }
+    const response = await apiFetch('/api/cloud/store/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_id: template.id }),
+    })
+    if (!response.ok) {
+      let detail = `unexpected status ${response.status}`
+      try {
+        detail = (await response.json())?.detail ?? detail
+      } catch {
+        // keep fallback detail
+      }
+      window.alert(`Could not publish to FrameOS Cloud: ${detail}`)
+      return
+    }
+    const payload = await response.json()
+    const scene = payload?.scene
+    const suffix =
+      scene?.visibility === 'public'
+        ? `It is public, now at version ${scene?.version ?? '?'}.`
+        : 'It is private until you make it public on FrameOS Cloud.'
+    if (scene?.url && window.confirm(`Published "${template.name}" to FrameOS Cloud. ${suffix}\n\nOpen it now?`)) {
+      window.open(scene.url, '_blank', 'noopener')
+    }
+  }
 
   return (
     <div
@@ -242,6 +279,15 @@ export function TemplateRow({
                           label: 'Download .zip',
                           onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
                           icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                        },
+                      ]
+                    : []),
+                  ...(canPublishToCloud
+                    ? [
+                        {
+                          label: 'Publish to FrameOS Cloud',
+                          onClick: () => void publishToCloud(),
+                          icon: <CloudArrowUpIcon className="w-5 h-5" />,
                         },
                       ]
                     : []),
