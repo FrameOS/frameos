@@ -9,6 +9,7 @@ import pytest
 from app.models.cloud import CloudBackendLink
 from app.models.template import Template
 from app.utils import cloud_link
+from app.utils.versions import current_frameos_version
 
 PROVIDER = "https://cloud.frameos.net"
 
@@ -91,6 +92,9 @@ async def test_publish_sends_template_zip(async_client, db, store_calls):
         manifest = json.loads(archive.read(manifest_path))
         scenes = json.loads(archive.read(scenes_path))
     assert manifest["name"] == "Sunrise Clock"
+    # Zips are stamped with the FrameOS version they were exported with; the
+    # store surfaces it on scene listings.
+    assert manifest["frameosVersion"] == current_frameos_version()
     assert scenes == [{"id": "scene-1", "nodes": []}]
 
 

@@ -162,6 +162,20 @@ threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
       the normal template-from-URL flow with the link token attached for
       provider URLs. Repository templates show "by {author}" and a "shell"
       risk badge with an install confirmation.
+- [x] `/scenes` overview page: every frame's scenes at a glance (grid tiles
+      with the full scene menu), followed by My cloud drive, My local scenes,
+      and repositories (read-only cards; installs happen from a frame's
+      Templates drawer).
+- [x] FrameOS version stamping: `template.json` gains `frameosVersion` at
+      export; the store keeps it per scene/version and shows it (listings,
+      scene pages, Templates rows — with a "newer than this install" upgrade
+      nudge).
+- [x] `frameos-wasm` npm package (`frontend/wasm`): the emscripten scene
+      runtime + typed preview API + a showIf-aware management interface
+      (fields, event buttons, logs). Version always equals the `frameos`
+      release version (synced by `tools/update_versions.py`), published to
+      npm by the release workflow (needs the `NPM_TOKEN` repo secret).
+      frameos-cloud uses it for in-browser live previews on scene pages.
 - [ ] Apps (not just scenes) in the store — needs a code-review/signing story
       first (STORE-TODO Phase 3).
 - [ ] Photo gallery service (`gallery:read`): curated feeds usable as image

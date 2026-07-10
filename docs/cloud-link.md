@@ -305,9 +305,24 @@ GET {provider}/api/store/scenes/{id}/image       # public; preview image
 
 Repository entries may carry extra fields older installs simply ignore:
 `author` (publisher display name, rendered as "by {name}" in the Templates
-panel) and `flags` (risk flags computed at publish, e.g. `["shell"]` for
+panel), `flags` (risk flags computed at publish, e.g. `["shell"]` for
 scenes that configure shell-running apps or code — the UI badges these and
-asks for confirmation before install).
+asks for confirmation before install), and `frameosVersion` (the FrameOS
+release the scene was exported with — the backend stamps it into
+`template.json` at export, the provider reads it from there; the UI shows
+"newer than this install" as an upgrade nudge when applicable).
+
+The provider may also serve the extracted scenes JSON of a scene's latest
+version for in-browser live previews (same access rules as the download):
+
+```http
+GET {provider}/api/store/scenes/{id}/scenes.json
+```
+
+frameos.net's website runs these previews with the
+[`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) npm package
+(built from `frontend/wasm` in this repo; its version always equals the
+FrameOS release the runtime was built from).
 
 A backend with a connected link seeds `{provider}/api/store/repository.json`
 as a normal repository once per project (deleting it is respected).

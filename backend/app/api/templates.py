@@ -26,6 +26,7 @@ from app.api import api_project, api_open
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
+from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 
 
@@ -47,6 +48,9 @@ def template_zip_bytes(template: Template) -> bytes:
         scenes = template_dict.pop('scenes', [])
         template_dict['scenes'] = './scenes.json'
         template_dict['image'] = './image.jpg'
+        # The FrameOS version this template was exported with. Informational —
+        # the store surfaces it so people know what a scene was built/tested on.
+        template_dict['frameosVersion'] = current_frameos_version()
         zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
         zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
         if template.image:

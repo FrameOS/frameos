@@ -54,7 +54,9 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          git add versions.json
+          # update_versions.py also syncs the frameos-wasm npm package version
+          # to the frameos release version.
+          git add versions.json frontend/wasm/package.json
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
 
@@ -65,6 +67,53 @@ jobs:
           echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  publish-npm:
+    name: Publish frameos-wasm to npm
+    needs: update-versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frameos-wasm
+        run: pnpm --dir frontend/wasm run build
+
+      - name: Publish frameos-wasm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not set — skipping npm publish."
+            exit 0
+          fi
+          cd frontend/wasm
+          VERSION=$(node -p "require('./package.json').version")
+          # The frameos version (and thus the package version) only bumps when
+          # the runtime changed; skip republishing an existing version.
+          if npm view "frameos-wasm@${VERSION}" version >/dev/null 2>&1; then
+            echo "frameos-wasm@${VERSION} already on npm — skipping."
+            exit 0
+          fi
+          npm publish --access public
 
   release-notes:
     name: Generate Release Notes

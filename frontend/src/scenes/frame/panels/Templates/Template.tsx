@@ -35,6 +35,29 @@ import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import { LivePreviewModal } from '../Scenes/LivePreviewModal'
+import { CURRENT_FRAMEOS_VERSION } from '../../frameDeployUtils'
+
+// True when a cloud scene was exported with a newer FrameOS than this install
+// runs — a nudge that upgrading may be needed for it to work as published.
+// CalVer (2026.7.3) compares numerically segment by segment.
+export function builtOnNewerFrameos(templateVersion?: string): boolean {
+  if (!templateVersion || !CURRENT_FRAMEOS_VERSION || CURRENT_FRAMEOS_VERSION === 'dev') {
+    return false
+  }
+  const ours = CURRENT_FRAMEOS_VERSION.split('.').map(Number)
+  const theirs = templateVersion.split('.').map(Number)
+  if (theirs.some(isNaN) || ours.some(isNaN)) {
+    return false
+  }
+  for (let i = 0; i < Math.max(ours.length, theirs.length); i++) {
+    const a = theirs[i] ?? 0
+    const b = ours[i] ?? 0
+    if (a !== b) {
+      return a > b
+    }
+  }
+  return false
+}
 
 interface TemplateProps {
   template: TemplateType
@@ -233,7 +256,26 @@ export function TemplateRow({
                   </Tag>
                 ) : null}
               </H6>
-              {template.author ? <div className="frame-tool-muted text-xs">by {template.author}</div> : null}
+              {template.author || template.frameosVersion ? (
+                <div className="frame-tool-muted text-xs">
+                  {template.author ? <>by {template.author}</> : null}
+                  {template.author && template.frameosVersion ? ' · ' : null}
+                  {template.frameosVersion ? (
+                    builtOnNewerFrameos(template.frameosVersion) ? (
+                      <span
+                        className="text-amber-500"
+                        title={`Published from FrameOS ${template.frameosVersion}; this install runs ${CURRENT_FRAMEOS_VERSION}. Upgrade FrameOS for best results.`}
+                      >
+                        FrameOS {template.frameosVersion} — newer than this install
+                      </span>
+                    ) : (
+                      <span title="The FrameOS version this scene was published from">
+                        FrameOS {template.frameosVersion}
+                      </span>
+                    )
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className={clsx('flex gap-1', showFavourite && 'pr-6')}>
               {applyTemplate ? (

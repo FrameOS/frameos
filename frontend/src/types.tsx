@@ -304,6 +304,8 @@ export interface TemplateType {
   imageHeight?: number
   /** Publisher display name (FrameOS Cloud store scenes). */
   author?: string
+  /** FrameOS version the scene was exported with (FrameOS Cloud store scenes). */
+  frameosVersion?: string
   /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
   flags?: string[]
   /** Store scene uuid ("My cloud drive" entries). */

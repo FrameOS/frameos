@@ -218,9 +218,26 @@ def main(argv: List[str] | None = None) -> int:
     output = json.dumps(ordered_versions, indent=2) + "\n"
     VERSIONS_FILE.write_text(output, encoding="utf-8")
 
+    _sync_wasm_package_version(ordered_versions)
+
     changed = "yes" if ordered_versions != existing_versions else "no"
     print(f"versions_updated={changed}")
     return 0
+
+
+def _sync_wasm_package_version(versions: Dict[str, str]) -> None:
+    """The frameos-wasm npm package version tracks the frameos release version
+    (frontend/wasm is published to npm by the release workflow)."""
+    package_json = ROOT / "frontend" / "wasm" / "package.json"
+    frameos_version = (versions.get("frameos") or "").split("+", 1)[0]
+    if not package_json.exists() or not BASE_VERSION_RE.fullmatch(frameos_version):
+        return
+    data = json.loads(package_json.read_text(encoding="utf-8"))
+    if data.get("version") == frameos_version:
+        return
+    data["version"] = frameos_version
+    package_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"frameos-wasm version set to {frameos_version}")
 
 
 if __name__ == "__main__":
