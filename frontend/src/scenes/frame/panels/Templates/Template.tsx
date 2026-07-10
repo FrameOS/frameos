@@ -30,6 +30,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
+import { cloudDriveLogic } from './cloudDriveLogic'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
@@ -132,18 +133,35 @@ export function TemplateRow({
       } catch {
         // keep fallback detail
       }
-      window.alert(`Could not publish to FrameOS Cloud: ${detail}`)
+      window.alert(`Could not save to cloud drive: ${detail}`)
       return
     }
     const payload = await response.json()
     const scene = payload?.scene
+    cloudDriveLogic.findMounted()?.actions.loadDrive()
     const suffix =
       scene?.visibility === 'public'
-        ? `It is public, now at version ${scene?.version ?? '?'}.`
-        : 'It is private until you make it public on FrameOS Cloud.'
-    if (scene?.url && window.confirm(`Published "${template.name}" to FrameOS Cloud. ${suffix}\n\nOpen it now?`)) {
+        ? `It is public on the store, now at version ${scene?.version ?? '?'}.`
+        : 'It stays private until you make it public on FrameOS Cloud.'
+    if (scene?.url && window.confirm(`Saved "${template.name}" to your cloud drive. ${suffix}\n\nOpen it now?`)) {
       window.open(scene.url, '_blank', 'noopener')
     }
+  }
+
+  // Cloud store scenes carry risk flags; installing one that can run shell
+  // commands on the frame deserves an explicit confirmation.
+  const runsShellCommands = Boolean(template.flags?.includes('shell'))
+  function confirmAndApply(template: TemplateType): void {
+    if (
+      runsShellCommands &&
+      !window.confirm(
+        `"${template.name}" configures apps or custom code that run shell commands on the frame. ` +
+          'Only install it if you trust the publisher. Install anyway?'
+      )
+    ) {
+      return
+    }
+    applyTemplate?.(template)
   }
 
   return (
@@ -205,7 +223,17 @@ export function TemplateRow({
                     compiled
                   </Tag>
                 ) : null}
+                {runsShellCommands ? (
+                  <Tag
+                    color="red"
+                    className="ml-2 normal-case"
+                    title="This scene configures apps or custom code that run shell commands on the frame"
+                  >
+                    shell
+                  </Tag>
+                ) : null}
               </H6>
+              {template.author ? <div className="frame-tool-muted text-xs">by {template.author}</div> : null}
             </div>
             <div className={clsx('flex gap-1', showFavourite && 'pr-6')}>
               {applyTemplate ? (
@@ -213,7 +241,7 @@ export function TemplateRow({
                   className="!px-2 flex gap-1"
                   size="small"
                   color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
-                  onClick={() => applyTemplate(template)}
+                  onClick={() => confirmAndApply(template)}
                   disabled={!canInstall}
                   title={unsupported ? unsupportedReason : 'Add scene'}
                 >
@@ -257,7 +285,7 @@ export function TemplateRow({
                           label: templateScenes.length
                             ? `Add ${templateScenes.length} scene${templateScenes.length === 1 ? '' : 's'} onto frame`
                             : 'Add onto frame',
-                          onClick: () => applyTemplate(template),
+                          onClick: () => confirmAndApply(template),
                           disabled: !canInstall,
                           title: unsupported ? unsupportedReason : undefined,
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
@@ -285,7 +313,7 @@ export function TemplateRow({
                   ...(canPublishToCloud
                     ? [
                         {
-                          label: 'Publish to FrameOS Cloud',
+                          label: 'Save to cloud drive',
                           onClick: () => void publishToCloud(),
                           icon: <CloudArrowUpIcon className="w-5 h-5" />,
                         },

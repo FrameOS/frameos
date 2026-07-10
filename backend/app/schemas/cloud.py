@@ -56,7 +56,16 @@ class CloudBackupRestoreRequest(BaseModel):
 
 
 class CloudStorePublishRequest(BaseModel):
-    template_id: str
+    # Either an existing template...
+    template_id: str | None = None
+    # ...or inline scenes straight off a frame ("Save to cloud drive").
+    name: str | None = None
+    description: str | None = None
+    scenes: list[dict] | None = None
+    from_frame_id: int | None = None
+    # Use this scene's cached snapshot as the preview image instead of the
+    # frame's current display.
+    image_scene_id: str | None = None
     # "private" | "public"; omitted = private on first publish, unchanged on
     # republish.
     visibility: str | None = None

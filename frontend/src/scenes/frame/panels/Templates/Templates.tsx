@@ -21,6 +21,7 @@ import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateFavouriteId } from './templateFavourites'
+import { CloudDrive } from './CloudDrive'
 
 interface TemplatesProps {
   openInstalledSceneDrawer?: boolean
@@ -138,12 +139,14 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
         </Box>
       ) : null}
 
+      {!inFrameAdminMode && <CloudDrive openInstalledSceneDrawer={openInstalledSceneDrawer} />}
+
       {!inFrameAdminMode && (
-        <div className="space-y-2">
+        <div className="space-y-2 !mt-8">
           <div className="flex justify-between w-full items-center">
             <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded('')}>
               {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
-              My scenes
+              My local scenes
               {templates.length ? ` (${templates.length})` : ''}
             </H6>
             <DropdownMenu

@@ -5,6 +5,7 @@ import {
   ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
+  CloudArrowUpIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
@@ -20,6 +21,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
+import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { openWorkspaceSceneUtility, workspaceLogic } from './workspaceLogic'
 
@@ -49,7 +51,8 @@ export function WorkspaceSceneDropDown({
   const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const { updateSceneFromRepo } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
-  const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId: frame.id }))
+  const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
+  const { hasDriveScope } = useValues(cloudDriveLogic)
   const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
   const currentScene = currentScenes.find((candidate) => candidate.id === scene.id) ?? scene
 
@@ -116,6 +119,20 @@ export function WorkspaceSceneDropDown({
               saveAsTemplate({ name: currentScene.name ?? '', exportScenes: connectedSceneIds() })
             },
             icon: <FolderPlusIcon className="h-5 w-5" />,
+          },
+          {
+            label: 'Save to cloud drive',
+            onClick: () => {
+              if (!hasDriveScope) {
+                window.alert(
+                  'FrameOS Cloud is not connected (or store publishing is disabled). Enable it under Settings → FrameOS Cloud.'
+                )
+                return
+              }
+              setTemplateModalMounted(true)
+              saveAsCloudTemplate({ name: currentScene.name ?? '', exportScenes: connectedSceneIds() })
+            },
+            icon: <CloudArrowUpIcon className="h-5 w-5" />,
           },
           {
             label: 'Download as .zip',

@@ -302,6 +302,16 @@ export interface TemplateType {
   image?: any
   imageWidth?: number
   imageHeight?: number
+  /** Publisher display name (FrameOS Cloud store scenes). */
+  author?: string
+  /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
+  flags?: string[]
+  /** Store scene uuid ("My cloud drive" entries). */
+  sceneId?: string
+  /** Scene page on the cloud store. */
+  url?: string
+  /** 'private' | 'public' ("My cloud drive" entries). */
+  visibility?: string
 }
 
 export interface TemplateForm extends TemplateType {

@@ -148,10 +148,20 @@ threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
       cloud link exists (no `store:read` needed — it's public; the scope stays
       reserved for private-collection browsing later).
 - [x] Publish a scene/template to the store (`store:publish`):
-      `POST /api/cloud/store/publish` + "Publish to FrameOS Cloud" in the
-      Templates panel. Private by default, made public on the cloud website;
-      npm-style immutable versions; post-moderation (superadmin pull/feature,
-      crates-style yank) instead of a pre-publish review flow.
+      `POST /api/cloud/store/publish` + "Save to cloud drive" in the
+      Templates panel, scene dropdowns, and the frames-home scene menus
+      (works on unsaved templates too — inline scenes straight off a frame).
+      Private by default, made public on the cloud website; npm-style
+      immutable versions; pre-publish content moderation on the provider,
+      then post-moderation (superadmin pull/feature, crates-style yank,
+      publisher bans, user reports).
+- [x] "My cloud drive" section in the Templates panel: the account's own
+      store scenes (private + public), listed above "My local scenes",
+      collapsible, with a settings promo while not connected. Backed by
+      `GET /api/cloud/store/drive` (+ image proxy); private zips install via
+      the normal template-from-URL flow with the link token attached for
+      provider URLs. Repository templates show "by {author}" and a "shell"
+      risk badge with an install confirmation.
 - [ ] Apps (not just scenes) in the store — needs a code-review/signing story
       first (STORE-TODO Phase 3).
 - [ ] Photo gallery service (`gallery:read`): curated feeds usable as image

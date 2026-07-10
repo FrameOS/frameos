@@ -303,8 +303,28 @@ GET {provider}/api/store/scenes/{id}/download    # public; ?version=N; the templ
 GET {provider}/api/store/scenes/{id}/image       # public; preview image
 ```
 
+Repository entries may carry extra fields older installs simply ignore:
+`author` (publisher display name, rendered as "by {name}" in the Templates
+panel) and `flags` (risk flags computed at publish, e.g. `["shell"]` for
+scenes that configure shell-running apps or code — the UI badges these and
+asks for confirmation before install).
+
 A backend with a connected link seeds `{provider}/api/store/repository.json`
 as a normal repository once per project (deleting it is respected).
+
+**My cloud drive** — the account's own scenes, private ones included — is the
+same repository format behind the link token:
+
+```http
+GET {provider}/api/store/account/repository.json   # Bearer + store:publish
+```
+
+Entries use absolute `image`/`zip` URLs plus a `sceneId` and `visibility`
+field. Private downloads/images accept the owner's link token, so the backend
+proxies the listing and preview images for the browser
+(`GET /api/cloud/store/drive`, `GET /api/cloud/store/drive/image/{sceneId}`)
+and attaches the token when fetching template zips from the provider host
+(and only from the provider host — it never leaks to other repositories).
 
 Publishing carries the link's Bearer token and the `store:publish` scope:
 
@@ -338,7 +358,13 @@ Semantics the provider must honor:
   (`403 scene_pulled`). Structural validation at publish may reject
   `invalid_zip`, `missing_template_json`, `missing_scenes`,
   `413 scene_too_large`, or quota errors (`403 scene_quota_exceeded` /
-  `storage_quota_exceeded`).
+  `storage_quota_exceeded`). Content moderation may reject
+  `422 content_rejected {categories}` (name/description/preview image
+  classified before anything is stored) or answer `503
+  moderation_unavailable` when the provider's moderation backend is down —
+  retry later, the publish was not accepted. Abuse controls may answer `403
+  store_banned` (account-level publish ban) or `429
+  daily_scene_limit_exceeded`.
 
 ## The FrameOS-side API
 
@@ -372,7 +398,10 @@ POST /api/cloud/backups/templates # {"template_id"} — push one template
 POST /api/cloud/backups/frames    # {"frame_id"} — push one frame
 POST /api/cloud/backups/restore   # {"backup_id", "project_id"}
 GET  /api/backup/export           # local tar.gz of everything (no cloud needed)
-POST /api/cloud/store/publish     # {"template_id", "visibility"?} — publish a scene to the store
+POST /api/cloud/store/publish     # {"template_id"} or {"name", "scenes", "from_frame_id"?,
+                                  #  "image_scene_id"?}; "visibility"? — save a scene to the cloud drive
+GET  /api/cloud/store/drive       # "My cloud drive" listing (proxied, image URLs rewritten)
+GET  /api/cloud/store/drive/image/{sceneId}   # preview image proxy (attaches the link token)
 ```
 
 `GET /api/cloud/status` shape (mirrored by `CloudStatus` in
