@@ -13,7 +13,6 @@ const sceneLoaders = {
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
-  scenesOverview: () => import('./workspace/ScenesOverview'),
   appsWorkspace: () => import('./workspace/AppsWorkspace'),
   settings: () => import('./settings/Settings'),
   login: () => import('./login/Login'),
@@ -76,9 +75,7 @@ export const getRoutes = () =>
     ...(getBasePath() ? { [getBasePath() + '/']: 'frames' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     [urls.frame(':id')]: 'frame',
-    // /scenes with no frame is the cross-frame overview; with a frame it is
-    // the scene editor workspace.
-    [urls.scenes()]: 'scenesOverview',
+    [urls.scenes()]: 'sceneWorkspace',
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',

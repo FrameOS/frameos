@@ -162,10 +162,6 @@ threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
       the normal template-from-URL flow with the link token attached for
       provider URLs. Repository templates show "by {author}" and a "shell"
       risk badge with an install confirmation.
-- [x] `/scenes` overview page: every frame's scenes at a glance (grid tiles
-      with the full scene menu), followed by My cloud drive, My local scenes,
-      and repositories (read-only cards; installs happen from a frame's
-      Templates drawer).
 - [x] FrameOS version stamping: `template.json` gains `frameosVersion` at
       export; the store keeps it per scene/version and shows it (listings,
       scene pages, Templates rows — with a "newer than this install" upgrade
