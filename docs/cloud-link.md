@@ -320,8 +320,8 @@ GET {provider}/api/store/scenes/{id}/scenes.json
 ```
 
 **Install by pasting a page URL.** Scene pages advertise their zip in a meta
-tag, so people can copy a scene page's URL into the search box of a frame's
-Templates panel and install from there:
+tag, so people can copy a scene page's URL into the search box when adding a
+new scene and install from there:
 
 ```html
 <meta name="frameos:zip" content="{absolute or page-relative zip URL}" />

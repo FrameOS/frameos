@@ -1,5 +1,8 @@
+import clsx from 'clsx'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useState } from 'react'
+
+import { applyFrameosTheme, FrameosTheme } from '../utils/frameosTheme'
 
 import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
@@ -15,7 +18,7 @@ const EMBED_FRAME_ID = 1
 
 // The postMessage protocol (all messages are objects with a `type`):
 //   parent -> editor:
-//     {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?}
+//     {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?}
 //     {type: 'frameos-editor:get-scenes'}          -> replies with :scenes
 //     {type: 'frameos-editor:select-scene', sceneId}
 //   editor -> parent:
@@ -29,6 +32,9 @@ export function EmbeddedEditor(): JSX.Element {
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const [initialized, setInitialized] = useState(false)
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
+  const [theme, setTheme] = useState<FrameosTheme>(() =>
+    document.documentElement.dataset.frameosTheme === 'dark' ? 'dark' : 'light'
+  )
 
   useEffect(() => {
     embedBridge.onScenesChanged = (nextScenes: FrameScene[]) => {
@@ -41,6 +47,10 @@ export function EmbeddedEditor(): JSX.Element {
         return
       }
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
+        if (message.theme === 'dark' || message.theme === 'light') {
+          setTheme(message.theme)
+          applyFrameosTheme(message.theme)
+        }
         initEmbedFrame({
           id: EMBED_FRAME_ID,
           scenes: message.scenes,
@@ -85,7 +95,12 @@ export function EmbeddedEditor(): JSX.Element {
   return (
     <BindLogic logic={frameLogic} props={logicProps}>
       <BindLogic logic={frameEditorsLogic} props={logicProps}>
-        <EmbeddedEditorBody selectedSceneId={selectedSceneId} setSelectedSceneId={setSelectedSceneId} scenes={scenes} />
+        <EmbeddedEditorBody
+          selectedSceneId={selectedSceneId}
+          setSelectedSceneId={setSelectedSceneId}
+          scenes={scenes}
+          theme={theme}
+        />
       </BindLogic>
     </BindLogic>
   )
@@ -95,19 +110,28 @@ function EmbeddedEditorBody({
   selectedSceneId,
   setSelectedSceneId,
   scenes,
+  theme,
 }: {
   selectedSceneId: string | null
   setSelectedSceneId: (sceneId: string) => void
   scenes: FrameScene[]
+  theme: FrameosTheme
 }): JSX.Element {
   const { activeEditor } = useValues(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   const { closeEditor } = useActions(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   const appEditorOpen = activeEditor?.kind === 'editApp'
 
+  const dark = theme === 'dark'
+  const surface = dark ? 'bg-[#16181c] text-slate-100' : 'bg-white text-slate-900'
+  const divider = dark ? 'border-slate-700' : 'border-slate-200'
+  const mutedButton = dark
+    ? 'rounded px-3 py-1 text-sm text-slate-400 hover:bg-slate-800'
+    : 'rounded px-3 py-1 text-sm text-slate-500 hover:bg-slate-100'
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white text-slate-900">
+    <div className={clsx('frameos-app-shell flex h-screen flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}>
       {scenes.length > 1 ? (
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 px-2 py-1">
+        <div className={clsx('flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1', divider)}>
           {scenes.map((scene) => (
             <button
               key={scene.id}
@@ -115,8 +139,8 @@ function EmbeddedEditorBody({
               onClick={() => setSelectedSceneId(scene.id)}
               className={
                 scene.id === selectedSceneId
-                  ? 'rounded bg-slate-200 px-3 py-1 text-sm font-semibold'
-                  : 'rounded px-3 py-1 text-sm text-slate-500 hover:bg-slate-100'
+                  ? clsx('rounded px-3 py-1 text-sm font-semibold', dark ? 'bg-slate-700' : 'bg-slate-200')
+                  : mutedButton
               }
             >
               {scene.name || scene.id}
@@ -127,14 +151,10 @@ function EmbeddedEditorBody({
       <div className="relative min-h-0 flex-1">
         {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
         {appEditorOpen && activeEditor ? (
-          <div className="absolute inset-0 z-20 flex flex-col bg-white">
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-3 py-2">
+          <div className={clsx('absolute inset-0 z-20 flex flex-col', surface)}>
+            <div className={clsx('flex shrink-0 items-center justify-between border-b px-3 py-2', divider)}>
               <div className="text-sm font-semibold">{activeEditor.title || 'Edit app source'}</div>
-              <button
-                type="button"
-                className="rounded px-3 py-1 text-sm text-slate-500 hover:bg-slate-100"
-                onClick={() => closeEditor(activeEditor.key)}
-              >
+              <button type="button" className={mutedButton} onClick={() => closeEditor(activeEditor.key)}>
                 Close
               </button>
             </div>
