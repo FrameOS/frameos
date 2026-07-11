@@ -2,7 +2,7 @@
   "projects": {
     "frameos": {
       "include": ["frameos"],
-      "exclude": ["frameos/remote", "frameos/wasm/package.json"]
+      "exclude": ["frameos/remote", "frameos/wasm/package.json", "frameos/editor/package.json"]
     },
     "remote": {
       "include": ["frameos/remote"]

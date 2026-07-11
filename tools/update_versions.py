@@ -226,21 +226,24 @@ def main(argv: List[str] | None = None) -> int:
 
 
 def _sync_wasm_package_version(versions: Dict[str, str]) -> None:
-    """The frameos-wasm npm package version tracks the frameos release version
-    (frameos/wasm is published to npm by the release workflow). The file is
-    excluded from the frameos project hash (project-folders.json) so writing
-    the version here does not itself change that hash and force a bump on the
-    next release."""
-    package_json = ROOT / "frameos" / "wasm" / "package.json"
+    """The frameos-wasm and frameos-editor npm package versions track the
+    frameos release version (both are published by the release workflow).
+    The files are excluded from the frameos project hash
+    (project-folders.json) so writing the version here does not itself
+    change that hash and force a bump on the next release."""
     frameos_version = (versions.get("frameos") or "").split("+", 1)[0]
-    if not package_json.exists() or not BASE_VERSION_RE.fullmatch(frameos_version):
+    if not BASE_VERSION_RE.fullmatch(frameos_version):
         return
-    data = json.loads(package_json.read_text(encoding="utf-8"))
-    if data.get("version") == frameos_version:
-        return
-    data["version"] = frameos_version
-    package_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    print(f"frameos-wasm version set to {frameos_version}")
+    for name in ("wasm", "editor"):
+        package_json = ROOT / "frameos" / name / "package.json"
+        if not package_json.exists():
+            continue
+        data = json.loads(package_json.read_text(encoding="utf-8"))
+        if data.get("version") == frameos_version:
+            continue
+        data["version"] = frameos_version
+        package_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        print(f"{data.get('name')} version set to {frameos_version}")
 
 
 if __name__ == "__main__":

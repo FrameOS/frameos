@@ -56,7 +56,7 @@ jobs:
           git config user.email "git@frameos.net"
           # update_versions.py also syncs the frameos-wasm npm package version
           # to the frameos release version.
-          git add versions.json frameos/wasm/package.json
+          git add versions.json frameos/wasm/package.json frameos/editor/package.json
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
 
@@ -114,7 +114,14 @@ jobs:
       - name: Build frameos-wasm
         run: pnpm --dir frameos/wasm run build
 
-      - name: Publish frameos-wasm
+      # The embedded editor bundle needs the full frontend build (its build
+      # config lives in frontend/build.mjs).
+      - name: Build the frontend and frameos-editor
+        run: |
+          pnpm --dir frontend run build
+          pnpm --dir frameos/editor run build
+
+      - name: Publish frameos-wasm and frameos-editor
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -122,15 +129,17 @@ jobs:
             echo "NPM_TOKEN secret is not set — skipping npm publish."
             exit 0
           fi
-          cd frameos/wasm
-          VERSION=$(node -p "require('./package.json').version")
-          # The frameos version (and thus the package version) only bumps when
-          # the runtime changed; skip republishing an existing version.
-          if npm view "frameos-wasm@${VERSION}" version >/dev/null 2>&1; then
-            echo "frameos-wasm@${VERSION} already on npm — skipping."
-            exit 0
-          fi
-          npm publish --access public
+          for package in frameos/wasm frameos/editor; do
+            name=$(node -p "require('./${package}/package.json').name")
+            version=$(node -p "require('./${package}/package.json').version")
+            # The frameos version (and thus the package versions) only bumps
+            # when frameos changed; skip republishing an existing version.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} already on npm — skipping."
+              continue
+            fi
+            (cd "$package" && npm publish --access public)
+          done
 
   release-notes:
     name: Generate Release Notes
