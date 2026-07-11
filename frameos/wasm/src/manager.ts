@@ -167,14 +167,17 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
       controls.appendChild(apply)
     }
 
-    // Custom event nodes as buttons.
+    // Custom event nodes as buttons. Listener nodes filter on payload values
+    // (a "button" listener with label "A" only fires for {label: "A"} — see
+    // eventNodeMatchesPayload in frameos' interpreter.nim), so the label must
+    // ride along in the payload, not just caption the button.
     const buttonRow = el('div', 'frameos-manager__row frameos-manager__row--buttons')
     for (const event of sceneEventButtons(scene)) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'frameos-manager__button'
       button.textContent = event.label || event.keyword
-      button.onclick = () => preview.sendEvent(event.keyword, {})
+      button.onclick = () => preview.sendEvent(event.keyword, event.label ? { label: event.label } : {})
       buttonRow.appendChild(button)
     }
     const render = document.createElement('button')
