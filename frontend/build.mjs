@@ -115,6 +115,7 @@ function writeEditorHtml(outputs = {}) {
       // Serve this directory anywhere; asset URLs resolve relative to it.
       window.FRAMEOS_APP_CONFIG = { ingress_path: new URL('.', location.href).pathname.replace(/\\/$/, '') }
       window.ESBUILD_LOAD_CHUNKS = function () {}
+      window.FRAMEOS_EMBEDDED_NO_BACKEND = true
       // Default theme before the bundle loads; the embedding page can
       // override it via the init message's \`theme\`.
       const theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'

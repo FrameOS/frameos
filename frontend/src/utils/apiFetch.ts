@@ -48,6 +48,13 @@ function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
 }
 
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
+  // The standalone embedded editor (editor.html sets the flag) has no
+  // backend: answer every API call with a synthetic 404 so the callers'
+  // fallbacks (embedded app catalog, fonts, validation) engage immediately
+  // instead of resolving project ids or redirecting to auth screens.
+  if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
+    return new Response('null', { status: 404, statusText: 'No backend in the embedded editor' })
+  }
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
   const headers: HeadersInit = options.headers || {}
