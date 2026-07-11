@@ -96,11 +96,19 @@ const embedAliasPlugin = {
 function writeEditorHtml(outputs = {}) {
   const distEditor = path.resolve(__dirname, 'dist-editor')
   fse.mkdirpSync(distEditor)
-  // Hashless copies of the entry + monaco workers, so the html (and
-  // configureMonaco's worker URLs) can use stable names.
+  // Hashless copies of the entry + monaco workers, so configureMonaco's
+  // worker URLs keep stable names; the html references the HASHED entry
+  // files so a redeployed bundle busts browser caches.
+  let entryJs = './static/editor.js'
+  let entryCss = './static/editor.css'
   for (const key of Object.keys(outputs)) {
     if (/^dist-editor\/static\/(editor-[A-Z0-9]+\.(js|css)|monaco\/(editor|json|css|html|ts)\.worker-[A-Z0-9]+\.js)$/.test(key)) {
       createHashlessEntrypoints(__dirname, [key])
+      if (/static\/editor-[A-Z0-9]+\.js$/.test(key)) {
+        entryJs = `./static/${path.basename(key)}`
+      } else if (/static\/editor-[A-Z0-9]+\.css$/.test(key)) {
+        entryCss = `./static/${path.basename(key)}`
+      }
     }
   }
   fse.writeFileSync(
@@ -122,13 +130,13 @@ function writeEditorHtml(outputs = {}) {
       document.documentElement.dataset.frameosTheme = theme
       document.documentElement.style.colorScheme = theme
     </script>
-    <link rel="stylesheet" href="./static/editor.css" />
+    <link rel="stylesheet" href="${entryCss}" />
   </head>
   <body>
     <div id="root"></div>
     <div id="modal" style="position: absolute; z-index: 10"></div>
     <div id="popper" style="position: absolute; z-index: 80"></div>
-    <script type="module" src="./static/editor.js"></script>
+    <script type="module" src="${entryJs}"></script>
   </body>
 </html>
 `
