@@ -74,8 +74,8 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
   } = useValues(templatesLogic({ frameId }))
   const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
-  const { setAddTemplateUrlFormValue, submitAddTemplateUrlForm } = useActions(templatesLogic({ frameId }))
-  const { isAddTemplateUrlFormSubmitting } = useValues(templatesLogic({ frameId }))
+  const { addUrlToFrame } = useActions(templatesLogic({ frameId }))
+  const { addingUrlToFrame } = useValues(templatesLogic({ frameId }))
 
   // A pasted URL is an install request, not a search: scene pages on
   // FrameOS Cloud say "copy this link into the Templates search box".
@@ -91,13 +91,10 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
           <Button
             size="small"
             color="primary"
-            disabled={isAddTemplateUrlFormSubmitting}
-            onClick={() => {
-              setAddTemplateUrlFormValue('url', searchedUrl)
-              submitAddTemplateUrlForm()
-            }}
+            disabled={addingUrlToFrame}
+            onClick={() => addUrlToFrame(searchedUrl, openInstalledSceneDrawer)}
           >
-            {isAddTemplateUrlFormSubmitting ? 'Adding…' : 'Add to "My local scenes"'}
+            {addingUrlToFrame ? 'Adding…' : 'Add to this frame'}
           </Button>
         </Box>
       ) : null}

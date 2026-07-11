@@ -109,6 +109,8 @@ export const templatesLogic = kea<templatesLogicType>([
     showAddRepository: true,
     hideAddRepository: true,
     setSearch: (search: string) => ({ search }),
+    addUrlToFrame: (url: string, openDrawer?: boolean) => ({ url, openDrawer: openDrawer ?? false }),
+    setAddingUrlToFrame: (adding: boolean) => ({ adding }),
     toggleExpanded: (url: string) => ({ url }),
     applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
@@ -304,6 +306,7 @@ export const templatesLogic = kea<templatesLogicType>([
   })),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
+    addingUrlToFrame: [false, { setAddingUrlToFrame: (_, { adding }) => adding }],
     showingModal: [
       false,
       {
@@ -463,6 +466,40 @@ export const templatesLogic = kea<templatesLogicType>([
     ],
   }),
   listeners(({ actions, values }) => ({
+    // Install the scene(s) behind a pasted URL (template zip, or a scene page
+    // with a frameos:zip meta tag) straight onto this frame — the flow behind
+    // "copy this link into the Templates search box" on FrameOS Cloud.
+    addUrlToFrame: async ({ url, openDrawer }) => {
+      actions.setAddingUrlToFrame(true)
+      try {
+        const response = await apiFetch(`/api/templates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, format: 'scenes' }),
+        })
+        if (!response.ok) {
+          let detail = `unexpected status ${response.status}`
+          try {
+            detail = (await response.json())?.detail ?? detail
+          } catch {
+            // keep fallback detail
+          }
+          window.alert(`Could not add the scene: ${detail}`)
+          return
+        }
+        const scenes = await response.json()
+        if (!Array.isArray(scenes) || scenes.length === 0) {
+          window.alert('No scenes found at this URL.')
+          return
+        }
+        actions.applyTemplate({ scenes }, openDrawer)
+        if (values.search === url) {
+          actions.setSearch('')
+        }
+      } finally {
+        actions.setAddingUrlToFrame(false)
+      }
+    },
     saveRemoteAsLocal: async ({ template, repository }) => {
       if ('zip' in template) {
         let zipPath = (template as any).zip

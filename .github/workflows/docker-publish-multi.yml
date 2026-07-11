@@ -91,8 +91,25 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The runtime assets (frameos.js/frameos.wasm) are build outputs, not
+      # committed — compile them like the Dockerfile does.
+      - name: Build the wasm runtime
+        run: |
+          cd frameos
+          nimble install -d -y
+          ./tools/build_wasm.sh
 
       - name: Build frameos-wasm
         run: pnpm --dir frontend/wasm run build

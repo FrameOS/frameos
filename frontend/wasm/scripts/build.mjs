@@ -1,6 +1,6 @@
 // Copy the wasm runtime assets into dist/assets. The assets are built by
-// frameos/tools/build_wasm.sh into frontend/public/frameos-wasm and committed
-// to the repo, so packaging never needs the emscripten toolchain.
+// frameos/tools/build_wasm.sh into frontend/public/frameos-wasm (a gitignored
+// build output — run that script first; the release workflow does).
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'

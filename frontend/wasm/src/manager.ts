@@ -272,7 +272,7 @@ function injectStyles(): void {
   style.textContent = `
 .frameos-manager { display: flex; flex-direction: column; gap: 12px; font: 14px/1.4 system-ui, sans-serif; }
 .frameos-manager__stage { display: flex; justify-content: center; background: #0f172a; border-radius: 12px; padding: 12px; }
-.frameos-manager__canvas { max-width: 100%; height: auto; border-radius: 6px; background: #fff; }
+.frameos-manager__canvas { max-width: 100%; max-height: min(60vh, 480px); width: auto; height: auto; border-radius: 6px; background: #fff; }
 .frameos-manager__status { min-height: 1.2em; font-size: 12px; opacity: 0.7; }
 .frameos-manager__status--error { color: #dc2626; opacity: 1; }
 .frameos-manager__controls { display: flex; flex-direction: column; gap: 8px; }
