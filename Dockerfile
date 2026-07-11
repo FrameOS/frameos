@@ -142,6 +142,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml versions.json ./
 COPY frontend/package.json frontend/package.json
 COPY frameos/frontend/package.json frameos/frontend/package.json
+COPY frameos/wasm/package.json frameos/wasm/package.json
 RUN pnpm install --frozen-lockfile
 
 COPY frameos/frameos.nimble frameos/nimble.lock frameos/nim.cfg frameos/config.nims frameos/

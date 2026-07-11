@@ -1,4 +1,4 @@
 packages:
   - frontend
-  - frontend/wasm
   - frameos/frontend
+  - frameos/wasm

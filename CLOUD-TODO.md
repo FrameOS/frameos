@@ -166,7 +166,7 @@ threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
       export; the store keeps it per scene/version and shows it (listings,
       scene pages, Templates rows — with a "newer than this install" upgrade
       nudge).
-- [x] `frameos-wasm` npm package (`frontend/wasm`): the emscripten scene
+- [x] `frameos-wasm` npm package (`frameos/wasm`): the emscripten scene
       runtime + typed preview API + a showIf-aware management interface
       (fields, event buttons, logs). Version always equals the `frameos`
       release version (synced by `tools/update_versions.py`), published to

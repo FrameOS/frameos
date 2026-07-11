@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageDir = dirname(dirname(fileURLToPath(import.meta.url)))
-const assetsSource = join(packageDir, '..', 'public', 'frameos-wasm')
+const assetsSource = join(packageDir, '..', '..', 'frontend', 'public', 'frameos-wasm')
 const assetsTarget = join(packageDir, 'dist', 'assets')
 
 const files = ['frameos.js', 'frameos.wasm', 'preview-worker.js']

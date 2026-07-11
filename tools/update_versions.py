@@ -227,8 +227,11 @@ def main(argv: List[str] | None = None) -> int:
 
 def _sync_wasm_package_version(versions: Dict[str, str]) -> None:
     """The frameos-wasm npm package version tracks the frameos release version
-    (frontend/wasm is published to npm by the release workflow)."""
-    package_json = ROOT / "frontend" / "wasm" / "package.json"
+    (frameos/wasm is published to npm by the release workflow). The file is
+    excluded from the frameos project hash (project-folders.json) so writing
+    the version here does not itself change that hash and force a bump on the
+    next release."""
+    package_json = ROOT / "frameos" / "wasm" / "package.json"
     frameos_version = (versions.get("frameos") or "").split("+", 1)[0]
     if not package_json.exists() or not BASE_VERSION_RE.fullmatch(frameos_version):
         return

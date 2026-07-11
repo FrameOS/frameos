@@ -335,7 +335,7 @@ Bearer token).
 
 frameos.net's website runs these previews with the
 [`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) npm package
-(built from `frontend/wasm` in this repo; its version always equals the
+(built from `frameos/wasm` in this repo; its version always equals the
 FrameOS release the runtime was built from).
 
 A backend with a connected link seeds `{provider}/api/store/repository.json`

@@ -56,7 +56,7 @@ jobs:
           git config user.email "git@frameos.net"
           # update_versions.py also syncs the frameos-wasm npm package version
           # to the frameos release version.
-          git add versions.json frontend/wasm/package.json
+          git add versions.json frameos/wasm/package.json
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
 
@@ -112,7 +112,7 @@ jobs:
           ./tools/build_wasm.sh
 
       - name: Build frameos-wasm
-        run: pnpm --dir frontend/wasm run build
+        run: pnpm --dir frameos/wasm run build
 
       - name: Publish frameos-wasm
         env:
@@ -122,7 +122,7 @@ jobs:
             echo "NPM_TOKEN secret is not set — skipping npm publish."
             exit 0
           fi
-          cd frontend/wasm
+          cd frameos/wasm
           VERSION=$(node -p "require('./package.json').version")
           # The frameos version (and thus the package version) only bumps when
           # the runtime changed; skip republishing an existing version.
