@@ -2,8 +2,12 @@
 
 The [FrameOS](https://frameos.net) visual scene editor — the same node-graph editor the FrameOS
 backend ships — as an embeddable static bundle. No backend needed: the app catalog and app sources
-are embedded at build time, scenes go in and come back out as JSON over `postMessage`. JS app
-sources can be viewed and edited in the built-in Monaco editor.
+are embedded at build time, scenes go in and come back out as JSON over `postMessage`. The editor
+carries the full scene workspace: the node diagram plus side panels for scene settings, state
+variables, the app catalog, events and raw scene JSON; app sources open in a Monaco editor modal.
+When the [`frameos-wasm`](https://www.npmjs.com/package/frameos-wasm) package's assets are served
+next to the bundle (at `./frameos-wasm/` relative to `dist/`), the Preview panel runs the edited
+scenes live through the FrameOS WebAssembly runtime — canvas, scene state and runtime logs included.
 
 The package version always equals the FrameOS release it was built from.
 
@@ -36,7 +40,10 @@ editor.destroy()
 
 Parent → editor:
 
-- `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?}`
+- `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}` —
+  `theme` is `'light' | 'dark'`; `previewProxyUrl` is an optional same-origin endpoint the in-editor wasm live
+  preview routes CORS-blocked HTTP requests through; `description` is the embedding page's description of the
+  scene, shown in the Scene settings panel
 - `{type: 'frameos-editor:get-scenes'}` — replies with a `:scenes` message
 - `{type: 'frameos-editor:select-scene', sceneId}`
 

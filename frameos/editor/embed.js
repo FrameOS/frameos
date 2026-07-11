@@ -1,7 +1,7 @@
 // Parent-side helper for embedding the FrameOS scene editor. Creates an
 // iframe pointing at the editor bundle (this package's dist/index.html,
 // served from your own host) and speaks its postMessage protocol:
-//   in:  {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?}
+//   in:  {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}
 //        {type: 'frameos-editor:get-scenes'} · {type: 'frameos-editor:select-scene', sceneId}
 //   out: {type: 'frameos-editor:ready'} · {type: 'frameos-editor:scenes', scenes}
 //
@@ -17,6 +17,9 @@ export function createFrameOSEditor({
   width = 800,
   height = 480,
   interval = 300,
+  theme,
+  previewProxyUrl,
+  description,
   onScenesChanged,
   onReady,
 }) {
@@ -42,7 +45,18 @@ export function createFrameOSEditor({
     }
     if (message.type === 'frameos-editor:ready') {
       ready = true
-      post({ type: 'frameos-editor:init', scenes: latestScenes, sceneId, mode, width, height, interval })
+      post({
+        type: 'frameos-editor:init',
+        scenes: latestScenes,
+        sceneId,
+        mode,
+        width,
+        height,
+        interval,
+        theme,
+        previewProxyUrl,
+        description,
+      })
       onReady?.()
     } else if (message.type === 'frameos-editor:scenes' && Array.isArray(message.scenes)) {
       latestScenes = message.scenes
@@ -76,7 +90,18 @@ export function createFrameOSEditor({
     /** Replace the loaded scenes (re-initializes the editor). */
     setScenes: (nextScenes, nextSceneId) => {
       latestScenes = nextScenes
-      post({ type: 'frameos-editor:init', scenes: nextScenes, sceneId: nextSceneId, mode, width, height, interval })
+      post({
+        type: 'frameos-editor:init',
+        scenes: nextScenes,
+        sceneId: nextSceneId,
+        mode,
+        width,
+        height,
+        interval,
+        theme,
+        previewProxyUrl,
+        description,
+      })
     },
     selectScene: (nextSceneId) => post({ type: 'frameos-editor:select-scene', sceneId: nextSceneId }),
     destroy: () => {

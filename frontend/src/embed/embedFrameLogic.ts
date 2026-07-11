@@ -1,11 +1,18 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { forms } from 'kea-forms'
 import { FrameScene, FrameType } from '../types'
+import { frameFormSceneErrors } from '../scenes/frame/frameFormSceneErrors'
 import type { embedFrameLogicType } from './embedFrameLogicType'
 
 // In-memory replacement for frameLogic's editor-facing slice, used by the
 // standalone embedded editor build (see frameLogicShim.ts and build.mjs).
 // Scenes come in over postMessage and edits flow back out through
 // embedBridge — there is no backend and nothing to deploy.
+//
+// frameForm is a real kea-forms form (like the one on the real frameLogic):
+// the settings/state/events panels render <Form logic={frameLogic}
+// formKey="frameForm"> fields, and logics like scenesLogic connect to
+// form-generated actions such as submitFrameFormSuccess.
 
 export interface EmbedFrameLogicProps {
   frameId: number
@@ -21,8 +28,8 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
   key((props: EmbedFrameLogicProps) => props.frameId),
   actions({
     initEmbedFrame: (frame: Partial<FrameType>) => ({ frame }),
-    setFrameFormValues: (values: Record<string, any>) => ({ values }),
     applyTemplate: (template: any, openDrawer?: boolean) => ({ template, openDrawer }),
+    sendEvent: (event: string, payload?: Record<string, any>) => ({ event, payload }),
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({
       sceneId,
@@ -30,6 +37,19 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
       nodeData,
     }),
   }),
+  forms(() => ({
+    frameForm: {
+      options: {
+        showErrorsOnTouch: true,
+      },
+      defaults: {} as FrameType,
+      errors: (state: Partial<FrameType>) => ({
+        scenes: frameFormSceneErrors(state.scenes),
+      }),
+      // Nothing to save: edits already stream out through embedBridge.
+      submit: async () => {},
+    },
+  })),
   reducers({
     frame: [
       null as Partial<FrameType> | null,
@@ -37,20 +57,12 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
         initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => frame,
       },
     ],
-    frameForm: [
-      {} as Partial<FrameType>,
-      {
-        initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame }),
-        setFrameFormValues: (state: Partial<FrameType>, { values }: { values: Record<string, any> }) => ({
-          ...state,
-          ...values,
-        }),
-      },
-    ],
+    frameForm: {
+      initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame } as FrameType),
+    },
   }),
   selectors({
     frameId: [() => [(_: any, props: EmbedFrameLogicProps) => props.frameId], (frameId: number) => frameId],
-    frameFormErrors: [() => [], () => ({})],
     scenes: [
       (s: any) => [s.frame, s.frameForm],
       (frame: Partial<FrameType> | null, frameForm: Partial<FrameType>): FrameScene[] =>
@@ -77,11 +89,24 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
         (scenes.find((scene) => scene.id === 'default' || scene.default) || scenes[0])?.id ?? null,
     ],
     unsavedChanges: [() => [], () => false],
+    // No deploys and no frame-admin mode in the embed; connected logics
+    // (scenesLogic and friends) still expect these to exist.
+    lastDeploy: [() => [], () => null],
+    isFrameAdminMode: [() => [], () => false],
   }),
   listeners(({ actions, values }: { actions: any; values: any }) => ({
     setFrameFormValues: async (_: any, breakpoint: any) => {
       await breakpoint(150)
       embedBridge.onScenesChanged?.(values.frameForm?.scenes ?? [])
+    },
+    // Individual form-field edits (kea-forms Field components dispatch
+    // setFrameFormValue) must stream out the same way batched edits do.
+    setFrameFormValue: async (_: any, breakpoint: any) => {
+      await breakpoint(150)
+      embedBridge.onScenesChanged?.(values.frameForm?.scenes ?? [])
+    },
+    sendEvent: () => {
+      // No frame to send events to in the embed.
     },
     updateScene: ({ sceneId, scene }: { sceneId: string; scene: Partial<FrameScene> }) => {
       const frameForm = values.frameForm
