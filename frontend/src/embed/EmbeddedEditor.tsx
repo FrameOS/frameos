@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useState } from 'react'
 
-import { applyFrameosTheme, FrameosTheme } from '../utils/frameosTheme'
+import { FrameosTheme } from '../utils/frameosTheme'
 
 import { frameEditorsLogic } from '../scenes/frame/frameEditorsLogic'
 import { Diagram } from '../scenes/frame/panels/Diagram/Diagram'
@@ -49,7 +49,8 @@ export function EmbeddedEditor(): JSX.Element {
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
         if (message.theme === 'dark' || message.theme === 'light') {
           setTheme(message.theme)
-          applyFrameosTheme(message.theme)
+          document.documentElement.dataset.frameosTheme = message.theme
+          document.documentElement.style.colorScheme = message.theme
         }
         initEmbedFrame({
           id: EMBED_FRAME_ID,
@@ -148,7 +149,7 @@ function EmbeddedEditorBody({
           ))}
         </div>
       ) : null}
-      <div className="relative min-h-0 flex-1">
+      <div className="scene-editor-canvas scene-editor-canvas-full @container relative min-h-0 flex-1 overflow-hidden">
         {selectedSceneId ? <Diagram sceneId={selectedSceneId} showToolbar={false} /> : null}
         {appEditorOpen && activeEditor ? (
           <div className={clsx('absolute inset-0 z-20 flex flex-col', surface)}>
