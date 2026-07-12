@@ -5,6 +5,7 @@ import { loaders } from 'kea-loaders'
 import { CloudBackupItem, CloudStatus } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { inHassioIngress } from '../../utils/inHassioIngress'
 import { getCurrentProjectId } from '../../utils/projectApi'
 
 import type { cloudLogicType } from './cloudLogicType'
@@ -39,6 +40,13 @@ export const CLOUD_FEATURES: { scope: string; label: string; description: string
 ]
 
 const FEATURE_SCOPES = CLOUD_FEATURES.map(({ scope }) => scope)
+
+/** The features this runtime can offer. Home Assistant ingress has no login
+ * of its own (Home Assistant authenticates the user), so there is no
+ * cloud-login permission to ask for or receive there. */
+export function availableCloudFeatures(): typeof CLOUD_FEATURES {
+  return inHassioIngress() ? CLOUD_FEATURES.filter(({ scope }) => scope !== 'auth:login') : CLOUD_FEATURES
+}
 
 const BASE_SCOPES = ['backend:link', 'backend:read']
 

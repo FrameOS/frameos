@@ -11,7 +11,8 @@ import { Spinner } from '../../components/Spinner'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { CLOUD_FEATURES, cloudLogic } from './cloudLogic'
+import { inHassioIngress } from '../../utils/inHassioIngress'
+import { availableCloudFeatures, cloudLogic } from './cloudLogic'
 
 function pollErrorMessage(pollError: string): string {
   switch (pollError) {
@@ -164,7 +165,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     </div>
                   ) : (
                     <>
-                      {CLOUD_FEATURES.map(({ scope, label, description }) => (
+                      {availableCloudFeatures().map(({ scope, label, description }) => (
                         <label key={scope} className="flex cursor-pointer items-start gap-2">
                           <input
                             type="checkbox"
@@ -201,7 +202,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </div>
               </div>
             ) : null}
-            {!frameAdminMode && link.scopes.includes('auth:login') ? (
+            {!frameAdminMode && !inHassioIngress() && link.scopes.includes('auth:login') ? (
               <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
                   <Label>Cloud login</Label>
@@ -228,7 +229,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </div>
               </div>
             ) : null}
-            {!frameAdminMode && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
+            {!frameAdminMode && !inHassioIngress() && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
               <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
                   <Label>Local password login</Label>
