@@ -51,6 +51,11 @@ const EMBED_FRAME_ID = 1
 //     {type: 'frameos-editor:ready'}               once listening
 //     {type: 'frameos-editor:scenes', scenes}      after every edit (debounced)
 //                                                  and as the :get-scenes reply
+//     {type: 'frameos-editor:save-screenshot', dataUrl, sceneId}
+//                                                  Preview panel screenshot; reply with
+//                                                  {type: 'frameos-editor:screenshot-saved', ok,
+//                                                   error?, fallbackDownload?} or the editor
+//                                                  downloads the PNG locally after a timeout
 // `previewProxyUrl` is an optional same-origin endpoint the wasm live preview
 // routes CORS-blocked HTTP requests through. `description` is the embedding
 // page's description of the scene (scenes.json doesn't carry one), shown in

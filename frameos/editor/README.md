@@ -52,6 +52,9 @@ Editor → parent:
 - `{type: 'frameos-editor:ready'}` — once listening (the helper auto-sends `init` on this)
 - `{type: 'frameos-editor:scenes', scenes}` — after every edit (debounced) and as the
   `:get-scenes` reply
+- `{type: 'frameos-editor:save-screenshot', dataUrl, sceneId}` — the Preview panel captured a frame;
+  reply with `{type: 'frameos-editor:screenshot-saved', ok, error?, fallbackDownload?}` to store it
+  yourself, or stay silent and the editor downloads the PNG locally after a short timeout
 
 ## Demo
 

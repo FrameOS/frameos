@@ -4,6 +4,7 @@
 //   in:  {type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}
 //        {type: 'frameos-editor:get-scenes'} · {type: 'frameos-editor:select-scene', sceneId}
 //   out: {type: 'frameos-editor:ready'} · {type: 'frameos-editor:scenes', scenes}
+//        {type: 'frameos-editor:save-screenshot', dataUrl, sceneId} (ack with 'frameos-editor:screenshot-saved')
 //
 // The editor bundle is AGPL-licensed FrameOS code running at arm's length in
 // its own frame; this helper is part of the same package.

@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CursorArrowRaysIcon, KeyIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { CameraIcon, CursorArrowRaysIcon, KeyIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 
 import { Button } from '../components/Button'
 import { Checkbox } from '../components/Checkbox'
@@ -54,6 +54,8 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; scene
   } = useActions(livePreviewLogic({ frameId }))
   const { apps } = useValues(appsModel)
 
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [screenshotStatus, setScreenshotStatus] = useState<string | null>(null)
   const [showPublicState, setShowPublicState] = useState(true)
   const [showPrivateState, setShowPrivateState] = useState(false)
   // Non-null while the "edit state" modal is open; holds the edited values.
@@ -92,6 +94,49 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; scene
       }
     }
     setPreviewSettings(nested)
+  }
+
+  // "Save screenshot": offer the current frame to the embedding page (which
+  // can store it — FrameOS Cloud adds it to the scene's image gallery). If no
+  // parent acknowledges within a moment, fall back to a plain PNG download.
+  const saveScreenshot = (): void => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      setScreenshotStatus('Nothing rendered yet')
+      return
+    }
+    const dataUrl = canvas.toDataURL('image/png')
+    setScreenshotStatus('Saving…')
+    let settled = false
+    const onAck = (event: MessageEvent): void => {
+      const message = event.data
+      if (!message || message.type !== 'frameos-editor:screenshot-saved') {
+        return
+      }
+      settled = true
+      window.removeEventListener('message', onAck)
+      setScreenshotStatus(message.ok ? 'Saved to scene images' : message.error || 'Saving failed')
+      if (!message.ok && message.fallbackDownload !== false) {
+        downloadDataUrl(dataUrl)
+        setScreenshotStatus('Screenshot downloaded')
+      }
+    }
+    window.addEventListener('message', onAck)
+    window.parent?.postMessage({ type: 'frameos-editor:save-screenshot', dataUrl, sceneId }, '*')
+    window.setTimeout(() => {
+      if (!settled) {
+        window.removeEventListener('message', onAck)
+        downloadDataUrl(dataUrl)
+        setScreenshotStatus('Screenshot downloaded')
+      }
+    }, 3000)
+  }
+
+  const downloadDataUrl = (dataUrl: string): void => {
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = `${sceneId}-preview.png`
+    link.click()
   }
 
   // The wasm runtime starts when the panel opens and stops when it closes;
@@ -161,7 +206,10 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; scene
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="relative flex shrink-0 items-center justify-center">
         <canvas
-          ref={registerCanvas}
+          ref={(element) => {
+            canvasRef.current = element
+            registerCanvas(element)
+          }}
           width={previewDimensions.width}
           height={previewDimensions.height}
           className="max-h-[40vh] max-w-full cursor-zoom-in rounded-lg border border-slate-500/20"
@@ -246,6 +294,16 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; scene
         <Button size="small" color="secondary" onClick={forcePreviewRender}>
           Re-render
         </Button>
+        <Button
+          size="small"
+          color="secondary"
+          className="flex items-center gap-1"
+          onClick={saveScreenshot}
+          title="Save the current frame as an image of this scene"
+        >
+          <CameraIcon className="h-4 w-4" />
+          Save screenshot
+        </Button>
         {sceneEventButtons.map((event) => (
           <Button
             key={`${event.keyword}:${event.label ?? ''}`}
@@ -271,6 +329,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; scene
           </Button>
         ))}
         <span className="frameos-muted ml-auto flex items-center gap-1.5 text-xs">
+          {screenshotStatus ? <span>{screenshotStatus}</span> : null}
           {renderCount > 0 ? (
             <>
               {renderCount} render{renderCount === 1 ? '' : 's'}
