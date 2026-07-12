@@ -80,8 +80,21 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
       options.onFrame?.(frame)
     },
     onState: (state) => {
-      editedValues = {}
-      renderControls()
+      // Drop only the edits the runtime has confirmed; anything the user
+      // typed but has not applied yet must survive a render (or any other
+      // state report) instead of being silently reverted.
+      const unconfirmed: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(editedValues)) {
+        if (String(state?.[key] ?? '') !== String(value ?? '')) {
+          unconfirmed[key] = value
+        }
+      }
+      editedValues = unconfirmed
+      // Rebuilding the form mid-typing would steal focus and discard the
+      // in-progress value; the next interaction re-renders anyway.
+      if (!controls.contains(document.activeElement)) {
+        renderControls()
+      }
       options.onState?.(state)
     },
     onLog: (message) => {
@@ -149,6 +162,9 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
     for (const field of visible) {
       controls.appendChild(fieldRow(field, values[field.name]))
     }
+    // One row of actions: Apply & render (when there are fields), the
+    // scene's custom event buttons, and a plain Render.
+    const buttonRow = el('div', 'frameos-manager__row frameos-manager__row--buttons')
     if (visible.length > 0) {
       const apply = document.createElement('button')
       apply.type = 'button'
@@ -164,14 +180,13 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
         }
         preview.setSceneState(state)
       }
-      controls.appendChild(apply)
+      buttonRow.appendChild(apply)
     }
 
     // Custom event nodes as buttons. Listener nodes filter on payload values
     // (a "button" listener with label "A" only fires for {label: "A"} — see
     // eventNodeMatchesPayload in frameos' interpreter.nim), so the label must
     // ride along in the payload, not just caption the button.
-    const buttonRow = el('div', 'frameos-manager__row frameos-manager__row--buttons')
     for (const event of sceneEventButtons(scene)) {
       const button = document.createElement('button')
       button.type = 'button'
