@@ -10,6 +10,7 @@ import {
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import {
   FolderPlusIcon,
+  ArrowTopRightOnSquareIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
   DocumentPlusIcon,
@@ -340,6 +341,17 @@ export function TemplateRow({
                           label: 'Save to "My scenes"',
                           onClick: () => saveRemoteAsLocal(template),
                           icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                        },
+                      ]
+                    : []),
+                  // Store scenes (and cloud drive entries) carry their page's
+                  // URL in the repository index.
+                  ...(template.url
+                    ? [
+                        {
+                          label: 'View store page',
+                          onClick: () => window.open(template.url, '_blank', 'noopener'),
+                          icon: <ArrowTopRightOnSquareIcon className="w-5 h-5" />,
                         },
                       ]
                     : []),
