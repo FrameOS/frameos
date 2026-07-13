@@ -734,6 +734,7 @@ void frameos_nim_flush_logs(void)
 static const char *TAG = "fos_nim_http";
 /* Never clamp below this, so small fetches keep working under pressure. */
 #define FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN (512u * 1024u)
+#define FOS_NIM_HTTP_BODY_HEADROOM (64u * 1024u)
 
 static uint8_t *http_error_response(int *out_status, size_t *out_len, const char *fmt, ...)
 {
@@ -906,11 +907,16 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
 
     if (max_bytes == 0) max_bytes = 10 * 1024 * 1024;
     size_t nim_copy_limit = max_bytes;
-    /* Clamp to live PSRAM instead of a fixed constant: half the largest free
-     * block still has to hold the decode target and intermediates. The old
-     * fixed 4MB cap silently rejected 4-6MB images the Nim side allowed. */
+    /* Clamp to live PSRAM. The image decoders stream (scaled JPEG source,
+     * PNG scanline streaming straight out of the inflate window), so the
+     * response body itself is the only large contiguous allocation a decode
+     * needs — the render target already exists. Leave a small headroom in
+     * the block instead of reserving half of it for buffers that are no
+     * longer allocated; a multi-MB gallery PNG must fit next to a 7.7MB
+     * canvas on a fragmented 16MB module. */
     size_t largest_spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    size_t dynamic_limit = largest_spiram / 2;
+    size_t dynamic_limit = largest_spiram > FOS_NIM_HTTP_BODY_HEADROOM
+        ? largest_spiram - FOS_NIM_HTTP_BODY_HEADROOM : 0;
     if (dynamic_limit < FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN) {
         dynamic_limit = FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN;
     }

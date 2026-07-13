@@ -32,12 +32,12 @@ const ExifToolTimeoutMs = 10_000
 const DisplayDecodeMaxEdge* = 2048
 const DisplayDecodeMaxPixels* = DisplayDecodeMaxEdge * DisplayDecodeMaxEdge
 const ImageEngineImageMagick* = "imagemagick"
+const EmbeddedMaxRemoteSourceWidth = 800
 when defined(frameosEmbedded):
   const EmbeddedSmallDecodeCopyBytes = 512 * 1024
   const EmbeddedMaxDirectDecodeCopyBytes = 2 * 1024 * 1024
   const EmbeddedMaxDirectPngBytes = 6 * 1024 * 1024
   const EmbeddedMaxDirectRgbaBytes = 5 * 1024 * 1024
-  const EmbeddedMaxRemoteSourceWidth = 800
 
 var runtimeImageEngine = ""
 
@@ -298,12 +298,15 @@ when defined(frameosEmbedded):
       if len > EmbeddedMaxDirectPngBytes:
         raise newException(PixieError,
           &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {len div 1024}K")
-      guardEmbeddedDirectDecode(data, len, format)
       GC_fullCollect()
       when compiles(decodePngScaledInto(data, len, target, fit)):
+        # Streamed scanline decode: pixie's own decode budget guards the
+        # peak (a row plus fixed overhead), so the full-RGBA guard would
+        # only reject images this path never allocates whole.
         decodePngScaledInto(data, len, target, fit)
         return target
       else:
+        guardEmbeddedDirectDecode(data, len, format)
         target.scaleAndDrawImage(decodeImageWithFallback(data, len), scaledFitPlacement(fit))
         return target
     decodeImageWithFallback(data, len)
@@ -328,12 +331,13 @@ when defined(frameosEmbedded):
       if data.len > EmbeddedMaxDirectPngBytes:
         raise newException(PixieError,
           &"Direct on-device PNG decode over {EmbeddedMaxDirectPngBytes div 1024}K needs the low-memory media proxy; fetched {data.len div 1024}K")
-      guardEmbeddedDirectDecode(data.cstring, data.len, format)
       GC_fullCollect()
       when compiles(decodePngScaledInto(data, target, fit)):
+        # Streamed scanline decode; see the pointer variant above
         decodePngScaledInto(data, target, fit)
         return target
       else:
+        guardEmbeddedDirectDecode(data.cstring, data.len, format)
         target.scaleAndDrawImage(decodeImageWithFallback(data), scaledFitPlacement(fit))
         return target
     decodeImageWithFallback(data)
@@ -538,44 +542,52 @@ proc decodeDataUrlInto*(dataUrl: string, target: Image, fit = fitCover): Image =
     return decodeImageWithFallback(decodedData, target, fit)
   return decodeImageWithFallback(decodedData)
 
+proc upsertQueryParam(query, key, value: string): string =
+  var parts = if query.len > 0: query.split('&') else: @[]
+  var updated = false
+  for part in parts.mitems:
+    let equals = part.find('=')
+    let partKey = if equals >= 0: part[0 ..< equals] else: part
+    if partKey == key:
+      part = encodeUrl(key) & "=" & encodeUrl(value)
+      updated = true
+  if not updated:
+    parts.add(encodeUrl(key) & "=" & encodeUrl(value))
+  parts.join("&")
+
+# RULE: NEVER route frame image downloads through a backend/image proxy, and
+# don't reach for host-side resize params as the fix either. Frames render
+# independently, from the original source. When a source serves images too
+# large for on-device decode, THE fix is better streaming on-device
+# (incremental inflate + row-by-row unfilter/scale into the target, so a
+# multi-MB PNG needs its compressed body plus a few rows — not a full-size
+# RGBA buffer). Proxies are for in-browser previews only. The unsplash
+# rewrite below predates this rule and stays as-is.
+proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
+  if target.isNil or target.width <= 0 or target.height <= 0:
+    return url
+  var parsed: Uri
+  try:
+    parsed = parseUri(url)
+  except CatchableError:
+    return url
+  if parsed.scheme notin ["http", "https"]:
+    return url
+
+  case parsed.hostname.toLowerAscii()
+  of "images.unsplash.com":
+    let requestedWidth = min(target.width, EmbeddedMaxRemoteSourceWidth)
+    let requestedHeight = min(target.height, EmbeddedMaxRemoteSourceWidth)
+    parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
+    parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
+    parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
+    if parsed.query.find("auto=") < 0:
+      parsed.query = upsertQueryParam(parsed.query, "auto", "format")
+    return $parsed
+  else:
+    return url
+
 when defined(frameosEmbedded):
-  proc upsertQueryParam(query, key, value: string): string =
-    var parts = if query.len > 0: query.split('&') else: @[]
-    var updated = false
-    for part in parts.mitems:
-      let equals = part.find('=')
-      let partKey = if equals >= 0: part[0 ..< equals] else: part
-      if partKey == key:
-        part = encodeUrl(key) & "=" & encodeUrl(value)
-        updated = true
-    if not updated:
-      parts.add(encodeUrl(key) & "=" & encodeUrl(value))
-    parts.join("&")
-
-  proc embeddedSizedRemoteImageUrl(url: string, target: Image): string =
-    if target.isNil or target.width <= 0 or target.height <= 0:
-      return url
-    var parsed: Uri
-    try:
-      parsed = parseUri(url)
-    except CatchableError:
-      return url
-    if parsed.scheme notin ["http", "https"]:
-      return url
-
-    case parsed.hostname.toLowerAscii()
-    of "images.unsplash.com":
-      let requestedWidth = min(target.width, EmbeddedMaxRemoteSourceWidth)
-      let requestedHeight = min(target.height, EmbeddedMaxRemoteSourceWidth)
-      parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
-      parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
-      parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
-      if parsed.query.find("auto=") < 0:
-        parsed.query = upsertQueryParam(parsed.query, "auto", "format")
-      return $parsed
-    else:
-      return url
-
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
