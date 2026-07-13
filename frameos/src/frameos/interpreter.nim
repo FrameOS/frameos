@@ -1,5 +1,6 @@
 import frameos/types
 import frameos/values
+from frameos/utils/image import renderError
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
@@ -413,7 +414,21 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "error": $e.msg,
                 "stacktrace": e.getStackTrace()
               })
-              # Leave field at default; still proceed.
+              # If this input takes an image, hand the consumer an image with
+              # the producer's error on it ("response too large", HTTP errors,
+              # …) — a nil image would only render as "No image provided".
+              # Non-image fields reject the value and keep their defaults.
+              try:
+                let errorWidth =
+                  if context.hasImage and not context.image.isNil: context.image.width
+                  else: self.frameConfig.width
+                let errorHeight =
+                  if context.hasImage and not context.image.isNil: context.image.height
+                  else: self.frameConfig.height
+                setInterpretedAppField(keyword, app, inputName,
+                  Value(kind: fkImage, img: renderError(errorWidth, errorHeight, $e.msg)))
+              except Exception:
+                discard # Leave field at default; still proceed.
 
       if self.appInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]
