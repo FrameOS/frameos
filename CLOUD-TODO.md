@@ -32,6 +32,14 @@ Two repos are involved:
 5. **AGPL-clean boundary.** The protocol (endpoints, payloads, token semantics)
    is documented in `docs/cloud-link.md` in this repo. The private repo may do
    whatever it wants behind that contract.
+6. **NO image proxies for frames. EVER.** Frames fetch and render images
+   directly from their sources — never through the backend or the cloud as a
+   resizing/fetching middleman, and not via host-side resize params either.
+   If a source serves images too large for a device, the fix is better
+   on-device streaming decode (incremental inflate + row-by-row
+   unfilter/scale into the render target). Proxies are acceptable for
+   in-browser previews only. Do not re-implement proxying; it has been built
+   and reverted before.
 
 ## Permission scopes
 

@@ -39,6 +39,16 @@
 - When adding a frame model key that is tracked for deploy changes in `frontend/src/scenes/frame/frameLogic.ts`, also add a marker to `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`. For unreleased work, use the next patch after the current `versions.json` FrameOS base version.
 
 ## Device runtime (Nim) notes
+- **HARD RULE — no image proxies for frames, EVER.** Frames download and render
+  images directly from their sources; never route a frame's image fetches
+  through the backend (or any other middleman) to resize or fetch on its
+  behalf, and don't paper over device limits with host-side resize params
+  either. When a source serves images too large for a device, THE fix is
+  better on-device streaming decode (incremental inflate, row-by-row
+  unfilter/scale into the target — a multi-MB PNG should need its compressed
+  body plus a few rows, not a full-resolution RGBA buffer). Proxies are fine
+  for in-browser previews only. Proxying has been implemented and reverted
+  before — do not implement it again.
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.
 - Entry point `src/frameos.nim` waits on `startFrameOS()` defined under `src/frameos/frameos`. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`. 【F:frameos/src/frameos.nim†L1-L6】
 - JavaScript repo apps under `repo/apps/code` are catalog templates for custom code apps. Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
