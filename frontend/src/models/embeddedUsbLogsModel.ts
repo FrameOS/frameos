@@ -50,6 +50,11 @@ interface EmbeddedUsbApiCommandOptions {
   promptIfNeeded?: boolean
   port?: SerialPort
   mirrorOutput?: boolean
+  // Keep the port open after the command instead of close/reopen per call.
+  // Open/close churn toggles DTR/RTS, which can spuriously reset
+  // USB-Serial/JTAG boards — use this when polling (e.g. waiting for the
+  // board to boot after flashing).
+  keepOpen?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -144,6 +149,37 @@ async function openPort(port: SerialPort, options?: { resetBaud?: boolean }): Pr
 
 function appendSelectedUsbPort(frameId: number, port: SerialPort): void {
   lastPorts.set(frameId, port)
+}
+
+// When the board reboots (e.g. after flashing), its USB device re-enumerates
+// and the SerialPort object we hold goes permanently stale — every open()
+// fails with NetworkError. The replacement object is already granted, so it
+// shows up in getPorts(); match it by USB vendor/product id.
+export function isSerialPortGoneError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /failed to open serial port|device has been lost|port is closed/i.test(message)
+}
+
+export async function resolveLiveSerialPort(original: SerialPort): Promise<SerialPort | null> {
+  let ports: SerialPort[] = []
+  try {
+    ports = await navigator.serial.getPorts()
+  } catch (error) {
+    return null
+  }
+  const info = original.getInfo()
+  const candidates = ports.filter((port) => {
+    const portInfo = port.getInfo()
+    return portInfo.usbVendorId === info.usbVendorId && portInfo.usbProductId === info.usbProductId
+  })
+  // SerialPort.connected is Chrome 117+; treat missing support as connected
+  const connected = candidates.filter((port) => (port as { connected?: boolean }).connected !== false)
+  // Prefer the original object so a second board with the same vendor/product
+  // id is never picked while the original is still alive
+  if (connected.includes(original)) {
+    return original
+  }
+  return connected[0] ?? null
 }
 
 async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promise<T>): Promise<T> {
@@ -320,7 +356,8 @@ async function runUsbApiCommandOnPort(
   command: string,
   payload?: Uint8Array,
   timeoutMs = 30000,
-  onText?: (text: string) => void
+  onText?: (text: string) => void,
+  keepOpen = false
 ): Promise<EmbeddedUsbApiCommandResult> {
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
@@ -334,7 +371,7 @@ async function runUsbApiCommandOnPort(
     onText?.(decoded)
   }
   try {
-    await openPort(port, { resetBaud: true })
+    await openPort(port, { resetBaud: !keepOpen })
     if (!port.readable || !port.writable) {
       throw new Error('USB serial port is not open')
     }
@@ -475,7 +512,33 @@ async function runEmbeddedUsbApiCommandLocked(
       message: `Sending USB command: ${command}`,
       status: 'connecting',
     })
-    const result = await runUsbApiCommandOnPort(port, command, payload, options?.timeoutMs, appendCommandLogText)
+    let result: EmbeddedUsbApiCommandResult
+    try {
+      result = await runUsbApiCommandOnPort(
+        port,
+        command,
+        payload,
+        options?.timeoutMs,
+        appendCommandLogText,
+        options?.keepOpen
+      )
+    } catch (error) {
+      const replacement = isSerialPortGoneError(error) ? await resolveLiveSerialPort(port) : null
+      if (!replacement || replacement === port) {
+        throw error
+      }
+      appendUsbLine(frameId, `[USB API] USB device re-enumerated; retrying ${command} on the new port`)
+      port = replacement
+      appendSelectedUsbPort(frameId, port)
+      result = await runUsbApiCommandOnPort(
+        port,
+        command,
+        payload,
+        options?.timeoutMs,
+        appendCommandLogText,
+        options?.keepOpen
+      )
+    }
     flushCommandLogText()
     appendUsbLine(frameId, `[USB API] ${command} complete`)
     return result
@@ -487,7 +550,9 @@ async function runEmbeddedUsbApiCommandLocked(
     if (hadLogStream) {
       await startEmbeddedUsbLogStream(frameId, port)
     } else {
-      await closePort(port)
+      if (!options?.keepOpen) {
+        await closePort(port)
+      }
       embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
         message: null,
         status: 'idle',

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BoltIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { useActions, useValues } from 'kea'
-import type { IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
+import type { ESPLoader, IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
 
 import { Spinner } from '../../components/Spinner'
 import {
@@ -9,6 +9,7 @@ import {
   embeddedUsbLogStreamSessionPort,
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
+  resolveLiveSerialPort,
   runEmbeddedUsbApiCommand,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
@@ -27,15 +28,57 @@ type TraceableTransportInternals = { trace: (message: string) => void; lastTrace
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
 const POST_FLASH_BOOT_WAIT_MS = 7000
-const POST_FLASH_USB_READY_TIMEOUT_MS = 120000
+// First boot after an erase-all flash formats the 24MB SPIFFS state
+// partition before the console starts — measured ~180s on a XIAO ESP32-S3
+// with 32MB flash. Wait well past that.
+const POST_FLASH_USB_READY_TIMEOUT_MS = 360000
 const POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS = 8000
 const POST_FLASH_USB_READY_POLL_MS = 2500
+const POST_FLASH_USB_RESET_HINT_MS = 240000
 const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
 const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// ESP32-S3 RTC_CNTL registers, values from esptool's targets/esp32s3.py
+const S3_RTC_CNTL_OPTION1_REG = 0x6000812c
+const S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK = 0x1
+const S3_RTC_CNTL_WDTCONFIG0_REG = 0x60008098
+const S3_RTC_CNTL_WDTCONFIG1_REG = 0x6000809c
+const S3_RTC_CNTL_WDTWPROTECT_REG = 0x600080b0
+const S3_RTC_CNTL_WDT_WKEY = 0x50d83aa1
+// WDT_EN | STG0=reset system | sys reset length | cpu reset length
+const S3_RTC_WDT_RESET_CONFIG = (0x80000000 | (5 << 28) | (1 << 8) | 2) >>> 0
+
+// Reset the chip via the RTC watchdog, like `esptool --after watchdog-reset`.
+// A DTR/RTS reset pulse goes through the USB-Serial/JTAG strap logic, which on
+// some boards (XIAO ESP32-S3) latches the chip back into ROM download mode so
+// the app never boots after flashing (arduino-esp32#6762). The watchdog reset
+// runs over the flasher-stub protocol and never touches the strap pins.
+async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
+  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
+    return false
+  }
+  try {
+    await loader.writeReg(S3_RTC_CNTL_OPTION1_REG, 0, S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK)
+    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, S3_RTC_CNTL_WDT_WKEY)
+    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG1_REG, 2000)
+  } catch (error) {
+    return false
+  }
+  // The watchdog fires ~20ms after the arming write — often before the
+  // arming or lock command's response makes it back, dropping the USB
+  // device mid-exchange. Errors from here on mean the reset happened,
+  // which is the success case.
+  try {
+    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG0_REG, S3_RTC_WDT_RESET_CONFIG)
+    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, 0)
+  } catch (error) {}
+  await sleep(500)
+  return true
 }
 
 type FirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -253,6 +296,7 @@ async function uploadScenesOverUsbAfterFlash(
         payload,
         port,
         timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
+        keepOpen: true,
       })
       return true
     } catch (error) {
@@ -291,31 +335,48 @@ function usbStatusSummary(text: string | undefined): string {
   }
 }
 
+// Returns the port the board answered on: the watchdog reset after flashing
+// re-enumerates the USB device, so the original SerialPort object may have
+// been replaced by a fresh grant from getPorts().
 async function waitForUsbApiReadyAfterFlash(
   frame: FrameType,
   port: SerialPort,
   onStatus: (message: string) => void
-): Promise<void> {
-  const deadline = Date.now() + POST_FLASH_USB_READY_TIMEOUT_MS
+): Promise<SerialPort> {
+  const started = Date.now()
+  const deadline = started + POST_FLASH_USB_READY_TIMEOUT_MS
   let attempt = 0
   let lastError: unknown = null
-  onStatus('Waiting for board USB API')
+  let resetHintShown = false
+  onStatus('Waiting for board USB API. First boot after flashing formats onboard storage — this can take ~3 minutes.')
 
   while (Date.now() < deadline) {
     attempt += 1
+    const livePort = await resolveLiveSerialPort(port)
+    if (livePort && livePort !== port) {
+      appendBrowserFlashLog(frame.id, 'USB device re-enumerated after reboot; switching to the new port.')
+      port = livePort
+    }
     try {
       const result = await runEmbeddedUsbApiCommand(frame.id, 'status', {
         port,
         timeoutMs: Math.min(POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS, Math.max(1000, deadline - Date.now())),
         mirrorOutput: false,
+        keepOpen: true,
       })
       appendBrowserFlashLog(frame.id, usbStatusSummary(result.text))
-      return
+      return port
     } catch (error) {
       lastError = error
       if (attempt === 1 || attempt % 4 === 0) {
         const detail = error instanceof Error ? error.message : String(error)
         appendBrowserFlashLog(frame.id, `USB API not ready yet: ${detail}`)
+      }
+      if (!resetHintShown && Date.now() - started > POST_FLASH_USB_RESET_HINT_MS) {
+        resetHintShown = true
+        onStatus(
+          'Board still not responding after the storage-format window. Try pressing its RESET button — it may be stuck in download mode.'
+        )
       }
       await sleep(Math.min(POST_FLASH_USB_READY_POLL_MS, Math.max(0, deadline - Date.now())))
     }
@@ -472,14 +533,22 @@ export function EmbeddedWebFlasher({
           setProgress(total > 0 ? Math.round((written / total) * 100) : null)
         },
       })
-      // esptool-js's built-in hard reset never asserts RTS, which leaves
-      // USB-Serial/JTAG boards (e.g. XIAO ESP32-S3) stuck in the flasher
-      // stub. Pulse the reset line the way the esptool CLI does.
-      await transport.setDTR(false)
-      await transport.setRTS(true)
-      await sleep(100)
-      await transport.setRTS(false)
-      await transport.setDTR(false)
+      // Prefer a watchdog reset: a DTR/RTS pulse can strap USB-Serial/JTAG
+      // boards back into ROM download mode instead of booting the app. Fall
+      // back to pulsing the reset line the way the esptool CLI does —
+      // esptool-js's built-in hard reset never asserts RTS at all.
+      if (!(await watchdogResetAfterFlash(loader))) {
+        try {
+          await transport.setDTR(false)
+          await transport.setRTS(true)
+          await sleep(100)
+          await transport.setRTS(false)
+          await transport.setDTR(false)
+        } catch (error) {
+          // The port disappears if the chip already reset mid-command; the
+          // post-flash USB API wait re-acquires it and sorts out the rest.
+        }
+      }
 
       setPhase('preparing')
       setProgress(null)
@@ -511,7 +580,7 @@ export function EmbeddedWebFlasher({
       if (streamLogsAfterFlash && port) {
         try {
           await sleep(POST_FLASH_BOOT_WAIT_MS)
-          await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
+          port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
           const scenesUploaded = await uploadScenesOverUsbAfterFlash(frame, port, setFlashMessage)
           if (scenesUploaded) {
             const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {
