@@ -25,6 +25,8 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -52,7 +54,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 42  # ESP32 preserves Wikimedia image aspect before render placement
+EMBEDDED_FIRMWARE_VERSION = 43  # Chunked HTTP bodies + segmented/streamed PNG decode
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -383,6 +385,51 @@ def embedded_pixie_path() -> Path | None:
     if (candidate / "src" / "pixie").is_dir():
         return candidate.resolve()
     return None
+
+
+_source_fingerprint_cache: tuple[float, str] | None = None
+
+
+def embedded_firmware_source_fingerprint() -> str:
+    """Fingerprint of the source trees a firmware image is built from, so
+    cached builds go stale when the code changes — not only when the frame's
+    settings or the manually-bumped EMBEDDED_FIRMWARE_VERSION do. Covers this
+    repo (the dirs baked into the image) and the local pixie checkout the
+    build uses when present. Dirty trees hash their actual diff, so iterating
+    on sources triggers rebuilds without a commit."""
+    global _source_fingerprint_cache
+    now = time.monotonic()
+    if _source_fingerprint_cache is not None and now - _source_fingerprint_cache[0] < 5.0:
+        return _source_fingerprint_cache[1]
+
+    def repo_fingerprint(repo: Path, paths: list[str]) -> str:
+        try:
+            described = subprocess.run(
+                ["git", "-C", str(repo), "describe", "--tags", "--dirty", "--always"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip() or "unknown"
+            if described.endswith("-dirty"):
+                scope = ["--"] + paths if paths else []
+                diff = subprocess.run(
+                    ["git", "-C", str(repo), "diff", "HEAD"] + scope,
+                    capture_output=True, text=True, timeout=10,
+                ).stdout
+                status = subprocess.run(
+                    ["git", "-C", str(repo), "status", "--porcelain"] + scope,
+                    capture_output=True, text=True, timeout=10,
+                ).stdout
+                digest = hashlib.sha256((diff + status).encode("utf-8")).hexdigest()[:12]
+                return f"{described}-{digest}"
+            return described
+        except Exception:
+            return "unknown"
+
+    parts = [repo_fingerprint(REPO_ROOT, ["frameos", "embedded", "repo"])]
+    pixie_path = embedded_pixie_path()
+    parts.append(repo_fingerprint(pixie_path, []) if pixie_path else "no-local-pixie")
+    fingerprint = "+".join(parts)
+    _source_fingerprint_cache = (now, fingerprint)
+    return fingerprint
 
 
 def embedded_panel_for_frame(frame: Frame) -> str:
@@ -1018,6 +1065,15 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             "error": "The generated firmware was built from an older firmware project version",
         })
     if firmware.get("status") == "ready":
+        source_fingerprint = firmware.get("sourceFingerprint")
+        if isinstance(source_fingerprint, str) and \
+                source_fingerprint != embedded_firmware_source_fingerprint():
+            return with_embedded_firmware_layout(frame, {
+                **firmware,
+                "status": "stale",
+                "error": "The generated firmware was built from older FrameOS sources",
+            })
+    if firmware.get("status") == "ready":
         try:
             firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
         except ValueError:
@@ -1468,6 +1524,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
+        "sourceFingerprint": embedded_firmware_source_fingerprint(),
         "appSize": ota_bin.stat().st_size,
         "bootloaderSize": (build_dir / "bootloader" / "bootloader.bin").stat().st_size,
         "partitionTableSize": (build_dir / "partition_table" / "partition-table.bin").stat().st_size,
