@@ -19,6 +19,7 @@ when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
+  import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
   # fallbacks are compiled out and pixie does all decoding.
@@ -343,12 +344,13 @@ when defined(frameosEmbedded):
     decodeImageWithFallback(data)
 
   proc httpErrorDetail(response: BoundedHttpBufferResponse): string =
-    if response.body == nil or response.bodyLen <= 0:
+    if response.chunks.len == 0 or response.bodyLen <= 0:
       return ""
-    let copyLen = min(response.bodyLen, 512)
+    let first = response.chunks[0]
+    let copyLen = min(first.len, 512)
     var snippet = newString(copyLen)
     if copyLen > 0:
-      copyMem(addr snippet[0], response.body, copyLen)
+      copyMem(addr snippet[0], first.data, copyLen)
     if response.bodyLen > copyLen:
       snippet.add("...")
     ": " & snippet
@@ -588,6 +590,33 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     return url
 
 when defined(frameosEmbedded):
+  proc decodeImageChunks(chunks: seq[HttpBodyChunk], totalLen: int,
+      target: Image, fit: ScaledDecodeFit): Image =
+    ## Decodes an image whose bytes arrived in multiple download chunks.
+    ## PNGs stream straight from the chunks as inflate segments — no
+    ## contiguous copy of the file is ever assembled; other formats
+    ## coalesce into one buffer first.
+    let first = chunks[0]
+    if first.len > 8 and equalMem(first.data, pngSignature[0].unsafeAddr, 8) and
+        not target.isNil and target.width > 0 and target.height > 0:
+      GC_fullCollect()
+      when compiles(decodePngScaledInto([InflateSegment()], target, fit)):
+        var segments = newSeq[InflateSegment](chunks.len)
+        for i, chunk in chunks:
+          segments[i] = InflateSegment(
+            data: cast[ptr UncheckedArray[uint8]](chunk.data), len: chunk.len)
+        decodePngScaledInto(segments, target, fit)
+        return target
+    var data = newString(totalLen)
+    var pos = 0
+    for chunk in chunks:
+      if chunk.len > 0:
+        copyMem(addr data[pos], chunk.data, chunk.len)
+        pos += chunk.len
+    if not target.isNil and target.width > 0 and target.height > 0:
+      return decodeImageWithFallback(data, target, fit)
+    decodeImageWithFallback(data)
+
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
@@ -596,7 +625,9 @@ when defined(frameosEmbedded):
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
       let image =
-        if not target.isNil:
+        if response.chunks.len > 1:
+          decodeImageChunks(response.chunks, response.bodyLen, target, fit)
+        elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)
         else:
           decodeImageWithFallback(response.body, response.bodyLen)
