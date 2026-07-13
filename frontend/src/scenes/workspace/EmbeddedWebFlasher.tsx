@@ -348,7 +348,7 @@ async function waitForUsbApiReadyAfterFlash(
   let attempt = 0
   let lastError: unknown = null
   let resetHintShown = false
-  onStatus('Waiting for board USB API. First boot after flashing formats onboard storage — this can take ~3 minutes.')
+  onStatus('Waiting for board USB API. A brand-new or fully erased board formats its storage first (~3 minutes).')
 
   while (Date.now() < deadline) {
     attempt += 1
@@ -518,16 +518,18 @@ export function EmbeddedWebFlasher({
       const firmware = await downloadFirmware(downloadUrl)
 
       setPhase('flashing')
-      setFlashMessage(`Erasing ${flashSize} flash and flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
+      setFlashMessage(`Flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
       await loader.writeFlash({
         fileArray: [{ data: firmware, address: flashOffset }],
         flashSize,
         flashMode: 'keep',
         flashFreq: 'keep',
-        // Browser flashing is our "known good" provisioning path. Erase first so
-        // stale NVS, old RF calibration, or cached scenes from an earlier
-        // partition layout cannot override the freshly baked frame defaults.
-        eraseAll: true,
+        // eraseAll off: the merged image's FF padding already overwrites NVS,
+        // otadata and RF calibration (they sit inside the written range), so
+        // the freshly baked frame defaults win. The state partition beyond it
+        // survives, sparing the ~3 minute SPIFFS format on every re-flash —
+        // scenes are re-uploaded by this flow right after boot anyway.
+        eraseAll: false,
         compress: true,
         reportProgress: (_fileIndex, written, total) => {
           setProgress(total > 0 ? Math.round((written / total) * 100) : null)
