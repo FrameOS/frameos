@@ -74,6 +74,24 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
                               int *out_status, size_t *out_len);
 void fos_nim_http_free(void *ptr);
 
+/* Chunked variant: the body is returned as a malloc'd array of fixed-size
+ * PSRAM chunks, so no download ever needs one large contiguous allocation.
+ * Image decoders consume the chunks as segments. Free the array and its
+ * buffers with fos_nim_http_free_chunks. Error semantics match
+ * fos_nim_http_request (single status-599 chunk with a diagnostic body). */
+typedef struct {
+    uint8_t *data;
+    size_t len;
+} fos_nim_http_chunk;
+
+fos_nim_http_chunk *fos_nim_http_request_chunked(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_chunk_count);
+void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

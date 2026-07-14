@@ -224,6 +224,7 @@ async def test_ota_manifest_serves_ready_artifact(async_client, no_auth_client, 
         f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))
     assert response.status_code == 200
     assert response.content == b'\xe9firmware-bytes'
+    assert response.headers['cache-control'] == 'no-store'
 
     response = await no_auth_client.head(
         f'/api/frames/{frame.id}/embedded/ota/download', headers=auth(frame))

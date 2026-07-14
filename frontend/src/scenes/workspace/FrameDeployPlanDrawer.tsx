@@ -52,7 +52,7 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
-import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
+import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -1949,7 +1949,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
-  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
   const hasSuccessfulDeploy = Boolean(
     frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady
@@ -2048,8 +2047,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <EmbeddedFirmwareSection
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
-              onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
-              onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
+              onDownload={() => downloadEmbeddedFirmware(frame.id)}
+              onOtaUpdate={() => applyEmbeddedFirmwareOta(frame.id)}
             />
           ) : activeDeployDrawerView === 'sdCard' ? (
             <BuildrootSdCardSection
@@ -2176,35 +2175,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       </div>
                     </section>
                   ) : null}
-                  {isEmbeddedFrame && webSerialSupported ? (
-                    <section className="space-y-2">
-                      <DrawerHeading>USB connection</DrawerHeading>
-                      <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
-                        <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
-                          Connect this browser to the board over USB for browser flashing, previews, logs, and fast
-                          deploys when HTTP is unavailable.
-                          {needsEsp32UsbJtagPortGuidance(frame) ? (
-                            <span className="mt-2 block">
-                              For the 13.3&quot; ESP32 board, pick
-                              <span className="font-semibold text-[color:var(--tool-strong)]">
-                                {' '}
-                                USB JTAG/serial debug unit
-                              </span>
-                              {' '}
-                              for FrameOS logs, previews, fast deploy scene uploads, and browser flash with scene
-                              upload. Use
-                              <span className="font-semibold text-[color:var(--tool-strong)]">
-                                {' '}
-                                USB single serial
-                              </span>
-                              {' '}
-                              only for manual/recovery flashing; it cannot answer FrameOS USB commands after boot.
-                            </span>
-                          ) : null}
-                        </div>
-                        <EmbeddedUsbConnectionButton frame={frame} className="shrink-0" />
-                      </div>
-                    </section>
+                  {isEmbeddedFrame ? (
+                    <EmbeddedFirmwareSection
+                      frame={frame}
+                      onDownload={() => downloadEmbeddedFirmware(frame.id)}
+                      onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
+                    />
                   ) : null}
                   {deployChangeDetails.length > 0 ? (
                     <section className="space-y-2">
@@ -2220,7 +2196,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     </section>
                   ) : null}
                   <DeployBuildOptionsSection frame={frame} frameForm={frameForm} />
-                  {isEmbeddedFrame ? <FirmwareFootprintVisualization frame={frame} /> : null}
                 </div>
               )}
             </>
@@ -2306,15 +2281,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              {isEmbeddedFrame ? (
-                <button
-                  type="button"
-                  onClick={() => showDeployDrawerView('embedded')}
-                  className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Firmware
-                </button>
-              ) : (
+              {!isEmbeddedFrame ? (
                 <button
                   type="button"
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
@@ -2325,7 +2292,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 >
                   Full deploy
                 </button>
-              )}
+              ) : null}
             </>
           )}
         </div>

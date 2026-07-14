@@ -18,8 +18,10 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 /* Nim's os module calls lstat()/readlink(); newlib/VFS has no symlinks, so
  * stat() is exact and every path is a non-symlink (EINVAL per POSIX). */
@@ -190,6 +192,35 @@ void fos_nim_fatal_oom(size_t size)
     /* No guard armed: fall through to Nim's raiseOutOfMem (log + reboot). */
 }
 
+/* A longjmp abort skips every Nim destructor on the abandoned stack, so the
+ * aborted call's allocations (render canvas, decode buffers, HTTP chunks)
+ * leak with their refcounts stuck — no GC pass can ever reclaim them. One
+ * abort is survivable; once the leaks eat the contiguous PSRAM a render
+ * canvas needs, every future render is doomed and only a reboot recovers
+ * the heap. A device that stays "alive" but can never render again is worse
+ * than one clean restart. */
+#define FOS_NIM_OOM_ABORT_RESTART_STREAK 4
+
+static int s_frame_width = 0;
+static int s_frame_height = 0;
+static unsigned s_nim_oom_abort_streak = 0;
+
+static void nim_oom_abort_note(const char *what)
+{
+    s_nim_oom_abort_streak++;
+    size_t canvas_bytes = (size_t)s_frame_width * (size_t)s_frame_height * 4u;
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bool canvas_impossible = canvas_bytes > 0 && largest < canvas_bytes;
+    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, largest PSRAM block %u, canvas needs %u)",
+             what, s_nim_oom_abort_streak, (unsigned)largest, (unsigned)canvas_bytes);
+    if ((s_nim_oom_abort_streak >= 2 && canvas_impossible) ||
+        s_nim_oom_abort_streak >= FOS_NIM_OOM_ABORT_RESTART_STREAK) {
+        ESP_LOGE("fos_nim", "OOM aborts have leaked the Nim heap beyond recovery; restarting");
+        vTaskDelay(pdMS_TO_TICKS(250)); /* let the log lines drain */
+        esp_restart();
+    }
+}
+
 bool frameos_nim_available(void) { return true; }
 
 static void configure_backend_auth(const char *backend_url, uint32_t frame_id, const char *api_key)
@@ -241,6 +272,8 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t frame_id, const char *api_key,
                       bool server_send_logs)
 {
+    s_frame_width = width;
+    s_frame_height = height;
     configure_backend_auth(backend_url, frame_id, api_key);
     s_log_upload_configured = server_send_logs;
     s_log_upload_enabled = false;
@@ -270,8 +303,9 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_impl(buf, len, pixel_format);
+        if (result == 0) s_nim_oom_abort_streak = 0;
     } else {
-        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        nim_oom_abort_note("render");
         result = -1;
     }
     s_nim_oom_jmp_armed = false;
@@ -288,8 +322,9 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_alloc_impl(buf, len, pixel_format);
+        if (result == 0) s_nim_oom_abort_streak = 0;
     } else {
-        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {
             free(s_pending_render_buffer);
         }
@@ -345,7 +380,7 @@ bool frameos_nim_set_scene(const char *scene_id)
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_set_scene_impl(scene_id);
     } else {
-        ESP_LOGE("fos_nim", "scene switch aborted: out of memory");
+        nim_oom_abort_note("scene switch");
         ok = false;
     }
     s_nim_oom_jmp_armed = false;
@@ -362,7 +397,7 @@ int frameos_nim_load_scenes(const char *json)
         s_nim_oom_jmp_armed = true;
         count = fos_nim_load_scenes_impl(json);
     } else {
-        ESP_LOGE("fos_nim", "scene load aborted: out of memory");
+        nim_oom_abort_note("scene load");
         count = 0;
     }
     s_nim_oom_jmp_armed = false;
@@ -397,7 +432,7 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
     } else {
-        ESP_LOGE("fos_nim", "event dispatch aborted: out of memory");
+        nim_oom_abort_note("event dispatch");
         ok = false;
     }
     s_nim_oom_jmp_armed = false;
@@ -732,16 +767,31 @@ void frameos_nim_flush_logs(void)
 /* ------------------------------------------------------- outbound HTTP */
 
 static const char *TAG = "fos_nim_http";
-/* Never clamp below this, so small fetches keep working under pressure. */
-#define FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN (512u * 1024u)
+/* HTTP bodies are buffered in fixed-size PSRAM chunks so that no download
+ * ever needs one large contiguous allocation — a fragmented heap next to a
+ * full-size render canvas can still take multi-MB images. The decoders
+ * consume the chunks as segments (streamed PNG/JPEG). */
+#define FOS_NIM_HTTP_CHUNK_BYTES (512u * 1024u)
+#define FOS_NIM_HTTP_CHUNK_MIN_BYTES (64u * 1024u)
+/* Keep this much PSRAM free while buffering, for decode rows and friends.
+ * Streamed decodes need well under 200KB of working memory; a bigger
+ * reserve starves legitimate downloads when a render is already live. */
+#define FOS_NIM_HTTP_PSRAM_RESERVE (768u * 1024u)
 
-static uint8_t *http_error_response(int *out_status, size_t *out_len, const char *fmt, ...)
+void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count)
+{
+    if (chunks == NULL) return;
+    for (size_t i = 0; i < count; i++) {
+        free(chunks[i].data);
+    }
+    free(chunks);
+}
+
+static uint8_t *http_error_response_v(int *out_status, size_t *out_len,
+                                      const char *fmt, va_list args)
 {
     char message[256];
-    va_list args;
-    va_start(args, fmt);
     vsnprintf(message, sizeof(message), fmt, args);
-    va_end(args);
 
     size_t len = strlen(message);
     uint8_t *buf = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -755,6 +805,36 @@ static uint8_t *http_error_response(int *out_status, size_t *out_len, const char
     *out_status = 599;
     *out_len = len;
     return buf;
+}
+
+static uint8_t *http_error_response(int *out_status, size_t *out_len, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    uint8_t *buf = http_error_response_v(out_status, out_len, fmt, args);
+    va_end(args);
+    return buf;
+}
+
+static fos_nim_http_chunk *chunked_error(int *out_status, size_t *out_count,
+                                         const char *fmt, ...)
+{
+    *out_count = 0;
+    va_list args;
+    va_start(args, fmt);
+    size_t len = 0;
+    uint8_t *msg = http_error_response_v(out_status, &len, fmt, args);
+    va_end(args);
+    if (msg == NULL) return NULL;
+    fos_nim_http_chunk *chunks = malloc(sizeof(*chunks));
+    if (chunks == NULL) {
+        free(msg);
+        return NULL;
+    }
+    chunks[0].data = msg;
+    chunks[0].len = len;
+    *out_count = 1;
+    return chunks;
 }
 
 static bool should_authorize_backend_url(const char *url)
@@ -815,14 +895,15 @@ static bool set_extra_headers(esp_http_client_handle_t client, const char *heade
     return has_content_type;
 }
 
-uint8_t *fos_nim_http_request(const char *method, const char *url,
+fos_nim_http_chunk *fos_nim_http_request_chunked(
+                              const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
                               int timeout_ms, size_t max_bytes,
-                              int *out_status, size_t *out_len)
+                              int *out_status, size_t *out_count)
 {
     *out_status = 0;
-    *out_len = 0;
+    *out_count = 0;
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
     if (method != NULL) {
@@ -860,13 +941,13 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
         ESP_LOGW(TAG, "%s %s: connect failed: %s", method ? method : "GET", url,
                  esp_err_to_name(err));
         esp_http_client_cleanup(client);
-        return http_error_response(out_status, out_len, "connect failed: %s", esp_err_to_name(err));
+        return chunked_error(out_status, out_count, "connect failed: %s", esp_err_to_name(err));
     }
     if (body != NULL && body_len > 0) {
         if (esp_http_client_write(client, body, body_len) < 0) {
             ESP_LOGW(TAG, "%s %s: body write failed", method, url);
             esp_http_client_cleanup(client);
-            return http_error_response(out_status, out_len, "request body write failed");
+            return chunked_error(out_status, out_count, "request body write failed");
         }
     }
 
@@ -889,14 +970,14 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
             ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
                      esp_err_to_name(err));
             esp_http_client_cleanup(client);
-            return http_error_response(out_status, out_len, "redirect connect failed: %s",
-                                       esp_err_to_name(err));
+            return chunked_error(out_status, out_count, "redirect connect failed: %s",
+                                 esp_err_to_name(err));
         }
         if (body != NULL && body_len > 0) {
             if (esp_http_client_write(client, body, body_len) < 0) {
                 ESP_LOGW(TAG, "%s %s: redirect body write failed", method ? method : "GET", url);
                 esp_http_client_cleanup(client);
-                return http_error_response(out_status, out_len, "request body write failed");
+                return chunked_error(out_status, out_count, "request body write failed");
             }
         }
         content_length = esp_http_client_fetch_headers(client);
@@ -904,106 +985,172 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
         redirects++;
     }
 
-    if (max_bytes == 0) max_bytes = 10 * 1024 * 1024;
-    size_t nim_copy_limit = max_bytes;
-    /* Clamp to live PSRAM instead of a fixed constant: half the largest free
-     * block still has to hold the decode target and intermediates. The old
-     * fixed 4MB cap silently rejected 4-6MB images the Nim side allowed. */
-    size_t largest_spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    size_t dynamic_limit = largest_spiram / 2;
-    if (dynamic_limit < FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN) {
-        dynamic_limit = FOS_NIM_HTTP_NIM_COPY_LIMIT_MIN;
-    }
-    if (nim_copy_limit > dynamic_limit) {
-        nim_copy_limit = dynamic_limit;
-    }
-    if (content_length > 0 && (size_t)content_length > nim_copy_limit) {
+    size_t limit = max_bytes ? max_bytes : 10u * 1024u * 1024u;
+    if (content_length > 0 && (size_t)content_length > limit) {
         ESP_LOGW(TAG, "%s: response too large (%lld > %u)", url,
-                 content_length, (unsigned)nim_copy_limit);
+                 content_length, (unsigned)limit);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
-        return http_error_response(out_status, out_len, "response too large: %lld > %u bytes",
-                                   content_length, (unsigned)nim_copy_limit);
+        return chunked_error(out_status, out_count, "response too large: %lld > %u bytes",
+                             content_length, (unsigned)limit);
     }
 
-    /* Grow in PSRAM; bodies can be multi-MB images. Large image responses can
-     * arrive with an under-reported Content-Length, so reserve the expected
-     * image budget up front instead of needing two large buffers during growth. */
-    size_t cap = (content_length > 0) ? (size_t)content_length : 16384;
-    if (nim_copy_limit > (2u * 1024u * 1024u) &&
-        content_length > (1024u * 1024u) &&
-        cap < (3u * 1024u * 1024u)) {
-        cap = 3u * 1024u * 1024u;
-    }
-    if (cap > nim_copy_limit) cap = nim_copy_limit;
-    if (cap < 1024) cap = 1024;
-    uint8_t *buf = heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buf == NULL) buf = malloc(cap + 1);
-    if (buf == NULL) {
-        ESP_LOGW(TAG, "%s: out of memory allocating HTTP response buffer: cap=%u internal=%u psram=%u largest_psram=%u",
-                 url, (unsigned)cap,
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        *out_status = 0;
-        return NULL;
-    }
-
+    /* Accumulate the body in fixed-size PSRAM chunks: no download needs one
+     * contiguous allocation, no matter how fragmented PSRAM is. Only the
+     * Nim-side max_bytes and a live free-PSRAM reserve bound the size. */
+    fos_nim_http_chunk *chunks = NULL;
+    size_t chunk_count = 0, chunk_capacity = 0;
     size_t total = 0;
+    size_t cur_cap = 0, cur_len = 0;
+    uint8_t *cur = NULL;
+    enum { BODY_OK, BODY_OOM, BODY_TOO_BIG, BODY_READ_FAILED } body_status = BODY_OK;
+
     while (true) {
-        if (total == cap) {
-            if (cap >= nim_copy_limit) {
-                ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)nim_copy_limit);
-                fos_nim_http_free(buf);
-                esp_http_client_close(client);
-                esp_http_client_cleanup(client);
-                return http_error_response(out_status, out_len, "response exceeded %u bytes",
-                                           (unsigned)nim_copy_limit);
+        if (cur == NULL || cur_len == cur_cap) {
+            if (cur != NULL) {
+                chunks[chunk_count - 1].len = cur_len;
+                cur = NULL;
             }
-            size_t new_cap = (cap >= (1024u * 1024u)) ? (cap + 512u * 1024u) : (cap * 2u);
-            if (new_cap > nim_copy_limit) new_cap = nim_copy_limit;
-            uint8_t *new_buf = heap_caps_malloc(new_cap + 1,
-                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (new_buf == NULL) new_buf = malloc(new_cap + 1);
-            if (new_buf == NULL) {
-                ESP_LOGW(TAG, "%s: out of memory growing HTTP response buffer: total=%u cap=%u new_cap=%u internal=%u psram=%u largest_psram=%u",
-                         url, (unsigned)total, (unsigned)cap, (unsigned)new_cap,
-                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-                fos_nim_http_free(buf);
-                esp_http_client_close(client);
-                esp_http_client_cleanup(client);
-                return http_error_response(out_status, out_len,
-                                           "out of memory growing HTTP response buffer: total=%u cap=%u new=%u largest_psram=%u",
-                                           (unsigned)total, (unsigned)cap, (unsigned)new_cap,
-                                           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+            if (total >= limit) {
+                body_status = BODY_TOO_BIG;
+                break;
             }
-            if (total > 0) memcpy(new_buf, buf, total);
-            fos_nim_http_free(buf);
-            buf = new_buf;
-            cap = new_cap;
+            if (chunk_count == chunk_capacity) {
+                size_t new_capacity = chunk_capacity ? chunk_capacity * 2u : 8u;
+                fos_nim_http_chunk *new_chunks =
+                    realloc(chunks, new_capacity * sizeof(*new_chunks));
+                if (new_chunks == NULL) {
+                    body_status = BODY_OOM;
+                    break;
+                }
+                chunks = new_chunks;
+                chunk_capacity = new_capacity;
+            }
+            size_t want = FOS_NIM_HTTP_CHUNK_BYTES;
+            if (want > limit - total) want = limit - total;
+            if (want < 1) want = 1;
+            uint8_t *buf = NULL;
+            while (true) {
+                size_t free_spiram =
+                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (free_spiram >= want + 1 + FOS_NIM_HTTP_PSRAM_RESERVE) {
+                    buf = heap_caps_malloc(want + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                }
+                if (buf != NULL) break;
+                if (want <= FOS_NIM_HTTP_CHUNK_MIN_BYTES) break;
+                want /= 2;
+            }
+            if (buf == NULL) {
+                body_status = BODY_OOM;
+                break;
+            }
+            chunks[chunk_count].data = buf;
+            chunks[chunk_count].len = 0;
+            chunk_count++;
+            cur = buf;
+            cur_cap = want;
+            cur_len = 0;
         }
-        int r = esp_http_client_read(client, (char *)buf + total, cap - total);
+        int r = esp_http_client_read(client, (char *)cur + cur_len, cur_cap - cur_len);
         if (r < 0) {
             ESP_LOGW(TAG, "%s %s: response read failed, internal=%u psram=%u",
                      method ? method : "GET", url,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-            fos_nim_http_free(buf);
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            return http_error_response(out_status, out_len, "response read failed");
+            body_status = BODY_READ_FAILED;
+            break;
         }
         if (r == 0) break;
-        total += r;
+        cur_len += (size_t)r;
+        total += (size_t)r;
+    }
+
+    if (cur != NULL) {
+        chunks[chunk_count - 1].len = cur_len;
     }
 
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+
+    if (body_status != BODY_OK) {
+        fos_nim_http_free_chunks(chunks, chunk_count);
+        switch (body_status) {
+        case BODY_TOO_BIG:
+            ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
+            return chunked_error(out_status, out_count, "response exceeded %u bytes",
+                                 (unsigned)limit);
+        case BODY_READ_FAILED:
+            return chunked_error(out_status, out_count, "response read failed");
+        default:
+            ESP_LOGW(TAG, "%s: out of memory buffering HTTP response: total=%u internal=%u psram=%u largest_psram=%u",
+                     url, (unsigned)total,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+            return chunked_error(out_status, out_count,
+                                 "out of memory buffering HTTP response: total=%u psram_free=%u",
+                                 (unsigned)total,
+                                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        }
+    }
+
+    if (chunk_count == 0) {
+        /* Empty body: hand back one empty chunk so callers always get a buffer */
+        chunks = malloc(sizeof(*chunks));
+        if (chunks == NULL) {
+            return chunked_error(out_status, out_count, "out of memory");
+        }
+        chunks[0].data = malloc(1);
+        if (chunks[0].data == NULL) {
+            free(chunks);
+            return chunked_error(out_status, out_count, "out of memory");
+        }
+        chunks[0].len = 0;
+        chunk_count = 1;
+    }
+    /* NUL-terminate the final chunk (its allocation reserved the byte) for
+     * cstring-leaning consumers of coalesced single-chunk bodies. */
+    chunks[chunk_count - 1].data[chunks[chunk_count - 1].len] = 0;
+
+    *out_count = chunk_count;
+    return chunks;
+}
+
+uint8_t *fos_nim_http_request(const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_len)
+{
+    *out_len = 0;
+    size_t count = 0;
+    fos_nim_http_chunk *chunks = fos_nim_http_request_chunked(
+        method, url, body, body_len, headers, headers_len,
+        timeout_ms, max_bytes, out_status, &count);
+    if (chunks == NULL) return NULL;
+    if (count == 1) {
+        uint8_t *buf = chunks[0].data;
+        *out_len = chunks[0].len;
+        free(chunks);
+        return buf;
+    }
+    size_t total = 0;
+    for (size_t i = 0; i < count; i++) total += chunks[i].len;
+    uint8_t *buf = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf == NULL) buf = malloc(total + 1);
+    if (buf == NULL) {
+        fos_nim_http_free_chunks(chunks, count);
+        return http_error_response(out_status, out_len,
+                                   "out of memory coalescing %u byte HTTP response",
+                                   (unsigned)total);
+    }
+    size_t pos = 0;
+    for (size_t i = 0; i < count; i++) {
+        memcpy(buf + pos, chunks[i].data, chunks[i].len);
+        pos += chunks[i].len;
+    }
     buf[total] = 0;
+    fos_nim_http_free_chunks(chunks, count);
     *out_len = total;
     return buf;
 }
