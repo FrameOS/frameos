@@ -390,6 +390,42 @@ async def test_local_fallback_disable_requires_live_link(async_client, db, redis
 
 
 @pytest.mark.asyncio
+async def test_local_fallback_uses_identity_for_active_provider(async_client, db, monkeypatch):
+    link = make_connected_link(db)
+    user = db.query(User).filter_by(email="test@example.com").first()
+    db.add(
+        CloudIdentity(
+            user_id=user.id,
+            provider_url=PROVIDER,
+            provider_issuer=ISSUER,
+            provider_subject="active-provider-subject",
+            cloud_account_id="acc-1",
+        )
+    )
+    db.flush()
+    db.add(
+        CloudIdentity(
+            user_id=user.id,
+            provider_url="https://other-cloud.example",
+            provider_issuer="https://other-cloud.example",
+            provider_subject="newer-other-provider-subject",
+            cloud_account_id="other-account",
+        )
+    )
+    db.commit()
+
+    async def fake_grants(provider_url, access_token):
+        assert provider_url == link.provider_url
+        return 200, {"grants": [{"account_id": "acc-1", "role": "owner"}]}
+
+    monkeypatch.setattr(cloud_link, "backend_grants", fake_grants)
+    response = await async_client.post("/api/cloud/local-fallback", json={"enabled": False})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["local_fallback_enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_disconnect_reenables_local_fallback(async_client, db, redis, login_handoff, monkeypatch):
     calls, _ = login_handoff
     link = make_connected_link(db)

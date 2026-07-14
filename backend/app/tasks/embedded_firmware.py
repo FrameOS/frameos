@@ -25,7 +25,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -387,48 +386,130 @@ def embedded_pixie_path() -> Path | None:
     return None
 
 
-_source_fingerprint_cache: tuple[float, str] | None = None
+_FIRMWARE_SOURCE_PATHS = (
+    Path("Dockerfile"),
+    Path("backend/app/codegen"),
+    Path("backend/app/drivers/waveshare.py"),
+    Path("backend/app/tasks/embedded_firmware.py"),
+    Path("embedded/esp32"),
+    Path("frameos/config.nims"),
+    Path("frameos/frameos.nimble"),
+    Path("frameos/nim.cfg"),
+    Path("frameos/nimble.lock"),
+    Path("frameos/src"),
+    Path("frameos/tools/makeapploaders.py"),
+    Path("repo/apps"),
+    Path("repo/scenes"),
+)
+_FIRMWARE_SOURCE_EXCLUDED_NAMES = {
+    ".cache",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "managed_components",
+    "nimcache",
+    "node_modules",
+    "testresults",
+    "tests",
+    "tmp",
+}
+_FIRMWARE_SOURCE_EXCLUDED_PATHS = {
+    Path("embedded/esp32/dependencies.lock"),
+    Path("embedded/esp32/main/generated_config.h"),
+    Path("embedded/esp32/sdkconfig"),
+    Path("embedded/esp32/sdkconfig.old"),
+    Path("frameos/src/codegen"),
+}
+_source_fingerprint_cache: tuple[float, tuple[tuple[str, int, int], ...], str] | None = None
+
+
+def _firmware_source_files() -> tuple[list[tuple[str, Path | None]], tuple[tuple[str, int, int], ...]]:
+    """Collect immutable firmware inputs without relying on a Git checkout.
+
+    The production image deliberately has no ``.git`` directory. Build output,
+    per-frame generated config, caches, and tests are excluded because they do
+    not define the firmware source and may change while a build is running.
+    """
+    entries: list[tuple[str, Path | None]] = []
+    signature: list[tuple[str, int, int]] = []
+
+    def excluded(relative: Path) -> bool:
+        if relative in _FIRMWARE_SOURCE_EXCLUDED_PATHS:
+            return True
+        return any(
+            part in _FIRMWARE_SOURCE_EXCLUDED_NAMES or part.startswith("build-")
+            for part in relative.parts
+        )
+
+    def collect(label: str, path: Path, relative: Path) -> None:
+        if excluded(relative):
+            return
+        if path.is_symlink():
+            target = os.readlink(path)
+            entries.append((f"symlink:{label}\0{target}", None))
+            signature.append((f"{label}\0{target}", -2, path.lstat().st_mtime_ns))
+            return
+        if path.is_dir():
+            for child in sorted(path.iterdir(), key=lambda item: item.name):
+                collect(f"{label}/{child.name}", child, relative / child.name)
+            return
+        if path.is_file():
+            stat = path.stat()
+            entries.append((f"file:{label}", path))
+            signature.append((label, stat.st_size, stat.st_mtime_ns))
+            return
+        entries.append((f"missing:{label}", None))
+        signature.append((label, -1, -1))
+
+    for relative in _FIRMWARE_SOURCE_PATHS:
+        collect(f"repo/{relative.as_posix()}", REPO_ROOT / relative, relative)
+
+    pixie_path = embedded_pixie_path()
+    if pixie_path is None:
+        # nimble.lock is one of the repo inputs above and pins the exact Pixie
+        # revision used in production. This marker distinguishes that path from
+        # an explicit source override.
+        entries.append(("pixie/nimble-lock", None))
+        signature.append(("pixie/nimble-lock", -3, -3))
+    else:
+        for relative in (Path("pixie.nimble"), Path("src")):
+            collect(f"pixie/{relative.as_posix()}", pixie_path / relative, relative)
+
+    return entries, tuple(signature)
 
 
 def embedded_firmware_source_fingerprint() -> str:
     """Fingerprint of the source trees a firmware image is built from, so
     cached builds go stale when the code changes — not only when the frame's
     settings or the manually-bumped EMBEDDED_FIRMWARE_VERSION do. Covers this
-    repo (the dirs baked into the image) and the local pixie checkout the
-    build uses when present. Dirty trees hash their actual diff, so iterating
-    on sources triggers rebuilds without a commit."""
+    repo (the inputs baked into the image) and either the local Pixie checkout
+    or its production lock. The digest is based on file content, so it works in
+    Docker where Git metadata and a neighboring Pixie checkout are absent."""
     global _source_fingerprint_cache
     now = time.monotonic()
     if _source_fingerprint_cache is not None and now - _source_fingerprint_cache[0] < 5.0:
-        return _source_fingerprint_cache[1]
+        return _source_fingerprint_cache[2]
 
-    def repo_fingerprint(repo: Path, paths: list[str]) -> str:
-        try:
-            described = subprocess.run(
-                ["git", "-C", str(repo), "describe", "--tags", "--dirty", "--always"],
-                capture_output=True, text=True, timeout=10,
-            ).stdout.strip() or "unknown"
-            if described.endswith("-dirty"):
-                scope = ["--"] + paths if paths else []
-                diff = subprocess.run(
-                    ["git", "-C", str(repo), "diff", "HEAD"] + scope,
-                    capture_output=True, text=True, timeout=10,
-                ).stdout
-                status = subprocess.run(
-                    ["git", "-C", str(repo), "status", "--porcelain"] + scope,
-                    capture_output=True, text=True, timeout=10,
-                ).stdout
-                digest = hashlib.sha256((diff + status).encode("utf-8")).hexdigest()[:12]
-                return f"{described}-{digest}"
-            return described
-        except Exception:
-            return "unknown"
+    entries, signature = _firmware_source_files()
+    if _source_fingerprint_cache is not None and signature == _source_fingerprint_cache[1]:
+        fingerprint = _source_fingerprint_cache[2]
+        _source_fingerprint_cache = (now, signature, fingerprint)
+        return fingerprint
 
-    parts = [repo_fingerprint(REPO_ROOT, ["frameos", "embedded", "repo"])]
-    pixie_path = embedded_pixie_path()
-    parts.append(repo_fingerprint(pixie_path, []) if pixie_path else "no-local-pixie")
-    fingerprint = "+".join(parts)
-    _source_fingerprint_cache = (now, fingerprint)
+    digest = hashlib.sha256()
+    for label, path in entries:
+        digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        if path is not None:
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        digest.update(b"\0")
+    fingerprint = f"sha256:{digest.hexdigest()}"
+    _source_fingerprint_cache = (now, signature, fingerprint)
     return fingerprint
 
 

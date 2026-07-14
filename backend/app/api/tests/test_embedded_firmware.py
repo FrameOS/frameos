@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from app.models.frame import Frame
+from app.tasks import embedded_firmware as embedded_firmware_module
 from app.tasks.embedded_firmware import (
     EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -18,6 +19,7 @@ from app.tasks.embedded_firmware import (
     embedded_default_pins_for_frame,
     embedded_flash_size_for_frame,
     embedded_firmware_config_hash,
+    embedded_firmware_source_fingerprint,
     embedded_gpio_buttons_for_frame,
     embedded_hardware_preset_for_frame,
     embedded_hostname_for_frame,
@@ -1085,3 +1087,40 @@ def test_embedded_pixie_path_resolves_override(tmp_path, monkeypatch):
     (pixie / "src" / "pixie").mkdir(parents=True)
     monkeypatch.setenv("FRAMEOS_PIXIE_PATH", str(pixie))
     assert embedded_pixie_path() == pixie.resolve()
+
+
+def test_embedded_source_fingerprint_uses_contents_without_git(tmp_path, monkeypatch):
+    source = tmp_path / "frameos" / "src" / "embedded" / "embedded_main.nim"
+    source.parent.mkdir(parents=True)
+    source.write_text("const firmwareSource = 1\n", encoding="utf-8")
+    lock = tmp_path / "frameos" / "nimble.lock"
+    lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-one"}}}\n', encoding="utf-8")
+    codegen = tmp_path / "backend" / "app" / "codegen" / "apps_nim.py"
+    codegen.parent.mkdir(parents=True)
+    codegen.write_text("CODEGEN_VERSION = 1\n", encoding="utf-8")
+    generated = tmp_path / "embedded" / "esp32" / "build" / "firmware.bin"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"generated-one")
+
+    monkeypatch.setattr(embedded_firmware_module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(embedded_firmware_module, "embedded_pixie_path", lambda: None)
+    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
+
+    first = embedded_firmware_source_fingerprint()
+    assert first.startswith("sha256:")
+    assert "unknown" not in first
+
+    # Build output is intentionally ignored and cannot make a ready artifact
+    # immediately stale after its own build.
+    generated.write_bytes(b"generated-two")
+    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
+    assert embedded_firmware_source_fingerprint() == first
+
+    source.write_text("const firmwareSource = 2\n", encoding="utf-8")
+    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
+    second = embedded_firmware_source_fingerprint()
+    assert second != first
+
+    lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-two"}}}\n', encoding="utf-8")
+    monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
+    assert embedded_firmware_source_fingerprint() != second

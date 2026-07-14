@@ -24,6 +24,7 @@
   "files": ["dist", "!dist/**/*.map", "embed.js", "embed.d.ts", "demo.html", "README.md"],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "node --test embed.test.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "prepublishOnly": "node scripts/sync-version.mjs --check && npm run build"
   }

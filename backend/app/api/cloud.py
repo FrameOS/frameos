@@ -881,7 +881,10 @@ async def set_local_fallback(
         )
     identity = (
         db.query(CloudIdentity)
-        .filter(CloudIdentity.user_id == current_user.id)
+        .filter(
+            CloudIdentity.user_id == current_user.id,
+            CloudIdentity.provider_url == link.provider_url,
+        )
         .order_by(CloudIdentity.id.desc())
         .first()
     )

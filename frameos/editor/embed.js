@@ -33,6 +33,7 @@ export function createFrameOSEditor({
 
   const editorOrigin = new URL(url, location.href).origin
   let latestScenes = scenes
+  let latestSceneId = sceneId
   let ready = false
   const sceneWaiters = []
 
@@ -49,7 +50,7 @@ export function createFrameOSEditor({
       post({
         type: 'frameos-editor:init',
         scenes: latestScenes,
-        sceneId,
+        sceneId: latestSceneId,
         mode,
         width,
         height,
@@ -91,6 +92,7 @@ export function createFrameOSEditor({
     /** Replace the loaded scenes (re-initializes the editor). */
     setScenes: (nextScenes, nextSceneId) => {
       latestScenes = nextScenes
+      latestSceneId = nextSceneId
       post({
         type: 'frameos-editor:init',
         scenes: nextScenes,
@@ -104,7 +106,10 @@ export function createFrameOSEditor({
         description,
       })
     },
-    selectScene: (nextSceneId) => post({ type: 'frameos-editor:select-scene', sceneId: nextSceneId }),
+    selectScene: (nextSceneId) => {
+      latestSceneId = nextSceneId
+      post({ type: 'frameos-editor:select-scene', sceneId: nextSceneId })
+    },
     destroy: () => {
       window.removeEventListener('message', onMessage)
       iframe.remove()
