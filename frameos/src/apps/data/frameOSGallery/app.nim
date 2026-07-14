@@ -41,5 +41,5 @@ proc get*(self: App, context: ExecutionContext): Image =
   except CatchableError as e:
     let detail = if e.msg.len > 0: e.msg else: "unknown error"
     self.logError "An error occurred while downloading the gallery image: " & detail
-    result = renderError(self.contextImageWidth(context), self.contextImageHeight(context),
+    result = self.renderErrorForContext(context,
         "An error occurred while downloading the gallery image.\n" & detail)

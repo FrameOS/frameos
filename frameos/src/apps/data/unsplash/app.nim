@@ -7,7 +7,6 @@ import frameos/apps
 import frameos/types
 import frameos/utils/app_images
 import frameos/utils/http_client
-import frameos/utils/image
 
 type
   AppConfig* = object
@@ -25,7 +24,7 @@ proc init*(self: App) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
+  result = self.renderErrorForContext(context, message)
 
 proc get*(self: App, context: ExecutionContext): Image =
   self.ensureEmbeddedServiceSettings()

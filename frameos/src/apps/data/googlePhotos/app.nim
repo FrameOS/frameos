@@ -9,7 +9,6 @@ import frameos/apps
 import frameos/types
 import frameos/utils/app_images
 import frameos/utils/http_client
-import frameos/utils/image
 import frameos/hal/entropy
 
 const
@@ -87,7 +86,7 @@ proc init*(self: App) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
+  result = self.renderErrorForContext(context, message)
 
 proc albumStale(self: App): bool =
   self.photoUrls.len == 0 or

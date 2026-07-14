@@ -1,6 +1,6 @@
 import frameos/types
 import frameos/values
-from frameos/utils/image import renderError
+from frameos/utils/image import renderError, renderErrorInto
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
@@ -432,14 +432,29 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               # …) — a nil image would only render as "No image provided".
               # Non-image fields reject the value and keep their defaults.
               try:
-                let errorWidth =
-                  if context.hasImage and not context.image.isNil: context.image.width
-                  else: self.frameConfig.width
-                let errorHeight =
-                  if context.hasImage and not context.image.isNil: context.image.height
-                  else: self.frameConfig.height
-                setInterpretedAppField(keyword, app, inputName,
-                  Value(kind: fkImage, img: renderError(errorWidth, errorHeight, $e.msg)))
+                when defined(frameosEmbedded):
+                  # Reuse the live canvas for the error frame: allocating a
+                  # second full-frame image next to it OOMs memory-tight
+                  # devices. Paint only after the field accepted the image,
+                  # so a non-image field mismatch leaves the canvas untouched.
+                  if context.hasImage and not context.image.isNil:
+                    setInterpretedAppField(keyword, app, inputName,
+                      Value(kind: fkImage, img: context.image))
+                    renderErrorInto(context.image, context.image.width,
+                      context.image.height, $e.msg)
+                  else:
+                    setInterpretedAppField(keyword, app, inputName,
+                      Value(kind: fkImage, img: renderError(self.frameConfig.width,
+                        self.frameConfig.height, $e.msg)))
+                else:
+                  let errorWidth =
+                    if context.hasImage and not context.image.isNil: context.image.width
+                    else: self.frameConfig.width
+                  let errorHeight =
+                    if context.hasImage and not context.image.isNil: context.image.height
+                    else: self.frameConfig.height
+                  setInterpretedAppField(keyword, app, inputName,
+                    Value(kind: fkImage, img: renderError(errorWidth, errorHeight, $e.msg)))
               except Exception:
                 discard # Leave field at default; still proceed.
 
