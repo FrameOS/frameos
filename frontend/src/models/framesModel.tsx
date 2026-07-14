@@ -678,9 +678,16 @@ export const framesModel = kea<framesModelType>([
       })
       try {
         const frame = values.frames[id]
+        let usbSucceeded = false
         if ((frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
-          await runEmbeddedUsbApiCommand(id, 'render', { timeoutMs: 10000 })
-        } else {
+          try {
+            await runEmbeddedUsbApiCommand(id, 'render', { timeoutMs: 10000 })
+            usbSucceeded = true
+          } catch (error) {
+            // Stale/busy USB port — fall through to the HTTP event.
+          }
+        }
+        if (!usbSucceeded) {
           const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
           if (!response.ok) {
             throw new Error('Failed to send render event')

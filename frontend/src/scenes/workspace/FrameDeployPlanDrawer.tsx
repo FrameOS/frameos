@@ -2047,8 +2047,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <EmbeddedFirmwareSection
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
-              onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
-              onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
+              onDownload={() => downloadEmbeddedFirmware(frame.id)}
+              onOtaUpdate={() => applyEmbeddedFirmwareOta(frame.id)}
             />
           ) : activeDeployDrawerView === 'sdCard' ? (
             <BuildrootSdCardSection
@@ -2178,7 +2178,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   {isEmbeddedFrame ? (
                     <EmbeddedFirmwareSection
                       frame={frame}
-                      onDownload={() => closeAndRun(() => downloadEmbeddedFirmware(frame.id))}
+                      onDownload={() => downloadEmbeddedFirmware(frame.id)}
                       onOtaUpdate={() => closeAndRun(() => applyEmbeddedFirmwareOta(frame.id))}
                     />
                   ) : null}

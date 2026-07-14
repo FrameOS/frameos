@@ -244,7 +244,19 @@ async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promis
 }
 
 export function embeddedUsbApiCanUse(frameId: number): boolean {
-  return webSerialSupported() && (sessions.has(frameId) || lastPorts.has(frameId))
+  // Only claim USB is usable when the remembered port is still connected —
+  // a port granted earlier in the session goes stale once the board is
+  // unplugged, and callers that prefer USB over HTTP must fall through to
+  // the network path instead of timing out against a dead port.
+  if (!webSerialSupported()) {
+    return false
+  }
+  const sessionPort = sessions.get(frameId)?.port
+  if (sessionPort && serialPortIsConnected(sessionPort)) {
+    return true
+  }
+  const lastPort = lastPorts.get(frameId)
+  return lastPort !== undefined && serialPortIsConnected(lastPort)
 }
 
 export function embeddedUsbApiCanPrompt(): boolean {
