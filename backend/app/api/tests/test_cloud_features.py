@@ -27,7 +27,14 @@ def make_connected_link(db, scope="backend:link backend:read auth:login", local_
 def scope_calls(monkeypatch):
     calls = {"set_scopes": [], "poll": []}
     responses = {
-        "set_scopes": (200, {"status": "updated", "scope": "backend:link backend:read", "linked_client_id": "lc-1"}),
+        "set_scopes": (
+            200,
+            {
+                "status": "updated",
+                "scope": "backend:link backend:read backup:templates backup:frames store:publish",
+                "linked_client_id": "lc-1",
+            },
+        ),
         "poll": (428, {"error": "authorization_pending", "interval": 5}),
     }
 
@@ -60,7 +67,14 @@ async def test_feature_removal_applies_immediately(async_client, db, scope_calls
     response = await async_client.post("/api/cloud/features", json={"scopes": []})
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["link"]["scopes"] == ["backend:link", "backend:read"]
+    # auth:login is dropped; the included features are always kept on the link
+    assert data["link"]["scopes"] == [
+        "backend:link",
+        "backend:read",
+        "backup:templates",
+        "backup:frames",
+        "store:publish",
+    ]
     assert data["local_fallback_enabled"] is True
     assert data.get("upgrade") is None
 
@@ -69,7 +83,7 @@ async def test_feature_removal_applies_immediately(async_client, db, scope_calls
 
     _url, token, scopes = calls["set_scopes"][0]
     assert token == "link-token-secret"
-    assert scopes == ["backend:link", "backend:read"]
+    assert scopes == ["backend:link", "backend:read", "backup:templates", "backup:frames", "store:publish"]
 
 
 @pytest.mark.asyncio
@@ -92,6 +106,15 @@ async def test_feature_addition_needs_approval_then_polls(async_client, db, scop
 
     response = await async_client.post("/api/cloud/features", json={"scopes": ["auth:login"]})
     assert response.status_code == 200, response.text
+    # the included features ride along with the security-scope request
+    assert calls["set_scopes"][0][2] == [
+        "backend:link",
+        "backend:read",
+        "auth:login",
+        "backup:templates",
+        "backup:frames",
+        "store:publish",
+    ]
     data = response.json()
     assert data["status"] == "connected"  # the link never drops
     assert data["upgrade"]["user_code"] == "WXYZ-1234"
