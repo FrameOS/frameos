@@ -149,18 +149,6 @@ thin-client mode. Backend local-render builds run the same check
 default 8MB) and fail early with an actionable error; backend-rendered
 thin-client builds are allowed for panels that exceed local PSRAM.
 
-**No image proxies, ever:** when a remote image source serves files too large
-to decode on-device (e.g. multi-MB PNGs), the fix is a streaming decoder —
-incremental inflate with row-by-row unfilter/scale into the render target, so
-a decode needs the compressed body plus a few rows instead of a full-size
-RGBA buffer. Never route the frame's downloads through the backend, and don't
-lean on host-side resize params. Proxying has been built and reverted before;
-do not build it again.
-
-TODO: streaming PNG decode into target (`decodePngScaledInto` currently does a
-full `decodePng` first — that is what OOMs on multi-MB PNGs under PSRAM
-fragmentation; the gallery scenes hit this on the 13.3" Spectra-6 frame).
-
 Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (D4),
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,
 in the portal, or per-frame via `deviceConfig.pins` in the backend. The 13.3-inch

@@ -48,12 +48,6 @@ export async function getCurrentProjectId(): Promise<number> {
   if (currentProjectId) {
     return currentProjectId
   }
-  // The standalone embedded editor has no backend (and apiFetch is not on
-  // this path, so its synthetic-404 guard doesn't apply): fail fast instead
-  // of firing a request that can never succeed.
-  if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
-    throw new Error('No backend in the embedded editor')
-  }
   if (!currentProjectPromise) {
     currentProjectPromise = fetch(`${getBasePath()}/api/projects`, {
       headers: { Accept: 'application/json' },

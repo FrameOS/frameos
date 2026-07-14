@@ -2941,12 +2941,7 @@ async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(ge
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated firmware file not found")
 
     filename = str(firmware.get("filename") or f"frameos-esp32-{id}.bin")
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=filename,
-        headers={"Cache-Control": "no-store"},
-    )
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
 
 
 @api_project.post("/frames/{id:int}/embedded/firmware/ota")

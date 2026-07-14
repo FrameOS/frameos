@@ -31,22 +31,11 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       status*: string
       body*: string
 
-    HttpBodyChunk* = object
-      ## One piece of a response body. Embedded targets download into
-      ## fixed-size PSRAM chunks so no response needs one large contiguous
-      ## allocation; decoders consume the chunks as segments.
-      data*: pointer
-      len*: int
-
     BoundedHttpBufferResponse* = object
       code*: int
       status*: string
-      body*: pointer # Contiguous view; nil when the body spans >1 chunk
-      bodyLen*: int  # Total length across all chunks
-      chunks*: seq[HttpBodyChunk]
-      when defined(frameosEmbedded):
-        rawChunks: pointer
-        rawChunkCount: csize_t
+      body*: pointer
+      bodyLen*: int
 
     HttpResponseMetadata* = object
       contentLength*: int
@@ -59,21 +48,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                             outStatus: ptr cint, outLen: ptr csize_t):
                             pointer {.importc: "fos_nim_http_request", cdecl.}
   proc fos_nim_http_free(p: pointer) {.importc: "fos_nim_http_free", cdecl.}
-
-  when defined(frameosEmbedded):
-    type FosNimHttpChunk {.pure.} = object
-      data: pointer
-      len: csize_t
-
-    proc fos_nim_http_request_chunked(httpMethod: cstring, url: cstring,
-                            body: pointer, bodyLen: csize_t,
-                            headers: pointer, headersLen: csize_t,
-                            timeoutMs: cint, maxBytes: csize_t,
-                            outStatus: ptr cint, outChunkCount: ptr csize_t):
-                            ptr UncheckedArray[FosNimHttpChunk]
-                            {.importc: "fos_nim_http_request_chunked", cdecl.}
-    proc fos_nim_http_free_chunks(chunks: pointer, count: csize_t)
-                            {.importc: "fos_nim_http_free_chunks", cdecl.}
 
   proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
     for header in headers:
@@ -90,20 +64,10 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
 
   proc freeHttpBufferResponse*(response: var BoundedHttpBufferResponse) =
-    when defined(frameosEmbedded):
-      if response.rawChunks != nil:
-        fos_nim_http_free_chunks(response.rawChunks, response.rawChunkCount)
-        response.rawChunks = nil
-        response.rawChunkCount = 0
-        response.body = nil
-        response.bodyLen = 0
-        response.chunks = @[]
-        return
     if response.body != nil:
       fos_nim_http_free(response.body)
       response.body = nil
       response.bodyLen = 0
-      response.chunks = @[]
 
   proc boundedRequestBuffer*(
       url: string,
@@ -122,47 +86,21 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     if not (url.startsWith("http://") or url.startsWith("https://")):
       raise newException(ValueError, &"Invalid HTTP URL: {url}")
     var status: cint = 0
+    var outLen: csize_t = 0
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
     let headerBlock = encodeSimpleHeaders(headers)
     let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
-    when defined(frameosEmbedded):
-      var chunkCount: csize_t = 0
-      let rawChunks = fos_nim_http_request_chunked(httpMethod.cstring, url.cstring,
-                                     bodyPtr, body.len.csize_t,
-                                     headerPtr, headerBlock.len.csize_t,
-                                     timeoutMs.cint, maxBytes.csize_t,
-                                     addr status, addr chunkCount)
-      if rawChunks == nil and status == 0:
-        raise newException(IOError, &"HTTP request failed: {url}")
-      result.code = status.int
-      result.status = $status
-      result.rawChunks = rawChunks
-      result.rawChunkCount = chunkCount
-      var total = 0
-      if rawChunks != nil:
-        result.chunks = newSeq[HttpBodyChunk](chunkCount.int)
-        for i in 0 ..< chunkCount.int:
-          result.chunks[i] = HttpBodyChunk(
-            data: rawChunks[i].data, len: rawChunks[i].len.int)
-          total += rawChunks[i].len.int
-      result.bodyLen = total
-      if result.chunks.len == 1:
-        result.body = result.chunks[0].data
-    else:
-      var outLen: csize_t = 0
-      let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
-                                     bodyPtr, body.len.csize_t,
-                                     headerPtr, headerBlock.len.csize_t,
-                                     timeoutMs.cint, maxBytes.csize_t,
-                                     addr status, addr outLen)
-      if buf == nil and status == 0:
-        raise newException(IOError, &"HTTP request failed: {url}")
-      result.code = status.int
-      result.status = $status
-      result.body = buf
-      result.bodyLen = outLen.int
-      if buf != nil:
-        result.chunks = @[HttpBodyChunk(data: buf, len: outLen.int)]
+    let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
+                                   bodyPtr, body.len.csize_t,
+                                   headerPtr, headerBlock.len.csize_t,
+                                   timeoutMs.cint, maxBytes.csize_t,
+                                   addr status, addr outLen)
+    if buf == nil and status == 0:
+      raise newException(IOError, &"HTTP request failed: {url}")
+    result.code = status.int
+    result.status = $status
+    result.body = buf
+    result.bodyLen = outLen.int
 
   proc boundedRequest*(
       url: string,
@@ -189,13 +127,9 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     try:
       result.code = response.code
       result.status = response.status
-      if response.bodyLen > 0:
+      if response.body != nil and response.bodyLen > 0:
         result.body = newString(response.bodyLen)
-        var pos = 0
-        for chunk in response.chunks:
-          if chunk.len > 0:
-            copyMem(addr result.body[pos], chunk.data, chunk.len)
-            pos += chunk.len
+        copyMem(addr result.body[0], response.body, response.bodyLen)
     finally:
       response.freeHttpBufferResponse()
 

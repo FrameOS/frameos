@@ -22,6 +22,5 @@ bool fos_ota_boot_request_pending(void);
 esp_err_t fos_ota_run_boot_request(void);
 /* Background task that checks every interval_hours. */
 void fos_ota_start_periodic_task(uint32_t interval_hours);
-/* Request an early-boot OTA check and schedule a reboot into it. The delay
- * lets HTTP and USB callers flush their acknowledgement first. */
+/* Request an early-boot OTA check and reboot into it. */
 esp_err_t fos_ota_request_check(void);

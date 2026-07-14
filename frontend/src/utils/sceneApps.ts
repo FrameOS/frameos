@@ -1,6 +1,5 @@
 import { AppConfig, FrameScene, SceneApp } from '../types'
 import { apiFetch } from './apiFetch'
-import { embeddedBuiltinAppSources } from '../generated/builtinApps'
 import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../generated/repoApps'
 
 export const javascriptAppSourceFiles = ['app.ts', 'app.js', 'app.tsx', 'app.jsx']
@@ -152,7 +151,7 @@ export function appLabel(app: AppConfig, prefix?: string): string {
 }
 
 export async function loadAppSources(keyword: string): Promise<Record<string, string>> {
-  const embeddedSources = embeddedRepoAppSources[keyword] ?? embeddedBuiltinAppSources[keyword]
+  const embeddedSources = embeddedRepoAppSources[keyword]
   if (embeddedSources) {
     return { ...embeddedSources }
   }

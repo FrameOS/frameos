@@ -4,7 +4,6 @@ import type { appsModelType } from './appsModelType'
 import { loaders } from 'kea-loaders'
 import { AppConfig } from '../types'
 import { apiFetch } from '../utils/apiFetch'
-import { embeddedBuiltinAppConfigs } from '../generated/builtinApps'
 import { embeddedRepoAppConfigs } from '../generated/repoApps'
 
 export const categoryLabels: Record<string, any> = {
@@ -15,8 +14,7 @@ export const categoryLabels: Record<string, any> = {
 }
 
 function withEmbeddedRepoApps(apps: Record<string, AppConfig>): Record<string, AppConfig> {
-  // Build-time catalogs fill the gaps; anything the backend serves wins.
-  return { ...embeddedBuiltinAppConfigs, ...apps, ...embeddedRepoAppConfigs }
+  return { ...apps, ...embeddedRepoAppConfigs }
 }
 
 export const appsModel = kea<appsModelType>([

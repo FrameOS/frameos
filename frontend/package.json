@@ -10,7 +10,7 @@
     "dev:vite": "vite --host 0.0.0.0 --port 8616",
     "clean": "rm -rf ./dist && mkdir ./dist",
     "build": "npm run build:repo-apps && npm run build:kea && npm run schema && tsc && npm run build:esbuild",
-    "build:repo-apps": "node scripts/generateRepoApps.mjs && node scripts/generateBuiltinApps.mjs",
+    "build:repo-apps": "node scripts/generateRepoApps.mjs",
     "build:kea": "kea-typegen write --write-paths",
     "build:esbuild": "node build.mjs",
     "prettier": "prettier --write src",

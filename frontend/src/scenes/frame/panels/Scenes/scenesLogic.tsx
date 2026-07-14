@@ -709,21 +709,14 @@ export const scenesLogic = kea<scenesLogicType>([
           sceneId: scene.id,
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
-        let usbSucceeded = false
         if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
-          try {
-            const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
-            await runEmbeddedUsbApiCommand(props.frameId, 'upload-scenes', {
-              payload: payloadBytes,
-              timeoutMs: embeddedUsbUploadTimeoutMs(payloadBytes.byteLength),
-            })
-            scheduleEmbeddedUsbFrameImageRefresh(props.frameId)
-            usbSucceeded = true
-          } catch (error) {
-            // Stale/busy USB port — fall through to the HTTP event.
-          }
-        }
-        if (!usbSucceeded) {
+          const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
+          await runEmbeddedUsbApiCommand(props.frameId, 'upload-scenes', {
+            payload: payloadBytes,
+            timeoutMs: embeddedUsbUploadTimeoutMs(payloadBytes.byteLength),
+          })
+          scheduleEmbeddedUsbFrameImageRefresh(props.frameId)
+        } else {
           const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScenes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

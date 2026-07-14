@@ -29,7 +29,7 @@ type
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = self.renderErrorForContext(context, message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
 when defined(frameosEmbedded):
   proc bestEmbeddedGptImage2Size(width, height: int): string =

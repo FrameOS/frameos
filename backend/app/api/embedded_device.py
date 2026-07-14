@@ -293,13 +293,6 @@ async def api_embedded_device_settings(
     return embedded_settings_payload(db, frame)
 
 
-# NOTE: Do NOT add a backend image proxy for device rendering here. Frames
-# must fetch and render images independently of the backend. Oversized
-# sources are fixed with better on-device streaming decode (see the rule in
-# AGENTS.md and frameos/src/frameos/utils/image.nim). Proxies are acceptable
-# for in-browser previews only, never for frames.
-
-
 @api_public.get("/frames/{id:int}/embedded/ota/manifest")
 async def api_embedded_device_ota_manifest(
     id: int,
@@ -333,9 +326,5 @@ async def api_embedded_device_ota_download(
     if (firmware.get("status") != "ready" or not isinstance(ota_path, str)
             or not os.path.isfile(ota_path)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No OTA image available")
-    return FileResponse(
-        ota_path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(ota_path),
-        headers={"Cache-Control": "no-store"},
-    )
+    return FileResponse(ota_path, media_type="application/octet-stream",
+                        filename=os.path.basename(ota_path))

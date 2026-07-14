@@ -198,7 +198,7 @@ proc previousToken*(processor: var TokenProcessor) =
 proc removeBalancedCode*(processor: var TokenProcessor) =
   var braceDepth = 0
   while not processor.isAtEnd():
-    if processor.matches1(ttBraceL) or processor.matches1(ttDollarBraceL):
+    if processor.matches1(ttBraceL):
       inc braceDepth
     elif processor.matches1(ttBraceR):
       if braceDepth == 0:

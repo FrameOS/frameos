@@ -205,14 +205,11 @@ function getBuiltEntryPoints(config, result) {
   let outfiles = []
   if (config.outdir) {
     // convert "src/index.tsx" --> /a/posthog/frontend/dist/index.js
-    // ({in, out} entries land at outdir/out.js)
     outfiles = config.entryPoints.map((file) =>
-      typeof file === 'object'
-        ? path.resolve(config.absWorkingDir, config.outdir, `${file.out}.js`)
-        : path
-            .resolve(config.absWorkingDir, file)
-            .replace('/src/', '/dist/')
-            .replace(/\.[^.]+$/, '.js')
+      path
+        .resolve(config.absWorkingDir, file)
+        .replace('/src/', '/dist/')
+        .replace(/\.[^.]+$/, '.js')
     )
   } else if (config.outfile) {
     outfiles = [path.resolve(config.absWorkingDir, config.outfile)]

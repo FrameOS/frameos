@@ -895,11 +895,7 @@ proc stripMethodAndMemberTypes(code: string): string =
         let typeEnd = skipType(code, typeStart)
         var after = typeEnd
         skipSpaces(code, after)
-        # A member type ends at `;` or a single `=` (field initializer);
-        # `==`/`===`/`=>` mean the colon was a runtime object key instead.
-        let atInitializerEq = after < code.len and code[after] == '=' and
-          (after + 1 >= code.len or code[after + 1] notin {'=', '>'})
-        if after < code.len and (code[after] == ';' or atInitializerEq):
+        if after < code.len and code[after] in {';', '='}:
           if code[after] == '=':
             result.add(' ')
           i = typeEnd
@@ -1312,7 +1308,7 @@ proc tokenStatementEnd(tokens: seq[JsToken], start: int): int =
       inc parenDepth
     of ttParenR:
       if parenDepth > 0: dec parenDepth
-    of ttBraceL, ttDollarBraceL:
+    of ttBraceL:
       inc braceDepth
     of ttBraceR:
       if braceDepth == 0 and parenDepth == 0 and bracketDepth == 0:
@@ -1334,8 +1330,7 @@ proc tokenStatementEnd(tokens: seq[JsToken], start: int): int =
 proc tokenMatching(tokens: seq[JsToken], openIndex: int, openType, closeType: TokenType): int =
   var depth = 0
   for index in openIndex..<tokens.len:
-    # `${` opens a brace context closed by a plain `}` token.
-    if tokens[index].typ == openType or (openType == ttBraceL and tokens[index].typ == ttDollarBraceL):
+    if tokens[index].typ == openType:
       inc depth
     elif tokens[index].typ == closeType:
       dec depth

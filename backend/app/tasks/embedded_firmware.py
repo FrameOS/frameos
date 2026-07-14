@@ -25,7 +25,6 @@ import os
 import re
 import shlex
 import shutil
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -53,7 +52,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 44  # Acknowledge OTA requests before the scheduled reboot
+EMBEDDED_FIRMWARE_VERSION = 42  # ESP32 preserves Wikimedia image aspect before render placement
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -384,133 +383,6 @@ def embedded_pixie_path() -> Path | None:
     if (candidate / "src" / "pixie").is_dir():
         return candidate.resolve()
     return None
-
-
-_FIRMWARE_SOURCE_PATHS = (
-    Path("Dockerfile"),
-    Path("backend/app/codegen"),
-    Path("backend/app/drivers/waveshare.py"),
-    Path("backend/app/tasks/embedded_firmware.py"),
-    Path("embedded/esp32"),
-    Path("frameos/config.nims"),
-    Path("frameos/frameos.nimble"),
-    Path("frameos/nim.cfg"),
-    Path("frameos/nimble.lock"),
-    Path("frameos/src"),
-    Path("frameos/tools/makeapploaders.py"),
-    Path("repo/apps"),
-    Path("repo/scenes"),
-)
-_FIRMWARE_SOURCE_EXCLUDED_NAMES = {
-    ".cache",
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "__pycache__",
-    "build",
-    "managed_components",
-    "nimcache",
-    "node_modules",
-    "testresults",
-    "tests",
-    "tmp",
-}
-_FIRMWARE_SOURCE_EXCLUDED_PATHS = {
-    Path("embedded/esp32/dependencies.lock"),
-    Path("embedded/esp32/main/generated_config.h"),
-    Path("embedded/esp32/sdkconfig"),
-    Path("embedded/esp32/sdkconfig.old"),
-    Path("frameos/src/codegen"),
-}
-_source_fingerprint_cache: tuple[float, tuple[tuple[str, int, int], ...], str] | None = None
-
-
-def _firmware_source_files() -> tuple[list[tuple[str, Path | None]], tuple[tuple[str, int, int], ...]]:
-    """Collect immutable firmware inputs without relying on a Git checkout.
-
-    The production image deliberately has no ``.git`` directory. Build output,
-    per-frame generated config, caches, and tests are excluded because they do
-    not define the firmware source and may change while a build is running.
-    """
-    entries: list[tuple[str, Path | None]] = []
-    signature: list[tuple[str, int, int]] = []
-
-    def excluded(relative: Path) -> bool:
-        if relative in _FIRMWARE_SOURCE_EXCLUDED_PATHS:
-            return True
-        return any(
-            part in _FIRMWARE_SOURCE_EXCLUDED_NAMES or part.startswith("build-")
-            for part in relative.parts
-        )
-
-    def collect(label: str, path: Path, relative: Path) -> None:
-        if excluded(relative):
-            return
-        if path.is_symlink():
-            target = os.readlink(path)
-            entries.append((f"symlink:{label}\0{target}", None))
-            signature.append((f"{label}\0{target}", -2, path.lstat().st_mtime_ns))
-            return
-        if path.is_dir():
-            for child in sorted(path.iterdir(), key=lambda item: item.name):
-                collect(f"{label}/{child.name}", child, relative / child.name)
-            return
-        if path.is_file():
-            stat = path.stat()
-            entries.append((f"file:{label}", path))
-            signature.append((label, stat.st_size, stat.st_mtime_ns))
-            return
-        entries.append((f"missing:{label}", None))
-        signature.append((label, -1, -1))
-
-    for relative in _FIRMWARE_SOURCE_PATHS:
-        collect(f"repo/{relative.as_posix()}", REPO_ROOT / relative, relative)
-
-    pixie_path = embedded_pixie_path()
-    if pixie_path is None:
-        # nimble.lock is one of the repo inputs above and pins the exact Pixie
-        # revision used in production. This marker distinguishes that path from
-        # an explicit source override.
-        entries.append(("pixie/nimble-lock", None))
-        signature.append(("pixie/nimble-lock", -3, -3))
-    else:
-        for relative in (Path("pixie.nimble"), Path("src")):
-            collect(f"pixie/{relative.as_posix()}", pixie_path / relative, relative)
-
-    return entries, tuple(signature)
-
-
-def embedded_firmware_source_fingerprint() -> str:
-    """Fingerprint of the source trees a firmware image is built from, so
-    cached builds go stale when the code changes — not only when the frame's
-    settings or the manually-bumped EMBEDDED_FIRMWARE_VERSION do. Covers this
-    repo (the inputs baked into the image) and either the local Pixie checkout
-    or its production lock. The digest is based on file content, so it works in
-    Docker where Git metadata and a neighboring Pixie checkout are absent."""
-    global _source_fingerprint_cache
-    now = time.monotonic()
-    if _source_fingerprint_cache is not None and now - _source_fingerprint_cache[0] < 5.0:
-        return _source_fingerprint_cache[2]
-
-    entries, signature = _firmware_source_files()
-    if _source_fingerprint_cache is not None and signature == _source_fingerprint_cache[1]:
-        fingerprint = _source_fingerprint_cache[2]
-        _source_fingerprint_cache = (now, signature, fingerprint)
-        return fingerprint
-
-    digest = hashlib.sha256()
-    for label, path in entries:
-        digest.update(label.encode("utf-8"))
-        digest.update(b"\0")
-        if path is not None:
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        digest.update(b"\0")
-    fingerprint = f"sha256:{digest.hexdigest()}"
-    _source_fingerprint_cache = (now, signature, fingerprint)
-    return fingerprint
 
 
 def embedded_panel_for_frame(frame: Frame) -> str:
@@ -1134,20 +1006,6 @@ def clear_embedded_firmware(frame: Frame | Any) -> None:
     frame.embedded = embedded
 
 
-def embedded_firmware_download_url(frame_id: int, sha256: object = None) -> str:
-    """Return a content-addressed browser download URL when a hash is known.
-
-    Firmware artifacts are replaced in place for each frame. Keeping the URL
-    stable lets a browser reuse an older merged image after a rebuild, so put
-    the image hash in the query string to give every build a distinct cache
-    key. The download response is also marked no-store as a second safeguard.
-    """
-    base_url = f"/api/frames/{frame_id}/embedded/firmware/download"
-    if isinstance(sha256, str) and re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
-        return f"{base_url}?sha256={sha256.lower()}"
-    return base_url
-
-
 def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
     firmware = embedded.get("firmware")
@@ -1159,15 +1017,6 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
             "status": "stale",
             "error": "The generated firmware was built from an older firmware project version",
         })
-    if firmware.get("status") == "ready":
-        source_fingerprint = firmware.get("sourceFingerprint")
-        if isinstance(source_fingerprint, str) and \
-                source_fingerprint != embedded_firmware_source_fingerprint():
-            return with_embedded_firmware_layout(frame, {
-                **firmware,
-                "status": "stale",
-                "error": "The generated firmware was built from older FrameOS sources",
-            })
     if firmware.get("status") == "ready":
         try:
             firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
@@ -1209,10 +1058,6 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
                     frame,
                     {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"},
                 )
-        firmware = {
-            **firmware,
-            "downloadUrl": embedded_firmware_download_url(int(frame.id), firmware.get("sha256")),
-        }
     return with_embedded_firmware_layout(frame, firmware)
 
 
@@ -1606,7 +1451,6 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     frame = get_fresh_frame(db, int(frame.id)) or frame
     current = latest_embedded_firmware(frame) or {}
-    merged_sha256 = _sha256(artifact_path)
     ready_status = {
         **_preserved_queue_metadata(current),
         "status": "ready",
@@ -1620,18 +1464,17 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "filename": filename,
         "path": str(artifact_path),
         "size": artifact_path.stat().st_size,
-        "sha256": merged_sha256,
+        "sha256": _sha256(artifact_path),
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
-        "sourceFingerprint": embedded_firmware_source_fingerprint(),
         "appSize": ota_bin.stat().st_size,
         "bootloaderSize": (build_dir / "bootloader" / "bootloader.bin").stat().st_size,
         "partitionTableSize": (build_dir / "partition_table" / "partition-table.bin").stat().st_size,
         "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
-        "downloadUrl": embedded_firmware_download_url(int(frame.id), merged_sha256),
+        "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
     }
     if flash_profile["otaSupported"]:
         ready_status = {

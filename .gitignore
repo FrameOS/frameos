@@ -100,5 +100,3 @@ release-assets/
 # wasm live-preview bundle (built by frameos/tools/build_wasm.sh)
 frontend/public/frameos-wasm/
 frameos/build/wasm/
-dist-editor
-frontend/editor-smoke.png

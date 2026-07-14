@@ -413,8 +413,7 @@ static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_tick
         if ((xTaskGetTickCount() - start) >= timeout_ticks) {
             return false;
         }
-        /* At least one full tick: pdMS_TO_TICKS(1) is 0 ticks at 100Hz. */
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
     return true;
 }
@@ -702,10 +701,7 @@ static void fos_console_usb_task(void *arg)
     while (true) {
         int ch = fgetc(stdin);
         if (ch == EOF) {
-            /* stdin is non-blocking; sleep at least one full tick. At
-             * CONFIG_FREERTOS_HZ=100, pdMS_TO_TICKS(1) rounds to 0 ticks and
-             * this loop busy-spins, starving IDLE0 (task_wdt warnings). */
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
 

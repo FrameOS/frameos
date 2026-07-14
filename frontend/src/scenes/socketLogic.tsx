@@ -29,9 +29,6 @@ export const socketLogic = kea<socketLogicType>([
     socketReconnected: true,
   }),
   afterMount(({ actions, cache }) => {
-    if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
-      return
-    }
     const frameControlMode = isFrameControlMode()
     const isFrameOSAdmin = isInFrameAdminMode()
 

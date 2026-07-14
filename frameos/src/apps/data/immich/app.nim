@@ -10,6 +10,7 @@ import frameos/types
 import frameos/hal/entropy
 import frameos/utils/app_images
 import frameos/utils/http_client
+import frameos/utils/image
 
 const RequestTimeoutMs = 30000
 
@@ -37,7 +38,7 @@ proc init*(self: App) =
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
-  result = self.renderErrorForContext(context, message)
+  result = renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
 proc normalizeServerUrl*(url: string): string =
   result = url.strip()

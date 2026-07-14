@@ -37,9 +37,7 @@ template expectKind(v: Value; k: FieldKind) =
     raise newException(ValueError, "Value is " & $v.kind & ", expected " & $k)
 
 proc asString*(v: Value): string {.inline.} =
-  if v.kind notin {fkString, fkText}:
-    raise newException(ValueError, "Value is " & $v.kind & ", expected fkString or fkText")
-  v.s
+  assert v.kind in {fkString, fkText}; v.s
 proc asFloat*(v: Value): float64 {.inline.} =
   case v.kind
   of fkFloat:

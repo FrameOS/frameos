@@ -25,8 +25,7 @@ proc nextNonEof(tokens: seq[JsToken], i: int): int =
 proc findMatching(tokens: seq[JsToken], openIndex: int, openType, closeType: TokenType): int =
   var depth = 0
   for i in openIndex..<tokens.len:
-    # `${` opens a brace context closed by a plain `}` token.
-    if tokens[i].typ == openType or (openType == ttBraceL and tokens[i].typ == ttDollarBraceL):
+    if tokens[i].typ == openType:
       inc depth
     elif tokens[i].typ == closeType:
       dec depth
@@ -43,7 +42,7 @@ proc findStatementEnd(tokens: seq[JsToken], start: int): int =
     of ttParenL: inc parenDepth
     of ttParenR:
       if parenDepth > 0: dec parenDepth
-    of ttBraceL, ttDollarBraceL: inc braceDepth
+    of ttBraceL: inc braceDepth
     of ttBraceR:
       if braceDepth == 0 and parenDepth == 0 and bracketDepth == 0:
         return i
@@ -103,13 +102,6 @@ proc annotateScopes(tokens: var seq[JsToken]): seq[Scope] =
       stack.add((i, pendingFunctionBrace))
       pendingFunctionBrace = false
       inc scopeDepth
-    of ttDollarBraceL:
-      # Template interpolation opens a brace context closed by a plain `}`;
-      # track it so that `}` does not pop an enclosing scope.
-      tokens[i].contextId = nextContextId
-      inc nextContextId
-      stack.add((i, false))
-      inc scopeDepth
     of ttBraceR:
       if scopeDepth > 0:
         dec scopeDepth
@@ -133,7 +125,7 @@ proc markBindingList(tokens: var seq[JsToken], start, stop: int, role: Identifie
   var depth = 0
   while i <= stop and i < tokens.len:
     case tokens[i].typ
-    of ttBraceL, ttBracketL, ttParenL, ttDollarBraceL:
+    of ttBraceL, ttBracketL, ttParenL:
       inc depth
     of ttBraceR, ttBracketR, ttParenR:
       if depth > 0: dec depth
@@ -162,7 +154,7 @@ proc annotateVarDeclarations(tokens: var seq[JsToken]) =
         case tokens[j].typ
         of ttSemi, ttEof:
           break
-        of ttBraceL, ttBracketL, ttParenL, ttDollarBraceL:
+        of ttBraceL, ttBracketL, ttParenL:
           inc depth
         of ttBraceR, ttBracketR, ttParenR:
           if depth == 0 and tokens[j].typ == ttParenR:
@@ -438,9 +430,9 @@ proc annotateOptionalAndNullish(tokens: var seq[JsToken]) =
   for i in 0..<tokens.len:
     if tokens[i].typ == ttNullishCoalescing:
       var start = i - 1
-      while start > 0 and tokens[start].typ notin {ttComma, ttSemi, ttParenL, ttBraceL, ttDollarBraceL, ttBracketL, ttEq}:
+      while start > 0 and tokens[start].typ notin {ttComma, ttSemi, ttParenL, ttBraceL, ttBracketL, ttEq}:
         dec start
-      if start < i and tokens[start].typ in {ttComma, ttSemi, ttParenL, ttBraceL, ttDollarBraceL, ttBracketL, ttEq}:
+      if start < i and tokens[start].typ in {ttComma, ttSemi, ttParenL, ttBraceL, ttBracketL, ttEq}:
         inc start
       tokens[start].numNullishCoalesceStarts += 1
       var finish = i + 1
@@ -451,9 +443,9 @@ proc annotateOptionalAndNullish(tokens: var seq[JsToken]) =
 
     if tokens[i].typ == ttQuestionDot:
       var start = i - 1
-      while start > 0 and tokens[start].typ notin {ttComma, ttSemi, ttParenL, ttBraceL, ttDollarBraceL, ttBracketL, ttEq}:
+      while start > 0 and tokens[start].typ notin {ttComma, ttSemi, ttParenL, ttBraceL, ttBracketL, ttEq}:
         dec start
-      if start < i and tokens[start].typ in {ttComma, ttSemi, ttParenL, ttBraceL, ttDollarBraceL, ttBracketL, ttEq}:
+      if start < i and tokens[start].typ in {ttComma, ttSemi, ttParenL, ttBraceL, ttBracketL, ttEq}:
         inc start
       tokens[start].isOptionalChainStart = true
       var finish = i + 1
