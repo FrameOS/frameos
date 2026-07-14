@@ -42,6 +42,13 @@ class CloudFeaturesRequest(BaseModel):
     scopes: list[str]
 
 
+class CloudBackupFeaturesRequest(BaseModel):
+    # Local on/off switches for what actually gets uploaded; omitted fields
+    # stay unchanged. The backup scopes themselves come with the account.
+    scenes: bool | None = None
+    frames: bool | None = None
+
+
 class CloudBackupSaveTemplateRequest(BaseModel):
     template_id: str
 

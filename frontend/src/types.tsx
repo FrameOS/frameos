@@ -844,6 +844,10 @@ export interface CloudStatus {
   } | null
   /** True unless cloud login is enforced (local passwords disabled). */
   local_fallback_enabled?: boolean
+  /** Local switches: the backup scopes come with the account, but nothing is
+   * uploaded until these are turned on. */
+  backup_scenes_enabled?: boolean
+  backup_frames_enabled?: boolean
   /** A pending feature change awaiting owner approval on the provider. */
   upgrade?: {
     user_code: string | null

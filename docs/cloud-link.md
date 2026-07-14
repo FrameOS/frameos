@@ -56,17 +56,19 @@ falls back to the provider's default.
 | `store:read` | browse/install from scene & app repositories |
 | `store:publish` | publish scenes/apps to the user's collections or the store |
 | `gallery:read` | access curated photo galleries |
-| `backup:templates` | store scene template collections |
+| `backup:scenes` | store scene template collections |
 | `backup:frames` | store frame metadata + scene backups |
 | `backup:assets` | store client-side-encrypted frame asset backups |
 | `remote:access` | relay inbound connections to this installation |
 | `telemetry:logs` | ship logs for retention |
 | `telemetry:metrics` | ship metrics for retention |
 
-Phase 0 requests only `backend:link backend:read` (backends) or `frame:link`
-(frames). Feature scopes are requested when the user enables the feature.
-Some scopes may map to paid plans on cloud.frameos.net; the consent screen
-must say so before approval.
+Backends link with the base scopes plus the features included with every
+cloud account (`backup:scenes`, `backup:frames`, `store:publish`) in one
+approval; frames link with `frame:link` (+ `auth:login`). Security-sensitive
+scopes (`auth:login`, `remote:access`, telemetry) are only requested when the
+user explicitly toggles the matching feature on. Some scopes may map to paid
+plans on cloud.frameos.net; the consent screen must say so before approval.
 
 ## Linking (device authorization)
 
@@ -165,7 +167,10 @@ POST {provider}/api/backends/unlink        # self-revoke on disconnect
 `{"scopes": ["backend:link", "backend:read", "auth:login", …]}` — the full
 desired set. Removing scopes is applied immediately (`{"status": "updated",
 "scope": "…"}`): the token holder reducing its own privileges needs no
-consent, and the base link scope can never be dropped. Adding scopes returns
+consent, and the base link scope can never be dropped. Adding a scope that
+comes with every cloud account (`backup:scenes`, `backup:frames`,
+`store:publish`) is also applied immediately. Adding a security-sensitive
+scope (`auth:login`, `remote:access`, …) returns
 `{"status": "approval_required", "device_code", "user_code",
 "verification_uri(_complete)", "expires_in", "interval"}`: the owner approves
 the change on the provider's device screen (only the account that owns the
@@ -246,12 +251,12 @@ FrameOS-side behavior (`backend/app/api/cloud.py`, frame:
   client origins (loopback hosts are allowed for development) and bounces
   back to the install's login page.
 
-## Config backups (Phase 3, scopes `backup:templates` / `backup:frames`)
+## Config backups (Phase 3, scopes `backup:scenes` / `backup:frames`)
 
 Small replace-in-place blobs owned by the provider **account** (not the linked
 client), so a reinstalled backend that relinks to the same account can restore
 them. All endpoints carry the link's Bearer token and enforce the matching
-scope per kind (`templates` → `backup:templates`, `frames` → `backup:frames`):
+scope per kind (`templates` → `backup:scenes`, `frames` → `backup:frames`):
 
 ```http
 GET    {provider}/api/backends/backups                 # list (kinds the scopes allow)
@@ -278,14 +283,21 @@ account, and answer `413 backup_too_large` / `403 backup_quota_exceeded`.
 
 Payload formats (defined FrameOS-side, opaque to the provider):
 
-- `templates`: the template interchange zip (`{name}/template.json`,
-  `scenes.json`, `image.jpg`) — the same file the local export produces.
+- `templates`: the scene/template interchange zip (`{name}/template.json`,
+  `scenes.json`, `image.jpg`) — the same file the local export produces. (The
+  kind string predates the templates→scenes rename; the scope is
+  `backup:scenes` and the UI says "scene".)
 - `frames`: JSON `{"format": "frameos-frame-backup-v1", "saved_at", "project_name", "frame": {…}}`
   where `frame` is the frame's metadata + scene JSON **with all local secrets
   stripped** (SSH credentials, access keys, TLS material, wifi passwords —
   see `backend/app/utils/cloud_backup.py`). Restores regenerate fresh local
   credentials. Frame backups are pushed automatically after each successful
-  deploy while the scope is granted.
+  deploy while the scope is granted **and** the local switch is on.
+
+The scopes are granted with the link, but they are a permission only: FrameOS
+uploads nothing until the user turns the matching backup switch on (Settings →
+FrameOS Cloud; `backup_scenes_enabled` / `backup_frames_enabled` on the link,
+`POST /api/cloud/backup-features` locally). Connecting alone never sends data.
 
 The do-it-yourself alternative that needs no provider: `GET /api/backup/export`
 on the backend returns everything (full fidelity, secrets included — it stays

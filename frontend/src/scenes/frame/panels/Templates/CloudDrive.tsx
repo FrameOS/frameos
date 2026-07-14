@@ -65,17 +65,17 @@ export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps
         !hasDriveScope ? (
           <Box className="frame-tool-card rounded-[18px] p-3 text-sm space-y-1">
             <div>
-              Save scenes to your own private drive on FrameOS Cloud, restore them on any install, and share the
-              best ones on the public store.
+              Save scenes to your own private drive on FrameOS Cloud, restore them on any install, and share the best
+              ones on the public store.
             </div>
             <div className="frame-tool-muted">
               {cloudConnected ? (
                 <>
-                  Enable the <em>Store publishing</em> feature in{' '}
+                  This comes with your cloud account — reconnect in{' '}
                   <A href={urls.settings()} className="underline">
                     Settings → FrameOS Cloud
                   </A>{' '}
-                  to use it.
+                  to pick it up.
                 </>
               ) : (
                 <>

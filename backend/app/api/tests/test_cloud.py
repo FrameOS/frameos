@@ -118,7 +118,7 @@ async def test_connect_starts_device_flow(async_client, cloud_calls):
     assert payload["scopes"] == [
         "backend:link",
         "backend:read",
-        "backup:templates",
+        "backup:scenes",
         "backup:frames",
         "store:publish",
     ]

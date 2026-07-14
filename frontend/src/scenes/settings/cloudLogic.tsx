@@ -17,14 +17,17 @@ export interface CloudProviderForm {
 /** The features a link can enable, in the wording the consent screen uses.
  * Kept in sync with the scope table in CLOUD-TODO.md.
  *
- * Only security-sensitive features ('toggle') get a real opt-in checkbox;
+ * Only security-sensitive features ('toggle') need a cloud-approved opt-in;
  * everything that is safe comes with the cloud account itself: 'locked'
- * renders an always-on checkbox, 'plain' just lists the feature. */
+ * renders an always-on checkbox, 'local' is an instant local on/off switch
+ * (the scope is granted either way, the switch controls what gets uploaded). */
 export const CLOUD_FEATURES: {
   scope: string
   label: string
   description: string
-  control: 'toggle' | 'locked' | 'plain'
+  control: 'toggle' | 'locked' | 'local'
+  /** For 'local' controls: the /api/cloud/backup-features field to flip. */
+  localKey?: 'scenes' | 'frames'
 }[] = [
   {
     scope: 'store:publish',
@@ -33,16 +36,18 @@ export const CLOUD_FEATURES: {
     control: 'locked',
   },
   {
-    scope: 'backup:templates',
-    label: 'Template backups',
-    description: 'Backup scenes into the cloud',
-    control: 'plain',
+    scope: 'backup:scenes',
+    label: 'Scene backups',
+    description: 'Back up your scenes into the cloud',
+    control: 'local',
+    localKey: 'scenes',
   },
   {
     scope: 'backup:frames',
     label: 'Frame backups',
     description: 'Back up frame settings + scenes automatically after each deploy',
-    control: 'plain',
+    control: 'local',
+    localKey: 'frames',
   },
   {
     scope: 'auth:login',
@@ -100,6 +105,7 @@ export const cloudLogic = kea<cloudLogicType>([
     linkCloudIdentity: true,
     unlinkCloudIdentity: true,
     setLocalFallback: (enabled: boolean) => ({ enabled }),
+    setBackupFeature: (key: 'scenes' | 'frames', enabled: boolean) => ({ key, enabled }),
     loadCloudBackups: true,
     backupAllToCloud: true,
     restoreCloudBackup: (backupId: string) => ({ backupId }),
@@ -248,7 +254,12 @@ export const cloudLogic = kea<cloudLogicType>([
     featureUpgradePending: [(s) => [s.cloudStatus], (cloudStatus): boolean => Boolean(cloudStatus?.upgrade)],
     hasBackupScope: [
       (s) => [s.grantedScopes],
-      (scopes): boolean => scopes.includes('backup:templates') || scopes.includes('backup:frames'),
+      (scopes): boolean => scopes.includes('backup:scenes') || scopes.includes('backup:frames'),
+    ],
+    // The local switches: what actually gets uploaded.
+    anyBackupEnabled: [
+      (s) => [s.cloudStatus],
+      (cloudStatus): boolean => Boolean(cloudStatus?.backup_scenes_enabled || cloudStatus?.backup_frames_enabled),
     ],
   }),
   listeners(({ actions, values }) => ({
@@ -373,6 +384,20 @@ export const cloudLogic = kea<cloudLogicType>([
       }
       actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
     },
+    setBackupFeature: async ({ key, enabled }) => {
+      // A purely local switch: the scope stays granted, this only controls
+      // whether anything is actually uploaded.
+      const response = await apiFetch('/api/cloud/backup-features', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: enabled }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not change the backup settings'))
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
     backupAllToCloud: async () => {
       // Push every frame and template of the current project. Frames are also
       // backed up automatically after each deploy when the scope is granted.
@@ -382,7 +407,7 @@ export const cloudLogic = kea<cloudLogicType>([
 
       const backupItems = async (
         items: { id: string | number; name?: string }[],
-        kind: 'frame' | 'template',
+        kind: 'frame' | 'scene',
         endpoint: string,
         idField: 'frame_id' | 'template_id'
       ): Promise<void> => {
@@ -407,7 +432,7 @@ export const cloudLogic = kea<cloudLogicType>([
       }
 
       const scopes = values.grantedScopes
-      if (scopes.includes('backup:frames')) {
+      if (scopes.includes('backup:frames') && values.cloudStatus?.backup_frames_enabled) {
         try {
           const framesResponse = await apiFetch('/api/frames')
           if (!framesResponse.ok) {
@@ -420,17 +445,17 @@ export const cloudLogic = kea<cloudLogicType>([
           failures.push(error instanceof Error ? error.message : 'Could not list frames to back up')
         }
       }
-      if (scopes.includes('backup:templates')) {
+      if (scopes.includes('backup:scenes') && values.cloudStatus?.backup_scenes_enabled) {
         try {
           const templatesResponse = await apiFetch('/api/templates')
           if (!templatesResponse.ok) {
-            failures.push(await cloudErrorMessage(templatesResponse, 'Could not list templates to back up'))
+            failures.push(await cloudErrorMessage(templatesResponse, 'Could not list scenes to back up'))
           } else {
             const templates = (await templatesResponse.json()) ?? []
-            await backupItems(templates, 'template', '/api/cloud/backups/templates', 'template_id')
+            await backupItems(templates, 'scene', '/api/cloud/backups/templates', 'template_id')
           }
         } catch (error) {
-          failures.push(error instanceof Error ? error.message : 'Could not list templates to back up')
+          failures.push(error instanceof Error ? error.message : 'Could not list scenes to back up')
         }
       }
 

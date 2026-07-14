@@ -13,7 +13,7 @@ from app.utils import cloud_link
 PROVIDER = "https://cloud.frameos.net"
 
 
-def make_connected_link(db, scope="backend:link backend:read backup:frames"):
+def make_connected_link(db, scope="backend:link backend:read backup:frames", backup_frames_enabled=True):
     link = CloudBackendLink(
         provider_url=PROVIDER,
         status="connected",
@@ -22,6 +22,7 @@ def make_connected_link(db, scope="backend:link backend:read backup:frames"):
         scope=scope,
         local_origin="http://test",
         local_fallback_enabled=False,
+        backup_frames_enabled=backup_frames_enabled,
     )
     db.add(link)
     db.commit()
@@ -157,6 +158,20 @@ async def test_deploy_broadcast_triggers_backup(db, redis, service, cloud_calls)
     await update_frame(db, redis, frame)
     await service._maybe_backup_frame(frame.to_dict())
     assert len(calls["backup_save"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_deploy_backup_needs_the_local_switch(db, redis, service, cloud_calls):
+    """The backup:frames scope alone must not upload anything."""
+    calls, _ = cloud_calls
+    make_connected_link(db, backup_frames_enabled=False)
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    service._prime_deploys_seen()
+
+    frame.last_successful_deploy_at = datetime.datetime.utcnow()
+    await update_frame(db, redis, frame)
+    await service._maybe_backup_frame(frame.to_dict())
+    assert calls["backup_save"] == []
 
 
 @pytest.mark.asyncio

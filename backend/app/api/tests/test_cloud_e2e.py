@@ -12,8 +12,6 @@ file with:
 Everything here goes over real HTTP: the device-authorization link, grants
 sync, the login handoff (Phase 1), and config backups (Phase 3).
 """
-import base64
-import json
 import os
 
 import httpx
@@ -31,10 +29,12 @@ pytestmark = pytest.mark.skipif(
     reason="Set FRAMEOS_CLOUD_E2E_URL and FRAMEOS_CLOUD_E2E_COOKIE (see frameos-cloud/scripts/e2e-frameos.sh)",
 )
 
-# Connect with login only; the backup features are enabled later through the
-# in-place feature-change flow (also exercised end-to-end below).
-SCOPES = ["backend:link", "backend:read", "auth:login"]
-ALL_SCOPES = SCOPES + ["backup:templates", "backup:frames"]
+# Connect with the bare link scopes; the included ("safe") features are then
+# auto-granted through the in-place feature-change flow, and cloud login — a
+# security feature — needs the owner's approval (both exercised below).
+SCOPES = ["backend:link", "backend:read"]
+INCLUDED_SCOPES = ["backup:scenes", "backup:frames", "store:publish"]
+ALL_SCOPES = SCOPES + INCLUDED_SCOPES + ["auth:login"]
 
 
 def cloud_client() -> httpx.AsyncClient:
@@ -68,6 +68,31 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     assert sorted(data["link"]["scopes"]) == sorted(SCOPES)
     if E2E_EMAIL:
         assert data["link"]["account_email"] == E2E_EMAIL
+
+    # ---- enabled features: included scopes are auto-granted ------------------
+    # /api/cloud/features always sends the included feature scopes along;
+    # adding only safe scopes needs no approval on the provider.
+    response = await async_client.post("/api/cloud/features", json={"scopes": []})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data.get("upgrade") is None, data
+    assert sorted(data["link"]["scopes"]) == sorted(SCOPES + INCLUDED_SCOPES)
+
+    # ---- enabled features: cloud login needs the owner's approval ------------
+    response = await async_client.post("/api/cloud/features", json={"scopes": ["auth:login"]})
+    assert response.status_code == 200, response.text
+    upgrade = response.json().get("upgrade")
+    assert upgrade and upgrade["user_code"], response.text
+
+    async with cloud_client() as cloud:
+        approve = await cloud.post("/api/device/authorize", json={"user_code": upgrade["user_code"]})
+        assert approve.status_code == 200, approve.text
+
+    response = await async_client.post("/api/cloud/poll")
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("upgrade") is None
+    assert sorted(data["link"]["scopes"]) == sorted(ALL_SCOPES)
 
     # ---- Phase 1: login handoff over real HTTP -------------------------------
     response = await async_client.post("/api/cloud/identity/link", json={})
@@ -105,25 +130,6 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     assert response.headers["location"] == "/frames"
     assert "frameos_session" in response.headers.get("set-cookie", "")
 
-    # ---- enabled features: add the backup scopes without reconnecting --------
-    response = await async_client.post(
-        "/api/cloud/features",
-        json={"scopes": ["auth:login", "backup:templates", "backup:frames"]},
-    )
-    assert response.status_code == 200, response.text
-    upgrade = response.json().get("upgrade")
-    assert upgrade and upgrade["user_code"], response.text
-
-    async with cloud_client() as cloud:
-        approve = await cloud.post("/api/device/authorize", json={"user_code": upgrade["user_code"]})
-        assert approve.status_code == 200, approve.text
-
-    response = await async_client.post("/api/cloud/poll")
-    assert response.status_code == 200
-    data = response.json()
-    assert data.get("upgrade") is None
-    assert sorted(data["link"]["scopes"]) == sorted(ALL_SCOPES)
-
     # ---- Phase 3: config backups over real HTTP ------------------------------
     frame = Frame(
         project_id=async_client.project_id,
@@ -136,6 +142,17 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     db.add(frame)
     db.commit()
     db.refresh(frame)
+
+    # The scope alone is a permission, not the feature: uploads are refused
+    # until the local backup switches are turned on.
+    response = await async_client.post("/api/cloud/backups/frames", json={"frame_id": frame.id})
+    assert response.status_code == 403, response.text
+
+    response = await async_client.post("/api/cloud/backup-features", json={"scenes": True, "frames": True})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["backup_scenes_enabled"] is True
+    assert data["backup_frames_enabled"] is True
 
     response = await async_client.post("/api/cloud/backups/frames", json={"frame_id": frame.id})
     assert response.status_code == 200, response.text

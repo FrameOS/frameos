@@ -1,9 +1,12 @@
 """Cloud config backups and the local tarball export (CLOUD-TODO Phase 3).
 
-Templates and frame configs can be pushed to / restored from the linked
-FrameOS Cloud provider (scopes ``backup:templates`` / ``backup:frames``), and
-everything can always be exported as a plain local tarball — the do-it-
-yourself alternative that works without any cloud.
+Scenes (stored locally as templates) and frame configs can be pushed to /
+restored from the linked FrameOS Cloud provider (scopes ``backup:scenes`` /
+``backup:frames``). The scopes come with every cloud account, but uploads
+also require the matching local switch (``backup_scenes_enabled`` /
+``backup_frames_enabled``) so connecting alone never leaks data. Everything
+can always be exported as a plain local tarball — the do-it-yourself
+alternative that works without any cloud.
 """
 from __future__ import annotations
 
@@ -96,7 +99,7 @@ def _require_user(current_user: User | None) -> User:
     return current_user
 
 
-def _require_linked(db: Session, scope: str):
+def _require_linked(db: Session, scope: str, feature_enabled_attr: str | None = None):
     link = current_cloud_backend_link(db)
     access_token = cloud_backup.link_access_token(link)
     if link is None or access_token is None:
@@ -105,6 +108,11 @@ def _require_linked(db: Session, scope: str):
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
             detail=f"The cloud link is missing the {scope} permission; reconnect with it enabled",
+        )
+    if feature_enabled_attr is not None and not getattr(link, feature_enabled_attr):
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Cloud backups are switched off; enable them in Settings → FrameOS Cloud first",
         )
     return link, access_token
 
@@ -135,7 +143,7 @@ async def list_cloud_backups(
     access_token = cloud_backup.link_access_token(link)
     if link is None or access_token is None:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")
-    has_scope = any(scope in link.scopes for scope in ("backup:templates", "backup:frames"))
+    has_scope = any(scope in link.scopes for scope in ("backup:scenes", "backup:frames"))
     if not has_scope:
         return {"backups": [], "missing_scope": True}
     try:
@@ -157,7 +165,7 @@ async def backup_template_to_cloud(
     current_user: User | None = Depends(get_current_user),
 ):
     user = _require_user(current_user)
-    link, access_token = _require_linked(db, "backup:templates")
+    link, access_token = _require_linked(db, "backup:scenes", "backup_scenes_enabled")
     template = db.query(Template).filter_by(id=data.template_id).first()
     if template is None or get_user_project(db, user, template.project_id) is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Template not found")
@@ -183,7 +191,7 @@ async def backup_frame_to_cloud(
     current_user: User | None = Depends(get_current_user),
 ):
     user = _require_user(current_user)
-    link, access_token = _require_linked(db, "backup:frames")
+    link, access_token = _require_linked(db, "backup:frames", "backup_frames_enabled")
     frame = db.query(Frame).filter_by(id=data.frame_id).first()
     if frame is None or get_user_project(db, user, frame.project_id) is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")

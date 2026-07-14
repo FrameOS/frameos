@@ -53,7 +53,7 @@ link, re-checkable via the grants endpoint. Proposed set:
 | `store:read` | Browse/install from the scene & app store (public repositories) | 2 | free |
 | `store:publish` | Publish scenes/apps to the user's cloud collections or public store | 2 | free |
 | `gallery:read` | Access curated photo galleries / gallery API | 2 | freemium |
-| `backup:templates` | Store the user's scene template collections in the cloud | 3 | paid tier |
+| `backup:scenes` | Store the user's scene template collections in the cloud | 3 | paid tier |
 | `backup:frames` | Back up frame metadata + scene JSON ("backup of your backup") | 3 | paid tier |
 | `backup:assets` | Back up frame assets (SD card contents), client-side encrypted | 4 | paid (storage) |
 | `remote:access` | Relay inbound connections so `something.local:8616` is reachable from cloud.frameos.net | 4 | paid (bandwidth) |
@@ -68,10 +68,19 @@ Notes:
 - The UI never says "scopes" or "permissions": these are the install's
   **enabled features**. They change in place through
   `POST {provider}/api/backends/scopes` (Settings → FrameOS Cloud → Enabled
-  features) — removals apply immediately, additions need a quick owner
-  approval on the provider's device screen; the link token never changes and
-  nothing disconnects. Connecting only offers "Cloud login"; everything else
-  is enabled afterwards.
+  features) — removals apply immediately, additions of security-sensitive
+  scopes need a quick owner approval on the provider's device screen; the
+  link token never changes and nothing disconnects.
+- Only security-sensitive features (cloud login, later remote access and
+  telemetry) get a cloud-approved opt-in toggle. The safe scopes — backups and
+  "Save and share scenes via the cloud" (`store:publish`) — are included with
+  every cloud account: requested at link time and auto-granted when added
+  later.
+- The backup scopes are a permission, not the feature: nothing is uploaded
+  until the user flips the local scene/frame backup switches
+  (`backup_scenes_enabled` / `backup_frames_enabled`, instant, no cloud
+  approval). Same pattern as the future `remote:access` local toggle —
+  granting a scope alone must never move data.
 - `remote:access` additionally requires an explicit on/off toggle locally;
   granting the scope alone must not open a tunnel.
 - "Paid?" is a product intention, not a commitment; free tiers likely include
@@ -187,7 +196,7 @@ threat model, phases). Protocol: `docs/cloud-link.md` § "Scene store".
 
 ### Phase 3 — config backups — done
 
-- [x] Scene template collection backup/restore (`backup:templates`): the
+- [x] Scene template collection backup/restore (`backup:scenes`): the
       template interchange zip is the payload; push via
       `POST /api/cloud/backups/templates`, restore via
       `POST /api/cloud/backups/restore`. Cloud storage:

@@ -3,7 +3,9 @@
 Two kinds ship in this phase, mirrored by the provider's /api/backends/backups
 endpoints (docs/cloud-link.md):
 
-- ``templates`` (scope ``backup:templates``): the template interchange zip.
+- ``templates`` (scope ``backup:scenes``): the scene/template interchange zip.
+  The kind string predates the templates→scenes rename and stays for protocol
+  stability; every user-facing label says "scene".
 - ``frames`` (scope ``backup:frames``): frame metadata + scene JSON. Local
   machine credentials (SSH, frame access, TLS, agent secrets) are stripped,
   while app API keys/tokens and configured upload headers are intentionally

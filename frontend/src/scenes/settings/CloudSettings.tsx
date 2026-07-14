@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
-import { CheckIcon, PencilSquareIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon } from '@heroicons/react/24/solid'
 
 import { Box } from '../../components/Box'
 import { Button } from '../../components/Button'
@@ -63,6 +63,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     isCloudBackupRunning,
     restoringBackupId,
     hasBackupScope,
+    anyBackupEnabled,
   } = useValues(cloudLogic)
   const {
     connectCloud,
@@ -75,6 +76,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     linkCloudIdentity,
     unlinkCloudIdentity,
     setLocalFallback,
+    setBackupFeature,
     loadCloudBackups,
     backupAllToCloud,
     restoreCloudBackup,
@@ -166,22 +168,34 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     </div>
                   ) : (
                     <>
-                      {availableCloudFeatures().map(({ scope, label, description, control }) => (
+                      {availableCloudFeatures().map(({ scope, label, description, control, localKey }) => (
                         <label
                           key={scope}
-                          className={clsx('flex items-start gap-2', control === 'toggle' && 'cursor-pointer')}
+                          className={clsx('flex items-start gap-2', control !== 'locked' && 'cursor-pointer')}
                         >
-                          {control === 'plain' ? (
-                            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" aria-hidden="true" />
-                          ) : (
-                            <input
-                              type="checkbox"
-                              checked={control === 'locked' || enabledFeatureDraft.includes(scope)}
-                              disabled={control === 'locked'}
-                              onChange={control === 'toggle' ? () => toggleEnabledFeature(scope) : undefined}
-                              className="mt-0.5"
-                            />
-                          )}
+                          <input
+                            type="checkbox"
+                            checked={
+                              control === 'locked'
+                                ? true
+                                : control === 'local'
+                                ? Boolean(
+                                    localKey === 'frames'
+                                      ? cloudStatus?.backup_frames_enabled
+                                      : cloudStatus?.backup_scenes_enabled
+                                  )
+                                : enabledFeatureDraft.includes(scope)
+                            }
+                            disabled={control === 'locked'}
+                            onChange={
+                              control === 'toggle'
+                                ? () => toggleEnabledFeature(scope)
+                                : control === 'local' && localKey
+                                ? (event) => setBackupFeature(localKey, event.target.checked)
+                                : undefined
+                            }
+                            className="mt-0.5"
+                          />
                           <span>
                             <span className="frameos-strong font-medium">{label}</span>{' '}
                             <span className="frameos-muted">— {description}</span>
@@ -276,7 +290,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                       size="small"
                       color="secondary"
                       onClick={backupAllToCloud}
-                      disabled={isCloudBackupRunning}
+                      disabled={isCloudBackupRunning || !anyBackupEnabled}
                       className="inline-flex items-center gap-2"
                     >
                       {isCloudBackupRunning ? <Spinner /> : null}
@@ -285,7 +299,13 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     <Button size="small" color="secondary" onClick={loadCloudBackups} disabled={cloudBackupsLoading}>
                       {cloudBackups === null ? 'Show backups' : 'Refresh'}
                     </Button>
-                    <span className="frameos-muted">Frames are also backed up automatically after every deploy.</span>
+                    <span className="frameos-muted">
+                      {!anyBackupEnabled
+                        ? 'Backups are switched off — enable scene or frame backups above.'
+                        : cloudStatus?.backup_frames_enabled
+                        ? 'Frames are also backed up automatically after every deploy.'
+                        : 'Scene backups only; enable frame backups to also back up after every deploy.'}
+                    </span>
                   </div>
                   {cloudBackupsLoading ? <Spinner /> : null}
                   {cloudBackups !== null && cloudBackups.length === 0 && !cloudBackupsLoading ? (
@@ -296,7 +316,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                       {cloudBackups.map((backup) => (
                         <div key={backup.id} className="flex flex-wrap items-center gap-2">
                           <Tag color={backup.kind === 'frames' ? 'blue' : 'gray'}>
-                            {backup.kind === 'frames' ? 'frame' : 'template'}
+                            {backup.kind === 'frames' ? 'frame' : 'scene'}
                           </Tag>
                           <span className="frameos-strong font-medium">{backup.name ?? backup.item_key}</span>
                           <span className="frameos-muted">

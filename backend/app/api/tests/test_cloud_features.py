@@ -31,7 +31,7 @@ def scope_calls(monkeypatch):
             200,
             {
                 "status": "updated",
-                "scope": "backend:link backend:read backup:templates backup:frames store:publish",
+                "scope": "backend:link backend:read backup:scenes backup:frames store:publish",
                 "linked_client_id": "lc-1",
             },
         ),
@@ -71,7 +71,7 @@ async def test_feature_removal_applies_immediately(async_client, db, scope_calls
     assert data["link"]["scopes"] == [
         "backend:link",
         "backend:read",
-        "backup:templates",
+        "backup:scenes",
         "backup:frames",
         "store:publish",
     ]
@@ -83,7 +83,7 @@ async def test_feature_removal_applies_immediately(async_client, db, scope_calls
 
     _url, token, scopes = calls["set_scopes"][0]
     assert token == "link-token-secret"
-    assert scopes == ["backend:link", "backend:read", "backup:templates", "backup:frames", "store:publish"]
+    assert scopes == ["backend:link", "backend:read", "backup:scenes", "backup:frames", "store:publish"]
 
 
 @pytest.mark.asyncio
@@ -111,7 +111,7 @@ async def test_feature_addition_needs_approval_then_polls(async_client, db, scop
         "backend:link",
         "backend:read",
         "auth:login",
-        "backup:templates",
+        "backup:scenes",
         "backup:frames",
         "store:publish",
     ]

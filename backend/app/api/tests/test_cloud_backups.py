@@ -13,10 +13,10 @@ from app.utils import cloud_backup, cloud_link
 
 PROVIDER = "https://cloud.frameos.net"
 
-BACKUP_SCOPES = "backend:link backend:read backup:templates backup:frames"
+BACKUP_SCOPES = "backend:link backend:read backup:scenes backup:frames"
 
 
-def make_connected_link(db, scope=BACKUP_SCOPES):
+def make_connected_link(db, scope=BACKUP_SCOPES, backups_enabled=True):
     link = CloudBackendLink(
         provider_url=PROVIDER,
         status="connected",
@@ -25,6 +25,8 @@ def make_connected_link(db, scope=BACKUP_SCOPES):
         scope=scope,
         local_origin="http://test",
         cloud_account_id="acc-1",
+        backup_scenes_enabled=backups_enabled,
+        backup_frames_enabled=backups_enabled,
     )
     db.add(link)
     db.commit()
@@ -163,6 +165,36 @@ async def test_backup_requires_link(async_client, db, backup_calls):
     frame = make_frame(db, async_client.project_id)
     response = await async_client.post("/api/cloud/backups/frames", json={"frame_id": frame.id})
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_backup_requires_local_switch(async_client, db, backup_calls):
+    """The scope is a permission; nothing uploads until the feature is on."""
+    calls, _ = backup_calls
+    make_connected_link(db, backups_enabled=False)
+    frame = make_frame(db, async_client.project_id)
+    template = make_template(db, async_client.project_id)
+
+    response = await async_client.post("/api/cloud/backups/frames", json={"frame_id": frame.id})
+    assert response.status_code == 403
+    response = await async_client.post(
+        "/api/cloud/backups/templates", json={"template_id": str(template.id)}
+    )
+    assert response.status_code == 403
+    assert calls["save"] == []
+
+    response = await async_client.post("/api/cloud/backup-features", json={"scenes": True})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["backup_scenes_enabled"] is True
+    assert data["backup_frames_enabled"] is False
+
+    response = await async_client.post(
+        "/api/cloud/backups/templates", json={"template_id": str(template.id)}
+    )
+    assert response.status_code == 200, response.text
+    response = await async_client.post("/api/cloud/backups/frames", json={"frame_id": frame.id})
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

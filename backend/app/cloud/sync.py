@@ -251,6 +251,9 @@ class CloudSync:
         link, access_token, _link_id = self._load_link()
         if link is None or access_token is None or "backup:frames" not in link.scopes:
             return
+        if not link.backup_frames_enabled:
+            # The scope is a permission; the local switch is the feature.
+            return
         project_name = self._project_name(frame_dict.get("project_id"))
         try:
             status_code, response = await cloud_backup.push_frame_backup(

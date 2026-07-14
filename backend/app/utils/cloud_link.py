@@ -27,7 +27,7 @@ DEFAULT_CLOUD_PROVIDER_URL = "https://cloud.frameos.net"
 DEFAULT_LINK_SCOPES = [
     "backend:link",
     "backend:read",
-    "backup:templates",
+    "backup:scenes",
     "backup:frames",
     "store:publish",
 ]
