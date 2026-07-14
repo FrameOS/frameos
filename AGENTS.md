@@ -33,6 +33,7 @@
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
 - Repo-level local development runner: `pnpm dev` starts `mprocs` with panes for backend API, ARQ worker, the main frontend dev server, and the frame-local frontend watcher. `redis`, `frameos`, and `backend-docker` panes are available but do not autostart. The `backend-docker` pane runs `scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`. `mprocs.yaml` defines the process list.
 - Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
+- The published `frameos-editor` package has its own `editor` component hash/version in `versions.json`; `project-folders.json` includes shared frontend sources so frontend-only editor changes receive a new npm version during release.
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 - This includes small functions and callbacks inside components. Prefer to keep as much code as possible in logic files, treating React as a templating layer.

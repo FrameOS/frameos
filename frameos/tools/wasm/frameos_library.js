@@ -43,10 +43,10 @@ addToLibrary({
     {{{ makeSetValue('outLenPtr', 0, 0, 'i32') }}}
     var method = UTF8ToString(methodPtr)
     var url = UTF8ToString(urlPtr)
-    // When a same-origin backend proxy is configured, route the request
-    // through it: the browser can't fetch most external URLs directly (CORS),
-    // but the backend can — mirroring how the device fetches server-side. The
-    // proxy fetch is same-origin, so auth cookies flow and CORS doesn't apply.
+    // When a same-origin backend proxy is configured, it is the FALLBACK:
+    // requests go straight from the browser first (client-side, no server
+    // load), and only CORS/network failures are retried through the proxy,
+    // which fetches server-side like the device would.
     var proxyUrl = Module['frameosProxyUrl']
     try {
       var body = null
@@ -66,10 +66,30 @@ addToLibrary({
         }
       }
 
-      var xhr = new XMLHttpRequest()
-      // Synchronous: the Nim/pixie pipeline is fully synchronous and this
+      // Synchronous XHR: the Nim/pixie pipeline is fully synchronous and this
       // module runs in a Web Worker, where sync XHR is permitted.
-      if (proxyUrl) {
+      var directRequest = function () {
+        var xhr = new XMLHttpRequest()
+        xhr.open(method, url, false)
+        try {
+          xhr.responseType = 'arraybuffer'
+          if (timeoutMs > 0) xhr.timeout = timeoutMs
+        } catch (e) {
+          // Main-thread fallback: sync XHR only supports text responses there.
+        }
+        for (var name in headers) {
+          try {
+            xhr.setRequestHeader(name, headers[name])
+          } catch (e) {
+            // Forbidden header names (User-Agent & co) throw; skip them.
+          }
+        }
+        xhr.send(body)
+        return xhr
+      }
+
+      var proxyRequest = function () {
+        var xhr = new XMLHttpRequest()
         xhr.open('POST', proxyUrl, false)
         xhr.withCredentials = true
         try {
@@ -86,22 +106,21 @@ addToLibrary({
         xhr.send(
           JSON.stringify({ method: method, url: url, headers: headers, bodyBase64: bodyBase64, timeoutMs: timeoutMs })
         )
-      } else {
-        xhr.open(method, url, false)
-        try {
-          xhr.responseType = 'arraybuffer'
-          if (timeoutMs > 0) xhr.timeout = timeoutMs
-        } catch (e) {
-          // Main-thread fallback: sync XHR only supports text responses there.
-        }
-        for (var name in headers) {
-          try {
-            xhr.setRequestHeader(name, headers[name])
-          } catch (e) {
-            // Forbidden header names (User-Agent & co) throw; skip them.
-          }
-        }
-        xhr.send(body)
+        return xhr
+      }
+
+      var xhr = null
+      var directError = null
+      try {
+        xhr = directRequest()
+      } catch (e) {
+        // A cross-origin host without CORS headers throws on sync send.
+        directError = e
+      }
+      if ((xhr === null || xhr.status === 0) && proxyUrl) {
+        xhr = proxyRequest()
+      } else if (xhr === null) {
+        throw directError
       }
 
       var bytes

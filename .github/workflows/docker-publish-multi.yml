@@ -54,7 +54,9 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          git add versions.json
+          # update_versions.py syncs the wasm package to the FrameOS runtime
+          # version and the editor package to its independent frontend hash.
+          git add versions.json frameos/wasm/package.json frameos/editor/package.json
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
 
@@ -65,6 +67,79 @@ jobs:
           echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  publish-npm:
+    name: Publish FrameOS npm packages
+    needs: update-versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The runtime assets (frameos.js/frameos.wasm) are build outputs, not
+      # committed — compile them like the Dockerfile does.
+      - name: Build the wasm runtime
+        run: |
+          cd frameos
+          nimble install -d -y
+          ./tools/build_wasm.sh
+
+      - name: Build frameos-wasm
+        run: pnpm --dir frameos/wasm run build
+
+      # The embedded editor bundle needs the full frontend build (its build
+      # config lives in frontend/build.mjs).
+      - name: Build the frontend and frameos-editor
+        run: |
+          pnpm --dir frontend run build
+          pnpm --dir frameos/editor run build
+
+      - name: Publish frameos-wasm and frameos-editor
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not set — skipping npm publish."
+            exit 0
+          fi
+          for package in frameos/wasm frameos/editor; do
+            name=$(node -p "require('./${package}/package.json').name")
+            version=$(node -p "require('./${package}/package.json').version")
+            # Each package version follows its own content-owning component;
+            # skip only when that exact component version already exists.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} already on npm — skipping."
+              continue
+            fi
+            (cd "$package" && npm publish --access public)
+          done
 
   release-notes:
     name: Generate Release Notes

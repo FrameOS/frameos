@@ -41,13 +41,23 @@ export async function userExists(): Promise<boolean> {
 }
 
 function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
-  router.actions.push(
+  // replace, not push: an auth-guard redirect must not add a history entry —
+  // otherwise Back loops through the redirect forever (worst when the app is
+  // embedded in an iframe, where it also pollutes the parent's history).
+  router.actions.replace(
     status === 'exists' ? urls.login() : status === 'missing' ? urls.signup() : urls.setupUnavailable()
   )
   return new Promise(() => {})
 }
 
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
+  // The standalone embedded editor (editor.html sets the flag) has no
+  // backend: answer every API call with a synthetic 404 so the callers'
+  // fallbacks (embedded app catalog, fonts, validation) engage immediately
+  // instead of resolving project ids or redirecting to auth screens.
+  if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
+    return new Response('null', { status: 404, statusText: 'No backend in the embedded editor' })
+  }
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
   const headers: HeadersInit = options.headers || {}

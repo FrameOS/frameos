@@ -2,7 +2,11 @@
   "projects": {
     "frameos": {
       "include": ["frameos"],
-      "exclude": ["frameos/remote"]
+      "exclude": ["frameos/remote", "frameos/wasm/package.json", "frameos/editor/package.json"]
+    },
+    "editor": {
+      "include": ["frontend", "frameos/editor", "package.json", "pnpm-lock.yaml", "project-folders.json"],
+      "exclude": ["frameos/editor/package.json"]
     },
     "remote": {
       "include": ["frameos/remote"]

@@ -51,6 +51,11 @@ export const controlLogic = kea<controlLogicType>([
         sync: async (_, breakpoint) => {
           await breakpoint(100)
 
+          // The standalone embedded editor has no frame to sync state from.
+          if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
+            return emptyFrameStateRecord
+          }
+
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
