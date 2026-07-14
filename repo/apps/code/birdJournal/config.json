@@ -1,0 +1,138 @@
+{
+  "name": "Bird field journal (JS)",
+  "category": "data",
+  "description": "Polls iNaturalist for birds recently spotted near you. Every new species gets a field-journal plate drawn by OpenAI from licensed reference photos, verified for accuracy, and saved to the asset collection. Cycles through the collection on each render.",
+  "version": "1.0.0",
+  "settings": ["openAI"],
+  "fields": [
+    {
+      "name": "latitude",
+      "label": "Latitude",
+      "type": "string",
+      "value": "",
+      "placeholder": "50.85",
+      "hint": "Center of the observation circle. Leave empty to pause the journal."
+    },
+    {
+      "name": "longitude",
+      "label": "Longitude",
+      "type": "string",
+      "value": "",
+      "placeholder": "4.35"
+    },
+    {
+      "name": "radiusKm",
+      "label": "Radius (km)",
+      "type": "float",
+      "value": "25"
+    },
+    {
+      "name": "daysWindow",
+      "label": "Time window (days)",
+      "type": "integer",
+      "value": "7",
+      "hint": "Only sightings observed within this many days count."
+    },
+    {
+      "name": "pollMinutes",
+      "label": "Poll every (minutes)",
+      "type": "integer",
+      "value": "60",
+      "hint": "How often to ask iNaturalist for new sightings."
+    },
+    {
+      "name": "taxonId",
+      "label": "iNaturalist taxon ID",
+      "type": "integer",
+      "value": "3",
+      "hint": "3 = birds (Aves). Change for moths, mushrooms, ..."
+    },
+    {
+      "name": "qualityGrade",
+      "label": "Observation quality",
+      "type": "select",
+      "options": ["research", "any"],
+      "value": "research",
+      "hint": "research = community-verified IDs only"
+    },
+    {
+      "name": "style",
+      "label": "Plate style",
+      "type": "text",
+      "value": "A 19th-century naturalist's field-journal plate on lightly aged cream paper: fine ink linework with soft watercolor washes. The bird perches on a small branch or stands in typical habitat, anatomically accurate. Around it, small pencil detail studies (head, wing or feather) and short handwritten-style margin notes. Neatly hand-lettered at the bottom: the common name in larger letters and the scientific name in italics beneath it."
+    },
+    {
+      "name": "model",
+      "label": "OpenAI model",
+      "type": "string",
+      "value": "gpt-5.1",
+      "hint": "Responses API model that drives image generation and the accuracy check"
+    },
+    {
+      "name": "imageQuality",
+      "label": "Plate quality",
+      "type": "select",
+      "options": ["low", "medium", "high"],
+      "value": "medium"
+    },
+    {
+      "name": "verifyPlates",
+      "label": "Verify plates",
+      "type": "boolean",
+      "value": "true",
+      "hint": "Have the model double-check each plate against a reference photo before adding it"
+    },
+    {
+      "name": "maxSpecies",
+      "label": "Max species kept",
+      "type": "integer",
+      "value": "24",
+      "hint": "Least recently seen species (and their plates) are pruned beyond this"
+    },
+    {
+      "name": "maxAttempts",
+      "label": "Max attempts per species",
+      "type": "integer",
+      "value": "3"
+    },
+    {
+      "name": "assetFolder",
+      "label": "Asset folder",
+      "type": "string",
+      "value": "birdJournal",
+      "hint": "Plates are saved under this folder in the frame's assets directory"
+    },
+    {
+      "name": "journalStateKey",
+      "label": "Journal state key",
+      "type": "string",
+      "value": "birdJournal",
+      "hint": "Scene state key holding the species log; persist it to disk in scene fields"
+    },
+    {
+      "name": "captionStateKey",
+      "label": "Caption state key",
+      "type": "string",
+      "value": "birdCaption",
+      "hint": "Scene state key that receives the caption / status line for a text overlay"
+    },
+    {
+      "name": "inatHost",
+      "label": "iNaturalist API host",
+      "type": "string",
+      "value": "https://api.inaturalist.org"
+    },
+    {
+      "name": "openaiHost",
+      "label": "OpenAI API host",
+      "type": "string",
+      "value": "https://api.openai.com"
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
