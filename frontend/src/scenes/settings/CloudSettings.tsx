@@ -1,6 +1,7 @@
+import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
-import { PencilSquareIcon } from '@heroicons/react/24/solid'
+import { CheckIcon, PencilSquareIcon } from '@heroicons/react/24/solid'
 
 import { Box } from '../../components/Box'
 import { Button } from '../../components/Button'
@@ -165,14 +166,22 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     </div>
                   ) : (
                     <>
-                      {availableCloudFeatures().map(({ scope, label, description }) => (
-                        <label key={scope} className="flex cursor-pointer items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={enabledFeatureDraft.includes(scope)}
-                            onChange={() => toggleEnabledFeature(scope)}
-                            className="mt-0.5"
-                          />
+                      {availableCloudFeatures().map(({ scope, label, description, control }) => (
+                        <label
+                          key={scope}
+                          className={clsx('flex items-start gap-2', control === 'toggle' && 'cursor-pointer')}
+                        >
+                          {control === 'plain' ? (
+                            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" aria-hidden="true" />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={control === 'locked' || enabledFeatureDraft.includes(scope)}
+                              disabled={control === 'locked'}
+                              onChange={control === 'toggle' ? () => toggleEnabledFeature(scope) : undefined}
+                              className="mt-0.5"
+                            />
+                          )}
                           <span>
                             <span className="frameos-strong font-medium">{label}</span>{' '}
                             <span className="frameos-muted">— {description}</span>

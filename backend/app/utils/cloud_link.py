@@ -20,10 +20,17 @@ from app.config import config
 
 DEFAULT_CLOUD_PROVIDER_URL = "https://cloud.frameos.net"
 
-# Scopes requested by default when linking a backend. Kept to the minimum the
-# link itself needs; feature scopes (auth:login, store:read, ...) are requested
-# later, when the user enables the matching feature.
-DEFAULT_LINK_SCOPES = ["backend:link", "backend:read"]
+# Scopes requested by default when linking a backend: the link itself plus the
+# features included with every cloud account (backups, saving and sharing
+# scenes). Security-sensitive scopes (auth:login, remote:access, ...) are only
+# requested later, when the user explicitly toggles the matching feature on.
+DEFAULT_LINK_SCOPES = [
+    "backend:link",
+    "backend:read",
+    "backup:templates",
+    "backup:frames",
+    "store:publish",
+]
 
 REQUEST_TIMEOUT_SECONDS = 15.0
 

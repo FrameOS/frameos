@@ -3,6 +3,7 @@ import { loaders } from 'kea-loaders'
 
 import { CloudStatus } from '../../types'
 import { getBasePath } from '../../utils/getBasePath'
+import { INCLUDED_FEATURE_SCOPES } from '../settings/cloudLogic'
 
 import type { signupCloudLogicType } from './signupCloudLogicType'
 
@@ -10,7 +11,7 @@ import type { signupCloudLogicType } from './signupCloudLogicType'
 // /api/cloud/setup/* endpoints (they stop working the moment a user exists).
 // Once linked with auth:login, cloudLoginLogic's "Continue with FrameOS
 // Cloud" creates the first user from the approving cloud account.
-const SETUP_SCOPES = ['backend:link', 'backend:read', 'auth:login', 'backup:templates', 'backup:frames']
+const SETUP_SCOPES = ['backend:link', 'backend:read', 'auth:login', ...INCLUDED_FEATURE_SCOPES]
 
 async function setupFetch(path: string, init?: RequestInit): Promise<Response> {
   return await fetch(`${getBasePath()}${path}`, init)

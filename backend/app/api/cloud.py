@@ -913,6 +913,12 @@ async def set_local_fallback(
 
 BASE_LINK_SCOPES = ("backend:link", "backend:read")
 
+# Features included with every cloud account. Only security-sensitive features
+# (cloud login, later remote access/telemetry) get an opt-in toggle in the UI;
+# these safe scopes are always kept on the link, so a feature change can never
+# drop them.
+INCLUDED_FEATURE_SCOPES = ("backup:templates", "backup:frames", "store:publish")
+
 
 @api_user.post("/cloud/features", response_model=CloudStatusResponse)
 async def set_cloud_features(
@@ -934,6 +940,7 @@ async def set_cloud_features(
         )
 
     features = [s for s in data.scopes if s in KNOWN_SCOPES and s not in BASE_LINK_SCOPES]
+    features += [s for s in INCLUDED_FEATURE_SCOPES if s not in features]
     scopes = list(BASE_LINK_SCOPES) + features
 
     try:

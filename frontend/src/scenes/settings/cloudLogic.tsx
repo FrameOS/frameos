@@ -15,31 +15,51 @@ export interface CloudProviderForm {
 }
 
 /** The features a link can enable, in the wording the consent screen uses.
- * Kept in sync with the scope table in CLOUD-TODO.md. */
-export const CLOUD_FEATURES: { scope: string; label: string; description: string }[] = [
+ * Kept in sync with the scope table in CLOUD-TODO.md.
+ *
+ * Only security-sensitive features ('toggle') get a real opt-in checkbox;
+ * everything that is safe comes with the cloud account itself: 'locked'
+ * renders an always-on checkbox, 'plain' just lists the feature. */
+export const CLOUD_FEATURES: {
+  scope: string
+  label: string
+  description: string
+  control: 'toggle' | 'locked' | 'plain'
+}[] = [
   {
-    scope: 'auth:login',
-    label: 'Cloud login',
-    description: 'Sign in to this FrameOS with your cloud account',
+    scope: 'store:publish',
+    label: 'Save and share scenes via the cloud',
+    description: 'Save scenes to your cloud account and share them on the FrameOS store',
+    control: 'locked',
   },
   {
     scope: 'backup:templates',
     label: 'Template backups',
     description: 'Backup scenes into the cloud',
+    control: 'plain',
   },
   {
     scope: 'backup:frames',
     label: 'Frame backups',
     description: 'Back up frame settings + scenes automatically after each deploy',
+    control: 'plain',
   },
   {
-    scope: 'store:publish',
-    label: 'Store publishing',
-    description: 'Publish scenes from this FrameOS to the FrameOS Cloud store',
+    scope: 'auth:login',
+    label: 'Cloud login',
+    description: 'Sign in to this FrameOS with your cloud account',
+    control: 'toggle',
   },
 ]
 
-const FEATURE_SCOPES = CLOUD_FEATURES.map(({ scope }) => scope)
+/** Security-sensitive scopes the user toggles on and off explicitly. */
+const TOGGLED_FEATURE_SCOPES = CLOUD_FEATURES.filter(({ control }) => control === 'toggle').map(({ scope }) => scope)
+
+/** Scopes that come with every connected cloud account; requested at link
+ * time and silently kept on every scope change. */
+export const INCLUDED_FEATURE_SCOPES = CLOUD_FEATURES.filter(({ control }) => control !== 'toggle').map(
+  ({ scope }) => scope
+)
 
 /** The features this runtime can offer. Home Assistant ingress has no login
  * of its own (Home Assistant authenticates the user), so there is no
@@ -209,9 +229,10 @@ export const cloudLogic = kea<cloudLogicType>([
       (cloudStatus): string => cloudStatus?.provider_url ?? 'https://cloud.frameos.net',
     ],
     grantedScopes: [(s) => [s.cloudStatus], (cloudStatus): string[] => cloudStatus?.link?.scopes ?? []],
+    // Only the toggleable (security) features; included features are always on.
     grantedFeatures: [
       (s) => [s.grantedScopes],
-      (scopes): string[] => scopes.filter((scope) => FEATURE_SCOPES.includes(scope)),
+      (scopes): string[] => scopes.filter((scope) => TOGGLED_FEATURE_SCOPES.includes(scope)),
     ],
     enabledFeatureDraft: [
       (s) => [s.featureDraft, s.grantedFeatures],
@@ -232,10 +253,11 @@ export const cloudLogic = kea<cloudLogicType>([
   }),
   listeners(({ actions, values }) => ({
     connectCloud: async () => {
-      // Connecting asks for nothing beyond the link itself; features are
-      // enabled afterwards. Frames still bundle auth:login (they have no
-      // feature manager yet, and cloud login is their one cloud feature).
-      const scopes = isInFrameAdminMode() ? ['frame:link', 'auth:login'] : [...BASE_SCOPES]
+      // Connecting asks for the link plus every included ("safe") feature in
+      // one approval; security features (cloud login) are toggled on
+      // afterwards. Frames still bundle auth:login (they have no feature
+      // manager yet, and cloud login is their one cloud feature).
+      const scopes = isInFrameAdminMode() ? ['frame:link', 'auth:login'] : [...BASE_SCOPES, ...INCLUDED_FEATURE_SCOPES]
       const response = await apiFetch('/api/cloud/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -288,6 +310,9 @@ export const cloudLogic = kea<cloudLogicType>([
       }
     },
     toggleEnabledFeature: ({ scope }) => {
+      if (!TOGGLED_FEATURE_SCOPES.includes(scope)) {
+        return // included features are always on
+      }
       const current = values.enabledFeatureDraft
       const next = current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]
       actions.setFeatureDraft(next)
@@ -296,7 +321,7 @@ export const cloudLogic = kea<cloudLogicType>([
       const response = await apiFetch('/api/cloud/features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopes: values.enabledFeatureDraft }),
+        body: JSON.stringify({ scopes: [...INCLUDED_FEATURE_SCOPES, ...values.enabledFeatureDraft] }),
       })
       if (!response.ok) {
         actions.setCloudError(await cloudErrorMessage(response, 'Failed to change the enabled features'))
