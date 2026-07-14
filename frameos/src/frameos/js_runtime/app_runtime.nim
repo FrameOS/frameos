@@ -1,4 +1,4 @@
-import std/[base64, json, options, strformat, strutils, tables]
+import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
 import pixie
 
 import frameos/apps as frameos_apps
@@ -7,6 +7,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/image
+import frameos/utils/system
 import frameos/js_runtime/burrito
 
 type
@@ -14,6 +15,7 @@ type
     category*: string
     outputType*: string
     source*: string
+    settingsKeys*: seq[string]
     js*: QuickJS
     ready*: bool
     initialized*: bool
@@ -112,6 +114,356 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, "")
 
 proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
+
+const JsHttpMaxTimeoutMs = 600_000
+
+proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## Bounded HTTP request with method/headers/body. Options JSON:
+  ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
+  ## base64-encoded, required for binary responses), timeoutMs}.
+  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}.
+  let e = env(ctx)
+  var response = %*{"status": 0}
+
+  let urlStr = toNimString(ctx, url)
+  var options = %*{}
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  if options.isNil or options.kind != JObject:
+    options = %*{}
+
+  try:
+    var body = options{"body"}.getStr("")
+    if options{"bodyBase64"}.getStr("").len > 0:
+      body = decode(options["bodyBase64"].getStr())
+    var headers: seq[SimpleHttpHeader] = @[]
+    let headersNode = options{"headers"}
+    if not headersNode.isNil and headersNode.kind == JObject:
+      for name, value in headersNode.pairs:
+        headers.add((name, value.getStr($value)))
+    let timeoutMs = clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs)
+    let maxSeconds = max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0)
+    let res = boundedRequestWithHeaders(
+      urlStr,
+      httpMethod = options{"method"}.getStr("GET").toUpperAscii(),
+      body = body,
+      headers = headers,
+      timeoutMs = timeoutMs,
+      maxBytes = jsFetchMaxBytes(e),
+      maxSeconds = maxSeconds
+    )
+    response["status"] = %*res.code
+    if options{"base64"}.getBool(false):
+      response["bodyBase64"] = %*encode(res.body)
+    else:
+      response["body"] = %*res.body
+  except CatchableError as err:
+    response["error"] = %*err.msg
+    if e != nil:
+      frameos_apps.logError(e.owner, "JS app httpRequest failed: " & err.msg)
+  return nimStringToJS(ctx, $response)
+
+proc assetsRoot(e: JsAppEvalEnv): string =
+  result = if e.owner.frameConfig.assetsPath == "": "/srv/assets" else: e.owner.frameConfig.assetsPath
+  result.removeSuffix('/')
+
+proc resolveAssetPath(e: JsAppEvalEnv, relPath: string): string =
+  ## Absolute path inside the assets folder, or "" when the path is empty,
+  ## absolute, or escapes the folder.
+  if relPath.len == 0 or relPath.startsWith("/") or relPath.contains(".."):
+    return ""
+  let root = assetsRoot(e)
+  let full = normalizedPath(root / relPath)
+  if full == root or full.startsWith(root & "/"):
+    return full
+  return ""
+
+const EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
+
+proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
+  ## Full-buffer asset reads triple in RAM (bytes + base64 + JS string), so
+  ## embedded targets get a small cap; larger files must use ranged reads.
+  when defined(frameosEmbedded):
+    min(jsFetchMaxBytes(e), EmbeddedAssetReadMaxBytes)
+  else:
+    jsFetchMaxBytes(e)
+
+proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
+    contents: string, append: bool): bool =
+  let full = resolveAssetPath(e, pathStr)
+  if full.len == 0:
+    frameos_apps.logError(e.owner, "JS app " & opName & ": invalid asset path: " & pathStr)
+    return false
+  createDir(full.parentDir())
+  let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
+  if freeDiskSpace != -1 and freeDiskSpace < 100 * 1024 * 1024:
+    frameos_apps.logError(e.owner, "JS app " & opName & ": low disk space, asset not saved: " & pathStr)
+    return false
+  if append:
+    var file: File
+    if not file.open(full, fmAppend):
+      frameos_apps.logError(e.owner, "JS app " & opName & ": cannot open asset: " & pathStr)
+      return false
+    defer: file.close()
+    file.write(contents)
+  else:
+    writeFile(full, contents)
+  return true
+
+proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JSValue {.nimcall.} =
+  ## Asset management scoped to the frame's assets folder. Ops:
+  ## list (dir -> JSON array of relative paths), exists, size,
+  ## read (options JSON {offset, length} -> base64), write/append (path, base64),
+  ## delete, image (-> imageRef decoded within display bounds).
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  let opStr = toNimString(ctx, op)
+  let pathStr = toNimString(ctx, path)
+
+  try:
+    case opStr
+    of "list":
+      let root = assetsRoot(e)
+      let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
+      var files: seq[string] = @[]
+      if dir.len > 0 and dirExists(dir):
+        for filePath in walkDirRec(dir, relative = false):
+          if "/.thumbs/" in filePath or "/.frameos/" in filePath:
+            continue
+          files.add(filePath[(root.len + 1)..^1])
+      files.sort()
+      let arr = newJArray()
+      for file in files:
+        arr.add(%*file)
+      return jsonToJS(ctx, arr)
+    of "exists":
+      let full = resolveAssetPath(e, pathStr)
+      return nimBoolToJS(ctx, full.len > 0 and fileExists(full))
+    of "size":
+      let full = resolveAssetPath(e, pathStr)
+      if full.len == 0 or not fileExists(full):
+        return nimIntToJS(ctx, -1)
+      return nimFloatToJS(ctx, getFileSize(full).float)
+    of "read":
+      let full = resolveAssetPath(e, pathStr)
+      if full.len == 0 or not fileExists(full):
+        return jsNull(ctx)
+      var options = %*{}
+      let optionsStr = toNimString(ctx, data)
+      if optionsStr.len > 0:
+        try:
+          options = parseJson(optionsStr)
+        except CatchableError:
+          discard
+      if options.isNil or options.kind != JObject:
+        options = %*{}
+      let fileSize = getFileSize(full)
+      let offset = max(0, options{"offset"}.getInt(0))
+      let readMax = jsAssetReadMaxBytes(e)
+      var length = options{"length"}.getInt(int(fileSize) - offset)
+      length = min(length, int(fileSize) - offset)
+      if length <= 0:
+        return nimStringToJS(ctx, "")
+      if length > readMax:
+        frameos_apps.logError(e.owner,
+          "JS app readAsset: " & pathStr & " slice is " & $length &
+          " bytes, over the " & $readMax & " byte limit; read it in chunks" &
+          " with {offset, length}")
+        return jsNull(ctx)
+      var file: File
+      if not file.open(full):
+        return jsNull(ctx)
+      defer: file.close()
+      file.setFilePos(offset)
+      var contents = newString(length)
+      let bytesRead = file.readBuffer(addr contents[0], length)
+      contents.setLen(bytesRead)
+      return nimStringToJS(ctx, encode(contents))
+    of "write", "append":
+      let contents = decode(toNimString(ctx, data))
+      return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
+    of "delete":
+      let full = resolveAssetPath(e, pathStr)
+      if full.len == 0 or not fileExists(full):
+        return nimBoolToJS(ctx, false)
+      removeFile(full)
+      return nimBoolToJS(ctx, true)
+    of "image":
+      let full = resolveAssetPath(e, pathStr)
+      if full.len == 0 or not fileExists(full):
+        return jsNull(ctx)
+      let image = readImageWithDisplayBounds(full)
+      if image.isNil:
+        return jsNull(ctx)
+      return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
+    else:
+      frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)
+      return jsUndefSentinel(ctx)
+  except CatchableError as err:
+    frameos_apps.logError(e.owner, "JS app assets " & opStr & " failed: " & err.msg)
+    if opStr in ["write", "append", "delete", "exists"]:
+      return nimBoolToJS(ctx, false)
+    return jsNull(ctx)
+
+## Streams let apps pass around and process data bigger than memory allows in
+## one piece: a data app can return a streamRef (it travels between nodes as
+## plain JSON), and the consumer reads it chunk by chunk. Backed by simple
+## string streams or files inside the assets folder. The registry is global so
+## refs resolve across app runtimes; it is capped, evicting (and closing) the
+## oldest stream, so forgotten handles cannot pile up.
+const MaxOpenJsStreams = 64
+const DefaultJsStreamChunkBytes = 65536
+
+var jsStreamsGlobal = initOrderedTable[int, Stream]()
+var jsNextStreamId = 0
+
+proc registerJsStream(stream: Stream): JsonNode =
+  while jsStreamsGlobal.len >= MaxOpenJsStreams:
+    for id in jsStreamsGlobal.keys:
+      try:
+        jsStreamsGlobal[id].close()
+      except CatchableError:
+        discard
+      jsStreamsGlobal.del(id)
+      break
+  inc jsNextStreamId
+  jsStreamsGlobal[jsNextStreamId] = stream
+  return %*{"__frameosType": "streamRef", "id": jsNextStreamId}
+
+proc jsStreamById(options: JsonNode): Stream =
+  let id = options{"id"}.getInt(0)
+  if id != 0 and jsStreamsGlobal.hasKey(id):
+    return jsStreamsGlobal[id]
+  return nil
+
+proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## Ops: openAsset {path, mode: r|w|a} -> streamRef, create {base64} -> streamRef,
+  ## read {id, length} -> base64 ("" at end), write {id, base64}, atEnd {id},
+  ## close {id}. Read sizes are capped like readAsset; loop for more.
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  let opStr = toNimString(ctx, op)
+  var options = %*{}
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  if options.isNil or options.kind != JObject:
+    options = %*{}
+
+  try:
+    case opStr
+    of "openAsset":
+      let pathStr = options{"path"}.getStr("")
+      let mode = options{"mode"}.getStr("r")
+      let full = resolveAssetPath(e, pathStr)
+      if full.len == 0:
+        frameos_apps.logError(e.owner, "JS app openAssetStream: invalid asset path: " & pathStr)
+        return jsNull(ctx)
+      if mode == "r":
+        if not fileExists(full):
+          return jsNull(ctx)
+        let stream = newFileStream(full, fmRead)
+        if stream.isNil:
+          return jsNull(ctx)
+        return jsonToJS(ctx, registerJsStream(stream))
+      elif mode in ["w", "a"]:
+        createDir(full.parentDir())
+        let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
+        if freeDiskSpace != -1 and freeDiskSpace < 100 * 1024 * 1024:
+          frameos_apps.logError(e.owner, "JS app openAssetStream: low disk space: " & pathStr)
+          return jsNull(ctx)
+        let stream = newFileStream(full, if mode == "a": fmAppend else: fmWrite)
+        if stream.isNil:
+          return jsNull(ctx)
+        return jsonToJS(ctx, registerJsStream(stream))
+      else:
+        frameos_apps.logError(e.owner, "JS app openAssetStream: unknown mode: " & mode)
+        return jsNull(ctx)
+    of "create":
+      var contents = ""
+      if options{"base64"}.getStr("").len > 0:
+        contents = decode(options["base64"].getStr())
+      return jsonToJS(ctx, registerJsStream(newStringStream(contents)))
+    of "read":
+      let stream = jsStreamById(options)
+      if stream.isNil:
+        return jsNull(ctx)
+      let length = clamp(options{"length"}.getInt(DefaultJsStreamChunkBytes), 1, jsAssetReadMaxBytes(e))
+      return nimStringToJS(ctx, encode(stream.readStr(length)))
+    of "write":
+      let stream = jsStreamById(options)
+      if stream.isNil:
+        return nimBoolToJS(ctx, false)
+      stream.write(decode(options{"base64"}.getStr("")))
+      return nimBoolToJS(ctx, true)
+    of "atEnd":
+      let stream = jsStreamById(options)
+      if stream.isNil:
+        return nimBoolToJS(ctx, true)
+      return nimBoolToJS(ctx, stream.atEnd())
+    of "rewind":
+      let stream = jsStreamById(options)
+      if stream.isNil:
+        return nimBoolToJS(ctx, false)
+      stream.setPosition(0)
+      return nimBoolToJS(ctx, true)
+    of "close":
+      let id = options{"id"}.getInt(0)
+      if id == 0 or not jsStreamsGlobal.hasKey(id):
+        return nimBoolToJS(ctx, false)
+      try:
+        jsStreamsGlobal[id].close()
+      finally:
+        jsStreamsGlobal.del(id)
+      return nimBoolToJS(ctx, true)
+    else:
+      frameos_apps.logError(e.owner, "JS app streams: unknown operation: " & opStr)
+      return jsUndefSentinel(ctx)
+  except CatchableError as err:
+    frameos_apps.logError(e.owner, "JS app streams " & opStr & " failed: " & err.msg)
+    if opStr in ["write", "close", "rewind", "atEnd"]:
+      return nimBoolToJS(ctx, false)
+    return jsNull(ctx)
+
+proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
+  ## Read a value from frameConfig.settings, e.g. getSetting("openAI", "apiKey").
+  ## Only namespaces the app declares in its config.json "settings" list are
+  ## accessible; the declaration travels with the scene so access is auditable.
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  var path: JsonNode
+  try:
+    path = parseJson(toNimString(ctx, pathJson))
+  except CatchableError:
+    return jsUndefSentinel(ctx)
+  if path.isNil or path.kind != JArray or path.len == 0:
+    return jsUndefSentinel(ctx)
+
+  let namespace = path[0].getStr()
+  if namespace.len == 0 or namespace notin e.runtime.settingsKeys:
+    frameos_apps.logError(e.owner,
+      "JS app getSetting: settings namespace \"" & namespace &
+      "\" is not declared in the app config's \"settings\" list")
+    return jsUndefSentinel(ctx)
+
+  frameos_apps.ensureEmbeddedServiceSettings(e.owner)
+  var node = e.owner.frameConfig.settings
+  for part in path.items:
+    if node.isNil:
+      return jsUndefSentinel(ctx)
+    node = node{part.getStr()}
+  if node.isNil:
+    return jsUndefSentinel(ctx)
+  return jsonToJS(ctx, node)
 
 proc jsGetAppMeta(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -237,11 +589,13 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
     arr.add(%*key)
   return jsonToJS(ctx, arr)
 
-proc newJsAppRuntime*(category: string, outputType: string, source: string): JsAppRuntime =
+proc newJsAppRuntime*(category: string, outputType: string, source: string,
+    settingsKeys: seq[string] = @[]): JsAppRuntime =
   return JsAppRuntime(
     category: category,
     outputType: outputType,
     source: source,
+    settingsKeys: settingsKeys,
     nextImageId: 0,
     images: initTable[int, Image](),
     transientImageIds: @[]
@@ -382,7 +736,13 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
   let config = configFromSources(sources)
   let category = config{"category"}.getStr().toLowerAscii()
   let outputType = outputTypeFromConfig(config)
-  let runtime = newJsAppRuntime(category, outputType, source)
+  var settingsKeys: seq[string] = @[]
+  let settingsNode = config{"settings"}
+  if not settingsNode.isNil and settingsNode.kind == JArray:
+    for key in settingsNode.items:
+      if key.kind == JString and key.getStr().len > 0:
+        settingsKeys.add(key.getStr())
+  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys)
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
@@ -413,6 +773,10 @@ proc ensureReady(runtime: JsAppRuntime) =
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsFetchText", jsFetchText)
+  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
+  runtime.js.registerFunction("jsAssets", jsAssets)
+  runtime.js.registerFunction("jsStreams", jsStreams)
+  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
   runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
   runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
   runtime.js.registerFunction("jsGetAppState", jsGetAppState)
@@ -450,6 +814,36 @@ proc ensureReady(runtime: JsAppRuntime) =
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
+    httpRequest: (url, options) => JSON.parse(
+      jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || "{}"
+    ),
+    listAssets: (dir) => __frameosUnwrap(jsAssets("list", String(dir || ""), "")) || [],
+    assetExists: (path) => __frameosUnwrap(jsAssets("exists", String(path || ""), "")) === true,
+    assetSize: (path) => __frameosUnwrap(jsAssets("size", String(path || ""), "")) ?? -1,
+    readAsset: (path, options) => __frameosUnwrap(jsAssets(
+      "read", String(path || ""), options ? JSON.stringify(options) : ""
+    )) ?? null,
+    writeAsset: (path, base64) => __frameosUnwrap(jsAssets("write", String(path || ""), String(base64 || ""))) === true,
+    appendAsset: (path, base64) => __frameosUnwrap(jsAssets("append", String(path || ""), String(base64 || ""))) === true,
+    deleteAsset: (path) => __frameosUnwrap(jsAssets("delete", String(path || ""), "")) === true,
+    loadAssetImage: (path) => __frameosUnwrap(jsAssets("image", String(path || ""), "")) ?? null,
+    openAssetStream: (path, mode) => __frameosUnwrap(jsStreams("openAsset",
+      JSON.stringify({ path: String(path || ""), mode: String(mode || "r") }))) ?? null,
+    createStream: (base64) => __frameosUnwrap(jsStreams("create",
+      JSON.stringify({ base64: String(base64 || "") }))) ?? null,
+    streamRead: (ref, length) => __frameosUnwrap(jsStreams("read",
+      JSON.stringify({ id: (ref && ref.id) || ref, length }))) ?? null,
+    streamWrite: (ref, base64) => __frameosUnwrap(jsStreams("write",
+      JSON.stringify({ id: (ref && ref.id) || ref, base64: String(base64 || "") }))) === true,
+    streamAtEnd: (ref) => __frameosUnwrap(jsStreams("atEnd",
+      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
+    streamRewind: (ref) => __frameosUnwrap(jsStreams("rewind",
+      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
+    streamClose: (ref) => __frameosUnwrap(jsStreams("close",
+      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
+    getSetting: (...path) => __frameosUnwrap(jsGetSetting(
+      JSON.stringify(path.flat().map((p) => String(p)))
+    )),
     setState: (key, value) => jsSetState(
       String(key || ""),
       JSON.stringify(value === undefined ? null : value, __jsReplacer)
