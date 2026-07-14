@@ -422,7 +422,12 @@ bool fos_scenes_apply_pending_selection(void)
         return false;
     }
     ESP_LOGI(TAG, "scene selected: %s", scene_id);
+    printf("scene changed: %s\n", scene_id); /* visible on the USB serial stream */
     log_scene_event("event:setCurrentScene", "ok", "queued", scene_id,
+                    "selected", 0, 0, 0, ESP_OK);
+    /* Pi parity: the UI's scene-activation and preview tasks complete on
+     * render:sceneChange (see longRunningTasksModel). */
+    log_scene_event("render:sceneChange", "ok", "queued", scene_id,
                     "selected", 0, 0, 0, ESP_OK);
     return true;
 }

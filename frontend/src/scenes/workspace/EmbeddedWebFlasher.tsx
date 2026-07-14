@@ -597,6 +597,10 @@ export function EmbeddedWebFlasher({
             scheduleEmbeddedUsbFrameImageRefresh(frame.id)
             setPhase('done')
             setFlashMessage(`Firmware flashed and ${frame.scenes?.length ?? 0} scene(s) uploaded.`)
+            appendBrowserFlashLog(
+              frame.id,
+              'The frame is rendering its first scene — e-paper refreshes take a few minutes; the preview appears when it finishes.'
+            )
           } else {
             setPhase('done')
             setFlashMessage('Firmware flashed. No scenes configured to upload.')

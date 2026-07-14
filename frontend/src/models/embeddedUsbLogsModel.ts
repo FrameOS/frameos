@@ -283,7 +283,9 @@ function parseUsbCommandReady(command: string, text: string): boolean {
 
 function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCommandResult | null {
   const expectedCommand = usbApiResponseCommand(command)
-  const errorMatch = text.match(/__FRAMEOS_USB_ERROR__\s+(\S+)\s+(\S+)\s*([^\r\n]*)/)
+  // Require the trailing newline so a chunk boundary mid-line can't
+  // truncate the error to its first characters ("image failed: E")
+  const errorMatch = text.match(/__FRAMEOS_USB_ERROR__\s+(\S+)\s+(\S+)[ \t]*([^\r\n]*)\r?\n/)
   if (errorMatch) {
     if (errorMatch[1] !== expectedCommand) {
       return null
