@@ -222,6 +222,39 @@ const ok = metadata.satisfies satisfies boolean;
     check "const alias = metadata.as" in output
     check "const ok = metadata.satisfies" in output
 
+  test "preserves object keys after template literal interpolations":
+    # Regression: the `}` closing a `${...}` interpolation desynced token
+    # scope/depth tracking, so keys of a following object literal were taken
+    # for variable bindings and their string values erased as type annotations.
+    let output = transformFrameosScript("""
+function get(app) {
+  const post = call(`${app.config.base}/echo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hello: `${app.config.name}` }),
+  })
+  return { post, tail: `${post}!` }
+}
+""")
+    check "method: \"POST\"" in output
+    check "headers: { \"Content-Type\": \"application/json\" }" in output
+    check "hello: `${app.config.name}`" in output
+    check "tail: `${post}!`" in output
+
+  test "preserves comparison values of object keys":
+    # Regression: `key: value === x` lost its value — the member-type stripper
+    # took `value` for a type annotation ending at what it thought was a field
+    # initializer `=`.
+    let output = transformFrameosScript("""
+function verdict(res) {
+  return { ok: res.ok === true, no: res.ok !== true, same: res.kind == "a", fn: (x) => x }
+}
+""")
+    check "ok: res.ok === true" in output
+    check "no: res.ok !== true" in output
+    check "same: res.kind == \"a\"" in output
+    check "fn: (x) => x" in output
+
   test "preserves modern ES syntax supported by QuickJS":
     let output = transformFrameosScript("""
 class Counter {

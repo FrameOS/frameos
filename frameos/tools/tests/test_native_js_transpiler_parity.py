@@ -96,6 +96,22 @@ FIXTURES = [
     context={},
   ),
   Fixture(
+    name="object_keys_after_template_interpolation",
+    source=r'''
+      export function get(app: { config: { base: string } }, context: { event: string }) {
+        const request = (url: string, options: { method: string }) => `${url}#${options.method}`
+        const post = request(`${app.config.base}/echo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hello: `${context.event}` }),
+        })
+        return { post, ok: post.length !== 0, same: post === post }
+      }
+    ''',
+    app={"config": {"base": "http://frame"}},
+    context={"event": "render"},
+  ),
+  Fixture(
     name="enum_runtime_values",
     source=r'''
       export enum Mode {
