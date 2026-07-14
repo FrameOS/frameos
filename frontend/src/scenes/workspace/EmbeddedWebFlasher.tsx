@@ -17,7 +17,6 @@ import {
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
-import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
@@ -455,7 +454,6 @@ export function EmbeddedWebFlasher({
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const { setDeployDrawerView } = useActions(frameLogic({ frameId: frame.id }))
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
@@ -486,7 +484,10 @@ export function EmbeddedWebFlasher({
     setPhase('connecting')
     setProgress(null)
     setFlashMessage('Selecting USB port')
-    setDeployDrawerView('embedded')
+    // Do not switch drawer views here: the firmware section renders inline
+    // in the main deploy view too, and swapping views would unmount THIS
+    // component instance — the flash keeps running, but its progress bar
+    // and status messages update a dead instance and vanish.
     try {
       // Must run inside the click gesture, before any other await
       const activeLogPort = embeddedUsbLogStreamSessionPort(frame.id)
