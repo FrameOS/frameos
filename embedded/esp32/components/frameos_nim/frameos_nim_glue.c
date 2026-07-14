@@ -18,8 +18,10 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 /* Nim's os module calls lstat()/readlink(); newlib/VFS has no symlinks, so
  * stat() is exact and every path is a non-symlink (EINVAL per POSIX). */
@@ -190,6 +192,35 @@ void fos_nim_fatal_oom(size_t size)
     /* No guard armed: fall through to Nim's raiseOutOfMem (log + reboot). */
 }
 
+/* A longjmp abort skips every Nim destructor on the abandoned stack, so the
+ * aborted call's allocations (render canvas, decode buffers, HTTP chunks)
+ * leak with their refcounts stuck — no GC pass can ever reclaim them. One
+ * abort is survivable; once the leaks eat the contiguous PSRAM a render
+ * canvas needs, every future render is doomed and only a reboot recovers
+ * the heap. A device that stays "alive" but can never render again is worse
+ * than one clean restart. */
+#define FOS_NIM_OOM_ABORT_RESTART_STREAK 4
+
+static int s_frame_width = 0;
+static int s_frame_height = 0;
+static unsigned s_nim_oom_abort_streak = 0;
+
+static void nim_oom_abort_note(const char *what)
+{
+    s_nim_oom_abort_streak++;
+    size_t canvas_bytes = (size_t)s_frame_width * (size_t)s_frame_height * 4u;
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bool canvas_impossible = canvas_bytes > 0 && largest < canvas_bytes;
+    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, largest PSRAM block %u, canvas needs %u)",
+             what, s_nim_oom_abort_streak, (unsigned)largest, (unsigned)canvas_bytes);
+    if ((s_nim_oom_abort_streak >= 2 && canvas_impossible) ||
+        s_nim_oom_abort_streak >= FOS_NIM_OOM_ABORT_RESTART_STREAK) {
+        ESP_LOGE("fos_nim", "OOM aborts have leaked the Nim heap beyond recovery; restarting");
+        vTaskDelay(pdMS_TO_TICKS(250)); /* let the log lines drain */
+        esp_restart();
+    }
+}
+
 bool frameos_nim_available(void) { return true; }
 
 static void configure_backend_auth(const char *backend_url, uint32_t frame_id, const char *api_key)
@@ -241,6 +272,8 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t frame_id, const char *api_key,
                       bool server_send_logs)
 {
+    s_frame_width = width;
+    s_frame_height = height;
     configure_backend_auth(backend_url, frame_id, api_key);
     s_log_upload_configured = server_send_logs;
     s_log_upload_enabled = false;
@@ -270,8 +303,9 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_impl(buf, len, pixel_format);
+        if (result == 0) s_nim_oom_abort_streak = 0;
     } else {
-        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        nim_oom_abort_note("render");
         result = -1;
     }
     s_nim_oom_jmp_armed = false;
@@ -288,8 +322,9 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_alloc_impl(buf, len, pixel_format);
+        if (result == 0) s_nim_oom_abort_streak = 0;
     } else {
-        ESP_LOGE("fos_nim", "render aborted: out of memory");
+        nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {
             free(s_pending_render_buffer);
         }
@@ -345,7 +380,7 @@ bool frameos_nim_set_scene(const char *scene_id)
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_set_scene_impl(scene_id);
     } else {
-        ESP_LOGE("fos_nim", "scene switch aborted: out of memory");
+        nim_oom_abort_note("scene switch");
         ok = false;
     }
     s_nim_oom_jmp_armed = false;
@@ -362,7 +397,7 @@ int frameos_nim_load_scenes(const char *json)
         s_nim_oom_jmp_armed = true;
         count = fos_nim_load_scenes_impl(json);
     } else {
-        ESP_LOGE("fos_nim", "scene load aborted: out of memory");
+        nim_oom_abort_note("scene load");
         count = 0;
     }
     s_nim_oom_jmp_armed = false;
@@ -397,7 +432,7 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
         s_nim_oom_jmp_armed = true;
         ok = fos_nim_send_event_impl(event, payload_json ? payload_json : "{}");
     } else {
-        ESP_LOGE("fos_nim", "event dispatch aborted: out of memory");
+        nim_oom_abort_note("event dispatch");
         ok = false;
     }
     s_nim_oom_jmp_armed = false;
