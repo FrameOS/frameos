@@ -333,5 +333,9 @@ async def api_embedded_device_ota_download(
     if (firmware.get("status") != "ready" or not isinstance(ota_path, str)
             or not os.path.isfile(ota_path)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No OTA image available")
-    return FileResponse(ota_path, media_type="application/octet-stream",
-                        filename=os.path.basename(ota_path))
+    return FileResponse(
+        ota_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(ota_path),
+        headers={"Cache-Control": "no-store"},
+    )

@@ -1053,6 +1053,20 @@ def clear_embedded_firmware(frame: Frame | Any) -> None:
     frame.embedded = embedded
 
 
+def embedded_firmware_download_url(frame_id: int, sha256: object = None) -> str:
+    """Return a content-addressed browser download URL when a hash is known.
+
+    Firmware artifacts are replaced in place for each frame. Keeping the URL
+    stable lets a browser reuse an older merged image after a rebuild, so put
+    the image hash in the query string to give every build a distinct cache
+    key. The download response is also marked no-store as a second safeguard.
+    """
+    base_url = f"/api/frames/{frame_id}/embedded/firmware/download"
+    if isinstance(sha256, str) and re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
+        return f"{base_url}?sha256={sha256.lower()}"
+    return base_url
+
+
 def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
     embedded = frame.embedded if isinstance(frame.embedded, dict) else {}
     firmware = embedded.get("firmware")
@@ -1114,6 +1128,10 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
                     frame,
                     {**firmware, "status": "missing", "error": "The generated OTA firmware file is missing"},
                 )
+        firmware = {
+            **firmware,
+            "downloadUrl": embedded_firmware_download_url(int(frame.id), firmware.get("sha256")),
+        }
     return with_embedded_firmware_layout(frame, firmware)
 
 
@@ -1507,6 +1525,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     frame = get_fresh_frame(db, int(frame.id)) or frame
     current = latest_embedded_firmware(frame) or {}
+    merged_sha256 = _sha256(artifact_path)
     ready_status = {
         **_preserved_queue_metadata(current),
         "status": "ready",
@@ -1520,7 +1539,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "filename": filename,
         "path": str(artifact_path),
         "size": artifact_path.stat().st_size,
-        "sha256": _sha256(artifact_path),
+        "sha256": merged_sha256,
         "flashOffset": EMBEDDED_FLASH_OFFSET,
         "panel": selected_panel,
         "configHash": generated_config_hash,
@@ -1531,7 +1550,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "otaElfSha256": _sha256(ota_elf),
         "startedAt": current.get("startedAt") or started_at,
         "completedAt": _utc_now(),
-        "downloadUrl": f"/api/frames/{frame.id}/embedded/firmware/download",
+        "downloadUrl": embedded_firmware_download_url(int(frame.id), merged_sha256),
     }
     if flash_profile["otaSupported"]:
         ready_status = {

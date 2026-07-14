@@ -266,7 +266,9 @@ async function ensureFirmwareReady(frameId: number, onStatus: (message: string) 
 }
 
 async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
-  const response = await apiFetch(downloadUrl)
+  // Firmware paths are replaced in place after rebuilds. Bypass any older
+  // cached response even when talking to a backend that supplied a stable URL.
+  const response = await apiFetch(downloadUrl, { cache: 'no-store' })
   if (!response.ok) {
     throw new Error('Failed to download firmware image')
   }

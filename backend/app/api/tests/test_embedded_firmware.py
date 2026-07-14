@@ -334,6 +334,7 @@ async def test_firmware_download(async_client, db, tmp_path):
             'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
             'filename': 'frameos-esp32-s3.bin',
             'path': str(artifact),
+            'sha256': 'ef' * 32,
             'panel': 'EPD_7in5_V2',
             'configHash': embedded_firmware_config_hash(stored),
             'otaPath': str(artifact),
@@ -345,10 +346,17 @@ async def test_firmware_download(async_client, db, tmp_path):
     db.add(stored)
     db.commit()
 
-    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware/download")
+    status_response = await async_client.get(f"/api/frames/{frame['id']}/embedded/firmware")
+    download_url = status_response.json()['firmware']['downloadUrl']
+    assert download_url == (
+        f"/api/frames/{frame['id']}/embedded/firmware/download?sha256={'ef' * 32}"
+    )
+
+    response = await async_client.get(download_url)
     assert response.status_code == 200
     assert response.content == b'firmware-bytes'
     assert 'frameos-esp32-s3.bin' in response.headers.get('content-disposition', '')
+    assert response.headers['cache-control'] == 'no-store'
 
 
 @pytest.mark.asyncio
