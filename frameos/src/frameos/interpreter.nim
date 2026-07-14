@@ -9,6 +9,8 @@ import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutil
 import apps/apps
 
 const TRACING = false
+when defined(frameosEmbedded):
+  const EmbeddedMaxCachedImageBytes = 1024 * 1024
 
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
@@ -190,6 +192,17 @@ proc withCache(scene: InterpretedFrameScene,
     scene.logger.log(payload)
 
   let fresh = compute()
+  when defined(frameosEmbedded):
+    # Never retain frame-sized images in the node cache on embedded: image
+    # producers decode straight into the render canvas, so the cached value
+    # aliases a canvas-sized RGBA buffer (7.7MB at 1200x1600). Pinning it
+    # across renders means the next render needs a second canvas and OOMs
+    # the module (and a cache hit would draw the aliased, since-overwritten
+    # canvas anyway). Re-running the producer costs a re-download; small
+    # images still cache.
+    if fresh.kind == fkImage and not fresh.img.isNil and
+        fresh.img.width * fresh.img.height * 4 > EmbeddedMaxCachedImageBytes:
+      return fresh
   scene.cacheValues[nodeId] = fresh
   if cacheDurationEnabled:
     scene.cacheTimes[nodeId] = epochTime()

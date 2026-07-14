@@ -738,8 +738,10 @@ static const char *TAG = "fos_nim_http";
  * consume the chunks as segments (streamed PNG/JPEG). */
 #define FOS_NIM_HTTP_CHUNK_BYTES (512u * 1024u)
 #define FOS_NIM_HTTP_CHUNK_MIN_BYTES (64u * 1024u)
-/* Keep this much PSRAM free while buffering, for decode rows and friends. */
-#define FOS_NIM_HTTP_PSRAM_RESERVE (1536u * 1024u)
+/* Keep this much PSRAM free while buffering, for decode rows and friends.
+ * Streamed decodes need well under 200KB of working memory; a bigger
+ * reserve starves legitimate downloads when a render is already live. */
+#define FOS_NIM_HTTP_PSRAM_RESERVE (768u * 1024u)
 
 void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count)
 {
