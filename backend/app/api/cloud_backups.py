@@ -276,10 +276,14 @@ async def restore_cloud_backup(
             project_id=project.id,
             status="uninitialized",
             frame_access_key=secure_token(20),
+            server_api_key=secure_token(32),
         )
         for field in FRAME_RESTORE_FIELDS:
             if field in frame_dict:
                 setattr(frame, field, frame_dict[field])
+        agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
+        agent["agentSharedSecret"] = secure_token(32)
+        frame.agent = agent
         if not frame.name:
             frame.name = backup.get("name") or "Restored frame"
         if not frame.frame_host:

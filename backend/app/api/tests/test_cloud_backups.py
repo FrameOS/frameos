@@ -92,7 +92,7 @@ def backup_calls(monkeypatch):
     return calls, responses
 
 
-def test_sanitize_frame_dict_strips_all_secrets(db):
+def test_sanitize_frame_dict_strips_machine_secrets_but_keeps_app_api_keys(db):
     frame_dict = {
         "id": 7,
         "name": "Kitchen",
@@ -106,7 +106,10 @@ def test_sanitize_frame_dict_strips_all_secrets(db):
         "terminal_history": ["secrets typed here"],
         "network": {"wifiSSID": "Home", "wifiPassword": "hunter2", "wifiHotspotPassword": "x"},
         "agent": {"agentEnabled": True, "agentSharedSecret": "x"},
-        "scenes": [{"id": "s"}],
+        "device_config": {
+            "uploadHeaders": [{"name": "Authorization", "value": "Bearer upload-api-key"}],
+        },
+        "scenes": [{"id": "s", "apiKey": "scene-api-key", "accessToken": "scene-access-token"}],
     }
     clean = cloud_backup.sanitize_frame_dict(frame_dict)
     dumped = json.dumps(clean)
@@ -114,7 +117,12 @@ def test_sanitize_frame_dict_strips_all_secrets(db):
         assert secret not in dumped
     assert clean["network"]["wifiSSID"] == "Home"
     assert clean["agent"]["agentEnabled"] is True
-    assert clean["scenes"] == [{"id": "s"}]
+    assert clean["device_config"]["uploadHeaders"] == [
+        {"name": "Authorization", "value": "Bearer upload-api-key"}
+    ]
+    assert clean["scenes"] == [
+        {"id": "s", "apiKey": "scene-api-key", "accessToken": "scene-access-token"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -252,6 +260,11 @@ async def test_restore_frame_backup(async_client, db, backup_calls):
     assert restored.ssh_pass is None
     assert restored.frame_access_key
     assert restored.frame_access_key != "frame-access-key-1"
+    assert restored.server_api_key
+    assert restored.server_api_key != "server-api-key-1"
+    assert restored.agent["agentEnabled"] is True
+    assert restored.agent["agentSharedSecret"]
+    assert restored.agent["agentSharedSecret"] != "agent-secret"
     assert restored.network.get("wifiSSID") == "HomeWifi"
     assert "wifiPassword" not in (restored.network or {})
 

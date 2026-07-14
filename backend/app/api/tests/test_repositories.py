@@ -155,9 +155,9 @@ async def test_system_repository_image_allows_session_cookie_without_token(no_au
 
 @pytest.mark.asyncio
 async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeypatch):
-    """A connected cloud link seeds the store repository exactly once per
-    project; deleting it is respected (STORE-TODO Phase 2)."""
+    """A connected cloud link seeds once per provider; deletion is respected."""
     from app.models.cloud import CloudBackendLink
+    from app.models.settings import Settings
     from app.utils import cloud_link as cloud_link_utils
 
     async def fake_update(self):
@@ -165,22 +165,25 @@ async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeyp
 
     monkeypatch.setattr(Repository, "update_templates", fake_update)
 
-    db.add(
-        CloudBackendLink(
-            provider_url="https://cloud.frameos.net",
-            status="connected",
-            access_token=cloud_link_utils.encrypt_cloud_secret("link-token"),
-            linked_client_id="lc-1",
-            scope="backend:link backend:read",
-            local_origin="http://test",
-        )
+    link = CloudBackendLink(
+        provider_url="https://cloud.frameos.net",
+        status="connected",
+        access_token=cloud_link_utils.encrypt_cloud_secret("link-token"),
+        linked_client_id="lc-1",
+        scope="backend:link backend:read",
+        local_origin="http://test",
     )
+    db.add(link)
     db.commit()
 
     store_url = "https://cloud.frameos.net/api/store/repository.json"
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
     assert store_url in [r["url"] for r in response.json()]
+    marker = db.query(Settings).filter_by(
+        project_id=async_client.project_id, key="@system/cloud_store_repository_added"
+    ).one()
+    assert marker.value == store_url
 
     repo = db.query(Repository).filter_by(url=store_url).first()
     delete = await async_client.delete(f'/api/repositories/{repo.id}')
@@ -189,6 +192,57 @@ async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeyp
     # Not re-added behind the user's back.
     response = await async_client.get('/api/repositories')
     assert store_url not in [r["url"] for r in response.json()]
+
+    # Changing providers resets the one-time choice for the new provider and
+    # records its URL, even when the previous provider's store was deleted.
+    link.provider_url = "https://cloud.example.com"
+    db.commit()
+    next_store_url = "https://cloud.example.com/api/store/repository.json"
+    response = await async_client.get('/api/repositories')
+    assert next_store_url in [r["url"] for r in response.json()]
+    db.refresh(marker)
+    assert marker.value == next_store_url
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_migrates_legacy_marker_after_provider_change(async_client, db, monkeypatch):
+    from app.models.cloud import CloudBackendLink
+    from app.models.settings import Settings
+
+    async def fake_update(self):
+        self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+    db.add(
+        CloudBackendLink(
+            provider_url="https://cloud.example.com",
+            status="connected",
+            linked_client_id="lc-2",
+            scope="backend:link backend:read",
+            local_origin="http://test",
+        )
+    )
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value="true",
+        )
+    )
+    old_store_url = "https://cloud.frameos.net/api/store/repository.json"
+    db.add(Repository(project_id=async_client.project_id, name="Old cloud store", url=old_store_url))
+    db.commit()
+
+    new_store_url = "https://cloud.example.com/api/store/repository.json"
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    urls = [repository["url"] for repository in response.json()]
+    assert old_store_url not in urls
+    assert new_store_url in urls
+    marker = db.query(Settings).filter_by(
+        project_id=async_client.project_id, key="@system/cloud_store_repository_added"
+    ).one()
+    assert marker.value == new_store_url
 
 
 @pytest.mark.asyncio

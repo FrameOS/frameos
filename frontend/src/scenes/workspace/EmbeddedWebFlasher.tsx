@@ -9,8 +9,10 @@ import {
   embeddedUsbLogStreamSessionPort,
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
+  prepareSerialPortReconnect,
   resolveLiveSerialPort,
   runEmbeddedUsbApiCommand,
+  serialPortReconnectRequiresReselection,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
 } from '../../models/embeddedUsbLogsModel'
@@ -357,6 +359,10 @@ async function waitForUsbApiReadyAfterFlash(
     if (livePort && livePort !== port) {
       appendBrowserFlashLog(frame.id, 'USB device re-enumerated after reboot; switching to the new port.')
       port = livePort
+    } else if (!livePort && serialPortReconnectRequiresReselection(port)) {
+      throw new Error(
+        'Multiple identical USB devices are available. Select the target board again before uploading scenes.'
+      )
     }
     try {
       const result = await runEmbeddedUsbApiCommand(frame.id, 'status', {
@@ -387,7 +393,10 @@ async function waitForUsbApiReadyAfterFlash(
   throw new Error(`Timed out waiting for board USB API after reboot: ${detail}`)
 }
 
-function usbConnectionButtonLabel(usbLogStreamState: { status?: string } | undefined, usbLogStreamOpen: boolean): string {
+function usbConnectionButtonLabel(
+  usbLogStreamState: { status?: string } | undefined,
+  usbLogStreamOpen: boolean
+): string {
   return usbLogStreamState?.status === 'selecting'
     ? 'Select USB port'
     : usbLogStreamState?.status === 'connecting'
@@ -497,6 +506,7 @@ export function EmbeddedWebFlasher({
         setMessage(null)
         return
       }
+      await prepareSerialPortReconnect(port)
       openFrameToolBehindDrawer(frame.id, 'logs')
       appendBrowserFlashLog(frame.id, 'USB port selected')
 
@@ -563,12 +573,11 @@ export function EmbeddedWebFlasher({
       setPhase('error')
       setProgress(null)
       const detail = error instanceof Error ? error.message : String(error)
-      const displayMessage =
-        /No port selected/i.test(detail)
-          ? null
-          : /Failed to open serial port/i.test(detail)
-          ? 'Could not open the serial port. Close other serial monitors and try again.'
-          : detail
+      const displayMessage = /No port selected/i.test(detail)
+        ? null
+        : /Failed to open serial port/i.test(detail)
+        ? 'Could not open the serial port. Close other serial monitors and try again.'
+        : detail
       setMessage(displayMessage)
       if (/No port selected/i.test(detail)) {
         setPhase('idle')

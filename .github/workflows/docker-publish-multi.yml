@@ -54,8 +54,8 @@ jobs:
           VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          # update_versions.py also syncs the frameos-wasm npm package version
-          # to the frameos release version.
+          # update_versions.py syncs the wasm package to the FrameOS runtime
+          # version and the editor package to its independent frontend hash.
           git add versions.json frameos/wasm/package.json frameos/editor/package.json
           git commit -m "chore: version ${VERSION}"
           git push origin HEAD:main
@@ -69,7 +69,7 @@ jobs:
           echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
   publish-npm:
-    name: Publish frameos-wasm to npm
+    name: Publish FrameOS npm packages
     needs: update-versions
     runs-on: ubuntu-latest
     steps:
@@ -132,8 +132,8 @@ jobs:
           for package in frameos/wasm frameos/editor; do
             name=$(node -p "require('./${package}/package.json').name")
             version=$(node -p "require('./${package}/package.json').version")
-            # The frameos version (and thus the package versions) only bumps
-            # when frameos changed; skip republishing an existing version.
+            # Each package version follows its own content-owning component;
+            # skip only when that exact component version already exists.
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "${name}@${version} already on npm — skipping."
               continue

@@ -4,10 +4,11 @@ Two kinds ship in this phase, mirrored by the provider's /api/backends/backups
 endpoints (docs/cloud-link.md):
 
 - ``templates`` (scope ``backup:templates``): the template interchange zip.
-- ``frames`` (scope ``backup:frames``): frame metadata + scene JSON, with
-  local secrets stripped — SSH credentials, access keys, TLS material and the
-  like never leave the install. Asset backups (Phase 4) will be client-side
-  encrypted instead.
+- ``frames`` (scope ``backup:frames``): frame metadata + scene JSON. Local
+  machine credentials (SSH, frame access, TLS, agent secrets) are stripped,
+  while app API keys/tokens and configured upload headers are intentionally
+  retained so restored scenes keep working. Asset backups (Phase 4) will be
+  client-side encrypted instead.
 """
 from __future__ import annotations
 
@@ -51,7 +52,7 @@ def _scrub(value: Any) -> Any:
 
 
 def sanitize_frame_dict(frame_dict: dict) -> dict:
-    """Frame metadata + scene JSON with every local credential removed."""
+    """Frame metadata with machine credentials removed and app API keys kept."""
     cleaned = {key: value for key, value in frame_dict.items() if key not in SENSITIVE_FRAME_FIELDS}
     return _scrub(cleaned)
 

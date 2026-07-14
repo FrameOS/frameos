@@ -213,12 +213,27 @@ class CloudSync:
 
         db = SessionLocal()
         try:
-            for frame_id, deployed_at in db.query(Frame.id, Frame.last_successful_deploy_at).all():
-                if deployed_at is not None:
-                    self._deploys_seen[frame_id] = deployed_at.isoformat()
+            for frame_id, backed_up_at in db.query(Frame.id, Frame.last_cloud_backup_deploy_at).all():
+                if backed_up_at is not None:
+                    self._deploys_seen[frame_id] = backed_up_at.isoformat()
         finally:
             db.close()
         self._deploys_primed = True
+
+    def _mark_deploy_backed_up(self, frame_id: int, marker: str):
+        import datetime
+
+        from app.models.frame import Frame
+
+        backed_up_at = datetime.datetime.fromisoformat(marker.removesuffix("Z"))
+        db = SessionLocal()
+        try:
+            frame = db.get(Frame, frame_id)
+            if frame is not None:
+                frame.last_cloud_backup_deploy_at = backed_up_at
+                db.commit()
+        finally:
+            db.close()
 
     async def _maybe_backup_frame(self, frame_dict: dict):
         frame_id = frame_dict.get("id")
@@ -232,7 +247,6 @@ class CloudSync:
         marker = str(deployed_at).replace("+00:00", "")
         if self._deploys_seen.get(frame_id) == marker:
             return
-        self._deploys_seen[frame_id] = marker
 
         link, access_token, _link_id = self._load_link()
         if link is None or access_token is None or "backup:frames" not in link.scopes:
@@ -243,6 +257,8 @@ class CloudSync:
                 link, access_token, frame_dict, project_name
             )
             if status_code == 200:
+                self._mark_deploy_backed_up(frame_id, marker)
+                self._deploys_seen[frame_id] = marker
                 print(f"🟢 FrameOS Cloud: backed up frame {frame_id} after deploy")
             else:
                 detail = response.get("error") or status_code

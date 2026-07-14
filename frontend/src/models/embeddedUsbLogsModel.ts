@@ -43,6 +43,7 @@ interface UsbLogSession {
 const sessions = new Map<number, UsbLogSession>()
 const lastPorts = new Map<number, SerialPort>()
 const usbApiCommandLocks = new Map<number, Promise<void>>()
+const serialPortReconnectEligible = new WeakMap<SerialPort, boolean>()
 
 interface EmbeddedUsbApiCommandOptions {
   payload?: string | Uint8Array
@@ -151,6 +152,37 @@ function appendSelectedUsbPort(frameId: number, port: SerialPort): void {
   lastPorts.set(frameId, port)
 }
 
+function serialPortIsConnected(port: SerialPort): boolean {
+  // SerialPort.connected is Chrome 117+; treat missing support as connected.
+  return (port as { connected?: boolean }).connected !== false
+}
+
+function matchingSerialPorts(original: SerialPort, ports: SerialPort[]): SerialPort[] {
+  const info = original.getInfo()
+  return ports.filter((port) => {
+    const portInfo = port.getInfo()
+    return portInfo.usbVendorId === info.usbVendorId && portInfo.usbProductId === info.usbProductId
+  })
+}
+
+/** Snapshot whether this is the only granted board with its VID/PID before an
+ * operation that may make it re-enumerate. Object identity is the only stable
+ * distinction Web Serial exposes for otherwise identical boards. */
+export async function prepareSerialPortReconnect(original: SerialPort): Promise<void> {
+  try {
+    const granted = matchingSerialPorts(original, await navigator.serial.getPorts())
+    serialPortReconnectEligible.set(original, granted.length === 1 && granted[0] === original)
+  } catch (error) {
+    // If the granted-port inventory cannot be inspected, fail closed and
+    // require an explicit selection instead of risking another board.
+    serialPortReconnectEligible.set(original, false)
+  }
+}
+
+export function serialPortReconnectRequiresReselection(original: SerialPort): boolean {
+  return serialPortReconnectEligible.get(original) === false
+}
+
 // When the board reboots (e.g. after flashing), its USB device re-enumerates
 // and the SerialPort object we hold goes permanently stale — every open()
 // fails with NetworkError. The replacement object is already granted, so it
@@ -167,19 +199,24 @@ export async function resolveLiveSerialPort(original: SerialPort): Promise<Seria
   } catch (error) {
     return null
   }
-  const info = original.getInfo()
-  const candidates = ports.filter((port) => {
-    const portInfo = port.getInfo()
-    return portInfo.usbVendorId === info.usbVendorId && portInfo.usbProductId === info.usbProductId
-  })
-  // SerialPort.connected is Chrome 117+; treat missing support as connected
-  const connected = candidates.filter((port) => (port as { connected?: boolean }).connected !== false)
+  const connected = matchingSerialPorts(original, ports).filter(serialPortIsConnected)
   // Prefer the original object so a second board with the same vendor/product
   // id is never picked while the original is still alive
   if (connected.includes(original)) {
     return original
   }
-  return connected[0] ?? null
+  if (serialPortReconnectEligible.get(original) !== true) {
+    return null
+  }
+  if (connected.length !== 1) {
+    if (connected.length > 1) {
+      serialPortReconnectEligible.set(original, false)
+    }
+    return null
+  }
+  const replacement = connected[0]
+  serialPortReconnectEligible.set(replacement, true)
+  return replacement
 }
 
 async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promise<T>): Promise<T> {
@@ -483,10 +520,10 @@ async function runEmbeddedUsbApiCommandLocked(
     throw new Error('No USB serial port selected for this frame')
   }
   appendSelectedUsbPort(frameId, port)
-  const payload =
-    typeof options?.payload === 'string'
-      ? new TextEncoder().encode(options.payload)
-      : options?.payload
+  if (!serialPortReconnectEligible.has(port)) {
+    await prepareSerialPortReconnect(port)
+  }
+  const payload = typeof options?.payload === 'string' ? new TextEncoder().encode(options.payload) : options?.payload
   appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
   if (payload) {
     appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
@@ -527,6 +564,14 @@ async function runEmbeddedUsbApiCommandLocked(
     } catch (error) {
       const replacement = isSerialPortGoneError(error) ? await resolveLiveSerialPort(port) : null
       if (!replacement || replacement === port) {
+        if (isSerialPortGoneError(error) && serialPortReconnectRequiresReselection(port)) {
+          if (lastPorts.get(frameId) === port) {
+            lastPorts.delete(frameId)
+          }
+          throw new Error(
+            'Multiple identical USB devices are available. Select the target board again before sending data.'
+          )
+        }
         throw error
       }
       appendUsbLine(frameId, `[USB API] USB device re-enumerated; retrying ${command} on the new port`)

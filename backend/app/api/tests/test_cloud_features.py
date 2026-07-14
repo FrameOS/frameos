@@ -53,13 +53,19 @@ async def test_features_requires_link(async_client):
 @pytest.mark.asyncio
 async def test_feature_removal_applies_immediately(async_client, db, scope_calls):
     calls, _ = scope_calls
-    make_connected_link(db)
+    link = make_connected_link(db)
+    link.local_fallback_enabled = False
+    db.commit()
 
     response = await async_client.post("/api/cloud/features", json={"scopes": []})
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["link"]["scopes"] == ["backend:link", "backend:read"]
+    assert data["local_fallback_enabled"] is True
     assert data.get("upgrade") is None
+
+    db.refresh(link)
+    assert link.local_fallback_enabled is True
 
     _url, token, scopes = calls["set_scopes"][0]
     assert token == "link-token-secret"

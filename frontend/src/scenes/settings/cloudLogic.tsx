@@ -127,6 +127,7 @@ export const cloudLogic = kea<cloudLogicType>([
         connectCloud: () => null,
         disconnectCloud: () => null,
         loadCloudStatus: () => null,
+        backupAllToCloud: () => null,
       },
     ],
     isCloudConnecting: [
@@ -350,36 +351,68 @@ export const cloudLogic = kea<cloudLogicType>([
     backupAllToCloud: async () => {
       // Push every frame and template of the current project. Frames are also
       // backed up automatically after each deploy when the scope is granted.
-      try {
-        const scopes = values.grantedScopes
-        if (scopes.includes('backup:frames')) {
+      const failures: string[] = []
+      let attempted = 0
+      let succeeded = 0
+
+      const backupItems = async (
+        items: { id: string | number; name?: string }[],
+        kind: 'frame' | 'template',
+        endpoint: string,
+        idField: 'frame_id' | 'template_id'
+      ): Promise<void> => {
+        for (const item of items) {
+          attempted += 1
+          const label = item.name || `${kind} ${item.id}`
+          try {
+            const response = await apiFetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ [idField]: item.id }),
+            })
+            if (response.ok) {
+              succeeded += 1
+            } else {
+              failures.push(`${label}: ${await cloudErrorMessage(response, `Could not back up ${kind} ${item.id}`)}`)
+            }
+          } catch (error) {
+            failures.push(`${label}: ${error instanceof Error ? error.message : `Could not back up ${kind}`}`)
+          }
+        }
+      }
+
+      const scopes = values.grantedScopes
+      if (scopes.includes('backup:frames')) {
+        try {
           const framesResponse = await apiFetch('/api/frames')
-          if (framesResponse.ok) {
+          if (!framesResponse.ok) {
+            failures.push(await cloudErrorMessage(framesResponse, 'Could not list frames to back up'))
+          } else {
             const frames = (await framesResponse.json()).frames ?? []
-            for (const frame of frames) {
-              await apiFetch('/api/cloud/backups/frames', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frame_id: frame.id }),
-              })
-            }
+            await backupItems(frames, 'frame', '/api/cloud/backups/frames', 'frame_id')
           }
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'Could not list frames to back up')
         }
-        if (scopes.includes('backup:templates')) {
+      }
+      if (scopes.includes('backup:templates')) {
+        try {
           const templatesResponse = await apiFetch('/api/templates')
-          if (templatesResponse.ok) {
+          if (!templatesResponse.ok) {
+            failures.push(await cloudErrorMessage(templatesResponse, 'Could not list templates to back up'))
+          } else {
             const templates = (await templatesResponse.json()) ?? []
-            for (const template of templates) {
-              await apiFetch('/api/cloud/backups/templates', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ template_id: template.id }),
-              })
-            }
+            await backupItems(templates, 'template', '/api/cloud/backups/templates', 'template_id')
           }
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'Could not list templates to back up')
         }
-      } catch {
-        actions.setCloudError('Backing up to FrameOS Cloud failed')
+      }
+
+      if (failures.length > 0) {
+        const result = attempted > 0 ? `Backed up ${succeeded} of ${attempted} items. ` : ''
+        const remaining = failures.length > 3 ? `; plus ${failures.length - 3} more failure(s)` : ''
+        actions.setCloudError(`${result}${failures.slice(0, 3).join('; ')}${remaining}`)
       }
       actions.loadCloudBackups()
     },

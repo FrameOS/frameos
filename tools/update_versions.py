@@ -218,32 +218,35 @@ def main(argv: List[str] | None = None) -> int:
     output = json.dumps(ordered_versions, indent=2) + "\n"
     VERSIONS_FILE.write_text(output, encoding="utf-8")
 
-    _sync_wasm_package_version(ordered_versions)
+    _sync_npm_package_versions(ordered_versions)
 
     changed = "yes" if ordered_versions != existing_versions else "no"
     print(f"versions_updated={changed}")
     return 0
 
 
-def _sync_wasm_package_version(versions: Dict[str, str]) -> None:
-    """The frameos-wasm and frameos-editor npm package versions track the
-    frameos release version (both are published by the release workflow).
-    The files are excluded from the frameos project hash
-    (project-folders.json) so writing the version here does not itself
-    change that hash and force a bump on the next release."""
-    frameos_version = (versions.get("frameos") or "").split("+", 1)[0]
-    if not BASE_VERSION_RE.fullmatch(frameos_version):
-        return
-    for name in ("wasm", "editor"):
+def _sync_npm_package_versions(versions: Dict[str, str]) -> None:
+    """Sync npm packages to the component version that owns their content.
+
+    frameos-wasm follows the runtime, while frameos-editor has its own hash
+    because frontend-only changes alter its bundle. Package files are excluded
+    from those hashes so writing a version cannot force another bump.
+    """
+    package_projects = {"wasm": "frameos", "editor": "editor"}
+    for name, project_name in package_projects.items():
+        component = versions.get(project_name) or ""
+        component_version = component.split("+", 1)[0]
+        if not BASE_VERSION_RE.fullmatch(component_version):
+            continue
         package_json = ROOT / "frameos" / name / "package.json"
         if not package_json.exists():
             continue
         data = json.loads(package_json.read_text(encoding="utf-8"))
-        if data.get("version") == frameos_version:
+        if data.get("version") == component_version:
             continue
-        data["version"] = frameos_version
+        data["version"] = component_version
         package_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        print(f"{data.get('name')} version set to {frameos_version}")
+        print(f"{data.get('name')} version set to {component_version}")
 
 
 if __name__ == "__main__":

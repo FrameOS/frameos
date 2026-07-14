@@ -54,7 +54,10 @@ def cloud_calls(monkeypatch):
     def make(name):
         async def call(*args):
             calls[name].append(args)
-            return responses[name]
+            response = responses[name]
+            if isinstance(response, Exception):
+                raise response
+            return response
 
         return call
 
@@ -136,6 +139,8 @@ async def test_deploy_broadcast_triggers_backup(db, redis, service, cloud_calls)
     await update_frame(db, redis, frame)
     await service._maybe_backup_frame(frame.to_dict())
     assert len(calls["backup_save"]) == 1
+    db.refresh(frame)
+    assert frame.last_cloud_backup_deploy_at == frame.last_successful_deploy_at
     _provider, _token, payload = calls["backup_save"][0]
     assert payload["kind"] == "frames"
     assert payload["item_key"] == f"frame-{frame.id}"
@@ -152,6 +157,37 @@ async def test_deploy_broadcast_triggers_backup(db, redis, service, cloud_calls)
     await update_frame(db, redis, frame)
     await service._maybe_backup_frame(frame.to_dict())
     assert len(calls["backup_save"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_deploy_backup_retries_after_worker_restart(db, redis, service, cloud_calls):
+    calls, responses = cloud_calls
+    make_connected_link(db)
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    service._prime_deploys_seen()
+    frame.last_successful_deploy_at = datetime.datetime.utcnow()
+    await update_frame(db, redis, frame)
+
+    responses["backup_save"] = RuntimeError("connection reset")
+    await service._maybe_backup_frame(frame.to_dict())
+    assert len(calls["backup_save"]) == 1
+    db.refresh(frame)
+    assert frame.last_cloud_backup_deploy_at is None
+
+    restarted_service = CloudSync()
+    restarted_service._prime_deploys_seen()
+    responses["backup_save"] = (503, {"error": "temporarily_unavailable"})
+    await restarted_service._maybe_backup_frame(frame.to_dict())
+    assert len(calls["backup_save"]) == 2
+
+    responses["backup_save"] = (200, {"status": "saved"})
+    await restarted_service._maybe_backup_frame(frame.to_dict())
+    assert len(calls["backup_save"]) == 3
+    db.refresh(frame)
+    assert frame.last_cloud_backup_deploy_at == frame.last_successful_deploy_at
+
+    await restarted_service._maybe_backup_frame(frame.to_dict())
+    assert len(calls["backup_save"]) == 3
 
 
 @pytest.mark.asyncio
@@ -173,6 +209,7 @@ async def test_priming_prevents_startup_backup_storm(db, redis, service, cloud_c
     make_connected_link(db)
     frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
     frame.last_successful_deploy_at = datetime.datetime.utcnow()
+    frame.last_cloud_backup_deploy_at = frame.last_successful_deploy_at
     await update_frame(db, redis, frame)
 
     # Simulate a worker restart: the first event after priming carries a stamp

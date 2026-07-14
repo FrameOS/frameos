@@ -169,13 +169,20 @@ proc requestedScopes(payload: JsonNode): seq[string] =
   if result.len == 0:
     result = DEFAULT_FRAME_SCOPES
 
-proc localOrigin(request: Request): string =
-  var host = ""
-  if request.headers.contains("Host"):
-    host = request.headers["Host"]
+proc requestHeader(request: Request, name: string): string =
+  for (headerName, value) in request.headers:
+    if cmpIgnoreCase(headerName, name) == 0:
+      return value
+  ""
+
+proc localOrigin*(request: Request): string =
+  let forwardedProto = requestHeader(request, "x-forwarded-proto")
+    .split(",", 1)[0].strip().toLowerAscii()
+  let scheme = if forwardedProto == "https": "https" else: "http"
+  var host = requestHeader(request, "host")
   if host.len == 0:
     host = "localhost"
-  "http://" & host
+  scheme & "://" & host
 
 const CLOUD_LOGIN_STATE_TTL_SECONDS = 600
 

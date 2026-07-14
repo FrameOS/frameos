@@ -946,6 +946,10 @@ async def set_cloud_features(
     if status_code == 200 and response.get("status") == "updated":
         if response.get("scope"):
             link.scope = response["scope"]
+        if "auth:login" not in scopes or "auth:login" not in link.scopes:
+            # Cloud login is no longer available, so local passwords must be
+            # restored before the current authenticated session can expire.
+            link.local_fallback_enabled = True
         link.poll_error = None
         link.updated_at = _now()
         db.commit()
