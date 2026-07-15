@@ -51,7 +51,8 @@ import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
-import { builtinFrameEventNames, normalizeCustomEvent } from '../../utils/frameEvents'
+import { normalizeCustomEvent } from '../../utils/frameEvents'
+import { frameFormSceneErrors } from './frameFormSceneErrors'
 import {
   cloneSplitScreenSceneLayout,
   defaultSplitScreenBackground,
@@ -1657,33 +1658,7 @@ export const frameLogic = kea<frameLogicType>([
               pass: state.frame_admin_auth?.pass ? undefined : 'Password is required',
             }
           : undefined,
-        scenes: (state.scenes ?? []).map((scene: Record<string, any>) => {
-          const customEventNames = (scene.customEvents ?? []).map((event: Record<string, any>) =>
-            String(event.name ?? '').trim()
-          )
-          return {
-            fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
-              name: String(field.name ?? '').trim() ? '' : 'Codename is required',
-              type: field.type ? '' : 'Type is required',
-            })),
-            customEvents: (scene.customEvents ?? []).map((event: Record<string, any>, eventIndex: number) => {
-              const name = String(event.name ?? '').trim()
-              return {
-                name: !name
-                  ? 'Event name is required'
-                  : builtinFrameEventNames.has(name)
-                  ? 'Event name must not match a built-in event'
-                  : customEventNames.findIndex((candidate: string) => candidate === name) !== eventIndex
-                  ? 'Event name must be unique'
-                  : '',
-                fields: (event.fields ?? []).map((field: Record<string, any>) => ({
-                  name: String(field.name ?? '').trim() ? '' : 'Codename is required',
-                  type: field.type ? '' : 'Type is required',
-                })),
-              }
-            }),
-          }
-        }),
+        scenes: frameFormSceneErrors(state.scenes),
         mountpoints: state.mountpoints?.enabled
           ? {
               items: (state.mountpoints.items ?? []).map((item) =>

@@ -1,3 +1,5 @@
 packages:
   - frontend
   - frameos/frontend
+  - frameos/wasm
+  - frameos/editor
