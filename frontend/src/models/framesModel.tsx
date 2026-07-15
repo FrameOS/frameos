@@ -111,8 +111,13 @@ const embeddedFirmwareRecoveryAttempts = new Map<number, number>()
 const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
 const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
 const embeddedUsbImageRefreshesInFlight = new Set<number>()
+const embeddedUsbImageRefreshRetries = new Map<number, number>()
 const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
 const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
+// The first render after a deploy takes minutes on e-paper; keep asking
+// until a preview exists (12 x 20s covers the slowest panels)
+const EMBEDDED_USB_IMAGE_RETRY_DELAY_MS = 20000
+const EMBEDDED_USB_IMAGE_RETRY_LIMIT = 12
 const EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS = 45000
 const EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS = 30000
 const EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB = 250
@@ -231,14 +236,31 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
       entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
     }
     socketLogic.actions.frameRendered(frameId)
+    embeddedUsbImageRefreshRetries.delete(frameId)
   } catch (error) {
-    console.warn('Failed to update frame image over USB', error)
+    const detail = error instanceof Error ? error.message : String(error)
+    if (/no preview rendered yet|preview snapshot was not retained/i.test(detail)) {
+      // Expected right after a deploy: the first render is still in
+      // progress. Quietly retry until a preview exists.
+      const attempts = (embeddedUsbImageRefreshRetries.get(frameId) ?? 0) + 1
+      if (attempts <= EMBEDDED_USB_IMAGE_RETRY_LIMIT) {
+        embeddedUsbImageRefreshRetries.set(frameId, attempts)
+        scheduleEmbeddedUsbFrameImageRefresh(frameId, EMBEDDED_USB_IMAGE_RETRY_DELAY_MS)
+      } else {
+        embeddedUsbImageRefreshRetries.delete(frameId)
+      }
+    } else {
+      console.warn('Failed to update frame image over USB', error)
+    }
   } finally {
     embeddedUsbImageRefreshesInFlight.delete(frameId)
   }
 }
 
-export function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
+export function scheduleEmbeddedUsbFrameImageRefresh(
+  frameId: number,
+  delayMs: number = EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS
+): void {
   if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
     return
   }
@@ -251,7 +273,7 @@ export function scheduleEmbeddedUsbFrameImageRefresh(frameId: number): void {
     window.setTimeout(() => {
       embeddedUsbImageRefreshTimers.delete(frameId)
       void refreshEmbeddedUsbFrameImage(frameId)
-    }, EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS)
+    }, delayMs)
   )
 }
 
@@ -656,9 +678,16 @@ export const framesModel = kea<framesModelType>([
       })
       try {
         const frame = values.frames[id]
+        let usbSucceeded = false
         if ((frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(id)) {
-          await runEmbeddedUsbApiCommand(id, 'render', { timeoutMs: 10000 })
-        } else {
+          try {
+            await runEmbeddedUsbApiCommand(id, 'render', { timeoutMs: 10000 })
+            usbSucceeded = true
+          } catch (error) {
+            // Stale/busy USB port — fall through to the HTTP event.
+          }
+        }
+        if (!usbSucceeded) {
           const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
           if (!response.ok) {
             throw new Error('Failed to send render event')

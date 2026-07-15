@@ -344,6 +344,25 @@ static void log_render_event(const char *event, const char *scene_id,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
              (int)esp_err, err_name_esc);
     frameos_nim_log_hook(log_line);
+
+    /* The structured line above only reaches the serial console at INFO,
+     * which the firmware log level (WARN) filters out — anyone watching the
+     * USB stream during a deploy sees nothing for the minutes a render
+     * takes. Print the key lifecycle moments directly. */
+    if (strcmp(event, "render:scene") == 0) {
+        printf("render #%lu started: scene \"%s\"\n", (unsigned long)count,
+               scene_name && scene_name[0] ? scene_name : scene_id);
+    } else if (strcmp(event, "render:device") == 0 &&
+               strcmp(status, "refreshing") == 0) {
+        printf("render #%lu refreshing display (%lld ms so far)\n",
+               (unsigned long)count, ms);
+    } else if (strcmp(event, "render:done") == 0) {
+        printf("render #%lu done in %lld ms\n", (unsigned long)count, ms);
+    } else if (strcmp(event, "render:error") == 0) {
+        printf("render #%lu failed at %s: %s\n", (unsigned long)count,
+               stage && stage[0] ? stage : "?",
+               reason && reason[0] ? reason : esp_err_to_name(esp_err));
+    }
 }
 
 static void store_snapshot(const uint8_t *buf, size_t len, int width, int height,
