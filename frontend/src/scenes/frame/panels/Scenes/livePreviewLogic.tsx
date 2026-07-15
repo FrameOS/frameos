@@ -98,6 +98,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     setPreviewState: (state: Record<string, any>) => ({ state }),
     dispatchPreviewEvent: (name: string, payload: Record<string, any>) => ({ name, payload }),
     forcePreviewRender: true,
+    setPreviewSettings: (settings: Record<string, Record<string, any>>) => ({ settings }),
   }),
   reducers({
     livePreviewSceneId: [
@@ -166,6 +167,15 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       {
         openLivePreview: () => 0,
         previewFrame: (state) => state + 1,
+      },
+    ],
+    // User-entered app settings (API keys etc.) merged over the backend's
+    // assembled settings on every (re)start. Kept in memory only — never
+    // persisted or sent anywhere except into the wasm runtime.
+    previewSettings: [
+      {} as Record<string, Record<string, any>>,
+      {
+        setPreviewSettings: (_, { settings }) => settings,
       },
     ],
   }),
@@ -272,6 +282,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       // Seed the scene's public fields with the values the user entered in the
       // form so the in-browser preview reflects their input, not stored defaults.
       const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, state ?? null)
+      // Snapshot of the scenes as loaded (without state seeding), so
+      // forcePreviewRender can tell whether they were edited since.
+      cache.initialScenesJson = JSON.stringify(collectScenePreviewPayloadScenes(scene, sceneList, null))
       const { width, height } = values.previewDimensions
 
       const frameId = values.frame?.id ?? props.frameId
@@ -279,25 +292,38 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       // Fetch the frame's assembled settings (app API keys etc.) so data apps
       // that need secrets can run in the preview. Best-effort: a scene with no
       // secret-using apps still previews fine if this fails.
-      let settingsJson = '{}'
+      let settings: Record<string, any> = {}
       try {
         const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
         if (response.ok) {
           const data = await response.json()
-          settingsJson = JSON.stringify(data?.settings ?? {})
+          settings = data?.settings ?? {}
         }
       } catch (error) {
         // fall through with empty settings
       }
+      // User-entered keys (setPreviewSettings) win over the backend's, merged
+      // per settings group.
+      for (const [group, groupValues] of Object.entries(values.previewSettings ?? {})) {
+        settings[group] = { ...(settings[group] ?? {}), ...groupValues }
+      }
+      const settingsJson = JSON.stringify(settings)
 
       // Same-origin backend proxy so the runtime's HTTP requests (image apps,
       // weather, ...) work despite CORS — the worker's sync XHR carries auth
       // cookies to it. Resolve the project-prefixed absolute path up front.
+      // An embedding page (the standalone editor bundle) can supply its own
+      // proxy endpoint via FRAMEOS_APP_CONFIG.preview_proxy_url instead.
       let proxyUrl = ''
-      try {
-        proxyUrl = getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))
-      } catch (error) {
-        // preview still runs; external fetches will fail with CORS as before
+      const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
+      if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
+        proxyUrl = configuredProxyUrl
+      } else {
+        try {
+          proxyUrl = getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))
+        } catch (error) {
+          // preview still runs; external fetches will fail with CORS as before
+        }
       }
 
       let worker: Worker
@@ -378,7 +404,29 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker?.postMessage({ type: 'event', name, payload })
     },
     forcePreviewRender: () => {
+      // The worker got a snapshot of the scenes when the preview opened; if
+      // they were edited since (diagram, panels, ...), restart it on the
+      // fresh scenes — carrying the current scene state over — instead of
+      // re-rendering the stale snapshot.
+      const sceneId = values.livePreviewSceneId
+      if (sceneId && !values.livePreviewScenes && cache.initialScenesJson) {
+        const scene = values.scenes.find((item: FrameScene) => item.id === sceneId)
+        if (scene) {
+          const currentScenesJson = JSON.stringify(collectScenePreviewPayloadScenes(scene, values.scenes, null))
+          if (currentScenesJson !== cache.initialScenesJson) {
+            actions.openLivePreview(sceneId, values.previewState)
+            return
+          }
+        }
+      }
       cache.worker?.postMessage({ type: 'render' })
+    },
+    setPreviewSettings: () => {
+      // New keys only reach the runtime through its init message: restart the
+      // running preview so they take effect.
+      if (values.livePreviewSceneId) {
+        actions.openLivePreview(values.livePreviewSceneId, values.previewState, values.livePreviewScenes)
+      }
     },
   })),
   beforeUnmount(({ cache }) => {
