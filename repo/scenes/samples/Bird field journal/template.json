@@ -1,6 +1,7 @@
 {
   "name": "Bird field journal",
   "description": "Birds recently spotted near you via live iNaturalist data. Every new species gets a field-journal plate drawn by OpenAI from licensed reference photos, verified for accuracy, then added to a collection that cycles on the frame. Set your latitude/longitude and an OpenAI API key under global settings.",
+  "frameosVersion": "2026.7.5",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 480,
