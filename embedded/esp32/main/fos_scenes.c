@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "fos_config.h"
 #include "fos_wifi.h"
@@ -36,6 +37,12 @@ static char s_etag[ETAG_LEN] = "";
 static char s_pending_scene_id[SCENE_ID_LEN] = "";
 static char s_last_error[SCENE_ERROR_LEN] = "";
 static portMUX_TYPE s_scene_select_lock = portMUX_INITIALIZER_UNLOCKED;
+/* Serializes writers of /state/scenes.json: the USB upload (console task)
+ * and the backend sync (fos_client task) share one tmp path, and two
+ * concurrent write+rename dances delete each other's tmp file (rename then
+ * fails ENOENT on a freshly written file). Created in fos_scenes_init(),
+ * which runs before either task starts. */
+static SemaphoreHandle_t s_scene_file_lock = NULL;
 
 static void json_escape_value(const char *src, char *out, size_t out_len)
 {
@@ -258,8 +265,8 @@ static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
     return ESP_OK;
 }
 
-static esp_err_t write_file_replace(const char *path, const char *tmp_path,
-                                    const char *data, size_t len)
+static esp_err_t write_file_replace_locked(const char *path, const char *tmp_path,
+                                           const char *data, size_t len)
 {
     esp_err_t err = write_file_atomic(path, tmp_path, data, len);
     if (err == ESP_OK) return ESP_OK;
@@ -415,15 +422,36 @@ bool fos_scenes_apply_pending_selection(void)
         return false;
     }
     ESP_LOGI(TAG, "scene selected: %s", scene_id);
+    printf("scene changed: %s\n", scene_id); /* visible on the USB serial stream */
     log_scene_event("event:setCurrentScene", "ok", "queued", scene_id,
+                    "selected", 0, 0, 0, ESP_OK);
+    /* Pi parity: the UI's scene-activation and preview tasks complete on
+     * render:sceneChange (see longRunningTasksModel). */
+    log_scene_event("render:sceneChange", "ok", "queued", scene_id,
                     "selected", 0, 0, 0, ESP_OK);
     return true;
 }
 
 /* ---------------------------------------------------------------- init */
 
+static esp_err_t write_file_replace(const char *path, const char *tmp_path,
+                                    const char *data, size_t len)
+{
+    if (s_scene_file_lock != NULL) {
+        xSemaphoreTake(s_scene_file_lock, portMAX_DELAY);
+    }
+    esp_err_t err = write_file_replace_locked(path, tmp_path, data, len);
+    if (s_scene_file_lock != NULL) {
+        xSemaphoreGive(s_scene_file_lock);
+    }
+    return err;
+}
+
 esp_err_t fos_scenes_init(void)
 {
+    if (s_scene_file_lock == NULL) {
+        s_scene_file_lock = xSemaphoreCreateMutex();
+    }
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
     load_etag();

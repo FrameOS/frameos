@@ -2,6 +2,7 @@ import std/[json, tables, strutils, unittest]
 import pixie
 import ../channels
 import ../interpreter
+import ../../apps/data/frameOSGallery/app as galleryApp
 import ../types
 import ../values
 
@@ -331,3 +332,50 @@ suite "interpreter error paths":
     finally:
       setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
       resetInterpretedScenes()
+
+  test "failed image download paints the error instead of 'No image provided'":
+    let savedHook = galleryApp.galleryDownloadHook
+    galleryApp.galleryDownloadHook =
+      proc(url: string, maxBytes: int, target: Image, fit: ScaledDecodeFit): Image =
+        raise newException(ValueError, "response too large: 2601969 > 1409024 bytes")
+    defer: galleryApp.galleryDownloadHook = savedHook
+
+    let sceneId = "tests/interpreter-errors/image-producer-error".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "image producer error",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "app", %*{"keyword": "render/image", "config": {}}),
+        node(30, "app", %*{
+          "keyword": "data/frameOSGallery",
+          "config": {"category": "random"}
+        })
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev"),
+        edge(101, 30, "fieldOutput", 20, "fieldInput/image")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      let rendered = render(scene, ctx(scene, "render"))
+      # The failure reason is logged, and nothing says "No image provided"
+      var sawDetail = false
+      for entry in store.entries:
+        if entry.kind != JObject:
+          continue
+        for key in ["message", "error"]:
+          if entry.hasKey(key):
+            check "No image provided" notin entry[key].getStr()
+            if "response too large" in entry[key].getStr():
+              sawDetail = true
+      check sawDetail
+      # ...and the canvas shows the error image, not the plain background
+      var nonBackground = 0
+      for pixel in rendered.data:
+        if pixel.r.int + pixel.g.int + pixel.b.int > 96:
+          inc nonBackground
+      check nonBackground > rendered.data.len div 2

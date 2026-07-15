@@ -32,13 +32,22 @@
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
 - Repo-level local development runner: `pnpm dev` starts `mprocs` with panes for backend API, ARQ worker, the main frontend dev server, and the frame-local frontend watcher. `redis`, `frameos`, and `backend-docker` panes are available but do not autostart. The `backend-docker` pane runs `scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`. `mprocs.yaml` defines the process list.
-- Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
-- Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
+- Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】- Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 - This includes small functions and callbacks inside components. Prefer to keep as much code as possible in logic files, treating React as a templating layer.
 - When adding a frame model key that is tracked for deploy changes in `frontend/src/scenes/frame/frameLogic.ts`, also add a marker to `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`. For unreleased work, use the next patch after the current `versions.json` FrameOS base version.
 
 ## Device runtime (Nim) notes
+- **HARD RULE — no image proxies for frames, EVER.** Frames download and render
+  images directly from their sources; never route a frame's image fetches
+  through the backend (or any other middleman) to resize or fetch on its
+  behalf, and don't paper over device limits with host-side resize params
+  either. When a source serves images too large for a device, THE fix is
+  better on-device streaming decode (incremental inflate, row-by-row
+  unfilter/scale into the target — a multi-MB PNG should need its compressed
+  body plus a few rows, not a full-resolution RGBA buffer). Proxies are fine
+  for in-browser previews only. Proxying has been implemented and reverted
+  before — do not implement it again.
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.
 - Entry point `src/frameos.nim` waits on `startFrameOS()` defined under `src/frameos/frameos`. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`. 【F:frameos/src/frameos.nim†L1-L6】
 - JavaScript repo apps under `repo/apps/code` are catalog templates for custom code apps. Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.

@@ -35,6 +35,18 @@ proc contextImageTarget*(self: AppRoot, context: ExecutionContext,
     else: self.frameConfig.renderHeight()
   newImage(width, height)
 
+proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: string): Image =
+  ## Error frame for image producers. On embedded the producer's success path
+  ## decodes straight into the context canvas, so the error path must reuse
+  ## that canvas too — a second full-frame allocation next to the live canvas
+  ## is exactly what OOMs a 16MB module.
+  when defined(frameosEmbedded):
+    let target = context.contextImage()
+    if not target.isNil:
+      renderErrorInto(target, target.width, target.height, message)
+      return target
+  renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
+
 proc scaledDecodeFitForFrame*(frameConfig: FrameConfig): ScaledDecodeFit =
   ## The decode-time fit that best matches the frame's scaling mode when an
   ## image is decoded straight into a region-sized target on embedded builds.
