@@ -1,5 +1,6 @@
 import frameos/types
 import frameos/values
+from frameos/utils/image import renderError, renderErrorInto
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
@@ -8,6 +9,8 @@ import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutil
 import apps/apps
 
 const TRACING = false
+when defined(frameosEmbedded):
+  const EmbeddedMaxCachedImageBytes = 1024 * 1024
 
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
@@ -189,6 +192,17 @@ proc withCache(scene: InterpretedFrameScene,
     scene.logger.log(payload)
 
   let fresh = compute()
+  when defined(frameosEmbedded):
+    # Never retain frame-sized images in the node cache on embedded: image
+    # producers decode straight into the render canvas, so the cached value
+    # aliases a canvas-sized RGBA buffer (7.7MB at 1200x1600). Pinning it
+    # across renders means the next render needs a second canvas and OOMs
+    # the module (and a cache hit would draw the aliased, since-overwritten
+    # canvas anyway). Re-running the producer costs a re-download; small
+    # images still cache.
+    if fresh.kind == fkImage and not fresh.img.isNil and
+        fresh.img.width * fresh.img.height * 4 > EmbeddedMaxCachedImageBytes:
+      return fresh
   scene.cacheValues[nodeId] = fresh
   if cacheDurationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
@@ -413,7 +427,36 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "error": $e.msg,
                 "stacktrace": e.getStackTrace()
               })
-              # Leave field at default; still proceed.
+              # If this input takes an image, hand the consumer an image with
+              # the producer's error on it ("response too large", HTTP errors,
+              # …) — a nil image would only render as "No image provided".
+              # Non-image fields reject the value and keep their defaults.
+              try:
+                when defined(frameosEmbedded):
+                  # Reuse the live canvas for the error frame: allocating a
+                  # second full-frame image next to it OOMs memory-tight
+                  # devices. Paint only after the field accepted the image,
+                  # so a non-image field mismatch leaves the canvas untouched.
+                  if context.hasImage and not context.image.isNil:
+                    setInterpretedAppField(keyword, app, inputName,
+                      Value(kind: fkImage, img: context.image))
+                    renderErrorInto(context.image, context.image.width,
+                      context.image.height, $e.msg)
+                  else:
+                    setInterpretedAppField(keyword, app, inputName,
+                      Value(kind: fkImage, img: renderError(self.frameConfig.width,
+                        self.frameConfig.height, $e.msg)))
+                else:
+                  let errorWidth =
+                    if context.hasImage and not context.image.isNil: context.image.width
+                    else: self.frameConfig.width
+                  let errorHeight =
+                    if context.hasImage and not context.image.isNil: context.image.height
+                    else: self.frameConfig.height
+                  setInterpretedAppField(keyword, app, inputName,
+                    Value(kind: fkImage, img: renderError(errorWidth, errorHeight, $e.msg)))
+              except Exception:
+                discard # Leave field at default; still proceed.
 
       if self.appInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineConnected = self.appInlineInputsForNodeId[currentNodeId]

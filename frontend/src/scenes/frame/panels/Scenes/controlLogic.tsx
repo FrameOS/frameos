@@ -51,6 +51,11 @@ export const controlLogic = kea<controlLogicType>([
         sync: async (_, breakpoint) => {
           await breakpoint(100)
 
+          // The standalone embedded editor has no frame to sync state from.
+          if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
+            return emptyFrameStateRecord
+          }
+
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
@@ -145,18 +150,17 @@ export const controlLogic = kea<controlLogicType>([
         detail: scene?.name || sceneId,
       })
       try {
+        let usbSucceeded = false
         if ((values.frame?.mode ?? 'rpios') === 'embedded' && embeddedUsbApiCanUse(props.frameId)) {
-          await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
-          actions.currentSceneChanged(sceneId)
-          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
-          longRunningTasksModel.actions.finishTask({
-            frameId: props.frameId,
-            kind: 'activate',
-            sceneId,
-            status: 'success',
-            detail: scene?.name || sceneId,
-          })
-        } else {
+          try {
+            await runEmbeddedUsbApiCommand(props.frameId, 'scene-payload', { payload: sceneId, timeoutMs: 10000 })
+            usbSucceeded = true
+          } catch (error) {
+            // A stale or busy USB port must not strand a network-reachable
+            // frame — fall through to the HTTP event below.
+          }
+        }
+        if (!usbSucceeded) {
           const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -166,16 +170,16 @@ export const controlLogic = kea<controlLogicType>([
             throw new Error('Failed to send scene activation event')
           }
           await response.text()
-          actions.currentSceneChanged(sceneId)
-          socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
-          longRunningTasksModel.actions.finishTask({
-            frameId: props.frameId,
-            kind: 'activate',
-            sceneId,
-            status: 'success',
-            detail: scene?.name || sceneId,
-          })
         }
+        actions.currentSceneChanged(sceneId)
+        socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
+        longRunningTasksModel.actions.finishTask({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId,
+          status: 'success',
+          detail: scene?.name || sceneId,
+        })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,

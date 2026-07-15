@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BoltIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { useActions, useValues } from 'kea'
-import type { IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
+import type { ESPLoader, IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
 
 import { Spinner } from '../../components/Spinner'
 import {
@@ -9,14 +9,16 @@ import {
   embeddedUsbLogStreamSessionPort,
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
+  prepareSerialPortReconnect,
+  resolveLiveSerialPort,
   runEmbeddedUsbApiCommand,
+  serialPortReconnectRequiresReselection,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
 } from '../../models/embeddedUsbLogsModel'
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
-import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
@@ -27,15 +29,57 @@ type TraceableTransportInternals = { trace: (message: string) => void; lastTrace
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
 const POST_FLASH_BOOT_WAIT_MS = 7000
-const POST_FLASH_USB_READY_TIMEOUT_MS = 120000
+// First boot after an erase-all flash formats the 24MB SPIFFS state
+// partition before the console starts — measured ~180s on a XIAO ESP32-S3
+// with 32MB flash. Wait well past that.
+const POST_FLASH_USB_READY_TIMEOUT_MS = 360000
 const POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS = 8000
 const POST_FLASH_USB_READY_POLL_MS = 2500
+const POST_FLASH_USB_RESET_HINT_MS = 240000
 const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
 const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// ESP32-S3 RTC_CNTL registers, values from esptool's targets/esp32s3.py
+const S3_RTC_CNTL_OPTION1_REG = 0x6000812c
+const S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK = 0x1
+const S3_RTC_CNTL_WDTCONFIG0_REG = 0x60008098
+const S3_RTC_CNTL_WDTCONFIG1_REG = 0x6000809c
+const S3_RTC_CNTL_WDTWPROTECT_REG = 0x600080b0
+const S3_RTC_CNTL_WDT_WKEY = 0x50d83aa1
+// WDT_EN | STG0=reset system | sys reset length | cpu reset length
+const S3_RTC_WDT_RESET_CONFIG = (0x80000000 | (5 << 28) | (1 << 8) | 2) >>> 0
+
+// Reset the chip via the RTC watchdog, like `esptool --after watchdog-reset`.
+// A DTR/RTS reset pulse goes through the USB-Serial/JTAG strap logic, which on
+// some boards (XIAO ESP32-S3) latches the chip back into ROM download mode so
+// the app never boots after flashing (arduino-esp32#6762). The watchdog reset
+// runs over the flasher-stub protocol and never touches the strap pins.
+async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
+  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
+    return false
+  }
+  try {
+    await loader.writeReg(S3_RTC_CNTL_OPTION1_REG, 0, S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK)
+    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, S3_RTC_CNTL_WDT_WKEY)
+    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG1_REG, 2000)
+  } catch (error) {
+    return false
+  }
+  // The watchdog fires ~20ms after the arming write — often before the
+  // arming or lock command's response makes it back, dropping the USB
+  // device mid-exchange. Errors from here on mean the reset happened,
+  // which is the success case.
+  try {
+    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG0_REG, S3_RTC_WDT_RESET_CONFIG)
+    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, 0)
+  } catch (error) {}
+  await sleep(500)
+  return true
 }
 
 type FirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -223,7 +267,9 @@ async function ensureFirmwareReady(frameId: number, onStatus: (message: string) 
 }
 
 async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
-  const response = await apiFetch(downloadUrl)
+  // Firmware paths are replaced in place after rebuilds. Bypass any older
+  // cached response even when talking to a backend that supplied a stable URL.
+  const response = await apiFetch(downloadUrl, { cache: 'no-store' })
   if (!response.ok) {
     throw new Error('Failed to download firmware image')
   }
@@ -253,6 +299,7 @@ async function uploadScenesOverUsbAfterFlash(
         payload,
         port,
         timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
+        keepOpen: true,
       })
       return true
     } catch (error) {
@@ -291,31 +338,52 @@ function usbStatusSummary(text: string | undefined): string {
   }
 }
 
+// Returns the port the board answered on: the watchdog reset after flashing
+// re-enumerates the USB device, so the original SerialPort object may have
+// been replaced by a fresh grant from getPorts().
 async function waitForUsbApiReadyAfterFlash(
   frame: FrameType,
   port: SerialPort,
   onStatus: (message: string) => void
-): Promise<void> {
-  const deadline = Date.now() + POST_FLASH_USB_READY_TIMEOUT_MS
+): Promise<SerialPort> {
+  const started = Date.now()
+  const deadline = started + POST_FLASH_USB_READY_TIMEOUT_MS
   let attempt = 0
   let lastError: unknown = null
-  onStatus('Waiting for board USB API')
+  let resetHintShown = false
+  onStatus('Waiting for board USB API. A brand-new or fully erased board formats its storage first (~3 minutes).')
 
   while (Date.now() < deadline) {
     attempt += 1
+    const livePort = await resolveLiveSerialPort(port)
+    if (livePort && livePort !== port) {
+      appendBrowserFlashLog(frame.id, 'USB device re-enumerated after reboot; switching to the new port.')
+      port = livePort
+    } else if (!livePort && serialPortReconnectRequiresReselection(port)) {
+      throw new Error(
+        'Multiple identical USB devices are available. Select the target board again before uploading scenes.'
+      )
+    }
     try {
       const result = await runEmbeddedUsbApiCommand(frame.id, 'status', {
         port,
         timeoutMs: Math.min(POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS, Math.max(1000, deadline - Date.now())),
         mirrorOutput: false,
+        keepOpen: true,
       })
       appendBrowserFlashLog(frame.id, usbStatusSummary(result.text))
-      return
+      return port
     } catch (error) {
       lastError = error
       if (attempt === 1 || attempt % 4 === 0) {
         const detail = error instanceof Error ? error.message : String(error)
         appendBrowserFlashLog(frame.id, `USB API not ready yet: ${detail}`)
+      }
+      if (!resetHintShown && Date.now() - started > POST_FLASH_USB_RESET_HINT_MS) {
+        resetHintShown = true
+        onStatus(
+          'Board still not responding after the storage-format window. Try pressing its RESET button — it may be stuck in download mode.'
+        )
       }
       await sleep(Math.min(POST_FLASH_USB_READY_POLL_MS, Math.max(0, deadline - Date.now())))
     }
@@ -325,7 +393,10 @@ async function waitForUsbApiReadyAfterFlash(
   throw new Error(`Timed out waiting for board USB API after reboot: ${detail}`)
 }
 
-function usbConnectionButtonLabel(usbLogStreamState: { status?: string } | undefined, usbLogStreamOpen: boolean): string {
+function usbConnectionButtonLabel(
+  usbLogStreamState: { status?: string } | undefined,
+  usbLogStreamOpen: boolean
+): string {
   return usbLogStreamState?.status === 'selecting'
     ? 'Select USB port'
     : usbLogStreamState?.status === 'connecting'
@@ -392,7 +463,6 @@ export function EmbeddedWebFlasher({
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const { setDeployDrawerView } = useActions(frameLogic({ frameId: frame.id }))
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
@@ -423,7 +493,10 @@ export function EmbeddedWebFlasher({
     setPhase('connecting')
     setProgress(null)
     setFlashMessage('Selecting USB port')
-    setDeployDrawerView('embedded')
+    // Do not switch drawer views here: the firmware section renders inline
+    // in the main deploy view too, and swapping views would unmount THIS
+    // component instance — the flash keeps running, but its progress bar
+    // and status messages update a dead instance and vanish.
     try {
       // Must run inside the click gesture, before any other await
       const activeLogPort = embeddedUsbLogStreamSessionPort(frame.id)
@@ -433,6 +506,7 @@ export function EmbeddedWebFlasher({
         setMessage(null)
         return
       }
+      await prepareSerialPortReconnect(port)
       openFrameToolBehindDrawer(frame.id, 'logs')
       appendBrowserFlashLog(frame.id, 'USB port selected')
 
@@ -457,29 +531,39 @@ export function EmbeddedWebFlasher({
       const firmware = await downloadFirmware(downloadUrl)
 
       setPhase('flashing')
-      setFlashMessage(`Erasing ${flashSize} flash and flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
+      setFlashMessage(`Flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
       await loader.writeFlash({
         fileArray: [{ data: firmware, address: flashOffset }],
         flashSize,
         flashMode: 'keep',
         flashFreq: 'keep',
-        // Browser flashing is our "known good" provisioning path. Erase first so
-        // stale NVS, old RF calibration, or cached scenes from an earlier
-        // partition layout cannot override the freshly baked frame defaults.
-        eraseAll: true,
+        // eraseAll off: the merged image's FF padding already overwrites NVS,
+        // otadata and RF calibration (they sit inside the written range), so
+        // the freshly baked frame defaults win. The state partition beyond it
+        // survives, sparing the ~3 minute SPIFFS format on every re-flash —
+        // scenes are re-uploaded by this flow right after boot anyway.
+        eraseAll: false,
         compress: true,
         reportProgress: (_fileIndex, written, total) => {
           setProgress(total > 0 ? Math.round((written / total) * 100) : null)
         },
       })
-      // esptool-js's built-in hard reset never asserts RTS, which leaves
-      // USB-Serial/JTAG boards (e.g. XIAO ESP32-S3) stuck in the flasher
-      // stub. Pulse the reset line the way the esptool CLI does.
-      await transport.setDTR(false)
-      await transport.setRTS(true)
-      await sleep(100)
-      await transport.setRTS(false)
-      await transport.setDTR(false)
+      // Prefer a watchdog reset: a DTR/RTS pulse can strap USB-Serial/JTAG
+      // boards back into ROM download mode instead of booting the app. Fall
+      // back to pulsing the reset line the way the esptool CLI does —
+      // esptool-js's built-in hard reset never asserts RTS at all.
+      if (!(await watchdogResetAfterFlash(loader))) {
+        try {
+          await transport.setDTR(false)
+          await transport.setRTS(true)
+          await sleep(100)
+          await transport.setRTS(false)
+          await transport.setDTR(false)
+        } catch (error) {
+          // The port disappears if the chip already reset mid-command; the
+          // post-flash USB API wait re-acquires it and sorts out the rest.
+        }
+      }
 
       setPhase('preparing')
       setProgress(null)
@@ -489,12 +573,11 @@ export function EmbeddedWebFlasher({
       setPhase('error')
       setProgress(null)
       const detail = error instanceof Error ? error.message : String(error)
-      const displayMessage =
-        /No port selected/i.test(detail)
-          ? null
-          : /Failed to open serial port/i.test(detail)
-          ? 'Could not open the serial port. Close other serial monitors and try again.'
-          : detail
+      const displayMessage = /No port selected/i.test(detail)
+        ? null
+        : /Failed to open serial port/i.test(detail)
+        ? 'Could not open the serial port. Close other serial monitors and try again.'
+        : detail
       setMessage(displayMessage)
       if (/No port selected/i.test(detail)) {
         setPhase('idle')
@@ -511,7 +594,7 @@ export function EmbeddedWebFlasher({
       if (streamLogsAfterFlash && port) {
         try {
           await sleep(POST_FLASH_BOOT_WAIT_MS)
-          await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
+          port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
           const scenesUploaded = await uploadScenesOverUsbAfterFlash(frame, port, setFlashMessage)
           if (scenesUploaded) {
             const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {
@@ -524,6 +607,10 @@ export function EmbeddedWebFlasher({
             scheduleEmbeddedUsbFrameImageRefresh(frame.id)
             setPhase('done')
             setFlashMessage(`Firmware flashed and ${frame.scenes?.length ?? 0} scene(s) uploaded.`)
+            appendBrowserFlashLog(
+              frame.id,
+              'The frame is rendering its first scene — e-paper refreshes take a few minutes; the preview appears when it finishes.'
+            )
           } else {
             setPhase('done')
             setFlashMessage('Firmware flashed. No scenes configured to upload.')

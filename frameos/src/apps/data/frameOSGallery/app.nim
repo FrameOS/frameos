@@ -2,6 +2,7 @@ import pixie, strformat, json
 import frameos/apps
 import frameos/types
 import frameos/utils/app_images
+import frameos/utils/image
 
 const BASE_URL = "https://gallery.frameos.net/image"
 
@@ -34,5 +35,11 @@ proc get*(self: App, context: ExecutionContext): Image =
   self.log(%*{"category": category})
   let url = galleryUrl(category)
   let target = context.contextImage()
-  result = galleryDownloadHook(url, self.maxImageResponseBytes(), target,
-      scaledDecodeFitForFrame(self.frameConfig))
+  try:
+    result = galleryDownloadHook(url, self.maxImageResponseBytes(), target,
+        scaledDecodeFitForFrame(self.frameConfig))
+  except CatchableError as e:
+    let detail = if e.msg.len > 0: e.msg else: "unknown error"
+    self.logError "An error occurred while downloading the gallery image: " & detail
+    result = self.renderErrorForContext(context,
+        "An error occurred while downloading the gallery image.\n" & detail)

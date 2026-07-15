@@ -72,8 +72,11 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   except Exception as e:
     let message = &"Error rendering SVG: {e.msg}"
     self.logError(message)
-    let errorImage = renderError(image.width, image.height, message)
-    scaleAndDrawImage(image, errorImage, self.appConfig.placement)
+    when defined(frameosEmbedded):
+      renderErrorInto(image, image.width, image.height, message)
+    else:
+      let errorImage = renderError(image.width, image.height, message)
+      scaleAndDrawImage(image, errorImage, self.appConfig.placement)
 
 proc run*(self: App, context: ExecutionContext) =
   render(self, context, context.image)

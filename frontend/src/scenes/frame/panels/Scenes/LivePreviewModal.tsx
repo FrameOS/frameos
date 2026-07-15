@@ -18,7 +18,7 @@ import { StateFieldEdit } from './StateFieldEdit'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
 // The preview's runtime lines are raw strings, so classify them by content.
-function logLineColor(line: string): string {
+export function logLineColor(line: string): string {
   if (/error|failed|exception/i.test(line)) {
     return 'text-red-300'
   }
@@ -29,7 +29,7 @@ function logLineColor(line: string): string {
 }
 
 // Same timestamp format as the real logs panel (Logs.tsx formatTimestamp).
-function formatTimestamp(isoTimestamp: string): string {
+export function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
   return `${date.getFullYear()}-${date.getMonth() + 1 < 10 ? '0' : ''}${date.getMonth() + 1}-${
     date.getDate() < 10 ? '0' : ''
@@ -41,7 +41,7 @@ function formatTimestamp(isoTimestamp: string): string {
 // Open the current canvas image in a new tab. The window is opened
 // synchronously so popup blockers count it as user-initiated; the blob URL is
 // filled in once the canvas has been encoded.
-function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
+export function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
   const win = window.open('', '_blank')
   canvas.toBlob((blob) => {
     if (!blob) {
@@ -59,7 +59,7 @@ function openCanvasImageInNewTab(canvas: HTMLCanvasElement): void {
 // Runtime log lines are mostly JSON like {"event":"debug","message":"..."}.
 // Render them the way the real logs panel renders webhook lines: the event
 // name highlighted, the remaining keys as key=value pairs.
-function renderLogLine(line: string): JSX.Element | string {
+export function renderLogLine(line: string): JSX.Element | string {
   if (line.startsWith('{')) {
     try {
       const { event, timestamp: _timestamp, ...rest } = JSON.parse(line)

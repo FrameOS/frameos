@@ -30,13 +30,17 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_RETRY_DELAY_MS 1000
 #define FOS_OTA_WIFI_SETTLE_MS 3000
 #define FOS_OTA_BOOT_REQUEST_KEY "ota_req"
+#define FOS_OTA_REBOOT_DELAY_MS 1000
+#define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
 
 static char s_auth_header[FOS_STR_LEN + 16];
 static StaticSemaphore_t s_ota_lock_storage;
 static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_ota_task_handle = NULL;
 static volatile bool s_ota_busy = false;
+static volatile bool s_ota_reboot_scheduled = false;
 
 typedef struct {
     char sha[80];
@@ -496,6 +500,13 @@ void fos_ota_start_periodic_task(uint32_t interval_hours)
     }
 }
 
+static void ota_reboot_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(FOS_OTA_REBOOT_DELAY_MS));
+    esp_restart();
+}
+
 esp_err_t fos_ota_request_check(void)
 {
     if (!ota_supported()) return ESP_ERR_NOT_SUPPORTED;
@@ -504,8 +515,27 @@ esp_err_t fos_ota_request_check(void)
         ESP_LOGW(TAG, "failed to store OTA request: %s", esp_err_to_name(err));
         return err;
     }
-    ESP_LOGW(TAG, "OTA requested; rebooting into early updater");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+
+    taskENTER_CRITICAL(&s_ota_request_mux);
+    bool already_scheduled = s_ota_reboot_scheduled;
+    s_ota_reboot_scheduled = true;
+    taskEXIT_CRITICAL(&s_ota_request_mux);
+    if (already_scheduled) return ESP_OK;
+
+    BaseType_t created = xTaskCreate(ota_reboot_task, "fos_ota_reboot",
+                                     FOS_OTA_REBOOT_TASK_STACK_SIZE, NULL, 5, NULL);
+    if (created != pdPASS) {
+        taskENTER_CRITICAL(&s_ota_request_mux);
+        s_ota_reboot_scheduled = false;
+        taskEXIT_CRITICAL(&s_ota_request_mux);
+        ESP_LOGW(TAG, "failed to schedule OTA reboot: internal=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* Reboot from a separate task so HTTP and USB callers can flush their
+     * success response before the connection disappears. */
+    ESP_LOGW(TAG, "OTA requested; rebooting into early updater in %d ms",
+             FOS_OTA_REBOOT_DELAY_MS);
     return ESP_OK;
 }
