@@ -137,7 +137,6 @@
           }
         ],
         "name": "Bird field journal (JS)",
-        "origin": "repo/apps/code/birdJournal",
         "output": [
           {
             "name": "image",

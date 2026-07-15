@@ -172,6 +172,12 @@ proc testLogger(): Logger =
 
 # Point the scene's app at the mock server before building it.
 var scenesJson = parseJson(readFile(ScenesPath))
+doAssert scenesJson.len == 1, "expected one Bird Journal sample scene"
+let birdJournalApp = scenesJson[0]["apps"]["birdJournal"]
+doAssert not birdJournalApp.hasKey("origin"),
+  "Bird Journal must remain an inline scene app without a catalog origin"
+doAssert birdJournalApp["sources"]{"app.ts"}.getStr().len > 0,
+  "Bird Journal must keep its app source inline in the scene"
 for scene in scenesJson.items:
   for node in scene["nodes"].items:
     if node["data"]{"keyword"}.getStr() == "birdJournal":
