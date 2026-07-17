@@ -1,6 +1,6 @@
 {
   "name": "frameos-wasm",
-  "version": "2026.7.5",
+  "version": "2026.7.6",
   "description": "Run FrameOS scenes in the browser via WebAssembly: a typed live-preview runtime plus a minimal showIf-aware management interface.",
   "keywords": [
     "frameos",
