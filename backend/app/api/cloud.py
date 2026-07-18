@@ -28,6 +28,7 @@ from app.redis import get_redis
 from app.schemas.cloud import (
     CloudConnectRequest,
     CloudFeaturesRequest,
+    CloudBackupFeaturesRequest,
     CloudLocalFallbackRequest,
     CloudLoginOptionsResponse,
     CloudLoginStartRequest,
@@ -125,6 +126,8 @@ def _status_payload(db: Session, link: CloudBackendLink | None, user: User | Non
         "can_edit_provider": status == "disconnected",
         "poll_error": link.poll_error if link else None,
         "local_fallback_enabled": link.local_fallback_enabled if link else True,
+        "backup_scenes_enabled": link.backup_scenes_enabled if link else False,
+        "backup_frames_enabled": link.backup_frames_enabled if link else False,
         "connection": None,
         "link": None,
         "identity": _identity_payload(db, user),
@@ -912,6 +915,28 @@ async def set_local_fallback(
     return _status_payload(db, link, current_user)
 
 
+@api_user.post("/cloud/backup-features", response_model=CloudStatusResponse)
+async def set_backup_features(
+    data: CloudBackupFeaturesRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Turn cloud backups on or off locally. The backup scopes come with every
+    cloud account, but nothing is uploaded while these switches are off."""
+    if current_user is None:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Log in first")
+    link = current_cloud_backend_link(db)
+    if link is None:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")
+    if data.scenes is not None:
+        link.backup_scenes_enabled = data.scenes
+    if data.frames is not None:
+        link.backup_frames_enabled = data.frames
+    link.updated_at = _now()
+    db.commit()
+    return _status_payload(db, link, current_user)
+
+
 # ---- enabled features (in-place scope changes) --------------------------------
 
 BASE_LINK_SCOPES = ("backend:link", "backend:read")
@@ -919,7 +944,8 @@ BASE_LINK_SCOPES = ("backend:link", "backend:read")
 # Features included with every cloud account. Only security-sensitive features
 # (cloud login, later remote access/telemetry) get an opt-in toggle in the UI;
 # these safe scopes are always kept on the link, so a feature change can never
-# drop them.
+# drop them. The backup scopes are a permission only: nothing is uploaded
+# until the matching backup_*_enabled switch on the link is turned on.
 INCLUDED_FEATURE_SCOPES = ("backup:scenes", "backup:frames", "store:publish")
 
 

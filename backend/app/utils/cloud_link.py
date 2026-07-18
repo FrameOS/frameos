@@ -166,3 +166,34 @@ async def frameos_login_token(
     return await cloud_request(
         "POST", provider_url, "/api/frameos/login/token", access_token=access_token, json_body={"code": code}
     )
+
+
+# ---- config backups (Phase 3) ------------------------------------------------
+
+
+async def backup_list(provider_url: str, access_token: str) -> tuple[int, dict[str, Any]]:
+    return await cloud_request("GET", provider_url, "/api/backends/backups", access_token=access_token)
+
+
+async def backup_save(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "POST", provider_url, "/api/backends/backups", access_token=access_token, json_body=payload
+    )
+
+
+async def backup_get(
+    provider_url: str, access_token: str, backup_id: str
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "GET", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
+    )
+
+
+async def backup_delete(
+    provider_url: str, access_token: str, backup_id: str
+) -> tuple[int, dict[str, Any]]:
+    return await cloud_request(
+        "DELETE", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
+    )
