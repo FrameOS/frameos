@@ -1,4 +1,4 @@
-"""FrameOS Cloud sync service (CLOUD-TODO Phase 1).
+"""FrameOS Cloud sync service (CLOUD-TODO Phases 1 and 3).
 
 Runs as a single asyncio task inside the arq worker (same singleton slot as
 the Home Assistant sync). Responsibilities:
@@ -7,6 +7,9 @@ the Home Assistant sync). Responsibilities:
   revocation takes effect quickly. A 401 means the link was revoked: the local
   link resets and local password login is re-enabled so nobody is locked out.
 - Inventory heartbeat: keeps version/health fresh on the provider.
+- Automatic frame backups (scope ``backup:frames``): watches the
+  ``update_frame`` broadcast for a changed ``last_successful_deploy_at`` —
+  i.e. a finished deploy — and pushes a sanitized frame backup.
 """
 from __future__ import annotations
 
@@ -20,12 +23,18 @@ from app.cloud import CLOUD_SYNC_CHANNEL
 from app.config import config
 from app.database import SessionLocal
 from app.models.cloud import CloudBackendLink, CloudMembership, current_cloud_backend_link
-from app.utils import cloud_link
+from app.utils import cloud_backup, cloud_link
 
+BROADCAST_CHANNEL = "broadcast_channel"
 GRANT_SYNC_INTERVAL_SECONDS = 15 * 60
 
 
 class CloudSync:
+    def __init__(self):
+        # frame_id -> last_successful_deploy_at we already backed up
+        self._deploys_seen: dict[int, str] = {}
+        self._deploys_primed = False
+
     # ---- lifecycle ----------------------------------------------------------
 
     async def run(self):
@@ -45,7 +54,10 @@ class CloudSync:
         redis_sub = create_redis(config.REDIS_URL, decode_responses=True)
         try:
             pubsub = redis_sub.pubsub()
-            await pubsub.subscribe(CLOUD_SYNC_CHANNEL)
+            await pubsub.subscribe(BROADCAST_CHANNEL, CLOUD_SYNC_CHANNEL)
+            # Learn current deploy stamps before listening so a restart neither
+            # re-pushes every frame nor mistakes old deploys for new ones.
+            self._prime_deploys_seen()
             await self._sync_link()
             next_sync = asyncio.get_running_loop().time() + GRANT_SYNC_INTERVAL_SECONDS
             while True:
@@ -72,6 +84,9 @@ class CloudSync:
         if message.get("channel") == CLOUD_SYNC_CHANNEL:
             if parsed.get("event") == "sync_now":
                 await self._sync_link()
+            return
+        if parsed.get("event") == "update_frame" and isinstance(parsed.get("data"), dict):
+            await self._maybe_backup_frame(parsed["data"])
 
     # ---- grants + inventory --------------------------------------------------
 
@@ -79,11 +94,7 @@ class CloudSync:
         db = SessionLocal()
         try:
             link = current_cloud_backend_link(db)
-            token = (
-                cloud_link.decrypt_cloud_secret(link.access_token)
-                if link is not None and link.status == "connected"
-                else None
-            )
+            token = cloud_backup.link_access_token(link)
             return link, token, link.id if link else 0
         finally:
             db.close()
@@ -191,6 +202,82 @@ class CloudSync:
             _reset_link(link, poll_error="revoked")
             db.commit()
             print("🟠 FrameOS Cloud sync: the provider revoked this link; local login re-enabled")
+        finally:
+            db.close()
+
+    # ---- automatic frame backups ----------------------------------------------
+
+    def _prime_deploys_seen(self):
+        """Learn current deploy stamps so a worker restart doesn't re-push everything."""
+        from app.models.frame import Frame
+
+        db = SessionLocal()
+        try:
+            for frame_id, backed_up_at in db.query(Frame.id, Frame.last_cloud_backup_deploy_at).all():
+                if backed_up_at is not None:
+                    self._deploys_seen[frame_id] = backed_up_at.isoformat()
+        finally:
+            db.close()
+        self._deploys_primed = True
+
+    def _mark_deploy_backed_up(self, frame_id: int, marker: str):
+        import datetime
+
+        from app.models.frame import Frame
+
+        backed_up_at = datetime.datetime.fromisoformat(marker.removesuffix("Z"))
+        db = SessionLocal()
+        try:
+            frame = db.get(Frame, frame_id)
+            if frame is not None:
+                frame.last_cloud_backup_deploy_at = backed_up_at
+                db.commit()
+        finally:
+            db.close()
+
+    async def _maybe_backup_frame(self, frame_dict: dict):
+        frame_id = frame_dict.get("id")
+        deployed_at = frame_dict.get("last_successful_deploy_at")
+        if frame_id is None or not deployed_at:
+            return
+        if not self._deploys_primed:
+            self._prime_deploys_seen()
+        # The isoformat here comes from Frame.to_dict() (UTC-stamped), while the
+        # primed value is the naive column isoformat; compare loosely.
+        marker = str(deployed_at).replace("+00:00", "")
+        if self._deploys_seen.get(frame_id) == marker:
+            return
+
+        link, access_token, _link_id = self._load_link()
+        if link is None or access_token is None or "backup:frames" not in link.scopes:
+            return
+        if not link.backup_frames_enabled:
+            # The scope is a permission; the local switch is the feature.
+            return
+        project_name = self._project_name(frame_dict.get("project_id"))
+        try:
+            status_code, response = await cloud_backup.push_frame_backup(
+                link, access_token, frame_dict, project_name
+            )
+            if status_code == 200:
+                self._mark_deploy_backed_up(frame_id, marker)
+                self._deploys_seen[frame_id] = marker
+                print(f"🟢 FrameOS Cloud: backed up frame {frame_id} after deploy")
+            else:
+                detail = response.get("error") or status_code
+                print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {detail}")
+        except Exception as e:  # noqa: BLE001
+            print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {e}")
+
+    def _project_name(self, project_id) -> Optional[str]:
+        if project_id is None:
+            return None
+        from app.models.organization import Project
+
+        db = SessionLocal()
+        try:
+            project = db.get(Project, project_id)
+            return project.name if project else None
         finally:
             db.close()
 

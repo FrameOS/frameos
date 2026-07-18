@@ -40,3 +40,23 @@ class CloudLocalFallbackRequest(BaseModel):
 class CloudFeaturesRequest(BaseModel):
     # The full desired set of feature scopes (base link scopes are implied).
     scopes: list[str]
+
+
+class CloudBackupFeaturesRequest(BaseModel):
+    # Local on/off switches for what actually gets uploaded; omitted fields
+    # stay unchanged. The backup scopes themselves come with the account.
+    scenes: bool | None = None
+    frames: bool | None = None
+
+
+class CloudBackupSaveTemplateRequest(BaseModel):
+    template_id: str
+
+
+class CloudBackupSaveFrameRequest(BaseModel):
+    frame_id: int
+
+
+class CloudBackupRestoreRequest(BaseModel):
+    backup_id: str
+    project_id: int
