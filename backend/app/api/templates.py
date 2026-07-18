@@ -25,6 +25,7 @@ from app.schemas.templates import (
 from app.api import api_project, api_open
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
+from app.utils.versions import current_frameos_version
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 
@@ -45,6 +46,12 @@ def respond_with_template(template: Template):
         scenes = template_dict.pop('scenes', [])
         template_dict['scenes'] = './scenes.json'
         template_dict['image'] = './image.jpg'
+        # Cloud and other repositories treat this as the oldest compatible
+        # FrameOS release. Without deeper feature inference, the exporting
+        # release is a conservative and safe automatic minimum.
+        frameos_version = current_frameos_version()
+        if frameos_version:
+            template_dict['frameosVersion'] = frameos_version
         zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
         zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
         if template.image:

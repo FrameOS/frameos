@@ -180,9 +180,15 @@ export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element 
 
   const publicFields = (livePreviewScene?.fields ?? []).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
-  const stateEntries = Object.entries(previewState)
-  const publicEntries = stateEntries.filter(([key]) => publicFieldNames.has(key))
-  const privateEntries = stateEntries.filter(([key]) => !publicFieldNames.has(key))
+  // The runtime omits unset values (notably empty strings), but they are still
+  // public scene state and appear in the Edit dialog. Include every currently
+  // visible public field here, falling back to its configured default, so the
+  // summary and editor show the same state shape.
+  const publicEntries = visiblePublicStateFields(publicFields, previewState).map(
+    (field) => [field.name, previewState[field.name] ?? field.value] as [string, any]
+  )
+  const privateEntries = Object.entries(previewState).filter(([key]) => !publicFieldNames.has(key))
+  const stateEntries = [...publicEntries, ...privateEntries]
   const visibleStateEntries = [...(showPublicState ? publicEntries : []), ...(showPrivateState ? privateEntries : [])]
 
   const openEditState = (): void => {
