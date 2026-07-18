@@ -90,6 +90,9 @@ export function isProjectScopedApiPath(path: string): boolean {
     path === '/api/user' ||
     path.startsWith('/api/user/') ||
     path.startsWith('/api/system/') ||
+    // the cloud link belongs to the installation, not a project
+    path === '/api/cloud' ||
+    path.startsWith('/api/cloud/') ||
     path === '/api/generate_ssh_keys' ||
     path === '/api/log' ||
     path === '/api/repositories/system' ||
