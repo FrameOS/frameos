@@ -40,12 +40,23 @@ export const sceneLogic = kea<sceneLogicType>([
   }),
   listeners(({ actions }) => ({
     logout: async () => {
+      let cloudLogoutUrl: string | null = null
       try {
-        await fetch(`${getBasePath()}/api/logout`, { method: 'POST' })
+        const response = await fetch(`${getBasePath()}/api/logout`, { method: 'POST' })
+        if (response.ok) {
+          cloudLogoutUrl = (await response.json())?.cloud_logout_url ?? null
+        }
       } catch (error) {
         console.error('Logout failed', error)
       }
       clearCachedProjectId()
+      if (cloudLogoutUrl) {
+        // Cloud-login users must also leave their FrameOS Cloud session, or
+        // the login screen's cloud button would sign them straight back in.
+        // The cloud bounces back to our /login page.
+        location.href = cloudLogoutUrl
+        return
+      }
       location.href = urls.frames()
     },
   })),

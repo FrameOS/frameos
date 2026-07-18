@@ -145,3 +145,24 @@ async def backend_set_scopes(
     return await cloud_request(
         "POST", provider_url, "/api/backends/scopes", access_token=access_token, json_body={"scopes": scopes}
     )
+
+
+# ---- login handoff (Phase 1) -------------------------------------------------
+
+
+async def frameos_login_start(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    """Ask the provider for an authorization URL for a browser login handoff."""
+    return await cloud_request(
+        "POST", provider_url, "/api/frameos/login/start", access_token=access_token, json_body=payload
+    )
+
+
+async def frameos_login_token(
+    provider_url: str, access_token: str, code: str
+) -> tuple[int, dict[str, Any]]:
+    """Redeem the single-use code from the login callback for identity claims."""
+    return await cloud_request(
+        "POST", provider_url, "/api/frameos/login/token", access_token=access_token, json_body={"code": code}
+    )
