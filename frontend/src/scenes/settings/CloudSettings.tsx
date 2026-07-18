@@ -1,3 +1,4 @@
+import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
 import { PencilSquareIcon } from '@heroicons/react/24/solid'
@@ -11,7 +12,8 @@ import { Spinner } from '../../components/Spinner'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { CLOUD_FEATURES, cloudLogic } from './cloudLogic'
+import { inHassioIngress } from '../../utils/inHassioIngress'
+import { availableCloudFeatures, cloudLogic } from './cloudLogic'
 
 function pollErrorMessage(pollError: string): string {
   switch (pollError) {
@@ -53,8 +55,22 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     isProviderUrlSubmitting,
     isCloudConnecting,
     isCloudDisconnecting,
+    enabledFeatureDraft,
+    featureChangesPending,
+    isFeatureChangeSubmitting,
   } = useValues(cloudLogic)
-  const { connectCloud, disconnectCloud, setProviderEditorOpen } = useActions(cloudLogic)
+  const {
+    connectCloud,
+    disconnectCloud,
+    setProviderEditorOpen,
+    toggleEnabledFeature,
+    applyFeatureChanges,
+    cancelFeatureChange,
+    resetFeatureDraft,
+    linkCloudIdentity,
+    unlinkCloudIdentity,
+    setLocalFallback,
+  } = useActions(cloudLogic)
   const frameAdminMode = isInFrameAdminMode()
 
   if (cloudStatus && !cloudStatus.enabled) {
@@ -105,15 +121,135 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                   <Label>Enabled features</Label>
                 </div>
                 <div className="w-full space-y-2 text-sm">
-                  {CLOUD_FEATURES.map(({ scope, label, description }) => (
-                    <label key={scope} className="flex items-start gap-2">
-                      <input type="checkbox" checked disabled className="mt-0.5" />
-                      <span>
-                        <span className="frameos-strong font-medium">{label}</span>{' '}
-                        <span className="frameos-muted">— {description}</span>
+                  {cloudStatus?.upgrade ? (
+                    <div className="space-y-2">
+                      <div className="frameos-muted">Approve the feature change on the cloud with this code:</div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="frameos-strong select-all font-mono text-xl font-bold tracking-widest">
+                          {cloudStatus.upgrade.user_code}
+                        </span>
+                        <Button
+                          size="small"
+                          color="primary"
+                          onClick={() =>
+                            window.open(
+                              cloudStatus.upgrade?.verification_uri_complete ??
+                                cloudStatus.upgrade?.verification_uri ??
+                                undefined,
+                              '_blank',
+                              'noopener'
+                            )
+                          }
+                        >
+                          Open {providerHost}
+                        </Button>
+                      </div>
+                      <div className="frameos-muted flex flex-wrap items-center gap-2">
+                        <Spinner />
+                        <span>Waiting for approval…</span>
+                        <button
+                          type="button"
+                          onClick={cancelFeatureChange}
+                          className="frameos-link font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {availableCloudFeatures().map(({ scope, label, description, control }) => (
+                        <label
+                          key={scope}
+                          className={clsx('flex items-start gap-2', control === 'toggle' && 'cursor-pointer')}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={control === 'locked' ? true : enabledFeatureDraft.includes(scope)}
+                            disabled={control === 'locked'}
+                            onChange={control === 'toggle' ? () => toggleEnabledFeature(scope) : undefined}
+                            className="mt-0.5"
+                          />
+                          <span>
+                            <span className="frameos-strong font-medium">{label}</span>{' '}
+                            <span className="frameos-muted">— {description}</span>
+                          </span>
+                        </label>
+                      ))}
+                      {featureChangesPending ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            size="small"
+                            color="primary"
+                            onClick={applyFeatureChanges}
+                            disabled={isFeatureChangeSubmitting}
+                            className="inline-flex items-center gap-2"
+                          >
+                            {isFeatureChangeSubmitting ? <Spinner color="white" /> : null}
+                            Apply changes
+                          </Button>
+                          <Button size="small" color="secondary" onClick={resetFeatureDraft}>
+                            Revert
+                          </Button>
+                          <span className="frameos-muted">Enabling a feature needs a quick approval on the cloud.</span>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && !inHassioIngress() && link.scopes.includes('auth:login') ? (
+              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Cloud login</Label>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                  {cloudStatus?.identity ? (
+                    <>
+                      <span className="frameos-strong font-medium">
+                        Your account is linked as{' '}
+                        {cloudStatus.identity.email ?? cloudStatus.identity.name ?? 'cloud user'}
                       </span>
-                    </label>
-                  ))}
+                      <Button size="small" color="secondary" onClick={unlinkCloudIdentity}>
+                        Unlink
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="frameos-muted">Link your cloud account to log in here with FrameOS Cloud.</span>
+                      <Button size="small" color="secondary" onClick={linkCloudIdentity}>
+                        Link my cloud account
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {!frameAdminMode && !inHassioIngress() && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
+              <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Local password login</Label>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+                  {cloudStatus?.local_fallback_enabled === false ? (
+                    <>
+                      <Tag color="orange">Disabled</Tag>
+                      <Button size="small" color="secondary" onClick={() => setLocalFallback(true)}>
+                        Enable local passwords
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Tag color="teal">Enabled</Tag>
+                      <Button size="small" color="secondary" onClick={() => setLocalFallback(false)}>
+                        Disable local passwords
+                      </Button>
+                      <span className="frameos-muted">
+                        Requires a verified cloud login by the account that owns this install.
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             ) : null}

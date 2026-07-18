@@ -152,6 +152,23 @@ async def login(
 ):
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_RUN_MODE")
+
+    # Cloud login (Phase 1) can disable local passwords; the flag lives on the
+    # cloud link and flips back to True whenever the link is lost, so this can
+    # never lock an install out entirely.
+    from app.models.cloud import current_cloud_backend_link
+
+    cloud_link_row = current_cloud_backend_link(db)
+    if (
+        cloud_link_row is not None
+        and cloud_link_row.status == "connected"
+        and not cloud_link_row.local_fallback_enabled
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Local password login is disabled on this install. Sign in with FrameOS Cloud.",
+        )
+
     email = form_data.username
     password = form_data.password
     ip = request.client.host
@@ -163,7 +180,8 @@ async def login(
         raise HTTPException(status_code=429, detail="Too many login attempts")
 
     user = db.query(User).filter_by(email=email).first()
-    if user is None or not check_password_hash(user.password, password):
+    # Cloud-created users (first-run cloud signup) have no local password.
+    if user is None or not user.password or not check_password_hash(user.password, password):
         await redis.incr(key)
         await redis.expire(key, 300)  # expire after 5 minutes
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -243,6 +261,27 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
 
 
 @api_user.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    # If this user signs in through FrameOS Cloud, the browser must also leave
+    # the cloud session, or "Continue with FrameOS Cloud" on the login screen
+    # would sign them straight back in. The frontend navigates to this URL; the
+    # cloud validates the return_to against the link's origin and bounces back
+    # to our login page.
+    cloud_logout_url = None
+    user = await get_current_user_from_request(request, db, request.headers.get("authorization"))
+    if user is not None:
+        from urllib.parse import quote
+
+        from app.api.cloud import _browser_origin, _connected_link, _link_has_scope
+        from app.models.cloud import CloudIdentity
+
+        link = _connected_link(db)
+        if _link_has_scope(link, "auth:login"):
+            identity = db.query(CloudIdentity).filter(CloudIdentity.user_id == user.id).first()
+            if identity is not None:
+                origin = _browser_origin(request) or ""
+                return_to = quote(f"{origin}/login", safe="")
+                cloud_logout_url = f"{link.provider_url}/logout?return_to={return_to}"
+
     response.delete_cookie(key=SESSION_COOKIE_NAME)
-    return {"success": True}
+    return {"success": True, "cloud_logout_url": cloud_logout_url}
