@@ -62,6 +62,10 @@ class CloudBackendLink(Base):
     local_organization_id = mapped_column(Integer, ForeignKey("organization.id", ondelete="SET NULL"), nullable=True)
     local_project_id = mapped_column(Integer, ForeignKey("project.id", ondelete="SET NULL"), nullable=True)
     local_fallback_enabled = mapped_column(Boolean, nullable=False, default=True)
+    # Local feature switches: the backup scopes come with every cloud account,
+    # but no data leaves this install until the user turns the feature on.
+    backup_scenes_enabled = mapped_column(Boolean, nullable=False, default=False)
+    backup_frames_enabled = mapped_column(Boolean, nullable=False, default=False)
     last_inventory_sync_at = mapped_column(DateTime, nullable=True)
     last_grant_sync_at = mapped_column(DateTime, nullable=True)
     revoked_at = mapped_column(DateTime, nullable=True)

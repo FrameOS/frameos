@@ -341,6 +341,7 @@ class Frame(Base):
     scenes = mapped_column(JSON, nullable=True, default=list)
     last_successful_deploy = mapped_column(JSON, nullable=True) # contains frame.to_dict() of last successful deploy
     last_successful_deploy_at = mapped_column(DateTime, nullable=True)
+    last_cloud_backup_deploy_at = mapped_column(DateTime, nullable=True)
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
