@@ -36,6 +36,8 @@ import lib/lgpio
 const
   LFLAGS* = 0
   NUM_MAXBUF* = 4
+  # spidev transfers are limited by the kernel's bufsiz module param (4096 by default)
+  SPI_CHUNK_BYTES = 4096
 
 type
   UBYTE* = uint8
@@ -135,8 +137,12 @@ proc devEquipmentTesting(): cint =
   -1
 
 proc DEV_GPIO_Init*() =
-  DEV_GPIO_Mode(EPD_SCK_PIN, UWORD(1))
-  DEV_GPIO_Mode(EPD_SI0_PIN, UWORD(1))
+  if spiHandle < 0:
+    # Software SPI fallback: drive clock and data as plain GPIO outputs.
+    # With hardware SPI these pins must stay muxed to the SPI peripheral,
+    # so claiming them as GPIO here would silently break the transfer.
+    DEV_GPIO_Mode(EPD_SCK_PIN, UWORD(1))
+    DEV_GPIO_Mode(EPD_SI0_PIN, UWORD(1))
   DEV_GPIO_Mode(EPD_CS_M_PIN, UWORD(1))
   DEV_GPIO_Mode(EPD_CS_S_PIN, UWORD(1))
   DEV_GPIO_Mode(EPD_DC_PIN, UWORD(1))
@@ -144,8 +150,9 @@ proc DEV_GPIO_Init*() =
   DEV_GPIO_Mode(EPD_BUSY_PIN, UWORD(0))
   DEV_GPIO_Mode(EPD_PWR_PIN, UWORD(1))
 
-  DEV_Digital_Write(EPD_SCK_PIN, UBYTE(0))
-  DEV_Digital_Write(EPD_SI0_PIN, UBYTE(0))
+  if spiHandle < 0:
+    DEV_Digital_Write(EPD_SCK_PIN, UBYTE(0))
+    DEV_Digital_Write(EPD_SI0_PIN, UBYTE(0))
   DEV_Digital_Write(EPD_CS_M_PIN, UBYTE(0))
   DEV_Digital_Write(EPD_CS_S_PIN, UBYTE(0))
   DEV_Digital_Write(EPD_DC_PIN, UBYTE(0))
@@ -153,6 +160,11 @@ proc DEV_GPIO_Init*() =
   DEV_Digital_Write(EPD_PWR_PIN, UBYTE(1))
 
 proc DEV_SPI_SendData*(reg: UBYTE) =
+  if spiHandle >= 0:
+    var data = reg
+    discard lgSpiWrite(spiHandle, cast[cstring](addr data), cint(1))
+    return
+
   var value = reg
   DEV_GPIO_Mode(EPD_SI0_PIN, UWORD(1))
   for _ in 0 ..< 8:
@@ -169,6 +181,14 @@ proc DEV_SPI_SendData_nByte*(pData: ptr UBYTE; len: UDOUBLE) =
   if pData.isNil or len == 0:
     return
   let bytes = cast[ptr UncheckedArray[UBYTE]](pData)
+  if spiHandle >= 0:
+    var offset = 0
+    let total = len.int
+    while offset < total:
+      let chunk = min(SPI_CHUNK_BYTES, total - offset)
+      discard lgSpiWrite(spiHandle, cast[cstring](addr bytes[offset]), chunk.cint)
+      offset += chunk
+    return
   for i in 0 ..< len.int:
     DEV_SPI_SendData(bytes[i])
 
@@ -213,9 +233,10 @@ proc DEV_Module_Init*(): UBYTE =
 
   spiHandle = lgSpiOpen(0, 0, 10_000_000, 0)
   if spiHandle < 0:
-    # The 13.3" E driver uses software SPI. Waveshare's C version opened
-    # hardware SPI opportunistically and continued when /dev/spidev0.0 was
-    # unavailable.
+    # Fall back to bit-banged software SPI when /dev/spidev0.0 is unavailable.
+    # This is ~7 KB/s (about 2.5 minutes per full frame), so deploys enable
+    # spi0 via the dtoverlay=spi0-0cs boot config line (no kernel chip
+    # selects — CS M/S on GPIO 8/7 are driven manually by this driver).
     spiHandle = cint(-1)
 
   DEV_GPIO_Init()

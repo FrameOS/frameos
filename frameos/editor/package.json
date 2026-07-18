@@ -1,8 +1,15 @@
 {
   "name": "frameos-editor",
-  "version": "2026.7.3",
+  "version": "2026.7.6",
   "description": "The FrameOS visual scene editor as an embeddable static bundle: serve it from any host, embed it in an iframe, and exchange scenes JSON over postMessage.",
-  "keywords": ["frameos", "editor", "scenes", "node-editor", "e-ink", "smart-frame"],
+  "keywords": [
+    "frameos",
+    "editor",
+    "scenes",
+    "node-editor",
+    "e-ink",
+    "smart-frame"
+  ],
   "homepage": "https://frameos.net",
   "repository": {
     "type": "git",
@@ -21,7 +28,14 @@
     "./dist/*": "./dist/*",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "!dist/**/*.map", "embed.js", "embed.d.ts", "demo.html", "README.md"],
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "embed.js",
+    "embed.d.ts",
+    "demo.html",
+    "README.md"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test embed.test.mjs",

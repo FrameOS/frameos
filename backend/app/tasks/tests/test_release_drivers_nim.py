@@ -99,8 +99,12 @@ def test_release_waveshare_variant_setup_lives_in_generated_driver():
 
     assert 'runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup())' not in epd10_source
     assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in epd10_source
-    assert 'runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup())' in epd13_source
-    assert 'setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])' in epd13_source
+    assert 'runSetupStep("spi"' not in epd13_source
+    assert 'runSetupStep("noSpi"' not in epd13_source
+    assert (
+        'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on", "gpio=7=op,dl", "gpio=8=op,dl"])'
+        in epd13_source
+    )
 
 
 def test_waveshare_epd13in3b_generates_partial_refresh_hooks():

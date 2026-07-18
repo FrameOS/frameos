@@ -82,11 +82,11 @@ NO_SPI_VARIANTS = {
     "EPD_12in48",
     "EPD_12in48b",
     "EPD_12in48b_V2",
-    "EPD_13in3e",
 }
 
 BOOT_CONFIG_SPI_VARIANTS = {
     "EPD_10in3",
+    "EPD_13in3e",
 }
 
 BOOT_CONFIG_LINES_BY_VARIANT = {
@@ -94,7 +94,11 @@ BOOT_CONFIG_LINES_BY_VARIANT = {
         "dtoverlay=spi0-0cs",
         "#dtparam=spi=on",
     ],
+    # spi0 without kernel chip selects: the driver toggles CS M/S (GPIO 8/7)
+    # manually, so the kernel must not claim those pins.
     "EPD_13in3e": [
+        "dtoverlay=spi0-0cs",
+        "#dtparam=spi=on",
         "gpio=7=op,dl",
         "gpio=8=op,dl",
     ],

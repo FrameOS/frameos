@@ -46,14 +46,42 @@ python3 tools/prepare_assets.py
 # ------------------------------------------------------- QuickJS via emcc
 # Engine only, no quickjs-libc — same surface as the ESP32 build
 # (embedded/esp32/components/frameos_quickjs/CMakeLists.txt).
+#
+# nimble build_quickjs may have installed a *prebuilt* QuickJS into quickjs/
+# (headers + a native libquickjs.a, no C sources — see
+# tools/install_prebuilt_quickjs.py). emcc needs the sources, so fetch the
+# source tarball into the build dir when quickjs/ has none. Version and
+# sha256 must stay in sync with the build_quickjs task in frameos.nimble.
+QJS_SRC="$FRAMEOS_DIR/quickjs"
+if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
+    QJS_SRC="$BUILD_DIR/quickjs-src"
+    if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
+        QJS_TARBALL_VERSION="2026-06-04"
+        QJS_TARBALL_SHA256="b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
+        echo "quickjs/ has no C sources (prebuilt install) — downloading QuickJS $QJS_TARBALL_VERSION sources"
+        mkdir -p "$BUILD_DIR"
+        curl -fsSL -o "$BUILD_DIR/quickjs-src.tar.xz" \
+            "https://bellard.org/quickjs/quickjs-$QJS_TARBALL_VERSION.tar.xz"
+        if command -v sha256sum >/dev/null; then
+            echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | sha256sum -c -
+        else
+            echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | shasum -a 256 -c -
+        fi
+        rm -rf "$QJS_SRC"
+        mkdir -p "$QJS_SRC"
+        tar -xf "$BUILD_DIR/quickjs-src.tar.xz" -C "$QJS_SRC" --strip-components=1
+        rm "$BUILD_DIR/quickjs-src.tar.xz"
+    fi
+fi
+
 QJS_BUILD="$BUILD_DIR/quickjs"
-QJS_VERSION="$(head -n1 quickjs/VERSION)"
+QJS_VERSION="$(head -n1 "$QJS_SRC/VERSION")"
 mkdir -p "$QJS_BUILD"
 
 qjs_needs_build=0
 for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
     obj="$QJS_BUILD/${src%.c}.o"
-    if [[ ! -f "$obj" || "quickjs/$src" -nt "$obj" ]]; then
+    if [[ ! -f "$obj" || "$QJS_SRC/$src" -nt "$obj" ]]; then
         qjs_needs_build=1
     fi
 done
@@ -64,7 +92,7 @@ if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
             -D_GNU_SOURCE \
             -DCONFIG_VERSION="\"$QJS_VERSION\"" \
             -funsigned-char -fwrapv -fno-strict-aliasing -w \
-            "quickjs/$src" -o "$QJS_BUILD/${src%.c}.o"
+            "$QJS_SRC/$src" -o "$QJS_BUILD/${src%.c}.o"
     done
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
