@@ -807,6 +807,31 @@ export interface FrameOSSettings {
   }
 }
 
+/** Mirrors GET /api/cloud/status (backend/app/api/cloud.py and the frame's cloud_api_routes.nim) */
+export interface CloudStatus {
+  enabled: boolean
+  provider_url: string | null
+  default_provider_url: string | null
+  status: 'disconnected' | 'connecting' | 'connected'
+  can_edit_provider: boolean
+  poll_error: string | null
+  connection: {
+    user_code: string | null
+    verification_uri: string | null
+    verification_uri_complete: string | null
+    expires_at: string | null
+    interval_seconds: number
+  } | null
+  link: {
+    linked_client_id: string | null
+    scopes: string[]
+    account_id: string | null
+    account_email: string | null
+    connected_at: string | null
+    last_inventory_sync_at: string | null
+  } | null
+}
+
 export interface SSHKeyEntry {
   id: string
   name?: string
