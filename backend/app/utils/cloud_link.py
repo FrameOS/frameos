@@ -197,3 +197,34 @@ async def backup_delete(
     return await cloud_request(
         "DELETE", provider_url, f"/api/backends/backups/{backup_id}", access_token=access_token
     )
+
+
+# ---- store (scene publishing) --------------------------------------------------
+
+
+async def store_publish(
+    provider_url: str, access_token: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    """Publish a scene (template zip) to the cloud store (store:publish)."""
+    return await cloud_request(
+        "POST", provider_url, "/api/store/publish", access_token=access_token, json_body=payload
+    )
+
+
+async def store_drive(provider_url: str, access_token: str) -> tuple[int, dict[str, Any]]:
+    """The account's own store scenes ("My cloud drive"), private ones included."""
+    return await cloud_request(
+        "GET", provider_url, "/api/store/account/repository.json", access_token=access_token
+    )
+
+
+async def cloud_get_binary(provider_url: str, path: str, access_token: str) -> tuple[int, str, bytes]:
+    """One authenticated binary GET (preview images, zips). Returns (status, content_type, body)."""
+    headers = {"authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = await client.get(cloud_api_url(provider_url, path), headers=headers)
+    return (
+        response.status_code,
+        response.headers.get("content-type", "application/octet-stream"),
+        response.content,
+    )

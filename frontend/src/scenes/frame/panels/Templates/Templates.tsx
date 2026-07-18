@@ -21,6 +21,7 @@ import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateFavouriteId } from './templateFavourites'
+import { CloudDrive } from './CloudDrive'
 
 interface TemplatesProps {
   openInstalledSceneDrawer?: boolean
@@ -73,10 +74,30 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
   } = useValues(templatesLogic({ frameId }))
   const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
+  const { addUrlToFrame } = useActions(templatesLogic({ frameId }))
+  const { addingUrlToFrame } = useValues(templatesLogic({ frameId }))
+
+  // A pasted URL is an install request, not a search: scene pages on
+  // FrameOS Cloud say "copy this link into the Templates search box".
+  const searchedUrl = /^https?:\/\/\S+$/i.test(search.trim()) ? search.trim() : null
 
   return (
     <div className="frame-tool-panel space-y-4">
-      <TextInput placeholder="Search scenes..." onChange={setSearch} value={search} />
+      <TextInput placeholder="Search scenes, or paste a scene URL..." onChange={setSearch} value={search} />
+      {searchedUrl && !inFrameAdminMode ? (
+        <Box className="frame-tool-card space-y-2 rounded-[22px] p-4">
+          <H6>Add scene from URL</H6>
+          <div className="frame-tool-muted break-all text-sm">{searchedUrl}</div>
+          <Button
+            size="small"
+            color="primary"
+            disabled={addingUrlToFrame}
+            onClick={() => addUrlToFrame(searchedUrl, openInstalledSceneDrawer)}
+          >
+            {addingUrlToFrame ? 'Adding…' : 'Add to this frame'}
+          </Button>
+        </Box>
+      ) : null}
       {showingRemoteTemplate ? (
         <Box className="frame-tool-card space-y-3 rounded-[22px] p-4">
           <H6>Add scene from URL</H6>
@@ -138,12 +159,14 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
         </Box>
       ) : null}
 
+      {!inFrameAdminMode && <CloudDrive openInstalledSceneDrawer={openInstalledSceneDrawer} />}
+
       {!inFrameAdminMode && (
-        <div className="space-y-2">
+        <div className="space-y-2 !mt-8">
           <div className="flex justify-between w-full items-center">
             <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded('')}>
               {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
-              My scenes
+              My local scenes
               {templates.length ? ` (${templates.length})` : ''}
             </H6>
             <DropdownMenu

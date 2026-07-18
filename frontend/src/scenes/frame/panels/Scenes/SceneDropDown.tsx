@@ -8,6 +8,7 @@ import {
   ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
@@ -15,6 +16,7 @@ import {
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
+import { cloudDriveLogic } from '../Templates/cloudDriveLogic'
 import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 
@@ -45,7 +47,8 @@ export function SceneDropDown({
   const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, updateSceneFromRepo } =
     useActions(scenesLogic({ frameId }))
-  const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
+  const { hasDriveScope } = useValues(cloudDriveLogic)
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -123,6 +126,19 @@ export function SceneDropDown({
           onClick: () =>
             saveAsTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
           icon: <FolderPlusIcon className="w-5 h-5" />,
+        },
+        {
+          label: 'Save to cloud drive',
+          onClick: () => {
+            if (!hasDriveScope) {
+              window.alert(
+                'FrameOS Cloud is not connected (or store publishing is disabled). Enable it under Settings → FrameOS Cloud.'
+              )
+              return
+            }
+            saveAsCloudTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) })
+          },
+          icon: <CloudArrowUpIcon className="w-5 h-5" />,
         },
         {
           label: 'Download as .zip',

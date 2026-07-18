@@ -1,5 +1,7 @@
 import base64
 import io
+import re
+import urllib.parse
 import zipfile
 import json
 import string
@@ -35,6 +37,29 @@ def safe_template_name(template: Template) -> str:
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
     template_name = ''.join(c if c in safe_chars else ' ' for c in template_name).strip()
     return ' '.join(template_name.split()) or 'Template'
+
+
+_FRAMEOS_ZIP_META_RE = re.compile(
+    r'<meta\s+[^>]*?(?:name=["\']frameos:zip["\'][^>]*?content=["\']([^"\']+)["\']'
+    r'|content=["\']([^"\']+)["\'][^>]*?name=["\']frameos:zip["\'])',
+    re.IGNORECASE,
+)
+
+
+def frameos_zip_url_from_html(content: bytes, page_url: str) -> str | None:
+    """The template zip URL a scene page advertises via
+    <meta name="frameos:zip" content="...">, resolved against the page URL."""
+    try:
+        html = content[:262144].decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return None
+    match = _FRAMEOS_ZIP_META_RE.search(html)
+    if not match:
+        return None
+    zip_url = (match.group(1) or match.group(2) or "").strip().replace("&amp;", "&")
+    if not zip_url:
+        return None
+    return urllib.parse.urljoin(page_url, zip_url)
 
 
 def template_zip_bytes(template: Template) -> bytes:
@@ -133,6 +158,9 @@ async def create_template(
     name = name or parsed_json.get('name')
     description = description or parsed_json.get('description')
     from_frame_id = from_frame_id or parsed_json.get('from_frame_id')
+    # When saving specific scenes off a frame, the preview should be the
+    # snapshot of one of *those* scenes, not whatever the frame shows now.
+    image_scene_id = parsed_json.get('image_scene_id')
 
     # Scenes/config might come as JSON arrays or as strings
     if not scenes and parsed_json.get('scenes') is not None:
@@ -157,11 +185,28 @@ async def create_template(
         file_bytes = await file.read()
         zip_file = zipfile.ZipFile(io.BytesIO(file_bytes))
     elif url:
-        # If we have a URL, fetch it
+        # If we have a URL, fetch it. URLs on the linked cloud provider get
+        # the link token attached so private "My cloud drive" scenes install.
+        from app.utils.cloud_backup import cloud_headers_for_url
+
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url)
-        resp.raise_for_status()
-        zip_file = zipfile.ZipFile(io.BytesIO(resp.content))
+            resp = await client.get(url, headers=cloud_headers_for_url(db, url))
+            resp.raise_for_status()
+            content = resp.content
+            if not zipfile.is_zipfile(io.BytesIO(content)):
+                # Not a zip: maybe a scene page (e.g. a FrameOS Cloud store
+                # page) that advertises its zip in a <meta name="frameos:zip">
+                # tag — so pasting the page URL installs the scene.
+                zip_url = frameos_zip_url_from_html(content, url)
+                if not zip_url:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="URL is neither a template .zip nor a page with a frameos:zip meta tag",
+                    )
+                resp = await client.get(zip_url, headers=cloud_headers_for_url(db, zip_url))
+                resp.raise_for_status()
+                content = resp.content
+        zip_file = zipfile.ZipFile(io.BytesIO(content))
 
     data = {
         "from_frame_id": from_frame_id,
@@ -207,8 +252,10 @@ async def create_template(
                 image_path = img_val[len('./'):]
                 img_val = zip_file.read(f'{folder_name}{image_path}')
             elif img_val.startswith('http:') or img_val.startswith('https:'):
+                from app.utils.cloud_backup import cloud_headers_for_url
+
                 async with httpx.AsyncClient() as client:
-                    resp = await client.get(img_val)
+                    resp = await client.get(img_val, headers=cloud_headers_for_url(db, img_val))
                 resp.raise_for_status()
                 img_val = resp.content
             else:
@@ -225,8 +272,20 @@ async def create_template(
         frame_id = data['from_frame_id']
         frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
         if frame:
-            cache_key = f'frame:{frame.id}:image'
-            last_image = await redis.get(cache_key)
+            last_image = None
+            if image_scene_id:
+                from app.models.scene_image import SceneImage
+
+                scene_image = (
+                    db.query(SceneImage)
+                    .filter_by(project_id=project_id, frame_id=frame.id, scene_id=image_scene_id)
+                    .first()
+                )
+                if scene_image:
+                    last_image = scene_image.image
+            if not last_image:
+                cache_key = f'frame:{frame.id}:image'
+                last_image = await redis.get(cache_key)
             if last_image:
                 try:
                     img_obj = Image.open(io.BytesIO(last_image))

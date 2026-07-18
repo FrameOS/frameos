@@ -74,6 +74,27 @@ def link_access_token(link: CloudBackendLink | None) -> str | None:
     return cloud.decrypt_cloud_secret(link.access_token)
 
 
+def cloud_headers_for_url(db, url: str | None) -> dict[str, str]:
+    """Authorization header for requests that target the linked cloud provider.
+
+    Lets template installs and repository refreshes fetch the account's
+    private store scenes ("My cloud drive"); any other host gets no header, so
+    the link token never leaks to third-party repositories.
+    """
+    if not url:
+        return {}
+    from app.models.cloud import current_cloud_backend_link
+
+    link = current_cloud_backend_link(db)
+    access_token = link_access_token(link)
+    if link is None or access_token is None or not link.provider_url:
+        return {}
+    provider = link.provider_url.rstrip("/")
+    if url == provider or url.startswith(provider + "/"):
+        return {"authorization": f"Bearer {access_token}"}
+    return {}
+
+
 async def push_frame_backup(
     link: CloudBackendLink, access_token: str, frame_dict: dict, project_name: str | None = None
 ) -> tuple[int, dict]:
