@@ -234,8 +234,12 @@ export const withCustomPalette: Record<string, Palette> = {
 }
 
 export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
+export const BUILDROOT_RASPBERRY_PI_64 = 'raspberry-pi-64'
 
-export const buildrootPlatforms: Option[] = [{ value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' }]
+export const buildrootPlatforms: Option[] = [
+  { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
+  { value: BUILDROOT_RASPBERRY_PI_64, label: 'Raspberry Pi Zero 2 W / 3 / 4 (64-bit)' },
+]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
 

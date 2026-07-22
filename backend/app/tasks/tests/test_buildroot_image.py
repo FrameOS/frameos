@@ -306,7 +306,8 @@ def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     config_path = tmp_path / "frameos-buildroot.config"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path)
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    builder._write_buildroot_config(config_path)
     config = config_path.read_text(encoding="utf-8")
 
     assert "BR2_PACKAGE_BASH=y" in config
@@ -371,7 +372,8 @@ def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
-    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img")
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    builder._write_build_script(script_path, "frameos-test.img")
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output" in script
@@ -407,8 +409,9 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     partition_post_build_path = tmp_path / "partition-post-build.sh"
     post_image_path = tmp_path / "post-image.sh"
 
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path)
+    builder._write_post_image_script(post_image_path)
     BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
 
     partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
@@ -1474,12 +1477,12 @@ def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatc
     partition_post_build_path = tmp_path / "partition-post-build.sh"
     post_image_path = tmp_path / "post-image.sh"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path)
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+
+    builder._write_buildroot_config(config_path)
     BuildrootImageBuilder._write_post_build_script(post_build_path)
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path)
-
-    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    builder._write_post_image_script(post_image_path)
 
     key_base = builder._buildroot_output_cache_key(
         "build-id",
@@ -1802,3 +1805,53 @@ def test_buildroot_setup_payload_supports_gzip(tmp_path):
 
     decoded = gzip.decompress(output_path.read_bytes()).decode("utf-8")
     assert json.loads(decoded) == payload
+
+
+def test_raspberry_pi_64_platform_normalizes_aliases():
+    normalize = buildroot_image_module.normalize_buildroot_platform
+    assert normalize("raspberry-pi-64") == "raspberry-pi-64"
+    assert normalize("raspberry-pi-4") == "raspberry-pi-64"
+    assert normalize("pi-4") == "raspberry-pi-64"
+    assert normalize("raspberry-pi-3") == "raspberry-pi-64"
+    assert normalize("") == "raspberry-pi-zero-2-w"
+    assert normalize("pi-zero-2-w") == "raspberry-pi-zero-2-w"
+    with pytest.raises(ValueError):
+        normalize("raspberry-pi-5")
+
+
+def test_raspberry_pi_64_platform_builds_unified_image_config(tmp_path):
+    frame = SimpleNamespace(id=1, buildroot={"platform": "raspberry-pi-64"})
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+    assert builder.platform_spec.id == "raspberry-pi-64"
+    # Same base defconfig as the Zero 2 W; the kernel is switched via config overrides.
+    assert builder.platform_spec.defconfig == "raspberrypizero2w_64_defconfig"
+
+    config_path = tmp_path / "frameos-buildroot.config"
+    builder._write_buildroot_config(config_path)
+    config = config_path.read_text(encoding="utf-8")
+    assert 'BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"' in config
+    assert "broadcom/bcm2710-rpi-zero-2-w" in config
+    assert "broadcom/bcm2711-rpi-4-b" in config
+
+    post_image_path = tmp_path / "post-image.sh"
+    builder._write_post_image_script(post_image_path)
+    post_image = post_image_path.read_text(encoding="utf-8")
+    assert "start4.elf" in post_image
+    assert "fixup4.dat" in post_image
+
+
+def test_zero_2_w_platform_output_is_unchanged(tmp_path):
+    frame = SimpleNamespace(id=1, buildroot={"platform": "raspberry-pi-zero-2-w"})
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+
+    config_path = tmp_path / "frameos-buildroot.config"
+    builder._write_buildroot_config(config_path)
+    config = config_path.read_text(encoding="utf-8")
+    assert "BR2_LINUX_KERNEL_DEFCONFIG" not in config
+    assert "bcm2711" not in config
+
+    post_image_path = tmp_path / "post-image.sh"
+    builder._write_post_image_script(post_image_path)
+    post_image = post_image_path.read_text(encoding="utf-8")
+    assert "start4.elf" not in post_image
+    assert "\nfi\n\nfiles=()" in post_image

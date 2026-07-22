@@ -208,11 +208,58 @@ ACTIVE_ARQ_JOB_STATUSES = {
 T = TypeVar("T")
 
 
+@dataclass(frozen=True, slots=True)
+class BuildrootPlatformSpec:
+    id: str
+    label: str
+    defconfig: str
+    aliases: frozenset[str] = frozenset()
+    # BR2_* lines appended to the generated frameos-buildroot.config after the defconfig.
+    extra_buildroot_config_lines: tuple[str, ...] = ()
+    boot_config_lines: tuple[str, ...] = BUILDROOT_DEFAULT_BOOT_CONFIG_LINES
+    # Stage start4.elf/fixup4.dat and bcm2711 DTBs so the image also boots BCM2711 boards.
+    include_pi4_firmware: bool = False
+
+
+BUILDROOT_PLATFORMS: dict[str, BuildrootPlatformSpec] = {
+    spec.id: spec
+    for spec in (
+        BuildrootPlatformSpec(
+            id=SUPPORTED_BUILDROOT_PLATFORM,
+            label="Raspberry Pi Zero 2 W",
+            defconfig=BUILDROOT_DEFCONFIG,
+            aliases=frozenset(LEGACY_PLATFORM_ALIASES),
+        ),
+        # One unified 64-bit image for BCM2710 + BCM2711 boards, the way Raspberry Pi OS
+        # ships a single card: bcm2711 kernel (supports both SoCs), every DTB on the boot
+        # partition, and both GPU firmware sets so the bootloader picks per model.
+        BuildrootPlatformSpec(
+            id="raspberry-pi-64",
+            label="Raspberry Pi Zero 2 W / 3 / 4 (64-bit)",
+            defconfig=BUILDROOT_DEFCONFIG,
+            aliases=frozenset({"pi-64", "raspberrypi64", "raspberry-pi-4", "pi-4", "raspberry-pi-3", "pi-3"}),
+            extra_buildroot_config_lines=(
+                'BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"',
+                'BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2710-rpi-zero-2-w'
+                " broadcom/bcm2710-rpi-3-b broadcom/bcm2710-rpi-3-b-plus"
+                ' broadcom/bcm2711-rpi-4-b broadcom/bcm2711-rpi-400 broadcom/bcm2711-rpi-cm4"',
+            ),
+            include_pi4_firmware=True,
+        ),
+    )
+}
+
+
 def normalize_buildroot_platform(platform: str | None) -> str:
     value = (platform or "").strip()
-    if value == SUPPORTED_BUILDROOT_PLATFORM or value in LEGACY_PLATFORM_ALIASES:
-        return SUPPORTED_BUILDROOT_PLATFORM
+    for spec in BUILDROOT_PLATFORMS.values():
+        if value == spec.id or value in spec.aliases:
+            return spec.id
     raise ValueError(f"Unsupported Buildroot platform: {value or '(empty)'}")
+
+
+def buildroot_platform_spec(platform: str | None) -> BuildrootPlatformSpec:
+    return BUILDROOT_PLATFORMS[normalize_buildroot_platform(platform)]
 
 
 def buildroot_artifact_dir() -> Path:
@@ -549,8 +596,13 @@ def _merge_boot_config_lines(content: str, requested_lines: list[str]) -> str:
     return merged
 
 
+def _frame_buildroot_platform_spec(frame: Frame | Any) -> BuildrootPlatformSpec:
+    buildroot = getattr(frame, "buildroot", None) or {}
+    return buildroot_platform_spec(buildroot.get("platform"))
+
+
 def _frame_boot_config_lines(frame: Frame) -> list[str]:
-    lines: list[str] = list(BUILDROOT_DEFAULT_BOOT_CONFIG_LINES)
+    lines: list[str] = list(_frame_buildroot_platform_spec(frame).boot_config_lines)
     seen: set[str] = set(lines)
     for driver in drivers_for_frame(frame).values():
         for line in getattr(driver, "lines", []) or []:
@@ -775,9 +827,10 @@ async def start_buildroot_sd_image(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
+    platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
     current_base_entry = None
     try:
-        current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+        current_base_entry = await resolve_buildroot_base_entry(platform)
     except Exception:
         if not can_use_precompiled_buildroot_sd_image(frame):
             raise
@@ -805,7 +858,7 @@ async def start_buildroot_sd_image(
         "status": "queued",
         "requestId": request_id,
         "queueJobId": queue_job_id,
-        "platform": SUPPORTED_BUILDROOT_PLATFORM,
+        "platform": platform,
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -886,6 +939,7 @@ class BuildrootImageBuilder:
         self.redis = redis
         self.frame = frame
         self.request_id = request_id
+        self.platform_spec = _frame_buildroot_platform_spec(frame)
         self.build_environment_provider: BuildEnvironmentProvider = "docker"
         self.build_executor_config: BuildHostConfig | ModalSandboxConfig | None = None
         self.executor: BuildExecutor | None = None
@@ -959,7 +1013,7 @@ class BuildrootImageBuilder:
             temp_dir = Path(tmp)
             deployer = FrameDeployer(self.db, self.redis, self.frame, "", str(temp_dir))
             build_id = deployer.build_id
-            raw_filename = f"frameos-{self.frame.id}-{SUPPORTED_BUILDROOT_PLATFORM}-{build_id}.img"
+            raw_filename = f"frameos-{self.frame.id}-{self.platform_spec.id}-{build_id}.img"
             filename = f"{raw_filename}.gz"
             raw_output_path = artifact_dir / raw_filename
             output_path = artifact_dir / filename
@@ -973,7 +1027,7 @@ class BuildrootImageBuilder:
                     **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                     "status": "building",
                     "buildId": build_id,
-                    "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                    "platform": self.platform_spec.id,
                     "frameosVersion": current_frameos_version(),
                     "filename": filename,
                     "rawFilename": raw_filename,
@@ -1005,7 +1059,7 @@ class BuildrootImageBuilder:
                     )
                 )
             if precompiled_sd_image is None:
-                base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+                base_entry = await resolve_buildroot_base_entry(self.platform_spec.id)
                 if compose_image is None:
                     compose_image = await self._compose_tools_image()
                 frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
@@ -1062,7 +1116,7 @@ class BuildrootImageBuilder:
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                 "status": "ready",
                 "buildId": build_id,
-                "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                "platform": self.platform_spec.id,
                 "frameosVersion": current_frameos_version(),
                 "buildrootVersion": BUILDROOT_VERSION,
                 **(
@@ -1156,7 +1210,7 @@ class BuildrootImageBuilder:
             return None
 
         precompiled_sd_image = await download_precompiled_buildroot_sd_image(
-            platform=SUPPORTED_BUILDROOT_PLATFORM,
+            platform=self.platform_spec.id,
             logger=self._log,
         )
         if precompiled_sd_image is None:
@@ -1485,8 +1539,7 @@ class BuildrootImageBuilder:
             link.unlink()
         link.symlink_to(target)
 
-    @staticmethod
-    def _write_buildroot_config(path: Path) -> None:
+    def _write_buildroot_config(self, path: Path) -> None:
         path.write_text(
             "\n".join(
                 [
@@ -1558,6 +1611,7 @@ class BuildrootImageBuilder:
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
+                    *self.platform_spec.extra_buildroot_config_lines,
                     "",
                 ]
             ),
@@ -1645,9 +1699,8 @@ class BuildrootImageBuilder:
         path.write_text(PARTITION_POST_BUILD_SCRIPT, encoding="utf-8")
         os.chmod(path, 0o755)
 
-    @staticmethod
-    def _write_post_image_script(path: Path) -> None:
-        path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
+    def _write_post_image_script(self, path: Path) -> None:
+        path.write_text(_post_image_script(self.platform_spec), encoding="utf-8")
         os.chmod(path, 0o755)
 
     @staticmethod
@@ -1679,8 +1732,7 @@ class BuildrootImageBuilder:
         bootstrap_data["buildroot"] = buildroot
         return SimpleNamespace(**bootstrap_data)
 
-    @staticmethod
-    def _write_build_script(path: Path, output_filename: str) -> None:
+    def _write_build_script(self, path: Path, output_filename: str) -> None:
         tarball = f"buildroot-{BUILDROOT_VERSION}.tar.gz"
         path.write_text(
             f"""#!/usr/bin/env bash
@@ -1815,7 +1867,7 @@ if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/nul
     rm -f "$ncurses_dir/.stamp_staging_installed" "$ncurses_dir/.stamp_target_installed"
   done
 fi
-make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
+make -C /build/buildroot O=/build/output {self.platform_spec.defconfig}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
@@ -2699,8 +2751,8 @@ fi
             raise RuntimeError(f"Failed to build Buildroot image: {err or 'see logs'}")
         return image
 
-    @staticmethod
     def _buildroot_output_cache_key(
+        self,
         build_id: str,
         overlay_dir: Path,
         config_path: Path,
@@ -2716,7 +2768,7 @@ fi
 
         digest = hashlib.sha256()
         digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-        digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+        digest.update(f"buildroot-defconfig={self.platform_spec.defconfig}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-image={build_image}\n".encode("utf-8"))
         digest.update(f"buildroot-skip-apt-install={skip_apt_install}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
@@ -2873,7 +2925,23 @@ mv "$tmp_fstab" "$fstab"
 """
 
 
-POST_IMAGE_SCRIPT = f"""#!/usr/bin/env bash
+POST_IMAGE_PI4_FIRMWARE_SNIPPET = """# Stage BCM2711 GPU firmware alongside the default variant so the same image
+# also boots Pi 4-family boards; their bootloader loads start4.elf/fixup4.dat.
+pi4_firmware_staged=0
+for fw_boot in "${BUILD_DIR:?BUILD_DIR is required}"/rpi-firmware-*/boot; do
+  [ -d "$fw_boot" ] || continue
+  cp -f "$fw_boot/start4.elf" "$fw_boot/fixup4.dat" "${BINARIES_DIR}/rpi-firmware/"
+  pi4_firmware_staged=1
+done
+if [ "$pi4_firmware_staged" != "1" ]; then
+  echo "rpi-firmware package directory with start4.elf/fixup4.dat not found" >&2
+  exit 1
+fi"""
+
+
+def _post_image_script(spec: BuildrootPlatformSpec) -> str:
+    pi4_firmware_snippet = POST_IMAGE_PI4_FIRMWARE_SNIPPET if spec.include_pi4_firmware else ""
+    return f"""#!/usr/bin/env bash
 set -euo pipefail
 
 board_dir="/build/buildroot/board/raspberrypi"
@@ -2907,7 +2975,7 @@ gpu_keys = {{"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}}
 with open(path, encoding="utf-8") as handle:
     lines = handle.read().splitlines()
 
-line = "{BUILDROOT_DEFAULT_BOOT_CONFIG_LINES[0]}"
+line = "{spec.boot_config_lines[0]}"
 lines = [
     existing for existing in lines
     if existing == line or existing.split("=", 1)[0] not in gpu_keys
@@ -2925,7 +2993,7 @@ if [ -f "$rootfs_image" ]; then
   e2fsck -fy "$rootfs_image"
   resize2fs -M "$rootfs_image"
 fi
-
+{pi4_firmware_snippet}
 files=()
 for candidate in "${{BINARIES_DIR}}"/*.dtb "${{BINARIES_DIR}}"/rpi-firmware/*; do
   if [ -e "$candidate" ]; then

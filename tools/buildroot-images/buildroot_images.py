@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +28,6 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_ASSETS_PARTITION_SIZE,
-    BUILDROOT_DEFCONFIG,
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
@@ -51,6 +51,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     stage_buildroot_frameos_service,
     _gzip_file,
     _sha256,
+    buildroot_platform_spec,
     normalize_buildroot_platform,
     stage_buildroot_network_manager_state,
 )
@@ -128,6 +129,7 @@ def parse_args() -> argparse.Namespace:
     download = sub.add_parser("download", help="Download the manifest to the repo")
     download.add_argument("--force", action="store_true")
     args = parser.parse_args()
+    args.platform = normalize_buildroot_platform(args.platform)
     if args.manifest_key is None:
         args.manifest_key = f"{args.prefix}/manifest.json"
     return args
@@ -399,7 +401,7 @@ def base_build_cache_key(paths: list[Path], *, platform: str, docker_image: str,
     digest.update(f"platform={platform}\n".encode("utf-8"))
     digest.update(f"build-host-machine={os.uname().machine}\n".encode("utf-8"))
     digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-    digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+    digest.update(f"buildroot-defconfig={buildroot_platform_spec(platform).defconfig}\n".encode("utf-8"))
     digest.update(f"bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
     digest.update(f"docker-image={docker_image}\n".encode("utf-8"))
     digest.update(f"skip-apt-install={skip_apt_install}\n".encode("utf-8"))
@@ -496,13 +498,18 @@ def build(args: argparse.Namespace) -> None:
         post_image_path = tmp_path / "post-image.sh"
         boot_logo_path = tmp_path / "frameos-boot-logo.png"
         build_script_path = tmp_path / "buildroot-build.sh"
-        BuildrootImageBuilder._write_buildroot_config(config_path)
+        base_builder = BuildrootImageBuilder(
+            db=None,
+            redis=None,
+            frame=SimpleNamespace(id=0, buildroot={"platform": args.platform}),
+        )
+        base_builder._write_buildroot_config(config_path)
         BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path)
         BuildrootImageBuilder._write_post_build_script(post_build_path)
         BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-        BuildrootImageBuilder._write_post_image_script(post_image_path)
+        base_builder._write_post_image_script(post_image_path)
         BuildrootImageBuilder._write_boot_logo(boot_logo_path)
-        BuildrootImageBuilder._write_build_script(build_script_path, "base.img")
+        base_builder._write_build_script(build_script_path, "base.img")
         cache_root = resolve_host_dir(args.cache_dir, default_buildroot_cache_dir())
         source_cache = buildroot_source_cache_dir(args, cache_root)
         cache_key = base_build_cache_key(
@@ -573,7 +580,7 @@ def build(args: argparse.Namespace) -> None:
         "platform": args.platform,
         "frameos_version": frameos_version(),
         "buildroot_version": BUILDROOT_VERSION,
-        "defconfig": BUILDROOT_DEFCONFIG,
+        "defconfig": buildroot_platform_spec(args.platform).defconfig,
         "docker_image": BUILDROOT_DOCKER_IMAGE,
         "buildroot_apt_deps": BUILDROOT_DOCKER_APT_DEPS_LINE,
         "frameos_partition_size": BUILDROOT_FRAMEOS_PARTITION_SIZE,
