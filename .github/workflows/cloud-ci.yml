@@ -1,0 +1,56 @@
+name: Cloud CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["cloud/**", ".github/workflows/cloud-ci.yml"]
+  pull_request:
+    paths: ["cloud/**", ".github/workflows/cloud-ci.yml"]
+
+defaults:
+  run:
+    working-directory: cloud
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # Real Postgres for the backend-linking integration tests.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: frameos_cloud
+          POSTGRES_PASSWORD: frameos_cloud
+          POSTGRES_DB: frameos_cloud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pnpm version from the packageManager field in cloud/package.json.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: cloud/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # Lint, typecheck, test, and build everything in the cloud workspace.
+      - run: pnpm verify
+
+      # Backend-linking flow against the Postgres service container.
+      - run: pnpm test:integration
+        env:
+          TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_test

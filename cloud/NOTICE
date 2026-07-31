@@ -1,0 +1,9 @@
+Copyright (c) 2026 Marius Andra.
+
+FrameOS Cloud is part of the FrameOS monorepo and is licensed under the
+GNU Affero General Public License, version 3 only (AGPL-3.0-only).
+See the LICENSE file at the repository root for the full license text.
+
+Independent implementations of the documented FrameOS Cloud protocol
+(device linking, frame enrollment, store repository format) require no
+permission or license from the FrameOS authors.

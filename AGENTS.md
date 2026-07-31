@@ -9,6 +9,7 @@
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
 - `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript app templates live outside the runtime under `repo/apps/code` (with the general repo app layout still `repo/apps/<folder>/<app>`). Entry point `src/frameos.nim` boots the async runtime. 【F:frameos/src/frameos.nim†L1-L6】
 - `e2e/` – Scene/asset generation utilities and snapshot-based end-to-end tests for validating rendered output. 【F:e2e/README.md†L1-L6】
+- `cloud/` – FrameOS Cloud: the hosted service (Next.js + Drizzle/Postgres) behind `cloud.frameos.net`, `account.frameos.net`, and `scenes.frameos.net` — accounts, device/backend linking, and the scene store. A self-contained pnpm workspace with its own lockfile; run pnpm commands from `cloud/`, see `cloud/README.md` and `cloud/docs/cloud-frames.md`. CI runs via `.github/workflows/cloud-ci.yml`.
 - Supporting files at the root include Docker configuration, Procfile, install scripts, and version metadata for packaging and deployment. 【F:docker-compose.yml†L1-L14】
 
 ## Backend notes
