@@ -26,11 +26,23 @@ if ! git merge-base --is-ancestor "$head_sha" "@{upstream}" 2>/dev/null; then
   exit 1
 fi
 
+# The editor bundle is built from this monorepo (pnpm editor:build), not
+# fetched from npm, and its assets are gitignored — ship the locally built
+# copy inside the archive; the server keeps it (see copy-editor-assets.mjs).
+editor_assets="apps/auth-web/public/frameos-editor"
+if [ ! -f "${editor_assets}/index.html" ]; then
+  echo "Editor assets missing at ${editor_assets}; run 'pnpm editor:build' and 'pnpm build' first." >&2
+  exit 1
+fi
+
 echo "Deploying ${head_sha} to ${deploy_host}"
 # In the monorepo this directory is a subtree of the git root; archive only it.
 prefix="$(git rev-parse --show-prefix)"
-git archive --format=tar "HEAD${prefix:+:${prefix%/}}" |
-  ssh ${ssh_key:+-i "$ssh_key"} "$deploy_host" frameos-cloud-update --archive -
+archive="$(mktemp)"
+trap 'rm -f "$archive"' EXIT
+git archive --format=tar "HEAD${prefix:+:${prefix%/}}" -o "$archive"
+tar -rf "$archive" "$editor_assets"
+ssh ${ssh_key:+-i "$ssh_key"} "$deploy_host" frameos-cloud-update --archive - < "$archive"
 
 echo "Verifying service and public URLs"
 ssh ${ssh_key:+-i "$ssh_key"} "$deploy_host" systemctl is-active frameos-cloud-auth-web.service

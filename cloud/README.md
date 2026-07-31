@@ -54,7 +54,7 @@ pnpm db:setup
 pnpm dev
 ```
 
-The activation hook follows the same pattern as `../frameos`: it installs
+The activation hook follows the same pattern as the repo root: it installs
 workspace dependencies when package files or the lockfile change.
 
 Useful commands:
@@ -72,6 +72,11 @@ pnpm deploy:prod
 `pnpm verify` runs the same checks as CI. `pnpm deploy:prod` deploys the
 pushed HEAD to production; see `docs/deployment.md` for the mechanics and
 rollback procedure.
+
+The scene editor served at `/frameos-editor` is built from this monorepo:
+`pnpm editor:build` runs the frontend build at the repo root and snapshots it
+into `frameos/editor/dist`; the next `pnpm dev`/`pnpm build` copies it into
+`public/`. Without it, everything except the editor modal works.
 
 `pnpm test:integration` exercises the full backend-linking flow (device
 authorization, token issuance and rotation, deny/revoke) against a real

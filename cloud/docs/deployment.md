@@ -45,10 +45,19 @@ Deploy the pushed HEAD with:
 pnpm deploy:prod
 ```
 
-This streams `git archive HEAD` into `/usr/local/bin/frameos-cloud-update
---archive -` on the server, which swaps `/opt/frameos-cloud` (previous release
-kept at `/opt/frameos-cloud.previous` for rollback), runs `pnpm install
---frozen-lockfile`, `scripts/db-migrate.sh`, builds, and restarts the service.
+This streams a tar of `HEAD` (the `cloud/` subtree) into
+`/usr/local/bin/frameos-cloud-update --archive -` on the server, which swaps
+`/opt/frameos-cloud` (previous release kept at `/opt/frameos-cloud.previous`
+for rollback), runs `pnpm install --frozen-lockfile`, `scripts/db-migrate.sh`,
+builds, and restarts the service.
+
+The scene editor bundle is built from this monorepo, not fetched from npm:
+run `pnpm editor:build` (full frontend build at the repo root, snapshotted to
+`frameos/editor/dist`) followed by a local `pnpm build` so the assets land in
+`apps/auth-web/public/frameos-editor`. `deploy:prod` refuses to run without
+them and appends them to the archive — the server never builds the editor and
+keeps whatever assets the archive ships (see
+`apps/auth-web/scripts/copy-editor-assets.mjs`).
 The script refuses to deploy a dirty tree or an unpushed commit, and checks the
 service plus the public login URL afterwards. Override
 `FRAMEOS_CLOUD_DEPLOY_HOST`, `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`, or

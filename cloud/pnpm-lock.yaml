@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  frameos-wasm@2026.7.3:
-    hash: 638ad7f04abac8f6de5e2ec8854aef6fae5e25272f81355babc934f0328d9811
-    path: patches/frameos-wasm@2026.7.3.patch
-
 importers:
 
   .:
@@ -50,8 +45,8 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3
       frameos-wasm:
-        specifier: ^2026.7.3
-        version: 2026.7.3(patch_hash=638ad7f04abac8f6de5e2ec8854aef6fae5e25272f81355babc934f0328d9811)
+        specifier: ^2026.7.6
+        version: 2026.7.6
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -89,9 +84,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
-      frameos-editor:
-        specifier: file:../../vendor/frameos-editor.tgz
-        version: file:vendor/frameos-editor.tgz
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
@@ -1119,12 +1111,8 @@ packages:
   flatted@3.4.2:
     resolution: {integrity: sha512-PjDse7RzhcPkIJwy5t7KPWQSZ9cAbzQXcafsetQoD7sOJRQlGikNbx7yZp2OotDnJyrDcbyRq3Ttb18iYOqkxA==}
 
-  frameos-editor@file:vendor/frameos-editor.tgz:
-    resolution: {integrity: sha512-W264tMl5YJVR8xy2tLxfwhN8Luch72+PtY7EtpeHongKshS8kzmpZzndAOOEw1yuKVVU3GxohaCW6C6W+WUbCA==, tarball: file:vendor/frameos-editor.tgz}
-    version: 2026.7.3
-
-  frameos-wasm@2026.7.3:
-    resolution: {integrity: sha512-BIS3jnYMmf9IZECWhGkI0jfViTzRqxyS0IPnHFGwi3i1d7gq9daU7ZRbADTvfnCYV5JSufd3UhaK30OdvVEASQ==}
+  frameos-wasm@2026.7.6:
+    resolution: {integrity: sha512-yjd59jAQiwRa1Pea/aohzoC30eVljEy5G1LGvgV1+Uu0PHlamRgdLPPL5PDQnpo1wY/pWzFqKp/2k/LWeUgygw==}
 
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -2746,9 +2734,7 @@ snapshots:
 
   flatted@3.4.2: {}
 
-  frameos-editor@file:vendor/frameos-editor.tgz: {}
-
-  frameos-wasm@2026.7.3(patch_hash=638ad7f04abac8f6de5e2ec8854aef6fae5e25272f81355babc934f0328d9811): {}
+  frameos-wasm@2026.7.6: {}
 
   fsevents@2.3.3:
     optional: true

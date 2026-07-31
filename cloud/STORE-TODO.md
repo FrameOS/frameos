@@ -6,11 +6,12 @@ public, and browse/install public scenes from any FrameOS install or the web.
 
 Two repos:
 
-- **frameos-cloud** (this repo) — registry storage, publish API, public
+- **frameos-cloud** (`cloud/` in this monorepo) — registry storage, publish API, public
   repository index, web store front, moderation tooling.
-- **frameos** (AGPL, `../frameos`, branch `backend-cloud-connect`) — "publish
+- **frameos** (the rest of this monorepo) — "publish
   to cloud" from the templates UI, and the store surfaced through the existing
-  repositories system. The public protocol lives in `../frameos/docs/cloud-link.md`.
+  repositories system. The public protocol lives in `docs/cloud-link.md` at the
+  repo root.
 
 ## Decisions (made, with rationale — revisit criteria noted)
 
@@ -209,7 +210,7 @@ Two repos:
       CORS-blocked hosts fall back to `POST /api/store/preview-proxy`
       (anonymous but rate-limited, SSRF-guarded like frameos'
       scene_preview_proxy, 10 MB response cap). The dependency is the
-      published npm package (`frameos-wasm@^2026.7.3`; version always equals
+      published npm package (`frameos-wasm@^2026.7.6`; version always equals
       the FrameOS release the runtime was built from).
       The preview shows the scene's FrameOS version on the button, has a
       resizable viewport, a restart button (full wasm reload), and asks for
@@ -222,12 +223,15 @@ Two repos:
       `frontend/src/embed/`; app catalog and sources embedded, Monaco for JS
       app source viewing/editing) is served as-is from /frameos-editor
       (copied by `scripts/copy-editor-assets.mjs`, gitignored) and embedded
-      in a full-screen iframe. **License boundary:** none of the editor's
-      code is imported into this app's bundle — the modal implements the
-      documented postMessage protocol natively (same arms-length model as
-      cloud-link). Saving posts the edited scenes to the content endpoint.
-      The dependency is the published npm package
-      (`frameos-editor@^2026.7.3`, devDependency, assets only).
+      in a full-screen iframe; the modal implements the documented postMessage
+      protocol. (This began as an AGPL arms-length boundary; since the
+      2026-07 monorepo merge the iframe stays because it is the editor's
+      designed embedding and isolates its global styles and React 18
+      runtime.) Saving posts the edited scenes to the content endpoint.
+      The assets are built directly from this monorepo — `pnpm editor:build`
+      snapshots frontend/dist-editor into `frameos/editor/dist`, the copy
+      script serves it from public/, and deploy.sh ships it in the archive.
+      No npm dependency.
 - [x] Tags (migration 0014): up to 5 publisher-assigned lowercase slugs per
       scene, edited on the scene page (moderated like descriptions), shown on
       cards/pages, filterable via `/?tag=x`, matched by search, and exposed
@@ -245,7 +249,7 @@ Two repos:
 - [x] /account split into subpages: overview cards plus installs, scenes,
       backups, and activity sections.
 
-## Protocol summary (details in ../frameos/docs/cloud-link.md)
+## Protocol summary (details in docs/cloud-link.md at the repo root)
 
 ```
 POST {provider}/api/store/publish                  (Bearer, store:publish)

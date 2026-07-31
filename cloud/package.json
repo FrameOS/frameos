@@ -12,6 +12,7 @@
     "db:migrate": "scripts/db-migrate.sh",
     "db:setup": "scripts/db-setup.sh",
     "deploy:prod": "scripts/deploy.sh",
+    "editor:build": "scripts/build-editor.sh",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "test:integration": "pnpm --filter @frameos-cloud/auth-web test:integration",
