@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+patchedDependencies:
+  frameos-wasm@2026.7.3: patches/frameos-wasm@2026.7.3.patch

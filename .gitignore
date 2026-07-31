@@ -2,7 +2,7 @@
 env
 __pycache__
 *.db
-db/
+/db/
 !.flox/
 !.flox/env/
 !.flox/env/manifest.toml

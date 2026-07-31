@@ -1,0 +1,163 @@
+import {
+  discoverOidcProvider,
+  exchangeAuthorizationCode,
+  verifyOidcIdToken,
+} from "@frameos-cloud/auth-client";
+import { createDb } from "@frameos-cloud/db";
+import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { NextRequest, NextResponse } from "next/server";
+import {
+  authCookieNames,
+  cookieOptions,
+  safeAuthReturnPath,
+} from "../../../../../src/lib/auth-cookies";
+import { resolveGoogleSignIn } from "../../../../../src/lib/google-account";
+import {
+  getBaseUrl,
+  getGoogleCallbackUrl,
+  getGoogleOAuthConfig,
+} from "../../../../../src/lib/env";
+import {
+  createSession,
+  sessionCookieName,
+  sessionCookieOptions,
+} from "../../../../../src/lib/session";
+
+export async function GET(request: NextRequest) {
+  const expectedState = request.cookies.get(authCookieNames.state)?.value;
+  const expectedNonce = request.cookies.get(authCookieNames.nonce)?.value;
+  const codeVerifier = request.cookies.get(authCookieNames.verifier)?.value;
+  const returnTo = safeAuthReturnPath(
+    request.cookies.get(authCookieNames.returnTo)?.value,
+  );
+  const actualState = request.nextUrl.searchParams.get("state");
+  const code = request.nextUrl.searchParams.get("code");
+  const error = request.nextUrl.searchParams.get("error");
+
+  if (error) {
+    // Keep the raw provider error in server logs only; the login page maps
+    // known codes to copy and shows a generic message for everything else.
+    console.error(
+      "auth/google/callback: provider returned error:",
+      error.slice(0, 200),
+    );
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(error)}`, getBaseUrl()),
+    );
+  }
+
+  if (
+    !code ||
+    !expectedState ||
+    !expectedNonce ||
+    !codeVerifier ||
+    actualState !== expectedState
+  ) {
+    return NextResponse.redirect(
+      new URL("/login?error=invalid_state", getBaseUrl()),
+    );
+  }
+
+  const config = getGoogleOAuthConfig();
+  if (!config) {
+    return NextResponse.redirect(
+      new URL("/login?error=google_unavailable", getBaseUrl()),
+    );
+  }
+
+  let discovery;
+  let claims;
+  try {
+    discovery = await discoverOidcProvider(config.issuerUrl);
+    const tokenSet = await exchangeAuthorizationCode(discovery, {
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      code,
+      codeVerifier,
+      redirectUri: getGoogleCallbackUrl(),
+    });
+
+    claims = await verifyOidcIdToken(tokenSet.id_token, {
+      audience: config.clientId,
+      issuer: discovery.issuer,
+      jwksUri: discovery.jwks_uri,
+      nonce: expectedNonce,
+    });
+  } catch (error) {
+    console.error(
+      "auth/google/callback: code exchange or id_token verification failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return NextResponse.redirect(
+      new URL("/login?error=provider_unavailable", getBaseUrl()),
+    );
+  }
+
+  const db = createDb();
+
+  // Merge rules live in resolveGoogleSignIn: an existing verified password
+  // account links automatically; an unverified one requires a password reset
+  // first so a squatter's password cannot ride along into this account.
+  const resolution = await resolveGoogleSignIn(db, discovery.issuer, claims);
+
+  if (resolution.status === "requires_password_reset") {
+    const response = NextResponse.redirect(
+      new URL("/login?error=verify_before_google_link", getBaseUrl()),
+    );
+    response.cookies.set(
+      authCookieNames.mergeEmail,
+      resolution.email,
+      cookieOptions(),
+    );
+    response.cookies.delete(authCookieNames.state);
+    response.cookies.delete(authCookieNames.nonce);
+    response.cookies.delete(authCookieNames.verifier);
+    response.cookies.delete(authCookieNames.returnTo);
+    return response;
+  }
+
+  if (resolution.status === "google_email_unverified") {
+    const response = NextResponse.redirect(
+      new URL("/login?error=google_email_unverified", getBaseUrl()),
+    );
+    response.cookies.delete(authCookieNames.state);
+    response.cookies.delete(authCookieNames.nonce);
+    response.cookies.delete(authCookieNames.verifier);
+    response.cookies.delete(authCookieNames.returnTo);
+    return response;
+  }
+
+  const accountId = resolution.accountId;
+
+  await recordAuditEvent(db, {
+    accountId,
+    actor: { accountId, providerSubject: claims.sub },
+    eventType: "account.signed_in",
+    metadata: {
+      email: claims.email,
+      emailVerified: claims.email_verified,
+      method: "google",
+    },
+    target: { providerIssuer: discovery.issuer },
+  });
+
+  const sessionToken = await createSession(db, {
+    accountId,
+    email: claims.email,
+    emailVerified: claims.email_verified,
+    name: claims.name,
+    providerIssuer: discovery.issuer,
+    providerSubject: claims.sub,
+  });
+
+  const response = NextResponse.redirect(
+    new URL(returnTo ?? "/account", getBaseUrl()),
+  );
+  response.cookies.set(sessionCookieName, sessionToken, sessionCookieOptions());
+  response.cookies.delete(authCookieNames.state);
+  response.cookies.delete(authCookieNames.nonce);
+  response.cookies.delete(authCookieNames.verifier);
+  response.cookies.delete(authCookieNames.returnTo);
+  response.cookies.delete(authCookieNames.mergeEmail);
+  return response;
+}
