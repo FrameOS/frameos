@@ -45,6 +45,10 @@ class Config:
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
+    # FrameOS Cloud provider origin. Empty = https://cloud.frameos.net,
+    # any http(s) URL = a compatible self-hosted provider, 'disabled' = hide
+    # the cloud link entirely. See docs/cloud-link.md.
+    FRAMEOS_CLOUD_URL = os.environ.get('FRAMEOS_CLOUD_URL') or os.environ.get('FRAMEOS_AUTH_PROVIDER_URL') or ''
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

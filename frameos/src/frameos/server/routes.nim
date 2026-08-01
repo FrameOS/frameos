@@ -5,7 +5,7 @@ import mummy/routers
 import httpcore
 import frameos/channels
 import frameos/types
-import ./routes/[web_routes, frame_api_routes, admin_api_routes, repository_api_routes, common]
+import ./routes/[web_routes, frame_api_routes, admin_api_routes, repository_api_routes, cloud_api_routes, common]
 
 proc shouldLogRouteNotFound*(path: string): bool =
   if path.startsWith("/img/"):
@@ -17,6 +17,7 @@ proc buildRouter*(connectionsState: ConnectionsState, adminConnectionsState: Con
   addFrameApiRoutes(result, connectionsState)
   addAdminApiRoutes(result)
   addRepositoryApiRoutes(result)
+  addCloudApiRoutes(result)
 
   result.notFoundHandler = proc(request: Request) {.gcsafe.} =
     if shouldLogRouteNotFound(request.path):

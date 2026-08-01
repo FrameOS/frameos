@@ -6,6 +6,7 @@ import mummy
 import ../../types
 import ../state
 import ../auth
+import ../routes/cloud_api_routes
 
 let missingConfigPath = getTempDir() / ("frameos-auth-tests-missing-frame-" & $getCurrentProcessId() & ".json")
 
@@ -53,6 +54,18 @@ suite "Server auth helpers":
     configureAdmin(true, "", "secret")
     check not adminPanelEnabled()
     check not adminAuthEnabled()
+
+  test "cloud callback origin follows the external proxy scheme and host":
+    check localOrigin(makeRequest(headers = @[("host", "frame.local:8787")])) ==
+      "http://frame.local:8787"
+    check localOrigin(makeRequest(headers = @[
+      ("host", "frame.example:8443"),
+      ("x-forwarded-proto", "https"),
+    ])) == "https://frame.example:8443"
+    check localOrigin(makeRequest(headers = @[
+      ("host", "frame.example"),
+      ("x-forwarded-proto", "https, http"),
+    ])) == "https://frame.example"
 
   test "legacy provider field does not affect admin auth":
     globalFrameConfig = FrameConfig(

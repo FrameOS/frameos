@@ -55,6 +55,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
@@ -290,13 +291,8 @@ function FrameAdminServiceSecretsSection(): JSX.Element {
 }
 
 function FrameAdminUpgradeSection(): JSX.Element {
-  const {
-    upgradeStatus,
-    upgradeStatusLoading,
-    isUpgradePolling,
-    upgradeError,
-    upgradeStatusIsActive,
-  } = useValues(frameAdminUpgradeLogic)
+  const { upgradeStatus, upgradeStatusLoading, isUpgradePolling, upgradeError, upgradeStatusIsActive } =
+    useValues(frameAdminUpgradeLogic)
   const { checkUpgradeStatus, dryRunUpgrade, confirmStartUpgrade, loadUpgradeStatus } =
     useActions(frameAdminUpgradeLogic)
 
@@ -427,11 +423,9 @@ const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
   { key: 'pwr', label: 'PWR' },
 ]
 
-const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
-  'waveshare_esp32_s3_epaper_13_3e6'
+const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_epaper_13_3e6'
 const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
-const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
-  'waveshare_esp32_s3_photopainter'
+const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_photopainter'
 const ESP32_WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
 const INKY_GPIO_BUTTONS: GPIOButton[] = [
   { pin: 5, label: 'A' },
@@ -613,9 +607,7 @@ function esp32RecommendedPinLayout(
   if (presetConfig) {
     return { ...presetConfig.pins }
   }
-  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
-    ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
-    : { ...ESP32_XIAO_PIN_LAYOUT }
+  return device === ESP32_WAVESHARE_13IN3E6_DEVICE ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
 }
 
 function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
@@ -646,8 +638,7 @@ function normalizeEsp32SdCardPinLayout(
 
 function normalizeEsp32SdCardAssets(value: Esp32SdCardAssets | undefined): NormalizedEsp32SdCardAssets {
   const preset =
-    value?.preset === 'waveshare_esp32_s3_photopainter' ||
-    value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+    value?.preset === 'waveshare_esp32_s3_photopainter' || value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
       ? value.preset
       : 'custom'
   const presetPins =
@@ -849,10 +840,7 @@ export function FrameSettings({
         sdCardAssets: presetConfig.sdCardAssets,
       },
     }
-    if (
-      !frameForm.max_http_response_bytes ||
-      frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
-    ) {
+    if (!frameForm.max_http_response_bytes || frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES) {
       nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     }
     setFrameFormValues(nextValues)
@@ -984,11 +972,7 @@ export function FrameSettings({
   const imageUrl = frameImageUrl(linkFrame)
   const embeddedAdminAuthMissing =
     isEmbeddedMode &&
-    !(
-      linkFrame.frame_admin_auth?.enabled &&
-      linkFrame.frame_admin_auth.user &&
-      linkFrame.frame_admin_auth.pass
-    )
+    !(linkFrame.frame_admin_auth?.enabled && linkFrame.frame_admin_auth.user && linkFrame.frame_admin_auth.pass)
   const frameActionsMenu = hideDropdown ? null : (
     <DropdownMenu
       className="w-fit"
@@ -1121,6 +1105,8 @@ export function FrameSettings({
       )}
       id="panel-settings-div"
     >
+      {/* Contains its own <form>, so it must stay outside the frameForm <Form> below. */}
+      {inFrameAdminMode ? <CloudSettingsSection headingId="frame-settings-cloud" /> : null}
       <Form
         formKey="frameForm"
         logic={frameLogic}
@@ -1614,10 +1600,7 @@ export function FrameSettings({
                                   preset: nextPreset as Esp32SdCardAssets['preset'],
                                   pins: esp32SdCardPinsForPreset(nextPreset),
                                 }
-                                if (
-                                  embeddedHardwarePreset !== 'custom' &&
-                                  nextPreset !== embeddedHardwarePreset
-                                ) {
+                                if (embeddedHardwarePreset !== 'custom' && nextPreset !== embeddedHardwarePreset) {
                                   setEsp32HardwarePresetCustom({
                                     device_config: {
                                       ...(frameForm.device_config ?? {}),
@@ -2122,8 +2105,8 @@ export function FrameSettings({
               <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                 <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
                 <div>
-                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup
-                  URL is locked outside hotspot mode.
+                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup URL
+                  is locked outside hotspot mode.
                 </div>
               </div>
             ) : null}
