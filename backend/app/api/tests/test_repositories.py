@@ -59,6 +59,7 @@ async def test_get_system_repositories_includes_packaged_templates(async_client)
     samples = next(repo for repo in repos if repo["id"] == "system-samples")
     by_name = {template["name"]: template for template in samples["templates"]}
     assert by_name["Chromium Screenshot"]["embedded"] is False
+    assert by_name["Bird field journal"]["frameosVersion"] == "2026.7.5"
     assert by_name["Webcam RSTP"]["embedded"] is False
     assert "embedded" not in by_name["Weather"]
 

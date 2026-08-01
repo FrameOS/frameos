@@ -1,5 +1,10 @@
+import io
+import json
+import zipfile
+
 import pytest
 from app.models.template import Template
+from app.utils.versions import current_frameos_version
 
 
 @pytest.mark.asyncio
@@ -52,6 +57,10 @@ async def test_export_template(async_client, db):
     response = await async_client.get(f'/api/templates/{t.id}/export')
     assert response.status_code == 200
     assert response.headers['content-type'] == 'application/zip'
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        manifest_path = next(name for name in archive.namelist() if name.endswith('/template.json'))
+        manifest = json.loads(archive.read(manifest_path))
+    assert manifest['frameosVersion'] == current_frameos_version()
 
 
 @pytest.mark.asyncio
