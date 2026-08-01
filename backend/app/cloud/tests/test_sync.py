@@ -115,3 +115,52 @@ async def test_sync_link_keeps_state_on_network_error(db, service, monkeypatch):
     db.expire_all()
     link = db.get(CloudBackendLink, link.id)
     assert link.status == "connected"
+
+
+# ---- secret key rotation ------------------------------------------------------
+
+
+def test_rotating_secret_key_without_migration_keys_breaks_the_link(db, monkeypatch):
+    """The failure mode this guards: SECRET_KEY changes, the token becomes
+    undecryptable, and the link silently does nothing while still reporting
+    "connected". It must at least be reported."""
+    link = make_connected_link(db)
+    monkeypatch.setattr(cloud_link.config, "SECRET_KEY", "a-brand-new-secret-key")
+    monkeypatch.setattr(cloud_link.config, "CLOUD_SECRET_KEY", "")
+    monkeypatch.setattr(cloud_link.config, "PREVIOUS_SECRET_KEYS", [])
+
+    loaded, token, _ = CloudSync()._load_link()
+    assert token is None
+    db.refresh(link)
+    assert link.poll_error == "secret_key_changed"
+
+
+def test_previous_secret_keys_recover_and_migrate_the_token(db, monkeypatch):
+    """Naming the old key recovers the link, and the token is re-encrypted with
+    the new one so the old key can be dropped."""
+    link = make_connected_link(db)
+    original = link.access_token
+    old_key = cloud_link.config.SECRET_KEY
+    monkeypatch.setattr(cloud_link.config, "SECRET_KEY", "a-brand-new-secret-key")
+    monkeypatch.setattr(cloud_link.config, "CLOUD_SECRET_KEY", "")
+    monkeypatch.setattr(cloud_link.config, "PREVIOUS_SECRET_KEYS", [old_key])
+
+    loaded, token, _ = CloudSync()._load_link()
+    assert token == "link-token-secret"
+    db.refresh(link)
+    assert link.poll_error is None
+    assert link.access_token != original  # migrated to the current key
+
+    # Now decryptable without the old key at all.
+    monkeypatch.setattr(cloud_link.config, "PREVIOUS_SECRET_KEYS", [])
+    assert cloud_link.decrypt_cloud_secret(link.access_token) == "link-token-secret"
+
+
+def test_cloud_secret_key_decouples_cloud_secrets_from_secret_key(db, monkeypatch):
+    """With CLOUD_SECRET_KEY set, SECRET_KEY can be rotated freely."""
+    monkeypatch.setattr(cloud_link.config, "CLOUD_SECRET_KEY", "a-dedicated-cloud-key")
+    encrypted = cloud_link.encrypt_cloud_secret("link-token-secret")
+
+    monkeypatch.setattr(cloud_link.config, "SECRET_KEY", "rotated-again")
+    assert cloud_link.decrypt_cloud_secret(encrypted) == "link-token-secret"
+    assert cloud_link.rewrap_cloud_secret(encrypted) is None  # nothing to migrate

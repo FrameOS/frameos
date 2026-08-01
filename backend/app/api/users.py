@@ -75,10 +75,16 @@ def api_user_update_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_local_user),
 ):
-    if not data.current_password:
-        raise HTTPException(status_code=400, detail="Current password is required.")
-    if not current_user.check_password(data.current_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    # A cloud-created user has no local password at all (cloud signup leaves it
+    # NULL). Requiring the current one would leave them no way to ever set one,
+    # so if the cloud link later breaks — revoked, provider gone, or
+    # FRAMEOS_CLOUD_URL=disabled — they would be locked out with no recovery
+    # short of editing the database. They are already authenticated here.
+    if current_user.password:
+        if not data.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required.")
+        if not current_user.check_password(data.current_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
     if not data.password:
         raise HTTPException(status_code=400, detail="New password is required.")
     if data.password != data.password2:

@@ -79,12 +79,39 @@ class CloudSync:
         db = SessionLocal()
         try:
             link = current_cloud_backend_link(db)
-            token = (
-                cloud_link.decrypt_cloud_secret(link.access_token)
-                if link is not None and link.status == "connected"
-                else None
-            )
-            return link, token, link.id if link else 0
+            if link is None or link.status != "connected":
+                return link, None, link.id if link else 0
+
+            token = cloud_link.decrypt_cloud_secret(link.access_token)
+            if token is None:
+                # The stored token cannot be decrypted with any configured key,
+                # which in practice means SECRET_KEY changed without
+                # CLOUD_SECRET_KEY / PREVIOUS_SECRET_KEYS being set. Say so
+                # instead of silently doing nothing forever while the UI keeps
+                # reporting the link as connected.
+                if link.poll_error != "secret_key_changed":
+                    link.poll_error = "secret_key_changed"
+                    db.commit()
+                print(
+                    "🔴 FrameOS Cloud sync: the stored link token cannot be decrypted. "
+                    "SECRET_KEY most likely changed; set PREVIOUS_SECRET_KEYS to the old value "
+                    "to recover (and CLOUD_SECRET_KEY to decouple them from now on), or "
+                    "reconnect the cloud link. See docs/cloud-link.md."
+                )
+                return link, None, link.id
+
+            # A rotation is in progress: migrate this secret to the current key
+            # so the old one can be dropped after a sync cycle.
+            rewrapped = cloud_link.rewrap_cloud_secret(link.access_token)
+            if rewrapped is not None:
+                link.access_token = rewrapped
+                db.commit()
+                print("🔵 FrameOS Cloud sync: re-encrypted the link token with the current key")
+            elif link.poll_error == "secret_key_changed":
+                link.poll_error = None
+                db.commit()
+
+            return link, token, link.id
         finally:
             db.close()
 

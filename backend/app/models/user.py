@@ -15,4 +15,9 @@ class User(Base):
         self.password = generate_password_hash(password)
 
     def check_password(self, password):
+        # Cloud-created users have no local password; without this guard
+        # check_password_hash(None, ...) raises AttributeError — a 500 that
+        # also echoes the internal error back to the caller.
+        if not self.password:
+            return False
         return check_password_hash(self.password, password)

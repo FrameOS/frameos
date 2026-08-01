@@ -5,6 +5,7 @@
 ## documented in docs/cloud-link.md: OAuth 2.0 Device Authorization Grant,
 ## outbound-only, scoped tokens. Link state lives in ./state/cloud_link.json.
 
+import algorithm
 import json
 import locks
 import os
@@ -185,12 +186,20 @@ proc localOrigin*(request: Request): string =
   scheme & "://" & host
 
 const CLOUD_LOGIN_STATE_TTL_SECONDS = 600
+const MAX_LOGIN_STATES = 16
 
 proc linkHasScope(state: JsonNode, scope: string): bool =
   scope in state{"scope"}.getStr("").splitWhitespace()
 
-proc pruneLoginStates(state: JsonNode) =
-  ## Drop expired pending login-handoff states (stored under login_states).
+proc pruneLoginStates(state: JsonNode): bool {.discardable.} =
+  ## Drop expired pending login-handoff states (stored under login_states), then
+  ## enforce MAX_LOGIN_STATES by evicting the oldest. /api/cloud/login/start is
+  ## open (the user is not logged in yet), so without the cap anyone on the LAN
+  ## could grow this file unboundedly and make every later cloud request pay for
+  ## parsing and rewriting it while holding cloudLinkLock.
+  ## Returns true when something was removed, so callers can skip a needless
+  ## rewrite of the state file.
+  result = false
   if state{"login_states"} == nil or state{"login_states"}.kind != JObject:
     return
   var expired: seq[string]
@@ -199,14 +208,43 @@ proc pruneLoginStates(state: JsonNode) =
       expired.add(key)
   for key in expired:
     state["login_states"].delete(key)
+    result = true
+
+  if state["login_states"].len <= MAX_LOGIN_STATES:
+    return
+  # Oldest first, by the expiry we stamped at creation.
+  var byAge: seq[(int64, string)]
+  for key, value in state{"login_states"}:
+    byAge.add((int64(value{"expires_epoch"}.getInt(0)), key))
+  byAge.sort(proc(a, b: (int64, string)): int = cmp(a[0], b[0]))
+  for i in 0 ..< (byAge.len - MAX_LOGIN_STATES):
+    state["login_states"].delete(byAge[i][1])
+    result = true
 
 proc redirectResponse(request: Request, location: string) =
   var headers: mummy.HttpHeaders
   headers["Location"] = location
   request.respond(303, headers, "")
 
-proc syncAfterConnect(state: JsonNode, providerUrl, accessToken: string) =
-  ## Best effort: report inventory and learn which account owns us.
+const CLOUD_LOGIN_STATE_COOKIE = "frameos_cloud_login_state"
+
+proc loginStateCookieHeader(request: Request, value: string): string =
+  CLOUD_LOGIN_STATE_COOKIE & "=" & value &
+    "; Path=/api/cloud/login; HttpOnly; SameSite=Lax; Max-Age=" &
+    $CLOUD_LOGIN_STATE_TTL_SECONDS &
+    (if shouldUseSecureCookie(request): "; Secure" else: "")
+
+  # Not cleared on success: mummy sends one Set-Cookie per response and the
+  # session cookie takes that slot. Harmless — the cookie is path-scoped to
+  # /api/cloud/login, expires in CLOUD_LOGIN_STATE_TTL_SECONDS, is overwritten
+  # by the next /start, and its server-side state entry is single-use.
+
+proc fetchConnectSync(providerUrl, accessToken: string): JsonNode =
+  ## Best effort: report inventory and learn which account owns us. Returns the
+  ## fields to merge into the link state rather than mutating it: both requests
+  ## below can take tens of seconds, so callers MUST run this WITHOUT holding
+  ## cloudLinkLock and merge the result afterwards.
+  var state = newJObject()
   try:
     let (inventoryCode, _) = cloudRequest(providerUrl, "/api/backends/inventory",
       accessToken = accessToken, body = %*{
@@ -229,6 +267,7 @@ proc syncAfterConnect(state: JsonNode, providerUrl, accessToken: string) =
           break
   except CatchableError:
     discard
+  return state
 
 proc addCloudApiRoutes*(router: var Router) =
   router.get("/api/cloud/status", proc(request: Request) {.gcsafe.} =
@@ -365,6 +404,7 @@ proc addCloudApiRoutes*(router: var Router) =
       except CatchableError:
         networkError = true
 
+      var syncAccessToken = ""
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         if state{"status"}.getStr("") != "connecting" or state{"device_code"}.getStr("") != deviceCode:
@@ -395,12 +435,25 @@ proc addCloudApiRoutes*(router: var Router) =
             if state.hasKey(key):
               state.delete(key)
           state["connected_at"] = %isoTimestamp(int64(epochTime()))
-          syncAfterConnect(state, providerUrl, accessToken)
+          saveCloudLinkState(state)
+          # The inventory/grants sync is two more cloud round trips; do it
+          # after releasing the lock (below) so a slow or unreachable provider
+          # cannot hold cloudLinkLock — and with it every cloud route — for
+          # minutes.
+          syncAccessToken = accessToken
+        else:
+          resetLinkState(state, pollError = (if error.len > 0: error else: "unexpected status " & $pollCode))
           saveCloudLinkState(state)
           jsonResponse(request, Http200, cloudStatusPayload(state))
           return
-        resetLinkState(state, pollError = (if error.len > 0: error else: "unexpected status " & $pollCode))
-        saveCloudLinkState(state)
+
+      let synced = fetchConnectSync(providerUrl, syncAccessToken)
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        for key, value in synced:
+          state[key] = value
+        if synced.len > 0:
+          saveCloudLinkState(state)
         jsonResponse(request, Http200, cloudStatusPayload(state))
   )
 
@@ -473,9 +526,18 @@ proc addCloudApiRoutes*(router: var Router) =
           "expires_epoch": int(epochTime() + float(CLOUD_LOGIN_STATE_TTL_SECONDS)),
         }
         saveCloudLinkState(state)
-      jsonResponse(request, Http200, %*{
+      # Bind the handoff to THIS browser. Without it, knowing a live state plus
+      # a code is enough for anyone to complete the login: an attacker could
+      # start a handoff for their own cloud account and feed the resulting
+      # callback URL to the owner's browser (logging them into the attacker's
+      # account), or replay a leaked code from their own browser to take over
+      # the owner's session.
+      var headers: mummy.HttpHeaders
+      headers["Set-Cookie"] = loginStateCookieHeader(request, loginState)
+      headers["Content-Type"] = "application/json"
+      request.respond(200, headers, $(%*{
         "authorization_url": startResponse{"authorization_url"}.getStr(""),
-      })
+      }))
   )
 
   router.get("/api/cloud/login/callback", proc(request: Request) {.gcsafe.} =
@@ -484,15 +546,28 @@ proc addCloudApiRoutes*(router: var Router) =
       let code = request.queryParams.getOrDefault("code", "")
       let errorParam = request.queryParams.getOrDefault("error", "")
 
+      # The state must match the cookie we set on /api/cloud/login/start, so
+      # only the browser that began the handoff can finish it. Checked before
+      # any state-file work, which also keeps forged callbacks off the lock.
+      let stateCookie = getCookieValue(request, CLOUD_LOGIN_STATE_COOKIE)
+      if stateParam.len == 0 or stateCookie.len == 0 or stateCookie != stateParam:
+        redirectResponse(request, "/login?cloudError=invalid_state")
+        return
+
       var providerUrl = ""
       var accessToken = ""
       var ownerAccountId = ""
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
-        pruneLoginStates(state)
+        let pruned = pruneLoginStates(state)
         if stateParam.len == 0 or state{"login_states"} == nil or
             state{"login_states"}{stateParam} == nil:
-          saveCloudLinkState(state)
+          # This endpoint is open, so an unknown state is the common case for
+          # junk traffic: only rewrite the state file when pruning actually
+          # changed it, otherwise every bogus request costs an SD-card write
+          # while holding cloudLinkLock.
+          if pruned:
+            saveCloudLinkState(state)
           redirectResponse(request, "/login?cloudError=invalid_state")
           return
         state["login_states"].delete(stateParam)
@@ -524,8 +599,22 @@ proc addCloudApiRoutes*(router: var Router) =
         redirectResponse(request, "/login?cloudError=exchange_failed")
         return
       # The provider only completes a handoff for the account that owns this
-      # link; double-check when we know who that is.
-      if ownerAccountId.len > 0 and claims{"account_id"}.getStr("") != ownerAccountId:
+      # link, but verify it ourselves rather than trusting the response. We
+      # learn the owner from /api/backends/grants during connect; if that call
+      # failed we have nothing to compare against, and minting an admin session
+      # on the provider's word alone would let a network hiccup during linking
+      # silently weaken this check — so refuse and re-sync instead.
+      let claimedAccountId = claims{"account_id"}.getStr("")
+      if ownerAccountId.len == 0 or claimedAccountId.len == 0 or claimedAccountId != ownerAccountId:
+        if ownerAccountId.len == 0:
+          # Fill in the owner we never got, so the next attempt can verify.
+          let synced = fetchConnectSync(providerUrl, accessToken)
+          if synced.len > 0:
+            withLock cloudLinkLock:
+              let state = loadCloudLinkState()
+              for key, value in synced:
+                state[key] = value
+              saveCloudLinkState(state)
         redirectResponse(request, "/login?cloudError=linked_client_required")
         return
 
