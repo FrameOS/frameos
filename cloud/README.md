@@ -4,9 +4,11 @@ FrameOS Cloud: hosted auth, cloud account state, the scene store, and linked
 backend records. Lives in `cloud/` inside the FrameOS monorepo and is licensed
 AGPL-3.0-only like the rest of it.
 
-This directory is a self-contained pnpm workspace (own `pnpm-workspace.yaml`
-and lockfile); run pnpm commands from `cloud/`. Unifying it with the root
-workspace and sharing the frontend are planned follow-ups — see
+This directory is part of the monorepo's single pnpm workspace: one root
+lockfile, `frameos-wasm` and `frameos-editor` consumed as `workspace:`
+packages, and Turborepo building whatever a task depends on (frontend →
+editor, wasm runtime → wasm) automatically and cached. Run pnpm commands
+from `cloud/`; sharing the full frontend is the next step — see
 `docs/cloud-frames.md`.
 
 ## Status
@@ -73,10 +75,12 @@ pnpm deploy:prod
 pushed HEAD to production; see `docs/deployment.md` for the mechanics and
 rollback procedure.
 
-The scene editor served at `/frameos-editor` is built from this monorepo:
-`pnpm editor:build` runs the frontend build at the repo root and snapshots it
-into `frameos/editor/dist`; the next `pnpm dev`/`pnpm build` copies it into
-`public/`. Without it, everything except the editor modal works.
+The scene editor served at `/frameos-editor` is the `frameos-editor`
+workspace package: `pnpm build` (turbo) builds the frontend and snapshots
+`frontend/dist-editor` into `frameos/editor/dist`, and the prebuild copy
+step serves it from `public/`. The wasm runtime is reused from
+`frameos/wasm/dist/assets` unless regenerated with
+`turbo run build:runtime --filter=frameos-wasm` (needs nim + emscripten).
 
 `pnpm test:integration` exercises the full backend-linking flow (device
 authorization, token issuance and rotation, deny/revoke) against a real

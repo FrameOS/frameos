@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 // database. Run with `pnpm test:integration`; see
 // src/test/integration/test-database-url.ts for how the database is chosen.
 export default defineConfig({
-  oxc: { jsx: { runtime: "automatic" } },
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
     // All files share one database; keep them sequential so truncation in one

@@ -226,12 +226,11 @@ Two repos:
       in a full-screen iframe; the modal implements the documented postMessage
       protocol. (This began as an AGPL arms-length boundary; since the
       2026-07 monorepo merge the iframe stays because it is the editor's
-      designed embedding and isolates its global styles and React 18
+      designed embedding and isolates its global styles and bundled
       runtime.) Saving posts the edited scenes to the content endpoint.
-      The assets are built directly from this monorepo — `pnpm editor:build`
-      snapshots frontend/dist-editor into `frameos/editor/dist`, the copy
-      script serves it from public/, and deploy.sh ships it in the archive.
-      No npm dependency.
+      The editor is the `frameos-editor` workspace package, built by turbo
+      (frontend build → `frameos/editor/dist`) and copied into public/ by
+      the prebuild step.
 - [x] Tags (migration 0014): up to 5 publisher-assigned lowercase slugs per
       scene, edited on the scene page (moderated like descriptions), shown on
       cards/pages, filterable via `/?tag=x`, matched by search, and exposed

@@ -282,9 +282,10 @@ bundle** of that SPA:
   and the scenes it needs, and esbuilds a static bundle.
 - Next.js serves that bundle at `account.frameos.net/frames/**` as a
   first-class route (HTML shell + static assets) — **not an iframe**.
-  Because it is a separately built bundle, the React-18-pinned SPA and the
-  React 19 / Next 16 app never share a module graph; the device build
-  already plays the same singleton trick with its `sharedDepsPlugin`.
+  Since the 2026-08 React 19 unification the whole workspace shares one
+  React major, so the wrapper bundle is a packaging choice (esbuild SPA vs
+  Next), not a version-isolation necessity — and importing SPA components
+  directly into Next pages is open as a future option.
 - API: the cloud implements the canonical `/api/frames...` subset. The SPA
   has a single transport chokepoint (`src/utils/apiFetch.ts` plus the path
   scoping in `src/utils/projectApi.ts`); the cloud adapter is one more
@@ -317,10 +318,10 @@ compiled-only features are filtered for cloud frames exactly as they are for
 
 ## Repo layout: monorepo merge
 
-**Done (2026-07): the cloud lives in the `frameos` monorepo as `cloud/`,
-still as its own nested pnpm workspace; the editor bundle is built directly
-from `frameos/editor` (no longer vendored), and `frameos-wasm` comes from
-npm until the workspaces are unified.** The
+**Done (2026-08): the cloud lives in the `frameos` monorepo as `cloud/`, in
+one unified pnpm workspace — `frameos-wasm` and `frameos-editor` are
+`workspace:` dependencies, with Turborepo orchestrating the cross-package
+builds.** The
 original rationale, kept for the record: the frontend
 sharing model above is relative deep imports inside one pnpm workspace —
 there is no published component library, and extracting one would fight
@@ -453,12 +454,12 @@ enforcement) is ever paywalled.
    here, "Add frame" flow 2 (link code). No scene pushing yet; a frame can
    enroll, appear in the account, show status, and be revoked. Can proceed
    in the current two-repo layout.
-2. **Relicense + monorepo merge — done (2026-07).** AGPL switch, history
-   audit, move as `cloud/` into the frameos repo (nested workspace). The
-   vendored editor tgz is gone — the editor bundle builds directly from
-   `frameos/editor` (`pnpm editor:build`) — and the wasm patch is gone,
-   upstreamed and consumed via npm. Remaining from this phase: unifying
-   the pnpm workspaces (needed for `workspace:` deps and the shared SPA).
+2. **Relicense + monorepo merge — done (2026-08).** AGPL switch, history
+   audit, move as `cloud/` into the frameos repo, workspaces unified into
+   one root lockfile with Turborepo builds. The vendored editor tgz and
+   wasm patch are gone — both are `workspace:` packages now. Remaining
+   from this phase: the standalone-bundle production deploy
+   (`docs/deployment.md`, "Monorepo cutover").
 3. **Scene management** — `set_scenes` push of interpreted scenes, the
    `cloud-frontend` wrapper bundle (fleet grid, scene assignment, wasm
    previews, declarative settings + schedule). Requires the JS capability
