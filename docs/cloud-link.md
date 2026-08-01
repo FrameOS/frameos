@@ -41,6 +41,35 @@ with the link and wins over the environment default.
 On a frame, link state (including the URL) lives in `./state/cloud_link.json`
 next to the FrameOS binary; there is no environment toggle.
 
+### Encryption of the stored link token, and rotating `SECRET_KEY`
+
+The backend stores the link token encrypted. By default the encryption key is
+derived from `SECRET_KEY`, which means **rotating `SECRET_KEY` would otherwise
+make the stored token undecryptable — the link keeps reporting "connected"
+while every cloud request silently stops working.** Two variables exist so a
+rotation never costs you the link:
+
+| Variable | Meaning |
+|---|---|
+| `CLOUD_SECRET_KEY` | Encrypt cloud secrets with this instead of `SECRET_KEY`. Set it once and `SECRET_KEY` can be rotated freely afterwards. |
+| `PREVIOUS_SECRET_KEYS` | Comma-separated old keys, tried on decrypt only. |
+
+To rotate `SECRET_KEY` on an install that is already linked:
+
+1. Put the old value in `PREVIOUS_SECRET_KEYS`, set the new `SECRET_KEY`, and
+   restart the backend **and** the worker.
+2. The next grant sync (immediately on worker start, then every 15 minutes)
+   re-encrypts the token with the new key and logs
+   `🔵 re-encrypted the link token with the current key`.
+3. Once that has run, drop `PREVIOUS_SECRET_KEYS`.
+
+Set `CLOUD_SECRET_KEY` to avoid the dance entirely next time.
+
+If a token cannot be decrypted with any configured key, the sync worker logs a
+red error and sets `poll_error = "secret_key_changed"` on the link instead of
+failing silently. Recovery is either naming the old key in
+`PREVIOUS_SECRET_KEYS` or reconnecting the link.
+
 ## Permission scopes
 
 Requested at link time, shown on the provider's consent screen, and returned

@@ -54,24 +54,68 @@ def default_cloud_provider_url() -> str | None:
     return normalize_cloud_provider_url(config.FRAMEOS_CLOUD_URL)
 
 
-def _cloud_fernet() -> Fernet:
-    digest = hashlib.sha256(config.SECRET_KEY.encode()).digest()
+def _fernet_for(key: str) -> Fernet:
+    digest = hashlib.sha256(key.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def cloud_secret_keys() -> list[str]:
+    """Keys that may decrypt stored cloud secrets, newest first.
+
+    The first entry also encrypts. By default that is SECRET_KEY, so nothing
+    changes for existing installs — but rotating SECRET_KEY would otherwise
+    make every stored link token undecryptable, leaving the link dead while it
+    still reported "connected". Two escape hatches:
+
+    - CLOUD_SECRET_KEY pins cloud secrets to their own key, so SECRET_KEY can
+      be rotated freely without touching them.
+    - PREVIOUS_SECRET_KEYS (comma separated) are tried on decrypt only, so a
+      rotation can be rolled out without re-linking. Secrets are re-encrypted
+      with the current key as they are read (see rewrap_cloud_secret), so the
+      old keys can be dropped once every link has synced.
+    """
+    keys: list[str] = []
+    for candidate in (config.CLOUD_SECRET_KEY, config.SECRET_KEY, *config.PREVIOUS_SECRET_KEYS):
+        if candidate and candidate not in keys:
+            keys.append(candidate)
+    return keys
 
 
 def encrypt_cloud_secret(value: str | None) -> str | None:
     if not value:
         return None
-    return _cloud_fernet().encrypt(value.encode()).decode()
+    return _fernet_for(cloud_secret_keys()[0]).encrypt(value.encode()).decode()
 
 
 def decrypt_cloud_secret(value: str | None) -> str | None:
     if not value:
         return None
-    try:
-        return _cloud_fernet().decrypt(value.encode()).decode()
-    except (InvalidToken, UnicodeDecodeError):
+    for key in cloud_secret_keys():
+        try:
+            return _fernet_for(key).decrypt(value.encode()).decode()
+        except (InvalidToken, UnicodeDecodeError):
+            continue
+    return None
+
+
+def rewrap_cloud_secret(value: str | None) -> str | None:
+    """Re-encrypt a secret under the current key, or None if already current.
+
+    Lets a caller that holds a database session migrate stored secrets after a
+    key change, without asking the user to re-link.
+    """
+    if not value:
         return None
+    keys = cloud_secret_keys()
+    try:
+        _fernet_for(keys[0]).decrypt(value.encode())
+        return None  # already encrypted with the current key
+    except (InvalidToken, UnicodeDecodeError):
+        pass
+    plaintext = decrypt_cloud_secret(value)
+    if plaintext is None:
+        return None
+    return encrypt_cloud_secret(plaintext)
 
 
 def cloud_api_url(provider_url: str, path: str) -> str:

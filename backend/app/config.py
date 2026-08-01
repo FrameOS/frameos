@@ -42,6 +42,16 @@ class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
     SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_urlsafe(32)
+    # Cloud link secrets are encrypted with CLOUD_SECRET_KEY when set, else
+    # SECRET_KEY. Set it to decouple them, so SECRET_KEY can be rotated without
+    # killing the cloud link. PREVIOUS_SECRET_KEYS (comma separated) are tried
+    # on decrypt only; stored secrets are re-encrypted with the current key as
+    # they are read, so old keys can be dropped after a sync cycle.
+    # See docs/cloud-link.md.
+    CLOUD_SECRET_KEY = os.environ.get('CLOUD_SECRET_KEY') or ''
+    PREVIOUS_SECRET_KEYS = [
+        key.strip() for key in (os.environ.get('PREVIOUS_SECRET_KEYS') or '').split(',') if key.strip()
+    ]
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
