@@ -832,6 +832,13 @@ export interface CloudStatus {
   } | null
   /** True unless cloud login is enforced (local passwords disabled). */
   local_fallback_enabled?: boolean
+  /** Local switches: the backup scopes come with the account, but nothing is
+   * uploaded until these are turned on. */
+  backup_scenes_enabled?: boolean
+  backup_frames_enabled?: boolean
+  /** Short id (e.g. "AB12-CD34") of the key sealing every backup payload;
+   * null until the key is generated with the first backup. */
+  backup_key_fingerprint?: string | null
   /** A pending feature change awaiting owner approval on the provider. */
   upgrade?: {
     user_code: string | null
@@ -856,6 +863,25 @@ export interface CloudLoginOptions {
   provider_url: string | null
   local_login_enabled: boolean
   setup_mode: boolean
+}
+
+/** GET /api/cloud/backup-key: the recovery code for the account backup key. */
+export interface CloudBackupKey {
+  fingerprint: string
+  recovery_code: string
+}
+
+/** One backup as listed by GET /api/cloud/backups (proxied from the provider) */
+export interface CloudBackupItem {
+  id: string
+  kind: 'templates' | 'frames' | string
+  item_key: string
+  name: string | null
+  size_bytes: number
+  sha256: string
+  content_type: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface SSHKeyEntry {

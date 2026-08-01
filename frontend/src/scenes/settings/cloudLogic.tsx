@@ -2,10 +2,11 @@ import { actions, afterMount, kea, listeners, path, reducers, selectors } from '
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 
-import { CloudStatus } from '../../types'
+import { CloudBackupItem, CloudBackupKey, CloudStatus } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { inHassioIngress } from '../../utils/inHassioIngress'
+import { getCurrentProjectId } from '../../utils/projectApi'
 
 import type { cloudLogicType } from './cloudLogicType'
 
@@ -18,12 +19,16 @@ export interface CloudProviderForm {
  *
  * Only security-sensitive features ('toggle') need a cloud-approved opt-in;
  * everything that is safe comes with the cloud account itself: 'locked'
- * renders an always-on checkbox. */
+ * renders an always-on checkbox, 'local' is an instant local on/off switch
+ * (the scope is granted either way, the switch controls what gets uploaded). */
 export const CLOUD_FEATURES: {
   scope: string
   label: string
   description: string
-  control: 'toggle' | 'locked'
+  control: 'toggle' | 'locked' | 'local'
+  /** For 'local' controls: which /api/cloud/backup-features switches to flip.
+   * 'all' flips both — one user-facing switch covers frame + scene backups. */
+  localKey?: 'scenes' | 'frames' | 'all'
 }[] = [
   {
     scope: 'store:publish',
@@ -32,16 +37,15 @@ export const CLOUD_FEATURES: {
     control: 'locked',
   },
   {
-    scope: 'backup:scenes',
-    label: 'Scene backups',
-    description: 'Back up your scenes into the cloud',
-    control: 'locked',
-  },
-  {
+    // One switch for both backup kinds: a frame backup without its scenes
+    // would be useless, and splitting "frames" from "scenes" only confused.
+    // Under the hood this covers the backup:frames + backup:scenes scopes.
     scope: 'backup:frames',
-    label: 'Frame backups',
-    description: 'Back up frame settings + scenes automatically after each deploy',
-    control: 'locked',
+    label: 'Cloud backups',
+    description:
+      'Back up your frames (settings + scenes) and scene library, end-to-end encrypted — frames automatically after each deploy',
+    control: 'local',
+    localKey: 'all',
   },
   {
     scope: 'auth:login',
@@ -55,10 +59,9 @@ export const CLOUD_FEATURES: {
 const TOGGLED_FEATURE_SCOPES = CLOUD_FEATURES.filter(({ control }) => control === 'toggle').map(({ scope }) => scope)
 
 /** Scopes that come with every connected cloud account; requested at link
- * time and silently kept on every scope change. */
-export const INCLUDED_FEATURE_SCOPES = CLOUD_FEATURES.filter(({ control }) => control !== 'toggle').map(
-  ({ scope }) => scope
-)
+ * time and silently kept on every scope change. Explicit because the merged
+ * "Cloud backups" switch represents two scopes. */
+export const INCLUDED_FEATURE_SCOPES = ['store:publish', 'backup:scenes', 'backup:frames']
 
 /** The features this runtime can offer. Home Assistant ingress has no login
  * of its own (Home Assistant authenticates the user), so there is no
@@ -99,8 +102,17 @@ export const cloudLogic = kea<cloudLogicType>([
     linkCloudIdentity: true,
     unlinkCloudIdentity: true,
     setLocalFallback: (enabled: boolean) => ({ enabled }),
+    setBackupFeature: (key: 'scenes' | 'frames' | 'all', enabled: boolean) => ({ key, enabled }),
+    loadCloudBackups: true,
+    backupAllToCloud: true,
+    restoreCloudBackup: (backupId: string) => ({ backupId }),
+    deleteCloudBackup: (backupId: string) => ({ backupId }),
+    setBackupActionMessage: (message: string | null) => ({ message }),
+    showBackupKey: true,
+    hideBackupKey: true,
+    importBackupKey: (recoveryCode: string) => ({ recoveryCode }),
   }),
-  loaders(() => ({
+  loaders(({ actions }) => ({
     cloudStatus: [
       null as CloudStatus | null,
       {
@@ -110,6 +122,33 @@ export const cloudLogic = kea<cloudLogicType>([
             throw new Error(await cloudErrorMessage(response, 'Failed to load FrameOS Cloud status'))
           }
           return (await response.json()) as CloudStatus
+        },
+      },
+    ],
+    cloudBackups: [
+      null as CloudBackupItem[] | null,
+      {
+        loadCloudBackups: async () => {
+          const response = await apiFetch('/api/cloud/backups')
+          if (!response.ok) {
+            actions.setCloudError(await cloudErrorMessage(response, 'Failed to list cloud backups'))
+            return null
+          }
+          const payload = await response.json()
+          return (payload.backups ?? []) as CloudBackupItem[]
+        },
+      },
+    ],
+    cloudBackupKey: [
+      null as CloudBackupKey | null,
+      {
+        showBackupKey: async () => {
+          const response = await apiFetch('/api/cloud/backup-key')
+          if (!response.ok) {
+            actions.setCloudError(await cloudErrorMessage(response, 'Could not load the backup key'))
+            return null
+          }
+          return (await response.json()) as CloudBackupKey
         },
       },
     ],
@@ -129,6 +168,7 @@ export const cloudLogic = kea<cloudLogicType>([
         connectCloud: () => null,
         disconnectCloud: () => null,
         loadCloudStatus: () => null,
+        backupAllToCloud: () => null,
       },
     ],
     isCloudConnecting: [
@@ -163,6 +203,52 @@ export const cloudLogic = kea<cloudLogicType>([
         applyFeatureChanges: () => true,
         loadCloudStatusSuccess: () => false,
         setCloudError: () => false,
+      },
+    ],
+    isCloudBackupRunning: [
+      false,
+      {
+        backupAllToCloud: () => true,
+        loadCloudBackupsSuccess: () => false,
+        loadCloudBackupsFailure: () => false,
+        setCloudError: () => false,
+      },
+    ],
+    restoringBackupId: [
+      null as string | null,
+      {
+        restoreCloudBackup: (_, { backupId }) => backupId,
+        loadCloudBackupsSuccess: () => null,
+        loadCloudBackupsFailure: () => null,
+        setCloudError: () => null,
+      },
+    ],
+    deletingBackupId: [
+      null as string | null,
+      {
+        deleteCloudBackup: (_, { backupId }) => backupId,
+        loadCloudBackupsSuccess: () => null,
+        loadCloudBackupsFailure: () => null,
+        setCloudError: () => null,
+      },
+    ],
+    // A green confirmation under the backup list ("Restored frame …").
+    backupActionMessage: [
+      null as string | null,
+      {
+        setBackupActionMessage: (_, { message }) => message,
+        restoreCloudBackup: () => null,
+        deleteCloudBackup: () => null,
+        backupAllToCloud: () => null,
+        setCloudError: () => null,
+      },
+    ],
+    backupKeyVisible: [
+      false,
+      {
+        showBackupKeySuccess: () => true,
+        hideBackupKey: () => false,
+        disconnectCloud: () => false,
       },
     ],
   }),
@@ -211,6 +297,15 @@ export const cloudLogic = kea<cloudLogicType>([
           featureDraft.some((scope) => !grantedFeatures.includes(scope))),
     ],
     featureUpgradePending: [(s) => [s.cloudStatus], (cloudStatus): boolean => Boolean(cloudStatus?.upgrade)],
+    hasBackupScope: [
+      (s) => [s.grantedScopes],
+      (scopes): boolean => scopes.includes('backup:scenes') || scopes.includes('backup:frames'),
+    ],
+    // The local switches: what actually gets uploaded.
+    anyBackupEnabled: [
+      (s) => [s.cloudStatus],
+      (cloudStatus): boolean => Boolean(cloudStatus?.backup_scenes_enabled || cloudStatus?.backup_frames_enabled),
+    ],
   }),
   listeners(({ actions, values }) => ({
     connectCloud: async () => {
@@ -333,6 +428,131 @@ export const cloudLogic = kea<cloudLogicType>([
         return
       }
       actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    setBackupFeature: async ({ key, enabled }) => {
+      // A purely local switch: the scope stays granted, this only controls
+      // whether anything is actually uploaded. 'all' flips both kinds — the
+      // UI shows one switch for frame + scene backups.
+      const body = key === 'all' ? { scenes: enabled, frames: enabled } : { [key]: enabled }
+      const response = await apiFetch('/api/cloud/backup-features', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not change the backup settings'))
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    backupAllToCloud: async () => {
+      // Push every frame and template of the current project. Frames are also
+      // backed up automatically after each deploy when the scope is granted.
+      const failures: string[] = []
+      let attempted = 0
+      let succeeded = 0
+
+      const backupItems = async (
+        items: { id: string | number; name?: string }[],
+        kind: 'frame' | 'scene',
+        endpoint: string,
+        idField: 'frame_id' | 'template_id'
+      ): Promise<void> => {
+        for (const item of items) {
+          attempted += 1
+          const label = item.name || `${kind} ${item.id}`
+          try {
+            const response = await apiFetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ [idField]: item.id }),
+            })
+            if (response.ok) {
+              succeeded += 1
+            } else {
+              failures.push(`${label}: ${await cloudErrorMessage(response, `Could not back up ${kind} ${item.id}`)}`)
+            }
+          } catch (error) {
+            failures.push(`${label}: ${error instanceof Error ? error.message : `Could not back up ${kind}`}`)
+          }
+        }
+      }
+
+      const scopes = values.grantedScopes
+      if (scopes.includes('backup:frames') && values.cloudStatus?.backup_frames_enabled) {
+        try {
+          const framesResponse = await apiFetch('/api/frames')
+          if (!framesResponse.ok) {
+            failures.push(await cloudErrorMessage(framesResponse, 'Could not list frames to back up'))
+          } else {
+            const frames = (await framesResponse.json()).frames ?? []
+            await backupItems(frames, 'frame', '/api/cloud/backups/frames', 'frame_id')
+          }
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'Could not list frames to back up')
+        }
+      }
+      if (scopes.includes('backup:scenes') && values.cloudStatus?.backup_scenes_enabled) {
+        try {
+          const templatesResponse = await apiFetch('/api/templates')
+          if (!templatesResponse.ok) {
+            failures.push(await cloudErrorMessage(templatesResponse, 'Could not list scenes to back up'))
+          } else {
+            const templates = (await templatesResponse.json()) ?? []
+            await backupItems(templates, 'scene', '/api/cloud/backups/templates', 'template_id')
+          }
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'Could not list scenes to back up')
+        }
+      }
+
+      if (failures.length > 0) {
+        const result = attempted > 0 ? `Backed up ${succeeded} of ${attempted} items. ` : ''
+        const remaining = failures.length > 3 ? `; plus ${failures.length - 3} more failure(s)` : ''
+        actions.setCloudError(`${result}${failures.slice(0, 3).join('; ')}${remaining}`)
+      }
+      actions.loadCloudBackups()
+    },
+    restoreCloudBackup: async ({ backupId }) => {
+      const projectId = await getCurrentProjectId()
+      const response = await apiFetch('/api/cloud/backups/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backup_id: backupId, project_id: projectId }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Restore failed'))
+        return
+      }
+      const payload = await response.json().catch(() => ({}))
+      actions.loadCloudBackups()
+      actions.setBackupActionMessage(
+        payload.kind === 'frame'
+          ? 'Restored as a new frame in this project — machine credentials were regenerated, so re-enter SSH details before deploying.'
+          : 'Restored as a new scene in this project.'
+      )
+    },
+    deleteCloudBackup: async ({ backupId }) => {
+      const response = await apiFetch(`/api/cloud/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not delete the backup'))
+        return
+      }
+      actions.loadCloudBackups()
+      actions.setBackupActionMessage('Backup deleted.')
+    },
+    importBackupKey: async ({ recoveryCode }) => {
+      const response = await apiFetch('/api/cloud/backup-key/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recovery_code: recoveryCode }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not import the recovery key'))
+        return
+      }
+      actions.loadCloudStatus()
+      actions.setBackupActionMessage('Backup key imported — encrypted backups made with this key can now be restored.')
     },
   })),
   afterMount(({ actions }) => {

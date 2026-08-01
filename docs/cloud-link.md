@@ -310,18 +310,44 @@ One live copy exists per `(account, kind, item_key)`; a new save replaces it.
 Providers should cap blob size (cloud.frameos.net: 8 MB) and count per
 account, and answer `413 backup_too_large` / `403 backup_quota_exceeded`.
 
-Payload formats (defined FrameOS-side, opaque to the provider):
+Payload formats (defined FrameOS-side, opaque to the provider). Every upload
+is an **end-to-end encrypted envelope** the provider cannot read:
+
+```json
+{
+  "format": "frameos-encrypted-backup-v1",
+  "key_fingerprint": "AB12-CD34",
+  "saved_at": "…",
+  "meta": { "name": "Kitchen frame", "device": "…", "scenes": ["…"] },
+  "sealed_base64": "…"
+}
+```
+
+`meta` is a curated plaintext manifest (enough to know what you would
+restore, never configuration); `sealed_base64` is the inner payload sealed to
+the account backup key (X25519 + ChaCha20-Poly1305, see
+`backend/app/utils/backup_crypto.py`). The key is generated on first backup;
+the backend keeps the private key (it already stores every secret in
+plaintext) and the user saves the `FRBK1-…` recovery code — after a
+reinstall, importing that code (`POST /api/cloud/backup-key/import`) makes
+old backups restorable again. Envelopes from before encryption shipped
+(plain inner payloads) still restore.
+
+The sealed inner payloads:
 
 - `templates`: the scene/template interchange zip (`{name}/template.json`,
   `scenes.json`, `image.jpg`) — the same file the local export produces. (The
   kind string predates the templates→scenes rename; the scope is
   `backup:scenes` and the UI says "scene".)
 - `frames`: JSON `{"format": "frameos-frame-backup-v1", "saved_at", "project_name", "frame": {…}}`
-  where `frame` is the frame's metadata + scene JSON **with all local secrets
-  stripped** (SSH credentials, access keys, TLS material, wifi passwords —
-  see `backend/app/utils/cloud_backup.py`). Restores regenerate fresh local
-  credentials. Frame backups are pushed automatically after each successful
-  deploy while the scope is granted **and** the local switch is on.
+  where `frame` is the frame's metadata + scene JSON. Because the payload is
+  encrypted, user-level secrets (wifi passwords, mountpoint credentials, app
+  API keys, upload headers) are **kept** so restores actually work; only
+  per-install machine credentials (SSH, access keys, TLS material, admin
+  auth, agent shared secret) are stripped and regenerated on restore — see
+  `backend/app/utils/cloud_backup.py`. Frame backups are pushed automatically
+  after each successful deploy while the scope is granted **and** the local
+  switch is on.
 
 The scopes are granted with the link, but they are a permission only: FrameOS
 uploads nothing until the user turns the matching backup switch on (Settings →

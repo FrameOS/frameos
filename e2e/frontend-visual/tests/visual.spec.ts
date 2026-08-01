@@ -19,6 +19,7 @@ for (const visualCase of visualCases) {
           if (visualCase.authenticated !== false) {
             await login(page)
           }
+          await (variant.setup ?? visualCase.setup)?.(page)
           await page.goto(visualCase.path, { waitUntil: 'domcontentloaded' })
           await settleForScreenshot(page)
           await visualCase.ready?.(page)
