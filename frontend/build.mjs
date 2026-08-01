@@ -102,7 +102,7 @@ function writeEditorHtml(outputs = {}) {
   let entryJs = './static/editor.js'
   let entryCss = './static/editor.css'
   for (const key of Object.keys(outputs)) {
-    if (/^dist-editor\/static\/(editor-[A-Z0-9]+\.(js|css)|monaco\/(editor|json|css|html|ts)\.worker-[A-Z0-9]+\.js)$/.test(key)) {
+    if (/^dist-editor\/static\/((editor|mount)-[A-Z0-9]+\.(js|css)|monaco\/(editor|json|css|html|ts)\.worker-[A-Z0-9]+\.js)$/.test(key)) {
       createHashlessEntrypoints(__dirname, [key])
       if (/static\/editor-[A-Z0-9]+\.js$/.test(key)) {
         entryJs = `./static/${path.basename(key)}`
@@ -131,6 +131,11 @@ function writeEditorHtml(outputs = {}) {
       document.documentElement.style.colorScheme = theme
     </script>
     <link rel="stylesheet" href="${entryCss}" />
+    <style>
+      /* The editor root is h-full (it also direct-mounts into host-sized
+         containers via static/mount.js); give it a full height chain here. */
+      html, body, #root { height: 100%; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
@@ -169,6 +174,7 @@ await buildInParallel(
       // get their shared chunks copied in by copyMonacoWorkerChunks).
       entryPoints: [
         { in: 'src/embed/editor.tsx', out: 'editor' },
+        { in: 'src/embed/mount.tsx', out: 'mount' },
         { in: 'src/monaco/editor.worker.ts', out: 'monaco/editor.worker' },
         { in: 'src/monaco/json.worker.ts', out: 'monaco/json.worker' },
         { in: 'src/monaco/css.worker.ts', out: 'monaco/css.worker' },

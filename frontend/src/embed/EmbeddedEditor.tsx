@@ -335,7 +335,7 @@ function EmbeddedEditorBody({
 
   return (
     <div
-      className={clsx('frameos-app-shell flex h-screen flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}
+      className={clsx('frameos-app-shell flex h-full flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}
     >
       {scenes.length > 1 ? (
         <div className={clsx('flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1', divider)}>

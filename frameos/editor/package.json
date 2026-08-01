@@ -25,6 +25,10 @@
       "types": "./embed.d.ts",
       "import": "./embed.js"
     },
+    "./mount": {
+      "types": "./mount.d.ts",
+      "import": "./dist/static/mount.js"
+    },
     "./dist/*": "./dist/*",
     "./package.json": "./package.json"
   },
@@ -33,6 +37,7 @@
     "!dist/**/*.map",
     "embed.js",
     "embed.d.ts",
+    "mount.d.ts",
     "demo.html",
     "README.md"
   ],
