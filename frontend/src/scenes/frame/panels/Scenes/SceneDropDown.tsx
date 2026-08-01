@@ -8,6 +8,7 @@ import {
   ArrowPathIcon,
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
@@ -15,6 +16,8 @@ import {
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
+import { cloudDriveLogic } from '../Templates/cloudDriveLogic'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 
@@ -45,7 +48,8 @@ export function SceneDropDown({
   const { scenes, sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, updateSceneFromRepo } =
     useActions(scenesLogic({ frameId }))
-  const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
+  const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
+  const { hasDriveScope } = useValues(cloudDriveLogic)
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -124,6 +128,23 @@ export function SceneDropDown({
             saveAsTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),
           icon: <FolderPlusIcon className="w-5 h-5" />,
         },
+        // Publishing goes through the backend's cloud link — not available on
+        // the frame's own admin page.
+        isInFrameAdminMode()
+          ? null
+          : {
+              label: 'Save to private cloud',
+              onClick: () => {
+                if (!hasDriveScope) {
+                  window.alert(
+                    'FrameOS Cloud is not connected (or scene publishing is disabled). Enable it under Settings → FrameOS Cloud.'
+                  )
+                  return
+                }
+                saveAsCloudTemplate({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) })
+              },
+              icon: <CloudArrowUpIcon className="w-5 h-5" />,
+            },
         {
           label: 'Download as .zip',
           onClick: () => saveAsZip({ name: scene.name ?? '', exportScenes: findConnectedScenes(scenes, scene.id) }),

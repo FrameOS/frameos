@@ -31,6 +31,7 @@ from . import api_project, api_user, api_open
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
+CLOUD_STORE_REPOSITORY_MARKER = "@system/cloud_store_repository_added"
 
 SYSTEM_REPOSITORIES_PATH = Path(__file__).resolve().parents[3] / "repo" / "scenes"
 
@@ -282,6 +283,53 @@ async def get_repositories(db: Session = Depends(get_db)):
                 db.delete(db.query(Settings).filter_by(project_id=project_id, key="@system/repository_gallery_done").first())
 
             db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
+            db.commit()
+
+        # Seed the connected provider's store once per provider. The marker
+        # records its URL so changing providers replaces the old store, while
+        # deleting the repository remains respected until the provider changes.
+        from app.models.cloud import current_cloud_backend_link
+
+        link = current_cloud_backend_link(db)
+        if link is not None and link.status == "connected" and link.provider_url:
+            store_url = link.provider_url.rstrip("/") + "/api/store/repository.json"
+            marker = db.query(Settings).filter_by(
+                project_id=project_id, key=CLOUD_STORE_REPOSITORY_MARKER
+            ).first()
+            marker_url = marker.value if marker is not None and isinstance(marker.value, str) else None
+            should_seed = marker is None or (marker_url is not None and marker_url != store_url)
+
+            if marker is not None and marker_url in (None, "true"):
+                # Migrate the old boolean marker. An absent repository is
+                # ambiguous and may have been explicitly deleted, so preserve
+                # that choice. An old provider repository makes a URL change
+                # observable and safe to migrate.
+                legacy_repositories = db.query(Repository).filter(
+                    Repository.project_id == project_id,
+                    Repository.url.like("%/api/store/repository.json"),
+                ).all()
+                should_seed = bool(legacy_repositories) and all(repo.url != store_url for repo in legacy_repositories)
+                for repository in legacy_repositories:
+                    if repository.url != store_url:
+                        db.delete(repository)
+                marker.value = store_url
+            elif marker is not None and marker_url != store_url:
+                old_repository = db.query(Repository).filter_by(project_id=project_id, url=marker_url).first()
+                if old_repository is not None:
+                    db.delete(old_repository)
+                marker.value = store_url
+
+            if marker is None:
+                marker = Settings(project_id=project_id, key=CLOUD_STORE_REPOSITORY_MARKER, value=store_url)
+                db.add(marker)
+
+            if should_seed and not db.query(Repository).filter_by(project_id=project_id, url=store_url).first():
+                store_repository = Repository(project_id=project_id, name="FrameOS Cloud store", url=store_url)
+                try:
+                    await store_repository.update_templates()
+                except Exception:  # noqa: BLE001 — provider may be unreachable; seed anyway
+                    pass
+                db.add(store_repository)
             db.commit()
 
         repositories = project_query(db, Repository).all()
