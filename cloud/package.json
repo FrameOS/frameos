@@ -3,21 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-only",
-  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "admin:grant": "scripts/grant-superadmin.sh",
     "dev": "pnpm --filter @frameos-cloud/auth-web dev",
-    "build": "pnpm --filter @frameos-cloud/auth-web build",
+    "build": "turbo run build --filter=@frameos-cloud/auth-web",
     "db:cleanup": "scripts/db-cleanup.sh",
     "db:migrate": "scripts/db-migrate.sh",
     "db:setup": "scripts/db-setup.sh",
     "deploy:prod": "scripts/deploy.sh",
-    "editor:build": "scripts/build-editor.sh",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "lint": "turbo run lint --filter='@frameos-cloud/*'",
+    "test": "turbo run test --filter='@frameos-cloud/*'",
     "test:integration": "pnpm --filter @frameos-cloud/auth-web test:integration",
-    "typecheck": "pnpm -r typecheck",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "typecheck": "turbo run typecheck --filter='@frameos-cloud/*'",
+    "verify": "turbo run lint typecheck test build --filter='@frameos-cloud/*'"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

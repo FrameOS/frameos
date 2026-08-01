@@ -56,12 +56,12 @@ Decided alongside that design, and since carried out (details in the doc):
 - Relicensed **AGPL-3.0** and merged into the `frameos` monorepo as
   `cloud/` (2026-07), on the way to sharing the existing frontend as a
   third wrapper bundle ("fourth adapter" of the repo-root
-  `docs/api-triality.md`). The editor bundle is built directly from
-  `frameos/editor` in this repo (`pnpm editor:build`; vendored tgz gone);
-  `frameos-wasm` — imported code, not just assets — comes from npm
-  (published from this repo) with the old local patch upstreamed and
-  dropped. Still pending from the merge: unifying the pnpm workspaces,
-  after which wasm can be a workspace dependency too.
+  `docs/api-triality.md`). The workspaces are unified: one root lockfile,
+  `frameos-wasm` and `frameos-editor` as `workspace:` dependencies, and
+  Turborepo orchestrating the cross-package builds (vendored tgz and wasm
+  patch long gone). Still pending: the standalone-bundle production deploy
+  (docs/deployment.md, "Monorepo cutover") — until then deploys run from
+  the pre-merge private repo.
 - **No MIT protocol carve-out.** One license everywhere; the wire contract
   stays as public documentation only, with an explicit note that
   independent implementations need no permission from us.

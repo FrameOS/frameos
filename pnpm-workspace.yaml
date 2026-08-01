@@ -3,3 +3,14 @@ packages:
   - frameos/frontend
   - frameos/wasm
   - frameos/editor
+  - cloud
+  - cloud/apps/*
+  - cloud/packages/*
+
+overrides:
+  csstype: 3.2.3
+
+packageExtensions:
+  kea-forms@*:
+    peerDependencies:
+      typescript: ">=5.0.0"

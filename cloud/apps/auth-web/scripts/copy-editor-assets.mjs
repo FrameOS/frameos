@@ -1,13 +1,13 @@
-// The frameos-editor bundle is built from this monorepo (frontend/dist-editor,
-// snapshotted to frameos/editor/dist — run `pnpm editor:build` from cloud/),
-// served as-is from public/ (gitignored), and embedded in an iframe — the
-// iframe keeps the editor's global stylesheet and React 18 bundle isolated
-// from this app. The modal talks to it over the documented postMessage
-// protocol. See src/components/SceneEditorModal.tsx.
+// The frameos-editor bundle is the workspace package frameos/editor (built
+// from frontend/dist-editor by `turbo build`), served as-is from public/
+// (gitignored) and embedded in an iframe — the iframe keeps the editor's
+// global stylesheet and bundled runtime isolated from this app. The modal
+// talks to it over the documented postMessage protocol. See
+// src/components/SceneEditorModal.tsx.
 //
-// When the monorepo build output is absent (CI, or the production server,
-// where deploy.sh ships prebuilt assets inside the archive), existing assets
-// in public/ are kept and nothing fails.
+// When the package's dist is absent (e.g. the production server, where the
+// deploy ships prebuilt assets), existing assets in public/ are kept and
+// nothing fails.
 /* global console, process */
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -16,16 +16,22 @@ import { fileURLToPath } from "node:url";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(join(appDir, "package.json"));
-const editorDist = join(appDir, "..", "..", "..", "frameos", "editor", "dist");
+let editorDist = null;
+try {
+  editorDist = join(dirname(require.resolve("frameos-editor/package.json")), "dist");
+} catch {
+  // Package not installed (e.g. production bundle) — fall through to the
+  // keep-existing-assets path below.
+}
 const target = join(appDir, "public", "frameos-editor");
 
-if (!existsSync(join(editorDist, "index.html"))) {
+if (!editorDist || !existsSync(join(editorDist, "index.html"))) {
   if (existsSync(join(target, "index.html"))) {
     console.log(`No editor build at ${editorDist}; keeping existing assets in ${target}`);
   } else {
     console.warn(
       `No editor build at ${editorDist} and no existing assets in ${target}; ` +
-        "the scene editor will not load. Run `pnpm editor:build` from cloud/ to build it.",
+        "the scene editor will not load. Run `turbo run build --filter=frameos-editor`.",
     );
   }
   process.exit(0);

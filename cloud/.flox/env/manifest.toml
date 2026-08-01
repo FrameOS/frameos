@@ -44,22 +44,24 @@ on-activate = '''
   unset NVM_BIN NVM_INC
   export PATH="$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}"
 
-  workspace_files="package.json pnpm-workspace.yaml"
-  for manifest in apps/*/package.json packages/*/package.json services/*/package.json; do
+  # The pnpm workspace root (lockfile, workspace config) is the monorepo
+  # root one level up; pnpm install from here operates on that workspace.
+  workspace_files="package.json ../package.json ../pnpm-workspace.yaml"
+  for manifest in apps/*/package.json packages/*/package.json; do
     if [ -f "$manifest" ]; then
       workspace_files="$workspace_files $manifest"
     fi
   done
 
-  if [ -f pnpm-lock.yaml ]; then
-    workspace_files="$workspace_files pnpm-lock.yaml"
+  if [ -f ../pnpm-lock.yaml ]; then
+    workspace_files="$workspace_files ../pnpm-lock.yaml"
   fi
 
   js_workspace_hash="$(sha256sum $workspace_files | sha256sum | awk '{print $1}')"
   js_stamp="$FRAMEOS_CLOUD_FLOX_CACHE_DIR/pnpm-workspace.sha256"
-  if [ ! -f node_modules/.modules.yaml ] || [ ! -f "$js_stamp" ] || [ "$(cat "$js_stamp")" != "$js_workspace_hash" ]; then
-    echo "Syncing frameos-cloud pnpm workspace dependencies..."
-    if [ -f pnpm-lock.yaml ] && [ "${CI:-}" = "1" ]; then
+  if [ ! -f ../node_modules/.modules.yaml ] || [ ! -f "$js_stamp" ] || [ "$(cat "$js_stamp")" != "$js_workspace_hash" ]; then
+    echo "Syncing pnpm workspace dependencies..."
+    if [ -f ../pnpm-lock.yaml ] && [ "${CI:-}" = "1" ]; then
       pnpm install --frozen-lockfile
     else
       pnpm install

@@ -25,7 +25,7 @@ type SceneJson = { id: string } & Record<string, unknown>;
 
 // Owner scene editing via the embedded FrameOS editor: the editor bundle
 // (copied to /frameos-editor by scripts/copy-editor-assets.mjs) runs in an
-// iframe — isolating its global stylesheet and React 18 runtime from this
+// iframe — isolating its global stylesheet and bundled runtime from this
 // app — and this modal talks to it over its documented postMessage protocol
 // (see the frameos-editor package README). Saving publishes the edited
 // scenes as a new immutable version.

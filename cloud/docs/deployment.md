@@ -45,19 +45,26 @@ Deploy the pushed HEAD with:
 pnpm deploy:prod
 ```
 
-This streams a tar of `HEAD` (the `cloud/` subtree) into
-`/usr/local/bin/frameos-cloud-update --archive -` on the server, which swaps
-`/opt/frameos-cloud` (previous release kept at `/opt/frameos-cloud.previous`
-for rollback), runs `pnpm install --frozen-lockfile`, `scripts/db-migrate.sh`,
-builds, and restarts the service.
+**Monorepo cutover — pending.** The pre-unification flow streamed a tar of
+the `cloud/` subtree into `/usr/local/bin/frameos-cloud-update --archive -`,
+which swapped `/opt/frameos-cloud` (previous release kept at
+`/opt/frameos-cloud.previous` for rollback), ran
+`pnpm install --frozen-lockfile`, `scripts/db-migrate.sh`, built, and
+restarted the service. Since the workspace unification there is no
+cloud-local lockfile and `workspace:` dependencies resolve against the
+monorepo, so that server contract cannot work from this checkout:
+`pnpm deploy:prod` refuses to run, and production deploys continue from the
+pre-merge private repository until cutover.
 
-The scene editor bundle is built from this monorepo, not fetched from npm:
-run `pnpm editor:build` (full frontend build at the repo root, snapshotted to
-`frameos/editor/dist`) followed by a local `pnpm build` so the assets land in
-`apps/auth-web/public/frameos-editor`. `deploy:prod` refuses to run without
-them and appends them to the archive — the server never builds the editor and
-keeps whatever assets the archive ships (see
-`apps/auth-web/scripts/copy-editor-assets.mjs`).
+The planned replacement builds locally and ships a self-contained bundle,
+removing pnpm from the server entirely:
+
+1. `turbo run build --filter=@frameos-cloud/auth-web` — builds the
+   frontend, editor, and wasm packages as needed; add
+   `output: "standalone"` to `next.config.ts` as part of this.
+2. Ship `.next/standalone` + `.next/static` + `public/` (including the
+   editor and wasm assets) + `packages/db/drizzle` + `scripts/`.
+3. `frameos-cloud-update` becomes: unpack, run migrations, restart.
 The script refuses to deploy a dirty tree or an unpushed commit, and checks the
 service plus the public login URL afterwards. Override
 `FRAMEOS_CLOUD_DEPLOY_HOST`, `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`, or
