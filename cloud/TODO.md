@@ -51,11 +51,17 @@ Cloud-managed frames (frame lists, frame-linking UI, the "Add frame" flow,
 the WebSocket hub) now **have** a concrete design: see
 `docs/cloud-frames.md`. Build them per that document and its phasing.
 
-Decided alongside that design (details and rationale in the doc):
+Decided alongside that design, and since carried out (details in the doc):
 
-- This repo will be relicensed **AGPL-3.0** and merged into the `frameos`
-  monorepo as `cloud/`, sharing the existing frontend as a third wrapper
-  bundle ("fourth adapter" of `docs/api-triality.md`).
+- Relicensed **AGPL-3.0** and merged into the `frameos` monorepo as
+  `cloud/` (2026-07), on the way to sharing the existing frontend as a
+  third wrapper bundle ("fourth adapter" of the repo-root
+  `docs/api-triality.md`). The workspaces are unified: one root lockfile,
+  `frameos-wasm` and `frameos-editor` as `workspace:` dependencies, and
+  Turborepo orchestrating the cross-package builds (vendored tgz and wasm
+  patch long gone). Still pending: the standalone-bundle production deploy
+  (docs/deployment.md, "Monorepo cutover") — until then deploys run from
+  the pre-merge private repo.
 - **No MIT protocol carve-out.** One license everywhere; the wire contract
   stays as public documentation only, with an explicit note that
   independent implementations need no permission from us.

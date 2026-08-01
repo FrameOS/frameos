@@ -1,6 +1,6 @@
 # FrameOS Integration Contract
 
-This document is the cloud-side contract for the AGPL `../frameos` backend and
+This document is the cloud-side contract for the FrameOS backend and
 frontend work. The implementation in that repository should stay generic OIDC
 and device-flow oriented; it must not depend on private FrameOS Cloud internals.
 

@@ -567,7 +567,11 @@ export interface SceneNodeData {
 export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData | SceneNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
-export type DiagramEdge = Edge<any>
+// Scene edges are serialized JSON and only use custom string edge types, so `label` is
+// narrowed to `string`: React 19 types ReactElement props as `unknown`, which kea-forms'
+// DeepPartial can't recurse into, making the raw `Edge<any>` (whose `label` is a ReactNode)
+// unusable in form value types.
+export type DiagramEdge = Omit<Edge<any>, 'label'> & { label?: string }
 
 export interface HandleType {
   handleId: string
