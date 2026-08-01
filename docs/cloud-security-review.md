@@ -112,8 +112,13 @@ rest are open, ordered by severity, with the attack that motivates them.
   expiry, `last_seen_at` is never read by any query, cleanup never touches
   links, and the backend never auto-disconnects or rotates. Only an explicit
   401 (genuinely revoked) resets it — and that deliberately re-enables local
-  password login. Caveat: changing `SECRET_KEY` silently kills the link (the
-  token cannot be decrypted) while it still displays as connected.
+  password login. The one real footgun — changing `SECRET_KEY` silently killed
+  the link, since the stored token could no longer be decrypted while the UI
+  still showed "connected" — is fixed: `CLOUD_SECRET_KEY` decouples cloud
+  secrets from `SECRET_KEY`, `PREVIOUS_SECRET_KEYS` recovers an already-rotated
+  install (secrets are re-encrypted on the next sync), and an undecryptable
+  token is now reported loudly instead of silently ignored. See
+  `docs/cloud-link.md`.
 - **Can a passwordless user log in if the link is broken?** No, and there is no
   fall-open path: every failure mode (cloud down, 500, timeout, revoked,
   disabled) fails closed, and `not user.password` is checked before the hash
