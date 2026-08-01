@@ -56,15 +56,16 @@ export const baselineDeviceScopes = new Set([
   "frame:link",
 ]);
 
-// Features that come with every cloud account. When a linked client asks to
-// add one of these to an existing link (POST /api/backends/scopes), it is
-// granted without a consent screen — only security-sensitive scopes (login,
-// remote access, telemetry, ...) need the owner's approval.
-export const autoGrantedDeviceScopes = new Set([
-  "backup:frames",
-  "backup:scenes",
-  "store:publish",
-]);
+// Scopes a linked client may add to an existing link (POST /api/backends/scopes)
+// without a consent screen.
+//
+// Deliberately empty. `backup:*` reads and writes every config backup on the
+// account — not just the ones this client pushed — and `store:publish` posts to
+// the public store under the owner's publisher identity. Auto-granting them let
+// any link that the owner had approved for "just the basic cloud connection"
+// silently escalate to both. Additions now always need approval; removals stay
+// free (see the route: only `addedNeedingApproval` triggers consent).
+export const autoGrantedDeviceScopes = new Set<string>([]);
 
 export const allowedDeviceScopes = new Set(
   Object.keys(deviceScopeDescriptions),

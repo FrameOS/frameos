@@ -141,13 +141,23 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_device_code", 400);
   }
 
+  const accessToken = decryptSecret(linkedClient.encryptedRefreshToken);
+
+  // This is the only place the stored copy is ever read, and the device code
+  // backing it is single-use — so drop it now. Keeping it would leave a
+  // decryptable copy of every live link token in the database for the life of
+  // the link, defeating the point of storing only a hash in token_reference.
   await db
     .update(linkedClients)
-    .set({ lastSeenAt: new Date(), updatedAt: new Date() })
+    .set({
+      encryptedRefreshToken: null,
+      lastSeenAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(linkedClients.id, linkedClient.id));
 
   return NextResponse.json({
-    access_token: decryptSecret(linkedClient.encryptedRefreshToken),
+    access_token: accessToken,
     // Who approved the link, in login-handoff claim format, so FrameOS can
     // map its local user to this cloud account right away. Single-use, like
     // the token: the redemption claim above guards both.

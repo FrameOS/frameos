@@ -51,7 +51,10 @@ export async function POST(request: NextRequest) {
   await db
     .update(linkedClients)
     .set({
-      encryptedRefreshToken: credential.encryptedToken,
+      // The rotated token is returned in this response and nothing can hand it
+      // out again (the device code was redeemed long ago), so keep no
+      // decryptable copy — see the same reasoning in device/poll.
+      encryptedRefreshToken: null,
       lastTokenRotationAt: new Date(),
       previousTokenExpiresAt: new Date(
         Date.now() + rotationGraceWindowSeconds * 1000,
