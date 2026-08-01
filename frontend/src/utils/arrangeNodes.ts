@@ -1,6 +1,5 @@
 import dagre from '@dagrejs/dagre'
-import type { Edge } from '@reactflow/core/dist/esm/types/edges'
-import type { CodeNodeData, DiagramNode } from '../types'
+import type { CodeNodeData, DiagramEdge, DiagramNode } from '../types'
 
 const FLOW_NODE_SEPARATION = 90
 const FLOW_RANK_SEPARATION = 90
@@ -67,7 +66,7 @@ interface ArrangeNodesOptions {
 
 interface ArrangeGraphResult {
   nodes: DiagramNode[]
-  edges: Edge[]
+  edges: DiagramEdge[]
 }
 
 interface RowItem {
@@ -89,7 +88,7 @@ interface Bounds {
 }
 
 interface BranchLayoutItem {
-  edge: Edge
+  edge: DiagramEdge
   targetPosition: { x: number; y: number }
   row: number
   column: number
@@ -208,7 +207,7 @@ function fieldPathIndexes(handle?: string | null): number[] {
   return Array.from(fieldName.matchAll(/\[(\d+)\]/g)).map((match) => Number(match[1]))
 }
 
-function isFlowEdge(edge: Edge): boolean {
+function isFlowEdge(edge: DiagramEdge): boolean {
   return edge.sourceHandle === 'next' || edge.targetHandle === 'prev' || edge.type === 'appNodeEdge'
 }
 
@@ -450,13 +449,13 @@ function uniqueNodeId(baseId: string, usedNodeIds: Set<string>): string {
   return id
 }
 
-function splitSharedStateNodes(nodes: DiagramNode[], edges: Edge[]): ArrangeGraphResult {
+function splitSharedStateNodes(nodes: DiagramNode[], edges: DiagramEdge[]): ArrangeGraphResult {
   const nodesById = nodes.reduce((acc, node) => {
     acc[node.id] = node
     return acc
   }, {} as Record<string, DiagramNode>)
   const usedNodeIds = new Set(nodes.map((node) => node.id))
-  const edgeOrderByEdge = new WeakMap<Edge, number>()
+  const edgeOrderByEdge = new WeakMap<DiagramEdge, number>()
   edges.forEach((edge, index) => {
     edgeOrderByEdge.set(edge, index)
   })
@@ -476,10 +475,10 @@ function splitSharedStateNodes(nodes: DiagramNode[], edges: Edge[]): ArrangeGrap
     }
     acc[edge.source] = [...(acc[edge.source] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
+  }, {} as Record<string, DiagramEdge[]>)
 
   const clonedNodes: DiagramNode[] = []
-  const replacementSourceByEdge = new WeakMap<Edge, string>()
+  const replacementSourceByEdge = new WeakMap<DiagramEdge, string>()
 
   Object.entries(stateInputEdgesBySource).forEach(([stateNodeId, stateEdges]) => {
     const stateNode = nodesById[stateNodeId]
@@ -490,7 +489,7 @@ function splitSharedStateNodes(nodes: DiagramNode[], edges: Edge[]): ArrangeGrap
     const edgesByTarget = stateEdges.reduce((acc, edge) => {
       acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }, {} as Record<string, Edge[]>)
+    }, {} as Record<string, DiagramEdge[]>)
     const targetGroups = Object.entries(edgesByTarget).sort(
       ([targetA, edgesA], [targetB, edgesB]) =>
         (edgeOrderByEdge.get(edgesA[0]) ?? 0) - (edgeOrderByEdge.get(edgesB[0]) ?? 0) || targetA.localeCompare(targetB)
@@ -537,7 +536,7 @@ function splitSharedStateNodes(nodes: DiagramNode[], edges: Edge[]): ArrangeGrap
 
 export function arrangeSceneGraph(
   nodes: DiagramNode[],
-  edges: Edge[],
+  edges: DiagramEdge[],
   options: ArrangeNodesOptions = {}
 ): ArrangeGraphResult {
   const splitGraph = splitSharedStateNodes(nodes, edges)
@@ -547,7 +546,7 @@ export function arrangeSceneGraph(
   }
 }
 
-export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
+export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
   if (!nodes.length) {
     return nodes
   }
@@ -581,15 +580,15 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
     acc[edge.source] = [...(acc[edge.source] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
+  }, {} as Record<string, DiagramEdge[]>)
   const incomingEdges = edges.reduce((acc, edge) => {
     if (!edge.source || !edge.target) {
       return acc
     }
     acc[edge.target] = [...(acc[edge.target] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
-  const edgeOrderByEdge = new WeakMap<Edge, number>()
+  }, {} as Record<string, DiagramEdge[]>)
+  const edgeOrderByEdge = new WeakMap<DiagramEdge, number>()
   edges.forEach((edge, index) => {
     edgeOrderByEdge.set(edge, index)
   })
@@ -696,7 +695,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
     acc[edge.source] = [...(acc[edge.source] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
+  }, {} as Record<string, DiagramEdge[]>)
   const branchTargetIds = new Set(
     Object.values(branchEdgesBySource).flatMap((sourceEdges) =>
       sourceEdges.length > 1 ? sourceEdges.map((edge) => edge.target) : []
@@ -705,7 +704,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   const incomingFlowEdgesByTarget = orderedFlowEdges.reduce((acc, edge) => {
     acc[edge.target] = [...(acc[edge.target] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
+  }, {} as Record<string, DiagramEdge[]>)
   const nearestBranchRootCache = new Map<string, string | null>()
   const nearestBranchRoot = (nodeId: string, visited: Set<string> = new Set()): string | null => {
     if (nearestBranchRootCache.has(nodeId)) {
@@ -792,7 +791,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
 
   const isSharedAcrossFlowTargets = (nodeId: string): boolean => reachableFlowTargetIds(nodeId).size > 1
 
-  const sortedUniqueInputEdgesForEstimate = (targetId: string, allowedFlowIds?: Set<string>): Edge[] =>
+  const sortedUniqueInputEdgesForEstimate = (targetId: string, allowedFlowIds?: Set<string>): DiagramEdge[] =>
     Array.from(
       (incomingEdges[targetId] ?? [])
         .filter(
@@ -815,7 +814,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
             acc.set(edge.source, edge)
           }
           return acc
-        }, new Map<string, Edge>())
+        }, new Map<string, DiagramEdge>())
         .values()
     )
 
@@ -1095,7 +1094,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       }
       acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }, {} as Record<string, Edge[]>)
+    }, {} as Record<string, DiagramEdge[]>)
 
     const targetByInputId = new Map<string, string>()
     Object.entries(stateInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
@@ -1125,7 +1124,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   const desiredPlacement = (node: DiagramNode, anchorId: string, depth: number): { centerX: number; order: number } => {
     const candidates: { centerX: number; order: number; priority: number }[] = []
     const considerEdge = (
-      edge: Edge,
+      edge: DiagramEdge,
       fixedNodeId: string,
       fixedHandle: string | null | undefined,
       movingHandle: string | null | undefined
@@ -1252,7 +1251,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
 
   const stateInputTargetByNodeId = new Map<string, string>()
 
-  const isLocalInputEdge = (edge: Edge): boolean =>
+  const isLocalInputEdge = (edge: DiagramEdge): boolean =>
     Boolean(
       edge.source &&
         edge.target &&
@@ -1266,9 +1265,9 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
     acc[edge.target] = [...(acc[edge.target] ?? []), edge]
     return acc
-  }, {} as Record<string, Edge[]>)
+  }, {} as Record<string, DiagramEdge[]>)
 
-  const sortedUniqueLocalInputEdges = (targetId: string, allowedFlowIds?: Set<string>): Edge[] =>
+  const sortedUniqueLocalInputEdges = (targetId: string, allowedFlowIds?: Set<string>): DiagramEdge[] =>
     Array.from(
       (localInputEdgesByTarget[targetId] ?? [])
         .filter((edge) => isLocalToFlowTargets(edge.source, allowedFlowIds))
@@ -1285,11 +1284,11 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
             acc.set(edge.source, edge)
           }
           return acc
-        }, new Map<string, Edge>())
+        }, new Map<string, DiagramEdge>())
         .values()
     )
 
-  const stateInputStackBottom = (targetNode: DiagramNode, stateInputEdges: Edge[]): number => {
+  const stateInputStackBottom = (targetNode: DiagramNode, stateInputEdges: DiagramEdge[]): number => {
     // State inputs are moved next to the target later; reserve that vertical lane so larger data-input trees stay above it.
     let stackBottom = targetNode.position.y
     stateInputEdges.forEach((edge, index) => {
@@ -1628,7 +1627,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       }
       acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }, {} as Record<string, Edge[]>)
+    }, {} as Record<string, DiagramEdge[]>)
 
     Object.entries(codeInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
       if (inputEdges.length <= CODE_INPUTS_PER_ROW) {
@@ -1653,7 +1652,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
               acc.set(edge.source, edge)
             }
             return acc
-          }, new Map<string, Edge>())
+          }, new Map<string, DiagramEdge>())
           .values()
       )
 
@@ -1665,7 +1664,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
         return sourceNode?.type !== 'state'
       })
-      const rowEdgeGroups: Edge[][] = []
+      const rowEdgeGroups: DiagramEdge[][] = []
       for (let start = 0; start < stateInputEdges.length; start += CODE_INPUTS_PER_ROW) {
         rowEdgeGroups.push(stateInputEdges.slice(start, start + CODE_INPUTS_PER_ROW))
       }
@@ -1764,7 +1763,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       }
       acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }, {} as Record<string, Edge[]>)
+    }, {} as Record<string, DiagramEdge[]>)
 
     Object.entries(stateInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
       const targetNode = positionedById[targetId] ?? nodesById[targetId]
@@ -1786,7 +1785,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
               acc.set(edge.source, edge)
             }
             return acc
-          }, new Map<string, Edge>())
+          }, new Map<string, DiagramEdge>())
           .values()
       )
 

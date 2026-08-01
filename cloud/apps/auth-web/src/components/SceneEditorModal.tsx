@@ -23,12 +23,12 @@ type SceneEditorModalProps = {
 
 type SceneJson = { id: string } & Record<string, unknown>;
 
-// Owner scene editing via the embedded FrameOS editor: the AGPL editor
-// bundle (copied to /frameos-editor by scripts/copy-editor-assets.mjs) runs
-// in an iframe, and this modal talks to it over its documented postMessage
-// protocol (see the frameos-editor package README) — the editor stays a
-// separate program; none of its code is bundled here. Saving publishes the
-// edited scenes as a new immutable version.
+// Owner scene editing via the embedded FrameOS editor: the editor bundle
+// (copied to /frameos-editor by scripts/copy-editor-assets.mjs) runs in an
+// iframe — isolating its global stylesheet and bundled runtime from this
+// app — and this modal talks to it over its documented postMessage protocol
+// (see the frameos-editor package README). Saving publishes the edited
+// scenes as a new immutable version.
 export function SceneEditorModal({ sceneId, width, height, description, canSave = false, canFork = false, share }: SceneEditorModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);

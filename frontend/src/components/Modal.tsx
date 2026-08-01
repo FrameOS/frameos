@@ -7,7 +7,7 @@ export interface ModalProps {
   footer?: JSX.Element | string
   open?: boolean
   onClose: () => void
-  initialFocus?: React.RefObject<HTMLElement>
+  initialFocus?: React.RefObject<HTMLElement | null>
   /** Overrides the panel's default max-w-[767px], e.g. 'max-w-[1000px]'. */
   panelClassName?: string
   /** Overrides the body's default max-h-[70vh], e.g. 'h-[calc(100dvh-9rem)]'. */

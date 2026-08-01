@@ -102,3 +102,6 @@ frontend/public/frameos-wasm/
 frameos/build/wasm/
 dist-editor
 frontend/editor-smoke.png
+
+# Turborepo cache
+.turbo/

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end happy path: the AGPL FrameOS backend (../frameos) linking to this
-# cloud over real HTTP — device authorization, grants, login handoff, backups.
+# End-to-end happy path: the FrameOS backend (the monorepo root, one level
+# up) linking to this cloud over real HTTP — device authorization, grants,
+# login handoff, backups.
 #
 # Requires: local Postgres via scripts/db-setup.sh (port 55432), pnpm install,
-# a Redis on localhost for the frameos backend tests, and ../frameos checked
-# out with its .venv installed.
+# a Redis on localhost for the frameos backend tests, and the backend .venv
+# installed at the repo root (override with FRAMEOS_DIR).
 #
 # Usage: scripts/e2e-frameos.sh
 set -euo pipefail
@@ -12,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CLOUD_URL="${CLOUD_URL:-http://localhost:3000}"
-FRAMEOS_DIR="$(cd "${FRAMEOS_DIR:-../frameos}" && pwd)"
+FRAMEOS_DIR="$(cd "${FRAMEOS_DIR:-..}" && pwd)"
 PYTHON="${PYTHON:-$FRAMEOS_DIR/.venv/bin/python}"
 
 if [ ! -x "$PYTHON" ]; then

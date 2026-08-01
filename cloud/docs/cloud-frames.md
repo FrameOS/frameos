@@ -35,8 +35,9 @@ relay, and fleet view.
 The management UI is the existing FrameOS frontend — the same SPA that
 already serves the self-hosted backend and the on-device admin panel — built
 as a third wrapper bundle for the cloud (see "Frontend: the fourth adapter").
-To make that sharing work, this repo is relicensed AGPL-3.0 and merged into
-the `frameos` monorepo (see "Repo layout" and "Licensing").
+To make that sharing work, the cloud has been relicensed AGPL-3.0 and merged
+into this monorepo as `cloud/` (see "Repo layout" and "Licensing" — both
+done as of 2026-07).
 
 ## Goals
 
@@ -53,7 +54,7 @@ the `frameos` monorepo (see "Repo layout" and "Licensing").
 ## Non-goals / hard rules
 
 These are load-bearing constraints, in the spirit of the existing "no image
-proxies, ever" rule in `../frameos/AGENTS.md`:
+proxies, ever" rule in `AGENTS.md` at the repo root:
 
 - **The cloud never gains SSH access to frames.** No SSH credentials, host
   keys, or shell transport ever touch the cloud data model.
@@ -91,8 +92,8 @@ proxies, ever" rule in `../frameos/AGENTS.md`:
 ```
 
 - The device dials out (WSS), reusing the pattern of the existing remote
-  agent (`../frameos/frameos/remote/`) and the Phase 4 `remote:access` slot
-  already reserved in `../frameos/docs/cloud-link.md`. There is no inbound
+  agent (`frameos/remote/`) and the Phase 4 `remote:access` slot
+  already reserved in `docs/cloud-link.md`. There is no inbound
   connectivity requirement and no port forwarding.
 - The cloud side is a new, small control plane inside `apps/auth-web` (or a
   sibling service if WS lifetimes demand it): `frames` rows hang off
@@ -167,7 +168,7 @@ Anything else the socket receives is rejected and audit-logged on-device.
 "Only interpreted scenes" is only safe if the QuickJS runtime's bindings are
 narrow. Required before launch:
 
-1. **Capability audit** of `../frameos/frameos/src/frameos/js_runtime/` —
+1. **Capability audit** of `frameos/src/frameos/js_runtime/` —
    enumerate every native binding exposed to scene JS.
 2. **Cloud-installed scenes get render + HTTP only.** Apps carrying the
    store's `"shell"` risk flag refuse to load under the cloud profile.
@@ -263,11 +264,11 @@ frames" becomes a sibling of `account/installs`.
 ## Frontend: the fourth adapter
 
 The FrameOS frontend is already multi-context by design.
-`../frameos/docs/api-triality.md` defines a canonical management API —
+`docs/api-triality.md` defines a canonical management API —
 feature code calls logical `/api/...` paths — with three adapters: the
 Python backend (project-scoped), the Pi device (served directly by the Nim
 server), and the ESP32 subset. The on-device admin panel is not a separate
-UI: `../frameos/frameos/frontend/` is a ~700-line wrapper package that
+UI: `frameos/frontend/` is a ~700-line wrapper package that
 deep-imports the main frontend (`FrameWorkspace`, `SceneWorkspace`,
 `socketLogic`, the kea models), builds its own esbuild bundle, and flips
 behavior via `window.FRAMEOS_APP_CONFIG` flags (`frameMode`,
@@ -281,9 +282,10 @@ bundle** of that SPA:
   and the scenes it needs, and esbuilds a static bundle.
 - Next.js serves that bundle at `account.frameos.net/frames/**` as a
   first-class route (HTML shell + static assets) — **not an iframe**.
-  Because it is a separately built bundle, the React-18-pinned SPA and the
-  React 19 / Next 16 app never share a module graph; the device build
-  already plays the same singleton trick with its `sharedDepsPlugin`.
+  Since the 2026-08 React 19 unification the whole workspace shares one
+  React major, so the wrapper bundle is a packaging choice (esbuild SPA vs
+  Next), not a version-isolation necessity — and importing SPA components
+  directly into Next pages is open as a future option.
 - API: the cloud implements the canonical `/api/frames...` subset. The SPA
   has a single transport chokepoint (`src/utils/apiFetch.ts` plus the path
   scoping in `src/utils/projectApi.ts`); the cloud adapter is one more
@@ -316,7 +318,11 @@ compiled-only features are filtered for cloud frames exactly as they are for
 
 ## Repo layout: monorepo merge
 
-**Decided: this repo moves into the `frameos` monorepo.** The frontend
+**Done (2026-08): the cloud lives in the `frameos` monorepo as `cloud/`, in
+one unified pnpm workspace — `frameos-wasm` and `frameos-editor` are
+`workspace:` dependencies, with Turborepo orchestrating the cross-package
+builds.** The
+original rationale, kept for the record: the frontend
 sharing model above is relative deep imports inside one pnpm workspace —
 there is no published component library, and extracting one would fight
 kea-typegen, Tailwind content globs, Monaco asset wiring, and 88k lines of
@@ -354,7 +360,7 @@ workarounds, which become direct imports.
 - **Ops docs**: runbooks and rehearsal docs containing production details
   move to a private ops repo (or are scrubbed) before the merge.
 
-## Changes required in `../frameos` (device + shared frontend)
+## Changes required outside `cloud/` (device + shared frontend)
 
 This doc records the contract; the work lands there (post-merge: same repo,
 different subtrees):
@@ -388,7 +394,7 @@ documentation (see Licensing) so third-party clouds can implement it.
 
 **Decided: AGPL-3.0 everywhere, no MIT carve-out.** This repo is relicensed
 AGPL-3.0 (replacing the current all-rights-reserved NOTICE), matching
-`../frameos`, and everything stays under that one license after the merge.
+the rest of the monorepo, and everything stays under that one license.
 
 Two earlier ideas are explicitly dropped:
 
@@ -444,14 +450,16 @@ enforcement) is ever paywalled.
 ## Phasing
 
 1. **Protocol + profile (foundations)** — cloud agent profile in
-   `../frameos`, keypair enrollment, claim tokens, WS hub + `frames` table
+   the device runtime, keypair enrollment, claim tokens, WS hub + `frames` table
    here, "Add frame" flow 2 (link code). No scene pushing yet; a frame can
    enroll, appear in the account, show status, and be revoked. Can proceed
    in the current two-repo layout.
-2. **Relicense + monorepo merge** — AGPL switch, history audit /
-   squash-import, move as `cloud/` into the frameos workspace. Must land
-   before the frames UI, since that UI is built from the shared SPA; it
-   also unblocks importing the editor and wasm runtime natively.
+2. **Relicense + monorepo merge — done (2026-08).** AGPL switch, history
+   audit, move as `cloud/` into the frameos repo, workspaces unified into
+   one root lockfile with Turborepo builds. The vendored editor tgz and
+   wasm patch are gone — both are `workspace:` packages now. Remaining
+   from this phase: the standalone-bundle production deploy
+   (`docs/deployment.md`, "Monorepo cutover").
 3. **Scene management** — `set_scenes` push of interpreted scenes, the
    `cloud-frontend` wrapper bundle (fleet grid, scene assignment, wasm
    previews, declarative settings + schedule). Requires the JS capability

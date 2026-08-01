@@ -857,7 +857,7 @@ function SplitPreviewDivider({
   onStartResize,
 }: {
   divider: SplitLayoutDivider
-  previewRef: RefObject<HTMLDivElement>
+  previewRef: RefObject<HTMLDivElement | null>
   onStartResize: (divider: SplitLayoutDivider, rect: DOMRect, event: PointerEvent<HTMLButtonElement>) => void
 }): JSX.Element {
   const vertical = divider.orientation === 'vertical'

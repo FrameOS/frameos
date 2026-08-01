@@ -1,9 +1,9 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // The app tsconfig uses Next's "jsx": "preserve"; vitest (rolldown-vite)
+  // The app tsconfig uses Next's "jsx": "preserve"; vitest (esbuild)
   // needs to be told to compile JSX itself.
-  oxc: { jsx: { runtime: "automatic" } },
+  esbuild: { jsx: "automatic" },
   test: {
     // Library tests run in node; component tests opt into jsdom with a
     // `// @vitest-environment jsdom` docblock.

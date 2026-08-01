@@ -8,6 +8,7 @@ import {
   AppNodeData,
   CodeNodeData,
   AppConfigField,
+  DiagramEdge,
   DiagramNode,
   MarkdownField,
   CodeArg,
@@ -24,7 +25,6 @@ import { appsModel } from '../../../../models/appsModel'
 import { Option } from '../../../../components/Select'
 import { diagramLogic } from './diagramLogic'
 import Fuse from 'fuse.js'
-import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import {
   appLabel,
@@ -864,9 +864,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         actions.setNodes([...values.nodes, newNode])
         window.setTimeout(() => {
           const edges = values.edges
-          let oldEdge: Edge | undefined
-          let newEdge: Edge
-          let extraEdge: Edge | undefined
+          let oldEdge: DiagramEdge | undefined
+          let newEdge: DiagramEdge
+          let extraEdge: DiagramEdge | undefined
           if (handleType === 'source') {
             oldEdge = edges.find((edge) => edge.source === nodeId && edge.sourceHandle === handleId)
             newEdge = {
@@ -904,7 +904,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
 
           if (oldEdge) {
             actions.setEdges(
-              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as Edge[]
+              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as DiagramEdge[]
             )
           } else {
             actions.setEdges([...values.edges, newEdge])
