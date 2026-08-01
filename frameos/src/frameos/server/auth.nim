@@ -39,7 +39,7 @@ proc secureRandomBytes(byteCount: int): string =
   for i in 0 ..< result.len:
     result[i] = char(rand(255))
 
-proc secureRandomToken(byteCount = 32): string =
+proc secureRandomToken*(byteCount = 32): string =
   let bytes = secureRandomBytes(byteCount)
   result = newStringOfCap(bytes.len * 2)
   for value in bytes:

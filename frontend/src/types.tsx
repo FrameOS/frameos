@@ -830,6 +830,32 @@ export interface CloudStatus {
     connected_at: string | null
     last_inventory_sync_at: string | null
   } | null
+  /** True unless cloud login is enforced (local passwords disabled). */
+  local_fallback_enabled?: boolean
+  /** A pending feature change awaiting owner approval on the provider. */
+  upgrade?: {
+    user_code: string | null
+    verification_uri: string | null
+    verification_uri_complete: string | null
+    expires_at: string | null
+    interval_seconds: number
+  } | null
+  /** The current user's linked cloud identity, if any. */
+  identity?: {
+    cloud_account_id: string | null
+    email: string | null
+    name: string | null
+    provider_url: string | null
+    last_login_at: string | null
+  } | null
+}
+
+/** Mirrors GET /api/cloud/login/options (open endpoint for the login/setup screens) */
+export interface CloudLoginOptions {
+  available: boolean
+  provider_url: string | null
+  local_login_enabled: boolean
+  setup_mode: boolean
 }
 
 export interface SSHKeyEntry {
