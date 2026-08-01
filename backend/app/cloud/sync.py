@@ -75,8 +75,14 @@ class CloudSync:
                 pass
 
     async def _handle_message(self, message: dict):
+        raw = message.get("data")
+        if message.get("channel") != CLOUD_SYNC_CHANNEL:
+            # The broadcast channel also carries every log line and metrics
+            # sample; a cheap substring check avoids parsing all of them.
+            if not isinstance(raw, str) or '"update_frame"' not in raw:
+                return
         try:
-            parsed = json.loads(message["data"])
+            parsed = json.loads(raw)
         except (TypeError, ValueError):
             return
         if not isinstance(parsed, dict):
@@ -279,16 +285,13 @@ class CloudSync:
         if self._deploys_seen.get(frame_id) == marker:
             return
 
-        link, access_token, _link_id = self._load_link()
-        if link is None or access_token is None or "backup:frames" not in link.scopes:
-            return
-        if not link.backup_frames_enabled:
-            # The scope is a permission; the local switch is the feature.
+        link, access_token, private_key = self._load_link_for_backup()
+        if link is None or access_token is None or private_key is None:
             return
         project_name = self._project_name(frame_dict.get("project_id"))
         try:
             status_code, response = await cloud_backup.push_frame_backup(
-                link, access_token, frame_dict, project_name
+                link, access_token, private_key, frame_dict, project_name
             )
             if status_code == 200:
                 self._mark_deploy_backed_up(frame_id, marker)
@@ -299,6 +302,25 @@ class CloudSync:
                 print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {detail}")
         except Exception as e:  # noqa: BLE001
             print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {e}")
+
+    def _load_link_for_backup(self) -> tuple[Optional[CloudBackendLink], Optional[str], Optional[bytes]]:
+        """The link, token, and backup key iff frame backups may upload.
+        The scope is a permission; the local switch is the feature. The key is
+        generated on first use, then reloaded so the detached link instance
+        keeps usable attributes after the session closes."""
+        db = SessionLocal()
+        try:
+            link = current_cloud_backend_link(db)
+            token = cloud_backup.link_access_token(link)
+            if link is None or token is None or "backup:frames" not in link.scopes:
+                return None, None, None
+            if not link.backup_frames_enabled:
+                return None, None, None
+            private_key = cloud_backup.ensure_backup_key(db, link)
+            db.refresh(link)
+            return link, token, private_key
+        finally:
+            db.close()
 
     def _project_name(self, project_id) -> Optional[str]:
         if project_id is None:

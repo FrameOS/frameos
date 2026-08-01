@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   attachFrontendErrorCollector,
   login,
+  mockCloudBackupsApi,
   prepareStablePage,
   projectApiPathPattern,
   settleForScreenshot,
@@ -51,6 +52,7 @@ const globalSettingsSections = [
   ['GitHub', 'settings-github'],
   ['Unsplash API', 'settings-unsplash'],
   ['Build environment', 'settings-build-environment'],
+  ['FrameOS Cloud', 'settings-cloud'],
   ['System information', 'settings-system'],
   ['Custom fonts', 'settings-fonts'],
 ] as const
@@ -312,6 +314,80 @@ test.describe('backend frontend e2e coverage @e2e', () => {
         await expectSectionNearTop(page, id)
       })
     }
+
+    expectNoFrontendErrors(readErrors)
+  })
+
+  test('cloud backups can be listed, restored, and deleted from the settings page', async ({ page }) => {
+    const readErrors = await prepareAuthenticatedPage(page)
+    const cloudCalls = await mockCloudBackupsApi(page)
+    await page.goto('/settings', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    await page
+      .locator('.frameos-settings-nav-link')
+      .filter({ hasText: /^FrameOS Cloud$/ })
+      .first()
+      .click()
+    await expectSectionNearTop(page, 'settings-cloud')
+    await expect(page.getByText('cloud.frameos.net').first()).toBeVisible()
+    await expect(page.getByText(/Frames back up automatically after every deploy/)).toBeVisible()
+
+    await page.getByRole('button', { name: /^Show backups$/ }).click()
+    await expect(page.getByText('Living room frame')).toBeVisible()
+    await expect(page.getByText('Morning dashboard scene')).toBeVisible()
+
+    const frameBackupRow = page
+      .locator('div')
+      .filter({ has: page.getByText('Living room frame', { exact: true }) })
+      .filter({ has: page.getByRole('button', { name: /^Restore$/ }) })
+      .last()
+    page.once('dialog', (dialog) => dialog.accept())
+    await frameBackupRow.getByRole('button', { name: /^Restore$/ }).click()
+
+    await expect.poll(() => cloudCalls.restores.length).toBe(1)
+    expect(cloudCalls.restores[0]).toEqual({
+      backup_id: 'backup-frame-1',
+      project_id: expect.any(Number),
+    })
+    await expect(page.getByText(/Restored as a new frame/)).toBeVisible()
+
+    page.once('dialog', (dialog) => dialog.accept())
+    await frameBackupRow.getByRole('button', { name: /^Delete$/ }).click()
+    await expect.poll(() => cloudCalls.deletes).toEqual(['backup-frame-1'])
+
+    // The recovery key for the end-to-end encryption reveals on demand.
+    await page.getByRole('button', { name: /^Show recovery key$/ }).click()
+    await expect(page.getByText(/^FRBK1-/)).toBeVisible()
+    await page.getByRole('button', { name: /^Hide$/ }).click()
+    await expect(page.getByText(/^FRBK1-/)).toHaveCount(0)
+
+    // Pasting a saved recovery code imports the key (the reinstall flow).
+    await page.getByPlaceholder('FRBK1-…').fill('FRBK1-TEST-CODE')
+    await page.getByRole('button', { name: /^Import recovery key$/ }).click()
+    await expect.poll(() => cloudCalls.keyImports).toEqual([{ recovery_code: 'FRBK1-TEST-CODE' }])
+
+    expectNoFrontendErrors(readErrors)
+  })
+
+  test('back up now pushes every frame of the project to the cloud', async ({ page }) => {
+    const readErrors = await prepareAuthenticatedPage(page)
+    const cloudCalls = await mockCloudBackupsApi(page)
+    await page.goto('/settings', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    await page
+      .locator('.frameos-settings-nav-link')
+      .filter({ hasText: /^FrameOS Cloud$/ })
+      .first()
+      .click()
+    await expectSectionNearTop(page, 'settings-cloud')
+
+    await page.getByRole('button', { name: /^Back up now$/ }).click()
+    await expect.poll(() => cloudCalls.frameBackups.length).toBeGreaterThan(0)
+    expect(cloudCalls.frameBackups).toContainEqual({ frame_id: 1 })
+    // The listing refreshes once the run finishes.
+    await expect(page.getByText('Living room frame')).toBeVisible()
 
     expectNoFrontendErrors(readErrors)
   })

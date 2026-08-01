@@ -149,6 +149,7 @@ def _status_payload(db: Session, link: CloudBackendLink | None, user: User | Non
         "local_fallback_enabled": link.local_fallback_enabled if link else True,
         "backup_scenes_enabled": link.backup_scenes_enabled if link else False,
         "backup_frames_enabled": link.backup_frames_enabled if link else False,
+        "backup_key_fingerprint": link.backup_key_fingerprint if link else None,
         "connection": None,
         "link": None,
         "identity": _identity_payload(db, user),

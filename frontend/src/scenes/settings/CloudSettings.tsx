@@ -62,6 +62,11 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     cloudBackupsLoading,
     isCloudBackupRunning,
     restoringBackupId,
+    deletingBackupId,
+    backupActionMessage,
+    cloudBackupKey,
+    cloudBackupKeyLoading,
+    backupKeyVisible,
     hasBackupScope,
     anyBackupEnabled,
   } = useValues(cloudLogic)
@@ -80,6 +85,10 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
     loadCloudBackups,
     backupAllToCloud,
     restoreCloudBackup,
+    deleteCloudBackup,
+    showBackupKey,
+    hideBackupKey,
+    importBackupKey,
   } = useActions(cloudLogic)
   const frameAdminMode = isInFrameAdminMode()
 
@@ -182,7 +191,9 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                                 ? Boolean(
                                     localKey === 'frames'
                                       ? cloudStatus?.backup_frames_enabled
-                                      : cloudStatus?.backup_scenes_enabled
+                                      : localKey === 'scenes'
+                                      ? cloudStatus?.backup_scenes_enabled
+                                      : cloudStatus?.backup_frames_enabled || cloudStatus?.backup_scenes_enabled
                                   )
                                 : enabledFeatureDraft.includes(scope)
                             }
@@ -301,10 +312,8 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                     </Button>
                     <span className="frameos-muted">
                       {!anyBackupEnabled
-                        ? 'Backups are switched off — enable scene or frame backups above.'
-                        : cloudStatus?.backup_frames_enabled
-                        ? 'Frames are also backed up automatically after every deploy.'
-                        : 'Scene backups only; enable frame backups to also back up after every deploy.'}
+                        ? 'Backups are switched off — enable cloud backups above.'
+                        : 'Frames back up automatically after every deploy; payloads are encrypted with your backup key.'}
                     </span>
                   </div>
                   {cloudBackupsLoading ? <Spinner /> : null}
@@ -320,23 +329,105 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                           </Tag>
                           <span className="frameos-strong font-medium">{backup.name ?? backup.item_key}</span>
                           <span className="frameos-muted">
-                            {Math.max(1, Math.round(backup.size_bytes / 1024))} KB,{' '}
+                            {Number.isFinite(backup.size_bytes)
+                              ? `${Math.max(1, Math.round(backup.size_bytes / 1024))} KB, `
+                              : ''}
                             {new Date(backup.updated_at).toLocaleString()}
                           </span>
                           <Button
                             size="small"
                             color="secondary"
-                            onClick={() => restoreCloudBackup(backup.id)}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Restore "${backup.name ?? backup.item_key}" as a new ` +
+                                    `${backup.kind === 'frames' ? 'frame' : 'scene'} in this project?`
+                                )
+                              ) {
+                                restoreCloudBackup(backup.id)
+                              }
+                            }}
                             disabled={restoringBackupId === backup.id}
                             className="inline-flex items-center gap-2"
                           >
                             {restoringBackupId === backup.id ? <Spinner /> : null}
                             Restore
                           </Button>
+                          <Button
+                            size="small"
+                            color="secondary"
+                            onClick={() => {
+                              if (window.confirm(`Delete the cloud backup "${backup.name ?? backup.item_key}"?`)) {
+                                deleteCloudBackup(backup.id)
+                              }
+                            }}
+                            disabled={deletingBackupId === backup.id}
+                            className="inline-flex items-center gap-2"
+                          >
+                            {deletingBackupId === backup.id ? <Spinner /> : null}
+                            Delete
+                          </Button>
                         </div>
                       ))}
                     </div>
                   ) : null}
+                  {backupActionMessage ? <div className="text-green-600 dark:text-green-400">{backupActionMessage}</div> : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="frameos-muted">
+                      Backup key{cloudStatus?.backup_key_fingerprint ? ` ${cloudStatus.backup_key_fingerprint}` : ''}:
+                    </span>
+                    {backupKeyVisible && cloudBackupKey ? (
+                      <>
+                        <code className="frameos-strong select-all break-all font-mono">
+                          {cloudBackupKey.recovery_code}
+                        </code>
+                        <Button size="small" color="secondary" onClick={hideBackupKey}>
+                          Hide
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="small"
+                        color="secondary"
+                        onClick={showBackupKey}
+                        disabled={cloudBackupKeyLoading}
+                        className="inline-flex items-center gap-2"
+                      >
+                        {cloudBackupKeyLoading ? <Spinner /> : null}
+                        Show recovery key
+                      </Button>
+                    )}
+                  </div>
+                  <div className="frameos-muted">
+                    Save the recovery key in your password manager. Backups are encrypted with it before upload —
+                    after reinstalling this backend, paste it below to restore them.
+                  </div>
+                  <form
+                    className="flex flex-wrap items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const input = event.currentTarget.elements.namedItem('recoveryCode') as HTMLInputElement | null
+                      if (input?.value.trim()) {
+                        importBackupKey(input.value.trim())
+                        input.value = ''
+                      }
+                    }}
+                  >
+                    <div className="w-72">
+                      <TextInput name="recoveryCode" placeholder="FRBK1-…" className="font-mono" />
+                    </div>
+                    <Button size="small" color="secondary" type="submit">
+                      Import recovery key
+                    </Button>
+                  </form>
+                  <div>
+                    <a className="frameos-link font-medium hover:underline" href="/api/backup/export">
+                      Download a local backup (.tar.gz)
+                    </a>{' '}
+                    <span className="frameos-muted">
+                      — projects, frames, and scenes with credentials included; never leaves this machine.
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : null}

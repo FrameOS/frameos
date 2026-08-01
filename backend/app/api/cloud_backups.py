@@ -4,9 +4,14 @@ Scenes (stored locally as templates) and frame configs can be pushed to /
 restored from the linked FrameOS Cloud provider (scopes ``backup:scenes`` /
 ``backup:frames``). The scopes come with every cloud account, but uploads
 also require the matching local switch (``backup_scenes_enabled`` /
-``backup_frames_enabled``) so connecting alone never leaks data. Everything
-can always be exported as a plain local tarball — the do-it-yourself
-alternative that works without any cloud.
+``backup_frames_enabled``) so connecting alone never leaks data.
+
+Every payload is sealed with the account backup key before upload
+(app/utils/backup_crypto.py): the provider stores ciphertext plus a curated
+plaintext manifest. The key is generated on first use; the recovery code
+(shown in Settings → FrameOS Cloud) lets a reinstalled backend decrypt old
+backups after relinking. Everything can also be exported as a plain local
+tarball — the do-it-yourself alternative that works without any cloud.
 """
 from __future__ import annotations
 
@@ -32,13 +37,14 @@ from app.models.template import Template
 from app.models.user import User
 from app.redis import get_redis
 from app.schemas.cloud import (
+    CloudBackupKeyImportRequest,
     CloudBackupRestoreRequest,
     CloudBackupSaveFrameRequest,
     CloudBackupSaveTemplateRequest,
     CloudStatusResponse,
 )
 from app.tenancy import get_user_project
-from app.utils import cloud_backup, cloud_link
+from app.utils import backup_crypto, cloud_backup, cloud_link
 from app.websockets import publish_message
 
 from . import api_user
@@ -170,9 +176,10 @@ async def backup_template_to_cloud(
     if template is None or get_user_project(db, user, template.project_id) is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Template not found")
 
+    private_key = cloud_backup.ensure_backup_key(db, link)
     try:
         status_code, response = await cloud_backup.push_template_backup(
-            link, access_token, str(template.id), template.name, template_zip_bytes(template)
+            link, access_token, private_key, str(template.id), template.name, template_zip_bytes(template)
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
@@ -197,9 +204,10 @@ async def backup_frame_to_cloud(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     project = db.get(Project, frame.project_id)
+    private_key = cloud_backup.ensure_backup_key(db, link)
     try:
         status_code, response = await cloud_backup.push_frame_backup(
-            link, access_token, frame.to_dict(), project.name if project else None
+            link, access_token, private_key, frame.to_dict(), project.name if project else None
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
@@ -243,6 +251,29 @@ async def restore_cloud_backup(
         content = b""
     if not content:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="The backup had no content")
+
+    envelope = cloud_backup.parse_encrypted_backup(content)
+    if envelope is not None:
+        private_key = cloud_backup.link_backup_private_key(link)
+        fingerprint = envelope.get("key_fingerprint")
+        if private_key is None:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=f"This backup is encrypted with backup key {fingerprint or 'unknown'}; "
+                "import that recovery key first (Settings → FrameOS Cloud)",
+            )
+        if fingerprint and fingerprint != backup_crypto.backup_key_fingerprint(private_key):
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=f"This backup is encrypted with a different backup key ({fingerprint}); "
+                "import that recovery key first (Settings → FrameOS Cloud)",
+            )
+        try:
+            content = cloud_backup.decrypt_backup_content(private_key, envelope)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=f"Could not decrypt the backup: {exc}"
+            ) from exc
 
     if backup.get("kind") == "templates":
         try:
@@ -305,12 +336,79 @@ async def restore_cloud_backup(
     raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Unknown backup kind")
 
 
+@api_user.delete("/cloud/backups/{backup_id}", response_model=CloudStatusResponse)
+async def delete_cloud_backup(
+    backup_id: str, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
+):
+    _require_user(current_user)
+    link = current_cloud_backend_link(db)
+    access_token = cloud_backup.link_access_token(link)
+    if link is None or access_token is None:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")
+    try:
+        status_code, response = await cloud_link.backup_delete(link.provider_url, access_token, backup_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY, detail=f"Could not reach {link.provider_url}: {exc}"
+        ) from exc
+    if status_code != 200:
+        detail = response.get("error") or f"unexpected status {status_code}"
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"FrameOS Cloud error: {detail}")
+    return {"status": "deleted"}
+
+
+# ---- the account backup key ----------------------------------------------------
+
+
+@api_user.get("/cloud/backup-key", response_model=CloudStatusResponse)
+async def get_backup_key(
+    db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
+):
+    """The recovery code for the account backup key, generating the key on
+    first call. The backend holds the private key anyway (it stores every
+    secret in plaintext), so showing it to the logged-in owner adds no new
+    exposure — it is exactly what they must save in their password manager."""
+    _require_user(current_user)
+    link = current_cloud_backend_link(db)
+    if link is None or link.status != "connected":
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")
+    private_key = cloud_backup.ensure_backup_key(db, link)
+    return {
+        "fingerprint": backup_crypto.backup_key_fingerprint(private_key),
+        "recovery_code": backup_crypto.encode_recovery_code(private_key),
+    }
+
+
+@api_user.post("/cloud/backup-key/import", response_model=CloudStatusResponse)
+async def import_backup_key(
+    data: CloudBackupKeyImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Restore the backup key on a reinstalled backend: paste the recovery
+    code saved when backups were first enabled."""
+    _require_user(current_user)
+    link = current_cloud_backend_link(db)
+    if link is None or link.status != "connected":
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")
+    try:
+        private_key = backup_crypto.decode_recovery_code(data.recovery_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    cloud_backup.set_link_backup_key(link, private_key)
+    db.commit()
+    return {"status": "imported", "fingerprint": link.backup_key_fingerprint}
+
+
 @api_user.get("/backup/export")
 async def export_backup_tarball(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
-    """Everything as a plain tar.gz — the self-service alternative to cloud
-    backups. Stays local, so unlike cloud frame backups it keeps credentials."""
+    """Projects, frames, and scene templates as a plain tar.gz — the
+    self-service alternative to cloud backups. Stays local, so unlike cloud
+    frame backups it keeps credentials. Not included (yet): global settings
+    (service API keys), the SSH key store, user accounts, and frame assets —
+    and there is no importer; restoring from the tarball is manual."""
     user = _require_user(current_user)
     projects = _user_projects(db, user)
 

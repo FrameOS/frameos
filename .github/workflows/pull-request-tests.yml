@@ -314,6 +314,11 @@ jobs:
       - name: Build frontend
         run: pnpm --dir frontend run build
 
+      - name: Build on-frame admin frontend
+        # frame-admin.spec.ts serves this bundle through route interception;
+        # without it those browser tests skip silently.
+        run: pnpm --dir frameos/frontend run build
+
       - name: Run frontend visual regression tests
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         env:

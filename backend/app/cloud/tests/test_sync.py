@@ -8,7 +8,7 @@ import pytest
 from app.cloud.sync import CloudSync
 from app.models import new_frame, update_frame
 from app.models.cloud import CloudBackendLink, CloudMembership
-from app.utils import cloud_link
+from app.utils import cloud_backup, cloud_link
 
 PROVIDER = "https://cloud.frameos.net"
 
@@ -175,7 +175,7 @@ def test_cloud_secret_key_decouples_cloud_secrets_from_secret_key(db, monkeypatc
 @pytest.mark.asyncio
 async def test_deploy_broadcast_triggers_backup(db, redis, service, cloud_calls):
     calls, _ = cloud_calls
-    make_connected_link(db)
+    link = make_connected_link(db)
     frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
     service._prime_deploys_seen()  # startup does this before listening
 
@@ -192,9 +192,15 @@ async def test_deploy_broadcast_triggers_backup(db, redis, service, cloud_calls)
     _provider, _token, payload = calls["backup_save"][0]
     assert payload["kind"] == "frames"
     assert payload["item_key"] == f"frame-{frame.id}"
-    content = json.loads(base64.b64decode(payload["content_base64"]))
-    assert content["frame"]["name"] == "Kitchen"
-    assert "ssh_pass" not in content["frame"]
+    # The worker generated the backup key on first use and sealed the payload.
+    envelope = json.loads(base64.b64decode(payload["content_base64"]))
+    assert envelope["format"] == "frameos-encrypted-backup-v1"
+    assert envelope["meta"]["name"] == "Kitchen"
+    db.expire_all()
+    private_key = cloud_backup.link_backup_private_key(db.get(CloudBackendLink, link.id))
+    inner = json.loads(cloud_backup.decrypt_backup_content(private_key, envelope))
+    assert inner["frame"]["name"] == "Kitchen"
+    assert "ssh_pass" not in inner["frame"]
 
     # The same deploy stamp is not pushed twice.
     await service._maybe_backup_frame(frame.to_dict())

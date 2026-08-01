@@ -60,3 +60,8 @@ class CloudBackupSaveFrameRequest(BaseModel):
 class CloudBackupRestoreRequest(BaseModel):
     backup_id: str
     project_id: int
+
+
+class CloudBackupKeyImportRequest(BaseModel):
+    # The FRBK1-… code saved in the user's password manager.
+    recovery_code: str

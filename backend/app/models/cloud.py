@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Session, mapped_column, relationship
 
 from app.database import Base
@@ -66,6 +66,11 @@ class CloudBackendLink(Base):
     # but no data leaves this install until the user turns the feature on.
     backup_scenes_enabled = mapped_column(Boolean, nullable=False, default=False)
     backup_frames_enabled = mapped_column(Boolean, nullable=False, default=False)
+    # X25519 private key sealing every backup payload (Fernet-encrypted at
+    # rest, like access_token). The user keeps the recovery code; the short
+    # fingerprint is shown in the UI and stamped into every envelope.
+    backup_private_key = mapped_column(Text, nullable=True)
+    backup_key_fingerprint = mapped_column(String(16), nullable=True)
     last_inventory_sync_at = mapped_column(DateTime, nullable=True)
     last_grant_sync_at = mapped_column(DateTime, nullable=True)
     revoked_at = mapped_column(DateTime, nullable=True)
