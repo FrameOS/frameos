@@ -8,30 +8,30 @@
 
 export interface FrameOSEditorScreenshotResult {
   ok: boolean
-  error?: string
+  error?: string | undefined
   /** When false, a failed save does not fall back to a local PNG download. */
-  fallbackDownload?: boolean
+  fallbackDownload?: boolean | undefined
 }
 
 export interface FrameOSEditorMountOptions {
   scenes: unknown[]
-  sceneId?: string
-  mode?: string
-  width?: number
-  height?: number
-  interval?: number
-  theme?: 'light' | 'dark'
+  sceneId?: string | undefined
+  mode?: string | undefined
+  width?: number | undefined
+  height?: number | undefined
+  interval?: number | undefined
+  theme?: 'light' | 'dark' | undefined
   /** Same-origin endpoint the wasm preview routes CORS-blocked fetches through. */
-  previewProxyUrl?: string
+  previewProxyUrl?: string | undefined
   /** Host-page description of the scene, shown in Scene settings. */
-  description?: string
-  onReady?: () => void
-  onScenesChanged?: (scenes: unknown[]) => void
+  description?: string | undefined
+  onReady?: (() => void) | undefined
+  onScenesChanged?: ((scenes: unknown[]) => void) | undefined
   /**
    * Preview-panel screenshot handler. Return {ok: true} once stored; omit the
    * handler to let the editor download the PNG locally instead.
    */
-  onSaveScreenshot?: (dataUrl: string, sceneId: string | null) => Promise<FrameOSEditorScreenshotResult>
+  onSaveScreenshot?: ((dataUrl: string, sceneId: string | null) => Promise<FrameOSEditorScreenshotResult>) | undefined
 }
 
 export interface FrameOSEditorHandle {

@@ -25,6 +25,10 @@
       "types": "./embed.d.ts",
       "import": "./embed.js"
     },
+    "./react": {
+      "types": "./react.d.ts",
+      "import": "./dist/static/lib.js"
+    },
     "./mount": {
       "types": "./mount.d.ts",
       "import": "./dist/static/mount.js"
@@ -38,6 +42,7 @@
     "embed.js",
     "embed.d.ts",
     "mount.d.ts",
+    "react.d.ts",
     "demo.html",
     "README.md"
   ],
@@ -46,5 +51,17 @@
     "test": "node --test embed.test.mjs",
     "sync-version": "node scripts/sync-version.mjs",
     "prepublishOnly": "node scripts/sync-version.mjs --check && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }

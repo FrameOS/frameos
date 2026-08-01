@@ -93,6 +93,27 @@ const embedAliasPlugin = {
   },
 }
 
+// Externalize react for the library build in a CJS-safe way: dependencies
+// that `require('react')` would otherwise become a throwing `__require` in
+// ESM output. Every react import resolves to a virtual ESM re-export module
+// whose own import is left external, so the host bundler supplies its React.
+const reactExternalPlugin = {
+  name: 'frameos-react-external',
+  setup(build) {
+    const filter = /^react(-dom)?(\/[a-z-]+)?$/
+    build.onResolve({ filter }, (args) => {
+      if (args.namespace === 'react-external-shim') {
+        return { path: args.path, external: true }
+      }
+      return { path: args.path, namespace: 'react-external-shim' }
+    })
+    build.onLoad({ filter: /.*/, namespace: 'react-external-shim' }, (args) => ({
+      contents: `export * from ${JSON.stringify(args.path)}\nexport { default } from ${JSON.stringify(args.path)}\n`,
+      loader: 'js',
+    }))
+  },
+}
+
 function writeEditorHtml(outputs = {}) {
   const distEditor = path.resolve(__dirname, 'dist-editor')
   fse.mkdirpSync(distEditor)
@@ -187,6 +208,21 @@ await buildInParallel(
       extraPlugins: [embedAliasPlugin],
       ...common,
     },
+    {
+      // The editor as an importable React library (frameos-editor/react):
+      // kea/reactflow/Monaco are bundled, react/react-dom are external, so
+      // EmbeddedSceneEditor renders in the host app's React tree. Emits
+      // lib.js + lib.css into the same dist-editor/static the other embeds
+      // use; Monaco workers are shared with them via ingress_path.
+      name: 'FrameOS Editor React Library',
+      globalName: 'frameOSEditorReact',
+      entryPoints: [{ in: 'src/embed/lib.tsx', out: 'lib' }],
+      splitting: false,
+      format: 'esm',
+      outdir: path.resolve(__dirname, 'dist-editor', 'static'),
+      extraPlugins: [embedAliasPlugin, reactExternalPlugin],
+      ...common,
+    },
   ],
   {
     async onBuildComplete(config, buildResponse) {
@@ -206,6 +242,15 @@ await buildInParallel(
           console.error('Embedded editor packaging failed:', error)
           throw error
         }
+        return
+      }
+      if (config.name === 'FrameOS Editor React Library') {
+        // Hashless lib.js/lib.css, so the package export map and host-page
+        // stylesheet links have stable names.
+        const libFiles = Object.keys(buildResponse.outputs).filter((key) =>
+          /^dist-editor\/static\/lib-[A-Z0-9]+\.(js|css)$/.test(key)
+        )
+        createHashlessEntrypoints(__dirname, libFiles)
         return
       }
 

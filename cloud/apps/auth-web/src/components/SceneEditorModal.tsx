@@ -1,8 +1,17 @@
 "use client";
 
 import { GitFork, Pencil, Save, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+// The FrameOS scene editor as a plain React component in this app's tree
+// (react/react-dom are externalized in its bundle — one React). It is
+// browser-only (kea, Monaco, wasm), hence the ssr: false dynamic import.
+const EmbeddedSceneEditor = dynamic(
+  () => import("frameos-editor/react").then((module) => module.EmbeddedSceneEditor),
+  { ssr: false },
+);
 
 type SceneEditorModalProps = {
   sceneId: string;
@@ -23,33 +32,45 @@ type SceneEditorModalProps = {
 
 type SceneJson = { id: string } & Record<string, unknown>;
 
-type EditorHandle = {
-  getScenesSync: () => SceneJson[];
-  setScenes: (scenes: SceneJson[], sceneId?: string) => void;
-  destroy: () => void;
-};
+// The editor's assets (Monaco workers, wasm preview runtime, stylesheet) are
+// copied to /frameos-editor by scripts/copy-editor-assets.mjs; the bundle
+// resolves them against this path.
+const EDITOR_ASSET_PATH = "/frameos-editor";
 
-// The mount module bundles its own React and resolves chunk/worker/stylesheet
-// URLs against its own location, so it must be loaded at runtime from the
-// copied assets in public/ — not resolved (and rebundled) by the app bundler.
-// The Function wrapper keeps webpack/turbopack from touching the import.
-const importEditorMount = new Function(
-  "url",
-  "return import(url)",
-) as (url: string) => Promise<{
-  mountFrameOSEditor: (
-    container: HTMLElement,
-    options: Record<string, unknown>,
-  ) => EditorHandle;
-}>;
+if (typeof window !== "undefined") {
+  const anyWindow = window as unknown as Record<string, unknown>;
+  const config = (anyWindow.FRAMEOS_APP_CONFIG = anyWindow.FRAMEOS_APP_CONFIG || {}) as Record<string, unknown>;
+  config.ingress_path = EDITOR_ASSET_PATH;
+}
 
-// Owner scene editing via the FrameOS editor mounted directly into this page
-// (frameos-editor/mount, copied to /frameos-editor by
-// scripts/copy-editor-assets.mjs) — no iframe. The mount module injects the
-// editor's global stylesheet while open and removes it on close; the modal
-// container's `transform` makes it the containing block for the editor's
-// fixed-position drawers (see .editor-modal__frame in globals.css). Saving
-// publishes the edited scenes as a new immutable version.
+// The editor's stylesheet is global (tailwind preflight included), so it is
+// only linked while the full-screen editor is open and removed on close.
+function useEditorStylesheet(open: boolean) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `${EDITOR_ASSET_PATH}/static/lib.css`;
+    document.head.appendChild(link);
+    const html = document.documentElement;
+    const previousTheme = html.dataset.frameosTheme;
+    html.dataset.frameosTheme = html.classList.contains("theme-dark") ? "dark" : "light";
+    return () => {
+      link.remove();
+      if (previousTheme === undefined) {
+        delete html.dataset.frameosTheme;
+      } else {
+        html.dataset.frameosTheme = previousTheme;
+      }
+    };
+  }, [open]);
+}
+
+// Owner scene editing via the FrameOS editor rendered as a component in this
+// page's React tree. Saving publishes the edited scenes as a new immutable
+// version.
 export function SceneEditorModal({ sceneId, width, height, description, canSave = false, canFork = false, share }: SceneEditorModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -57,17 +78,18 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   const [saving, setSaving] = useState(false);
   const [forking, setForking] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scenes, setScenes] = useState<SceneJson[] | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const latestScenesRef = useRef<SceneJson[] | null>(null);
   const initialJsonRef = useRef<string>("");
+  useEditorStylesheet(open);
 
   useEffect(() => {
     if (!open) {
       return;
     }
+    setTheme(document.documentElement.classList.contains("theme-dark") ? "dark" : "light");
     let cancelled = false;
-    let handle: EditorHandle | null = null;
-
     void (async () => {
       try {
         const response = await fetch(
@@ -76,77 +98,58 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
         if (!response.ok) {
           throw new Error(`Could not load the scene (${response.status})`);
         }
-        const scenes = (await response.json()) as SceneJson[];
-        const { mountFrameOSEditor } = await importEditorMount("/frameos-editor/static/mount.js");
-        if (cancelled || !containerRef.current) {
+        const loaded = (await response.json()) as SceneJson[];
+        if (cancelled) {
           return;
         }
-        latestScenesRef.current = scenes;
-        initialJsonRef.current = JSON.stringify(scenes);
-        handle = mountFrameOSEditor(containerRef.current, {
-          scenes,
-          width: width || 800,
-          height: height || 480,
-          mode: "rpios",
-          // Match the page's theme (see ThemeToggle).
-          theme: document.documentElement.classList.contains("theme-dark")
-            ? "dark"
-            : "light",
-          // The editor's built-in wasm Preview panel routes CORS-blocked
-          // fetches through this endpoint (same one SceneLivePreview uses).
-          previewProxyUrl: "/api/store/preview-proxy",
-          description: description || undefined,
-          onScenesChanged: (nextScenes: SceneJson[]) => {
-            latestScenesRef.current = nextScenes;
-            setDirty(JSON.stringify(nextScenes) !== initialJsonRef.current);
-          },
-          // The editor's Preview panel captured a frame. Owners get it saved
-          // to the scene's image gallery; everyone else gets ok:false and the
-          // editor falls back to downloading the PNG locally.
-          onSaveScreenshot: async (dataUrl: string) => {
-            if (!canSave) {
-              return { ok: false, error: "Only the scene owner can save to its images" };
-            }
-            if (!dataUrl.startsWith("data:image/png;base64,")) {
-              return { ok: false, fallbackDownload: false, error: "Unexpected screenshot format" };
-            }
-            try {
-              const upload = await fetch(`/api/account/scenes/${sceneId}/images`, {
-                body: JSON.stringify({
-                  content_base64: dataUrl.slice("data:image/png;base64,".length),
-                }),
-                headers: { "content-type": "application/json" },
-                method: "POST",
-              });
-              const payload = await upload.json().catch(() => ({}));
-              if (upload.ok) {
-                router.refresh();
-              }
-              return {
-                ok: upload.ok,
-                // The gallery upload failed for a real reason (quota,
-                // moderation, ...): tell the user instead of silently
-                // downloading a file they wanted stored.
-                fallbackDownload: false,
-                error: upload.ok ? undefined : `Saving failed: ${payload.error ?? upload.status}`,
-              };
-            } catch {
-              return { ok: false, fallbackDownload: false, error: "Saving failed" };
-            }
-          },
-        });
+        latestScenesRef.current = loaded;
+        initialJsonRef.current = JSON.stringify(loaded);
+        setScenes(loaded);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
         }
       }
     })();
-
     return () => {
       cancelled = true;
-      handle?.destroy();
     };
-  }, [open, sceneId, width, height, description]);
+  }, [open, sceneId, share]);
+
+  // The editor's Preview panel captured a frame. Owners get it saved to the
+  // scene's image gallery; everyone else gets ok:false and the editor falls
+  // back to downloading the PNG locally.
+  async function saveScreenshot(dataUrl: string) {
+    if (!canSave) {
+      return { ok: false, error: "Only the scene owner can save to its images" };
+    }
+    if (!dataUrl.startsWith("data:image/png;base64,")) {
+      return { ok: false, fallbackDownload: false, error: "Unexpected screenshot format" };
+    }
+    try {
+      const upload = await fetch(`/api/account/scenes/${sceneId}/images`, {
+        body: JSON.stringify({
+          content_base64: dataUrl.slice("data:image/png;base64,".length),
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const payload = await upload.json().catch(() => ({}));
+      if (upload.ok) {
+        router.refresh();
+      }
+      return {
+        ok: upload.ok,
+        // The gallery upload failed for a real reason (quota, moderation,
+        // ...): tell the user instead of silently downloading a file they
+        // wanted stored.
+        fallbackDownload: false,
+        error: upload.ok ? undefined : `Saving failed: ${payload.error ?? upload.status}`,
+      };
+    } catch {
+      return { ok: false, fallbackDownload: false, error: "Saving failed" };
+    }
+  }
 
   const editorHash = "#scene-editor";
   const openRef = useRef(false);
@@ -156,6 +159,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setOpen(false);
     setDirty(false);
     setError(null);
+    setScenes(null);
     latestScenesRef.current = null;
   }
 
@@ -200,8 +204,8 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   }
 
   async function forkAndSave() {
-    const scenes = latestScenesRef.current;
-    if (!scenes || scenes.length === 0) {
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
       setError("Nothing to fork yet.");
       return;
     }
@@ -216,7 +220,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setError(null);
     try {
       const response = await fetch(`/api/account/scenes/${sceneId}/fork`, {
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({ scenes: latest }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -237,8 +241,8 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   }
 
   async function save() {
-    const scenes = latestScenesRef.current;
-    if (!scenes || scenes.length === 0) {
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
       setError("Nothing to save yet.");
       return;
     }
@@ -253,7 +257,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setError(null);
     try {
       const response = await fetch(`/api/account/scenes/${sceneId}/content`, {
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({ scenes: latest }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -263,7 +267,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
         return;
       }
       setDirty(false);
-      initialJsonRef.current = JSON.stringify(scenes);
+      initialJsonRef.current = JSON.stringify(latest);
       close();
       router.refresh();
     } finally {
@@ -334,7 +338,26 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
           </button>
         </div>
       </div>
-      <div className="editor-modal__frame" ref={containerRef} />
+      <div className="editor-modal__frame">
+        {scenes ? (
+          <EmbeddedSceneEditor
+            scenes={scenes}
+            width={width || 800}
+            height={height || 480}
+            mode="rpios"
+            theme={theme}
+            // The editor's built-in wasm Preview panel routes CORS-blocked
+            // fetches through this endpoint (same one SceneLivePreview uses).
+            previewProxyUrl="/api/store/preview-proxy"
+            description={description || undefined}
+            onScenesChanged={(nextScenes) => {
+              latestScenesRef.current = nextScenes as SceneJson[];
+              setDirty(JSON.stringify(nextScenes) !== initialJsonRef.current);
+            }}
+            onSaveScreenshot={saveScreenshot}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

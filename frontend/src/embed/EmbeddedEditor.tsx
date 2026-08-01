@@ -34,12 +34,151 @@ import { workspaceLogic } from '../scenes/workspace/workspaceLogic'
 import { FrameScene } from '../types'
 import { embedBridge, embedFrameLogic } from './embedFrameLogic'
 import { EmbedScenePreview } from './EmbedScenePreview'
+import { ensurePortalRoots } from './portalRoots'
 // Note: via the build alias this resolves to embedFrameLogic too; imported
 // under its public name so BindLogic wires the same instance the Diagram
 // dependency graph connects to.
 import { frameLogic } from '../scenes/frame/frameLogic'
 
 const EMBED_FRAME_ID = 1
+
+export interface EmbeddedSceneEditorScreenshotResult {
+  ok: boolean
+  error?: string
+  /** When false, a failed save does not fall back to a local PNG download. */
+  fallbackDownload?: boolean
+}
+
+export interface EmbeddedSceneEditorProps {
+  scenes: FrameScene[]
+  sceneId?: string
+  mode?: string
+  width?: number
+  height?: number
+  interval?: number
+  theme?: FrameosTheme
+  /** Same-origin endpoint the wasm preview routes CORS-blocked fetches through. */
+  previewProxyUrl?: string
+  /** Host-page description of the scene (scenes.json doesn't carry one), shown
+   * in the Scene settings panel. */
+  description?: string
+  /** Fires (debounced) after every edit with the full scenes JSON. */
+  onScenesChanged?: (scenes: FrameScene[]) => void
+  /** Preview-panel screenshot handler; omit to let the editor download the
+   * PNG locally (or, under the iframe/mount embeds, to let the embedding
+   * page's protocol handler answer instead). */
+  onSaveScreenshot?: (dataUrl: string, sceneId: string | null) => Promise<EmbeddedSceneEditorScreenshotResult>
+}
+
+// The scene editor as a plain React component: render it inside any React
+// tree (the library build at src/embed/lib.tsx externalizes react, so it uses
+// the host app's copy). Scenes come in as props; edits stream out through
+// onScenesChanged. Re-initializes when the `scenes` array identity changes.
+export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Element {
+  // Portal targets must exist before the first render pass (a useState
+  // initializer runs exactly then).
+  useState(ensurePortalRoots)
+  const logicProps = { frameId: EMBED_FRAME_ID }
+  useMountedLogic(embedFrameLogic(logicProps))
+  const { initEmbedFrame } = useActions(embedFrameLogic(logicProps))
+  const { scenes } = useValues(embedFrameLogic(logicProps))
+  const { setTheme } = useActions(workspaceLogic)
+  const [initialized, setInitialized] = useState(false)
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
+  const theme: FrameosTheme = props.theme ?? 'light'
+
+  useEffect(() => {
+    // Through workspaceLogic so the diagram, Monaco editors and panels
+    // (which read workspaceLogic.theme) all follow the embedding page.
+    setTheme(theme)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme])
+
+  useEffect(() => {
+    if (props.previewProxyUrl) {
+      const config = ((window as any).FRAMEOS_APP_CONFIG = (window as any).FRAMEOS_APP_CONFIG || {})
+      config.preview_proxy_url = props.previewProxyUrl
+    }
+    initEmbedFrame({
+      id: EMBED_FRAME_ID,
+      scenes: props.scenes,
+      mode: props.mode || 'rpios',
+      width: props.width || 800,
+      height: props.height || 480,
+      interval: props.interval ?? 300,
+      rotate: 0,
+    } as any)
+    setSelectedSceneId(
+      props.sceneId ?? (props.scenes.find((scene) => scene.default) || props.scenes[0])?.id ?? null
+    )
+    setInitialized(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.scenes])
+
+  useEffect(() => {
+    if (props.sceneId) {
+      setSelectedSceneId(props.sceneId)
+    }
+  }, [props.sceneId])
+
+  useEffect(() => {
+    if (!props.onScenesChanged) {
+      return
+    }
+    embedBridge.onScenesChanged = props.onScenesChanged
+    return () => {
+      if (embedBridge.onScenesChanged === props.onScenesChanged) {
+        embedBridge.onScenesChanged = undefined
+      }
+    }
+  }, [props.onScenesChanged])
+
+  // The Preview panel reports screenshots over the same-window message bus
+  // (see EmbedScenePreview); when the host passes a handler, answer here so
+  // it never has to know about the protocol.
+  useEffect(() => {
+    const onSaveScreenshot = props.onSaveScreenshot
+    if (!onSaveScreenshot) {
+      return
+    }
+    const onMessage = (event: MessageEvent): void => {
+      const message = event.data
+      if (
+        event.source === window &&
+        message &&
+        typeof message === 'object' &&
+        message.type === 'frameos-editor:save-screenshot' &&
+        typeof message.dataUrl === 'string'
+      ) {
+        void onSaveScreenshot(message.dataUrl, typeof message.sceneId === 'string' ? message.sceneId : null)
+          .catch((error): EmbeddedSceneEditorScreenshotResult => ({ ok: false, error: String(error) }))
+          .then((result) => {
+            window.postMessage({ type: 'frameos-editor:screenshot-saved', ...result }, window.location.origin)
+          })
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [props.onSaveScreenshot])
+
+  if (!initialized) {
+    return <div className="h-full" />
+  }
+
+  return (
+    <BindLogic logic={frameLogic} props={logicProps}>
+      <BindLogic logic={frameEditorsLogic} props={logicProps}>
+        <EmbeddedEditorBody
+          selectedSceneId={selectedSceneId}
+          setSelectedSceneId={setSelectedSceneId}
+          scenes={scenes}
+          theme={theme}
+          sceneDescription={props.description?.trim() ? props.description : null}
+        />
+      </BindLogic>
+    </BindLogic>
+  )
+}
 
 // The postMessage protocol (all messages are objects with a `type`):
 //   parent -> editor:
@@ -60,44 +199,26 @@ const EMBED_FRAME_ID = 1
 // routes CORS-blocked HTTP requests through. `description` is the embedding
 // page's description of the scene (scenes.json doesn't carry one), shown in
 // the Scene settings panel.
+//
+// This wrapper drives EmbeddedSceneEditor from that protocol; it is what the
+// iframe bundle (editor.tsx) and the direct mount (mount.tsx) render.
 export function EmbeddedEditor(): JSX.Element {
   const logicProps = { frameId: EMBED_FRAME_ID }
   const logic = useMountedLogic(embedFrameLogic(logicProps))
-  const { initEmbedFrame } = useActions(embedFrameLogic(logicProps))
-  const { scenes } = useValues(embedFrameLogic(logicProps))
-  const { setTheme } = useActions(workspaceLogic)
-  const [initialized, setInitialized] = useState(false)
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
-  const [sceneDescription, setSceneDescription] = useState<string | null>(null)
-  const [theme, setThemeState] = useState<FrameosTheme>(() =>
-    document.documentElement.dataset.frameosTheme === 'dark' ? 'dark' : 'light'
-  )
+  const [init, setInit] = useState<Omit<EmbeddedSceneEditorProps, 'onScenesChanged'> | null>(null)
+  const [selectedSceneId, setSelectedSceneId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
-    embedBridge.onScenesChanged = (nextScenes: FrameScene[]) => {
-      window.parent?.postMessage({ type: 'frameos-editor:scenes', scenes: nextScenes }, '*')
-    }
-
     const onMessage = (event: MessageEvent): void => {
       const message = event.data
       if (!message || typeof message !== 'object') {
         return
       }
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
-        if (message.theme === 'dark' || message.theme === 'light') {
-          setThemeState(message.theme)
-          // Through workspaceLogic so the diagram, Monaco editors and panels
-          // (which read workspaceLogic.theme) all follow the embedding page.
-          setTheme(message.theme)
-        }
-        if (typeof message.previewProxyUrl === 'string' && message.previewProxyUrl) {
-          const config = ((window as any).FRAMEOS_APP_CONFIG = (window as any).FRAMEOS_APP_CONFIG || {})
-          config.preview_proxy_url = message.previewProxyUrl
-        }
-        setSceneDescription(
-          typeof message.description === 'string' && message.description.trim() ? message.description : null
-        )
-        initEmbedFrame({
+        // Also dispatch synchronously (EmbeddedSceneEditor re-inits in an
+        // effect, i.e. a tick later): a get-scenes message in the same tick
+        // must already see the new scenes in the form.
+        logic.actions.initEmbedFrame({
           id: EMBED_FRAME_ID,
           scenes: message.scenes,
           mode: message.mode || 'rpios',
@@ -106,12 +227,22 @@ export function EmbeddedEditor(): JSX.Element {
           interval: message.interval ?? 300,
           rotate: 0,
         } as any)
-        setSelectedSceneId(
-          message.sceneId ??
-            (message.scenes.find((scene: FrameScene) => scene.default) || message.scenes[0])?.id ??
-            null
-        )
-        setInitialized(true)
+        setInit({
+          scenes: message.scenes,
+          mode: message.mode,
+          width: message.width,
+          height: message.height,
+          interval: message.interval,
+          theme:
+            message.theme === 'dark' || message.theme === 'light'
+              ? message.theme
+              : document.documentElement.dataset.frameosTheme === 'dark'
+              ? 'dark'
+              : 'light',
+          previewProxyUrl: typeof message.previewProxyUrl === 'string' ? message.previewProxyUrl : undefined,
+          description: typeof message.description === 'string' ? message.description : undefined,
+        })
+        setSelectedSceneId(typeof message.sceneId === 'string' ? message.sceneId : undefined)
       } else if (message.type === 'frameos-editor:get-scenes') {
         window.parent?.postMessage({ type: 'frameos-editor:scenes', scenes: logic.values.frameForm?.scenes ?? [] }, '*')
       } else if (message.type === 'frameos-editor:select-scene' && typeof message.sceneId === 'string') {
@@ -120,33 +251,26 @@ export function EmbeddedEditor(): JSX.Element {
     }
     window.addEventListener('message', onMessage)
     window.parent?.postMessage({ type: 'frameos-editor:ready' }, '*')
-    return () => {
-      window.removeEventListener('message', onMessage)
-      embedBridge.onScenesChanged = undefined
-    }
+    return () => window.removeEventListener('message', onMessage)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (!initialized) {
+  if (!init) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center text-sm text-slate-400">
         Waiting for scenes… (post a {'{type: "frameos-editor:init", scenes: [...]}'} message)
       </div>
     )
   }
 
   return (
-    <BindLogic logic={frameLogic} props={logicProps}>
-      <BindLogic logic={frameEditorsLogic} props={logicProps}>
-        <EmbeddedEditorBody
-          selectedSceneId={selectedSceneId}
-          setSelectedSceneId={setSelectedSceneId}
-          scenes={scenes}
-          theme={theme}
-          sceneDescription={sceneDescription}
-        />
-      </BindLogic>
-    </BindLogic>
+    <EmbeddedSceneEditor
+      {...init}
+      sceneId={selectedSceneId}
+      onScenesChanged={(nextScenes) => {
+        window.parent?.postMessage({ type: 'frameos-editor:scenes', scenes: nextScenes }, '*')
+      }}
+    />
   )
 }
 
