@@ -452,3 +452,68 @@ async def test_disconnect_reenables_local_fallback(async_client, db, redis, logi
         "/api/login", data={"username": "test@example.com", "password": "testpassword"}
     )
     assert login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_login_callback_requires_state_cookie(async_client, db, redis, login_handoff):
+    """A live state alone must not complete a handoff.
+
+    Without binding the state to the browser that started it, anyone able to
+    call the open /start endpoint could hand the resulting callback URL to a
+    victim (logging them into the attacker's account), or replay a leaked code
+    from their own browser to take over the owner's session.
+    """
+    calls, _ = login_handoff
+    make_connected_link(db)
+    state = await _start_and_get_state(async_client, calls)
+
+    async_client.cookies.delete("frameos_cloud_login_state")
+    response = await async_client.get(f"/api/cloud/login/callback?code=abc&state={state}")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?cloudError=invalid_state"
+
+    # The forged callback must not have consumed the real handoff either.
+    assert await redis.get(f"cloud_login_state:{state}") is not None
+
+
+@pytest.mark.asyncio
+async def test_login_callback_rejects_mismatched_state_cookie(async_client, db, redis, login_handoff):
+    calls, _ = login_handoff
+    make_connected_link(db)
+    state = await _start_and_get_state(async_client, calls)
+
+    async_client.cookies.set("frameos_cloud_login_state", "some-other-state")
+    response = await async_client.get(f"/api/cloud/login/callback?code=abc&state={state}")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?cloudError=invalid_state"
+
+
+@pytest.mark.asyncio
+async def test_cloud_created_user_can_set_a_recovery_password(no_auth_client, db, redis, login_handoff):
+    """Cloud signup leaves password NULL; that user must still be able to set one.
+
+    Otherwise a later broken link (revoked, provider gone, or cloud disabled)
+    locks them out permanently, with no recovery short of editing the database.
+    """
+    calls, _ = login_handoff
+    make_connected_link(db)
+
+    await no_auth_client.post("/api/cloud/login/start", json={})
+    state = calls["start"][0][2]["state"]
+    await no_auth_client.get(f"/api/cloud/login/callback?code=abc&state={state}")
+
+    user = db.query(User).first()
+    assert user is not None
+    assert user.password is None  # cloud-created: no local password
+    # An empty password must never authenticate a passwordless user.
+    assert not user.check_password("")
+
+    response = await no_auth_client.post(
+        "/api/user/password",
+        json={"password": "a-recovery-password", "password2": "a-recovery-password"},
+    )
+    assert response.status_code == 200, response.text
+
+    db.refresh(user)
+    assert user.check_password("a-recovery-password")
+    assert not user.check_password("")

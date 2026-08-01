@@ -9,7 +9,9 @@ class UserResponse(BaseModel):
 
 
 class UserPasswordUpdate(BaseModel):
-    current_password: str
+    # Optional so a cloud-created user (no local password yet) can set a
+    # recovery one; the route still requires it whenever a password exists.
+    current_password: str | None = None
     password: str
     password2: str
 

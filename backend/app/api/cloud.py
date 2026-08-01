@@ -16,7 +16,7 @@ import secrets
 from http import HTTPStatus
 
 from arq import ArqRedis as Redis
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,27 @@ from . import api_open, api_user
 
 CLOUD_LOGIN_STATE_PREFIX = "cloud_login_state:"
 CLOUD_LOGIN_STATE_TTL_SECONDS = 600
+CLOUD_LOGIN_STATE_COOKIE = "frameos_cloud_login_state"
+
+
+def _set_login_state_cookie(request: Request, response: Response, state: str) -> None:
+    """Bind a login handoff to the browser that started it.
+
+    The Redis state alone only proves *a* handoff is in flight, not that this
+    browser began it: without the cookie, anyone who can reach /start can mint
+    a state, and a leaked or attacker-held code can then be replayed into this
+    callback (logging the victim into the attacker's account, or the attacker
+    into the victim's). See RFC 6749 §10.12.
+    """
+    response.set_cookie(
+        CLOUD_LOGIN_STATE_COOKIE,
+        state,
+        max_age=CLOUD_LOGIN_STATE_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=_should_use_secure_cookie(request),
+        path="/api/cloud/login",
+    )
 
 # Scopes a link may request; must stay in sync with the table in CLOUD-TODO.md
 # and docs/cloud-link.md.
@@ -564,8 +585,13 @@ async def _handoff_authorization_url(
     user_id: int | None,
     intent: str,
     return_origin: str | None = None,
-) -> str:
-    """Start a login handoff with the provider and remember our state token."""
+) -> tuple[str, str]:
+    """Start a login handoff with the provider and remember our state token.
+
+    Returns (authorization_url, state). Callers must hand the state to the
+    browser as a cookie and require it back at the callback, so only the
+    browser that started a handoff can complete it.
+    """
     access_token = cloud.decrypt_cloud_secret(link.access_token)
     if not access_token or not link.local_origin:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="The cloud link is incomplete; reconnect first")
@@ -600,7 +626,7 @@ async def _handoff_authorization_url(
         ),
         ex=CLOUD_LOGIN_STATE_TTL_SECONDS,
     )
-    return str(response["authorization_url"])
+    return str(response["authorization_url"]), state
 
 
 @api_open.get("/cloud/login/options", response_model=CloudLoginOptionsResponse)
@@ -622,6 +648,7 @@ async def cloud_login_options(db: Session = Depends(get_db)):
 @api_open.post("/cloud/login/start", response_model=CloudLoginStartResponse)
 async def cloud_login_start(
     request: Request,
+    response: Response,
     data: CloudLoginStartRequest,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -635,7 +662,7 @@ async def cloud_login_start(
             detail="The cloud link is missing the auth:login permission; reconnect with it enabled",
         )
     setup_mode = db.query(User).first() is None
-    authorization_url = await _handoff_authorization_url(
+    authorization_url, state = await _handoff_authorization_url(
         link,
         redis,
         mode="login",
@@ -644,12 +671,14 @@ async def cloud_login_start(
         intent="signup" if setup_mode else "login",
         return_origin=_browser_origin(request),
     )
+    _set_login_state_cookie(request, response, state)
     return {"authorization_url": authorization_url}
 
 
 @api_user.post("/cloud/identity/link", response_model=CloudLoginStartResponse)
 async def cloud_identity_link_start(
     request: Request,
+    response: Response,
     data: CloudLoginStartRequest,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -668,7 +697,7 @@ async def cloud_identity_link_start(
             status_code=HTTPStatus.FORBIDDEN,
             detail="The cloud link is missing the auth:login permission; reconnect with it enabled",
         )
-    authorization_url = await _handoff_authorization_url(
+    authorization_url, state = await _handoff_authorization_url(
         link,
         redis,
         mode="link",
@@ -677,6 +706,7 @@ async def cloud_identity_link_start(
         intent="login",
         return_origin=_browser_origin(request),
     )
+    _set_login_state_cookie(request, response, state)
     return {"authorization_url": authorization_url}
 
 
@@ -713,6 +743,13 @@ async def cloud_login_callback(
 ):
     """The browser lands here after approving (or failing) a cloud login."""
     if not state:
+        return _login_redirect("invalid_state")
+    # Only the browser that started the handoff may finish it: a live Redis
+    # state proves a handoff exists, not who began it (see
+    # _set_login_state_cookie). Checked before the state is consumed, so a
+    # forged callback cannot burn the real one.
+    state_cookie = request.cookies.get(CLOUD_LOGIN_STATE_COOKIE) or ""
+    if not secrets.compare_digest(state_cookie, state):
         return _login_redirect("invalid_state")
     state_raw = await redis.get(f"{CLOUD_LOGIN_STATE_PREFIX}{state}")
     if state_raw:
