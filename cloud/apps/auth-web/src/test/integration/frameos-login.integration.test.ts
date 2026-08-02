@@ -1,6 +1,11 @@
 import { sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { createDb, upsertAccountFromIdentity } from "@frameos-cloud/db";
+import {
+  createDb,
+  frameosLoginCodes,
+  linkedClients,
+  upsertAccountFromIdentity,
+} from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
@@ -127,6 +132,29 @@ function bearer(token: string) {
   return { authorization: `Bearer ${token}` };
 }
 
+/** Runs start + authorize and returns the single-use login code. */
+async function runHandoffForCode(accessToken: string) {
+  const startResponse = await startLogin(
+    postJson(
+      "/api/frameos/login/start",
+      {
+        redirect_uri: `${backendOrigin}/api/cloud/login/callback`,
+        state: "state-helper",
+      },
+      bearer(accessToken),
+    ),
+  );
+  expect(startResponse.status).toBe(200);
+  const { authorization_url: authorizationUrl } = await readJson(startResponse);
+  const authorizeResponse = await authorizeLogin(
+    new NextRequest(new URL(authorizationUrl as string)),
+  );
+  const location = new URL(authorizeResponse.headers.get("location") ?? "");
+  const code = location.searchParams.get("code");
+  expect(code).toMatch(/^fc_login_/);
+  return code as string;
+}
+
 describe("frameos login handoff", () => {
   it("logs a user in end-to-end: start, authorize, code exchange", async () => {
     const { accessToken, session } = await linkBackend([
@@ -178,6 +206,85 @@ describe("frameos login handoff", () => {
       postJson("/api/frameos/login/token", { code }, bearer(accessToken)),
     );
     expect(replayResponse.status).toBe(400);
+  });
+
+  it("clears the profile snapshot once the claims are released", async () => {
+    const { accessToken } = await linkBackend([
+      "backend:link",
+      "backend:read",
+      "auth:login",
+    ]);
+    const code = await runHandoffForCode(accessToken);
+
+    const tokenResponse = await redeemLoginCode(
+      postJson("/api/frameos/login/token", { code }, bearer(accessToken)),
+    );
+    expect(tokenResponse.status).toBe(200);
+
+    // The row still proves the code was used, but no longer carries the
+    // account's email, name and subject waiting for a cleanup run.
+    const rows = await db.select().from(frameosLoginCodes);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.redeemedAt).not.toBeNull();
+    expect(rows[0]?.profile).toEqual({});
+  });
+
+  it("stops honouring a login request once auth:login is removed", async () => {
+    const { accessToken } = await linkBackend([
+      "backend:link",
+      "backend:read",
+      "auth:login",
+    ]);
+
+    const startResponse = await startLogin(
+      postJson(
+        "/api/frameos/login/start",
+        {
+          redirect_uri: `${backendOrigin}/api/cloud/login/callback`,
+          state: "state-scope",
+        },
+        bearer(accessToken),
+      ),
+    );
+    expect(startResponse.status).toBe(200);
+    const { authorization_url: authorizationUrl } =
+      await readJson(startResponse);
+
+    // The request token lives for 10 minutes; revoking the scope in that
+    // window must take effect immediately, not when the token expires.
+    await db
+      .update(linkedClients)
+      .set({
+        providerClientMetadata: { requestedScopes: ["backend:link", "backend:read"] },
+      });
+
+    const authorizeResponse = await authorizeLogin(
+      new NextRequest(new URL(authorizationUrl as string)),
+    );
+    const location = new URL(authorizeResponse.headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBe("insufficient_scope");
+    expect(location.searchParams.get("code")).toBeNull();
+  });
+
+  it("stops honouring an already-minted code once auth:login is removed", async () => {
+    const { accessToken } = await linkBackend([
+      "backend:link",
+      "backend:read",
+      "auth:login",
+    ]);
+    const code = await runHandoffForCode(accessToken);
+
+    await db
+      .update(linkedClients)
+      .set({
+        providerClientMetadata: { requestedScopes: ["backend:link", "backend:read"] },
+      });
+
+    const tokenResponse = await redeemLoginCode(
+      postJson("/api/frameos/login/token", { code }, bearer(accessToken)),
+    );
+    expect(tokenResponse.status).toBe(403);
+    expect((await readJson(tokenResponse)).error).toBe("insufficient_scope");
   });
 
   it("requires the auth:login scope to start a handoff", async () => {

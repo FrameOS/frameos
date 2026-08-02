@@ -11,3 +11,4 @@ from .settings import *  # noqa: F403
 from .scene_image import *    # noqa: F403
 from .template import *  # noqa: F403
 from .user import *  # noqa: F403
+from .user_session import *  # noqa: F403

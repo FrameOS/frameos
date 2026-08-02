@@ -11,15 +11,18 @@ outbound-only, initiated here.
 from __future__ import annotations
 
 import datetime
+import ipaddress
 import json
 import secrets
 from http import HTTPStatus
+from urllib.parse import urlparse
 
 from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app import config as app_config
 from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, _should_use_secure_cookie, get_current_user
 from app.database import get_db
 from app.models.cloud import CloudBackendLink, CloudIdentity, current_cloud_backend_link, link_is_expired
@@ -37,6 +40,7 @@ from app.schemas.cloud import (
     CloudStatusResponse,
 )
 from app.utils import cloud_link as cloud
+from app.models.user_session import create_user_session, revoke_sessions_for_user
 from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
 from app.utils.versions import current_frameos_version
 
@@ -99,11 +103,65 @@ async def _nudge_cloud_sync() -> None:
         pass
 
 
+def _peer_is_trusted_proxy(request: Request) -> bool:
+    """Whether this request's immediate peer may set X-Forwarded-* headers.
+
+    Configured proxies win. Otherwise trust loopback and private-range peers:
+    that covers docker and the usual reverse-proxy layouts, while a client out
+    on the network can no longer name the origin FrameOS believes it has.
+    """
+    configured = [p.strip() for p in app_config.config.FRAMEOS_TRUSTED_PROXIES.split(",") if p.strip()]
+    peer = (request.client.host if request.client else "") or ""
+    if configured:
+        return peer in configured
+    if not peer:
+        return False
+    try:
+        return ipaddress.ip_address(peer).is_loopback or ipaddress.ip_address(peer).is_private
+    except ValueError:
+        return False
+
+
+def _peer_is_loopback(request: Request) -> bool:
+    peer = (request.client.host if request.client else "") or ""
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
+
+
+def _valid_origin(value: str | None) -> str | None:
+    """An origin we are willing to hand to a browser or to the provider."""
+    if not value:
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
 def _request_origin(request: Request) -> str:
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
-    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
-    scheme = forwarded_proto or request.url.scheme
-    host = forwarded_host or request.headers.get("host") or request.url.netloc
+    """The origin this install believes it is reached at.
+
+    This value ends up as the cloud login `redirect_uri` and the logout
+    `return_to` allowlist, so letting an arbitrary caller choose it — which
+    `X-Forwarded-Host` did, unconditionally and ahead of `Host` — hands those
+    to whoever asks. An explicitly configured public URL always wins;
+    forwarded headers count only from a trusted peer.
+    """
+    configured = _valid_origin(app_config.config.FRAMEOS_PUBLIC_URL)
+    if configured:
+        return configured
+
+    scheme = request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    if _peer_is_trusted_proxy(request):
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+        forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        scheme = forwarded_proto or scheme
+        host = forwarded_host or host
     return f"{scheme}://{host}".rstrip("/")
 
 
@@ -219,6 +277,21 @@ def _connected_link(db: Session) -> CloudBackendLink | None:
     return link
 
 
+def revoke_cloud_login_sessions(db: Session) -> None:
+    """Ends local sessions that exist because of the cloud.
+
+    A user who signs in through the handoff holds a local session with its own
+    seven-day life. Losing the link — revoked from the cloud, unlinked here, or
+    the provider gone — has to end that access too, otherwise "revoke" on the
+    cloud side means "revoked in a week". Users with a local password can log
+    straight back in; losing the link re-enables local login for exactly that.
+    """
+    from app.models.cloud import CloudIdentity
+
+    for identity in db.query(CloudIdentity).all():
+        revoke_sessions_for_user(db, identity.user_id)
+
+
 def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     link.status = "disconnected"
     link.device_code = None
@@ -234,6 +307,8 @@ def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     link.scope = None
     link.poll_error = poll_error
     link.revoked_at = None
+    # A cleared link is an unclaimed setup flow again.
+    link.setup_claim = None
     # Never leave an install without a way to log in: losing the cloud link
     # always re-enables local password login.
     link.local_fallback_enabled = True
@@ -487,6 +562,7 @@ async def disconnect_cloud(db: Session = Depends(get_db)):
             pass
     _reset_link(link)
     db.commit()
+    revoke_cloud_login_sessions(db)
     return _status_payload(db, link)
 
 
@@ -494,8 +570,25 @@ async def disconnect_cloud(db: Session = Depends(get_db)):
 #
 # A fresh install has no user to log in with, but the setup screen must be able
 # to link to the cloud so the first user can be created from a cloud account
-# (and config backups restored). Anyone who can reach a fresh install can
-# already claim it through the open /api/signup, so these carry the same trust.
+# (and config backups restored).
+#
+# "Anyone who can reach a fresh install can already claim it through the open
+# /api/signup" was the original rationale for leaving these open, and it does
+# not hold: claiming the install through signup is visible — the owner finds it
+# already set up — while pre-linking it is not. A LAN attacker could link a
+# fresh install to *their* cloud account, with scopes of their choosing, and
+# the owner would then complete setup on top of an install whose backups,
+# published scenes and (with auth:login) sign-in all answer to someone else.
+#
+# So the setup flow is bound to one browser: the first caller gets a claim
+# cookie, the claim is recorded with the link, and only the holder can drive
+# the flow or see the pending user code. A second browser sees that setup is in
+# progress and can take it over — the install is unclaimed, and a stuck link
+# must not brick first-run setup — but taking over discards the pending link
+# rather than inheriting it.
+
+SETUP_CLAIM_COOKIE = "frameos_setup_claim"
+SETUP_CLAIM_TTL_SECONDS = 60 * 60
 
 
 def _require_setup_mode(db: Session) -> None:
@@ -503,33 +596,91 @@ def _require_setup_mode(db: Session) -> None:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Setup is complete; log in first")
 
 
+def _setup_claim_matches(request: Request, link: CloudBackendLink | None) -> bool:
+    """Whether this browser is the one driving setup."""
+    if link is None or not link.setup_claim:
+        return True  # nothing claimed yet
+    presented = request.cookies.get(SETUP_CLAIM_COOKIE) or ""
+    if not presented:
+        return False
+    return secrets.compare_digest(cloud.hash_setup_claim(presented), link.setup_claim)
+
+
+def _set_setup_claim_cookie(request: Request, response: Response, claim: str) -> None:
+    response.set_cookie(
+        key=SETUP_CLAIM_COOKIE,
+        value=claim,
+        max_age=SETUP_CLAIM_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=_should_use_secure_cookie(request),
+    )
+
+
+def _require_setup_claim(request: Request, db: Session) -> CloudBackendLink | None:
+    link = current_cloud_backend_link(db)
+    if not _setup_claim_matches(request, link):
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail="Another browser is already setting this install up. Reload to take over.",
+        )
+    return link
+
+
 @api_open.get("/cloud/setup/status", response_model=CloudStatusResponse)
-async def setup_cloud_status(db: Session = Depends(get_db)):
+async def setup_cloud_status(request: Request, db: Session = Depends(get_db)):
     _require_setup_mode(db)
-    return _status_payload(db, current_cloud_backend_link(db))
+    link = current_cloud_backend_link(db)
+    payload = _status_payload(db, link)
+    if not _setup_claim_matches(request, link):
+        # Say that a link is in progress, but never hand the pending user code
+        # to a browser that did not start it: that code is the whole approval.
+        payload["connection"] = None
+        payload["link"] = None
+        payload["claimed_by_other_browser"] = True
+    return payload
 
 
 @api_open.post("/cloud/setup/provider", response_model=CloudStatusResponse)
-async def setup_cloud_provider(data: CloudProviderUpdateRequest, db: Session = Depends(get_db)):
+async def setup_cloud_provider(
+    request: Request, data: CloudProviderUpdateRequest, db: Session = Depends(get_db)
+):
     _require_setup_mode(db)
+    _require_setup_claim(request, db)
     return await _update_provider(data, db)
 
 
 @api_open.post("/cloud/setup/connect", response_model=CloudStatusResponse)
-async def setup_cloud_connect(request: Request, data: CloudConnectRequest, db: Session = Depends(get_db)):
+async def setup_cloud_connect(
+    request: Request, response: Response, data: CloudConnectRequest, db: Session = Depends(get_db)
+):
     _require_setup_mode(db)
-    return await _start_connect(request, data, db)
+    _require_setup_claim(request, db)
+    payload = await _start_connect(request, data, db)
+    # Claim the flow for this browser. Issued per connect, so a takeover after
+    # a stuck link starts from a fresh claim.
+    claim = secrets.token_urlsafe(32)
+    link = current_cloud_backend_link(db)
+    if link is not None:
+        link.setup_claim = cloud.hash_setup_claim(claim)
+        db.commit()
+    _set_setup_claim_cookie(request, response, claim)
+    return payload
 
 
 @api_open.post("/cloud/setup/poll", response_model=CloudStatusResponse)
-async def setup_cloud_poll(db: Session = Depends(get_db)):
+async def setup_cloud_poll(request: Request, db: Session = Depends(get_db)):
     _require_setup_mode(db)
+    _require_setup_claim(request, db)
     return await _poll_link(db)
 
 
 @api_open.post("/cloud/setup/disconnect", response_model=CloudStatusResponse)
-async def setup_cloud_disconnect(db: Session = Depends(get_db)):
+async def setup_cloud_disconnect(request: Request, db: Session = Depends(get_db)):
     _require_setup_mode(db)
+    # Deliberately not claim-gated: a browser that lost its cookie (or a second
+    # one taking over) must be able to clear a half-finished link, and on an
+    # install with no users there is nothing yet to protect.
     return await disconnect_cloud(db)
 
 
@@ -557,21 +708,29 @@ def _browser_origin(request: Request) -> str | None:
     return _request_origin(request)
 
 
-def _allowed_return_origin(origin: str | None, link: CloudBackendLink) -> str | None:
-    """An origin the callback may bounce back to: the link's own origin, or a
-    loopback host (development). Anything else could turn the callback into an
-    open redirect for whoever started the flow."""
-    if not origin:
-        return None
-    from urllib.parse import urlparse
+def _allowed_return_origin(
+    origin: str | None, link: CloudBackendLink, request: Request | None = None
+) -> str | None:
+    """An origin the callback may bounce back to.
 
-    parsed = urlparse(origin)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    The link's own origin always qualifies. A loopback origin used to qualify
+    unconditionally, from an Origin header any caller could set — so a remote
+    caller could aim the callback at `http://localhost:<anything>`. It now
+    qualifies only when the request itself came from this machine, which is
+    exactly the development case it exists for (Vite on :8616 proxying to the
+    backend on another port, same host).
+
+    Behind a reverse proxy on the same host every peer is loopback, so there
+    this is no stronger than before; the redirect target is still restricted to
+    loopback, which bounds it to a self-redirect.
+    """
+    normalized = _valid_origin(origin)
+    if normalized is None:
         return None
-    normalized = origin.rstrip("/")
-    if parsed.hostname in LOOPBACK_HOSTS:
+    if link.local_origin and normalized == _valid_origin(link.local_origin):
         return normalized
-    if link.local_origin and normalized == link.local_origin.rstrip("/"):
+    parsed = urlparse(normalized)
+    if parsed.hostname in LOOPBACK_HOSTS and request is not None and _peer_is_loopback(request):
         return normalized
     return None
 
@@ -589,6 +748,7 @@ async def _handoff_authorization_url(
     user_id: int | None,
     intent: str,
     return_origin: str | None = None,
+    request: Request | None = None,
 ) -> tuple[str, str]:
     """Start a login handoff with the provider and remember our state token.
 
@@ -625,7 +785,7 @@ async def _handoff_authorization_url(
                 "mode": mode,
                 "next": next_path,
                 "user_id": user_id,
-                "return_origin": _allowed_return_origin(return_origin, link),
+                "return_origin": _allowed_return_origin(return_origin, link, request),
             }
         ),
         ex=CLOUD_LOGIN_STATE_TTL_SECONDS,
@@ -674,6 +834,7 @@ async def cloud_login_start(
         user_id=None,
         intent="signup" if setup_mode else "login",
         return_origin=_browser_origin(request),
+        request=request,
     )
     _set_login_state_cookie(request, response, state)
     return {"authorization_url": authorization_url}
@@ -709,6 +870,7 @@ async def cloud_identity_link_start(
         user_id=current_user.id,
         intent="login",
         return_origin=_browser_origin(request),
+        request=request,
     )
     _set_login_state_cookie(request, response, state)
     return {"authorization_url": authorization_url}
@@ -772,7 +934,7 @@ async def cloud_login_callback(
     # In development the UI origin (e.g. Vite on :8616) differs from the
     # link's registered origin that this callback runs on; send the browser
     # back to where it started. Only origins vetted at start time are stored.
-    return_origin = _allowed_return_origin(state_data.get("return_origin"), link) if link else None
+    return_origin = _allowed_return_origin(state_data.get("return_origin"), link, request) if link else None
 
     def _target(path: str) -> str:
         if return_origin and return_origin != _request_origin(request):
@@ -862,7 +1024,10 @@ async def cloud_login_callback(
     ensure_default_project_for_user(db, user)
 
     expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    session_value, max_age = create_session_cookie_value(email=user.email, expires_delta=expires)
+    session_id = create_user_session(db, user_id=user.id, expires_at=_now() + expires)
+    session_value, max_age = create_session_cookie_value(
+        email=user.email, session_id=session_id, expires_delta=expires
+    )
     redirect = RedirectResponse(_target(next_path or "/"), status_code=HTTPStatus.SEE_OTHER)
     redirect.set_cookie(
         key=SESSION_COOKIE_NAME,

@@ -26,13 +26,21 @@ implementation), `frameos/src/frameos/server/routes/cloud_api_routes.nim`
 
 ## Configuration
 
-Environment variable on the backend (`backend/app/config.py`):
+Environment variables on the backend (`backend/app/config.py`):
 
 | `FRAMEOS_CLOUD_URL` | Meaning |
 |---|---|
 | unset / empty | use `https://cloud.frameos.net` |
-| an `http(s)://` origin | use that provider |
+| an `https://` origin | use that provider |
+| an `http://` origin | only for localhost, RFC1918 and `.local` hosts — everything the link carries (the token, grants, identity claims) is forgeable by an on-path attacker over plain HTTP |
 | `disabled` | hide the cloud link feature entirely |
+
+Behind a reverse proxy, also set:
+
+| Variable | Meaning |
+|---|---|
+| `FRAMEOS_PUBLIC_URL` | The origin this install is reached at, e.g. `https://frameos.example`. It becomes the login `redirect_uri` and the logout `return_to`, so setting it explicitly is what stops a caller choosing them through `X-Forwarded-Host` |
+| `FRAMEOS_TRUSTED_PROXIES` | Comma-separated proxy addresses whose `X-Forwarded-*` headers are honoured. Empty means loopback and private-range peers only |
 
 (`FRAMEOS_AUTH_PROVIDER_URL` is accepted as a fallback name.) The provider URL
 can also be edited in the UI while disconnected; the edited value is stored
@@ -123,6 +131,16 @@ POST {provider}/api/device/start
 `client_kind` is `"backend"` or `"frame"`; when omitted, the provider derives
 it from the base scope (`frame:link` → frame). It is shown on the consent
 screen and stored with the link.
+
+`local_origin` is where the install is reachable on its owner's network. A
+provider must treat it as a claim, not a fact — `/api/device/start` is
+unauthenticated, so it is whatever the caller wrote — and should reject
+anything that is not an address a self-hosted install can have (loopback,
+RFC1918, link-local, `.local`). It is not decoration: it ends up as the
+allowlist for the login handoff's `redirect_uri`, so a public origin accepted
+here is a phishing target that later collects login codes. The consent screen
+should label it as reported by the device, and should not let a request opened
+from a link be approved without a deliberate confirmation.
 
 Response `200`:
 
@@ -222,7 +240,10 @@ its own privileges silently.
 grant state across short provider outages, but must honor revocation as soon
 as it can reconnect (an unlinked token gets `401 invalid_link_token`). The
 backend runs a periodic grants sync (`backend/app/cloud/sync.py`); a 401
-resets the local link and re-enables local password login.
+resets the local link, re-enables local password login, and ends the local
+sessions that were created through the cloud handoff — otherwise revoking a
+link on the provider would leave local access valid until those sessions
+expired on their own.
 
 ## Login handoff (scope `auth:login`)
 
@@ -265,6 +286,10 @@ FrameOS-side behavior (`backend/app/api/cloud.py`, frame:
 - First-run setup: while no local user exists, the open `/api/cloud/setup/*`
   endpoints mirror status/provider/connect/poll/disconnect, and a completed
   login handoff creates the first user from the cloud principal.
+- Scope checks are re-run when a handoff is redeemed, not only when it starts:
+  the request token lives 10 minutes and the code 2, so a provider that checks
+  `auth:login` only at `/start` keeps honouring both after the scope is
+  removed.
 - Local fallback: `POST /api/cloud/local-fallback {"enabled": false}` disables
   local password login. It requires a connected link with `auth:login`, the
   current user's identity matching the link's owner account, and a live grants

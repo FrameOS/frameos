@@ -19,12 +19,15 @@ import frameos/upgrade
 import frameos/utils/http_client
 import ../api
 import ../auth
+import ../rate_limit
 import ../state
 
 const
   CLOUD_LINK_STATE_PATH = "./state/cloud_link.json"
   DEFAULT_CLOUD_PROVIDER_URL = "https://cloud.frameos.net"
   CLOUD_REQUEST_TIMEOUT_MS = 15000
+  CLOUD_REQUEST_MAX_SECONDS = 20.0
+  CLOUD_REQUEST_MAX_REDIRECTS = 1
 
 # Scopes a frame link may request; must stay in sync with docs/cloud-link.md.
 const KNOWN_FRAME_SCOPES = [
@@ -54,14 +57,27 @@ proc loadCloudLinkState(): JsonNode =
   %*{"status": "disconnected"}
 
 proc saveCloudLinkState(state: JsonNode) =
+  ## This file holds the link bearer token, so its bytes must never be readable
+  ## by another local account — not even for the window between writing the
+  ## content and chmod'ing it, which is what the previous order left open at
+  ## whatever the process umask happened to be.
   let dir = splitFile(CLOUD_LINK_STATE_PATH).dir
   if dir.len > 0 and not dirExists(dir):
     createDir(dir)
+  if dir.len > 0:
+    try:
+      setFilePermissions(dir, {fpUserRead, fpUserWrite, fpUserExec})
+    except CatchableError:
+      discard
   let tempPath = CLOUD_LINK_STATE_PATH & ".tmp"
-  writeFile(tempPath, pretty(state, indent = 2) & "\n")
-  setFilePermissions(tempPath, {fpUserRead, fpUserWrite})
-  if fileExists(CLOUD_LINK_STATE_PATH):
-    removeFile(CLOUD_LINK_STATE_PATH)
+  let handle = open(tempPath, fmWrite)
+  try:
+    setFilePermissions(tempPath, {fpUserRead, fpUserWrite})
+    handle.write(pretty(state, indent = 2) & "\n")
+  finally:
+    handle.close()
+  # Rename straight over the target: an interrupted replace then leaves the
+  # previous state intact instead of no state at all.
   moveFile(tempPath, CLOUD_LINK_STATE_PATH)
 
 proc normalizeProviderUrl(value: string): string =
@@ -152,6 +168,11 @@ proc cloudRequest(providerUrl, path: string, httpMethod = HttpPost,
     body = (if body != nil: $body else: ""),
     headers = headers,
     timeoutMs = CLOUD_REQUEST_TIMEOUT_MS,
+    maxSeconds = CLOUD_REQUEST_MAX_SECONDS,
+    # A provider's API answers directly; every extra hop is another connect
+    # (and another resolution) charged to a worker thread, so allow one for a
+    # host or scheme move and no more.
+    maxRedirects = CLOUD_REQUEST_MAX_REDIRECTS,
   )
   var payload: JsonNode = nil
   try:
@@ -187,6 +208,26 @@ proc localOrigin*(request: Request): string =
 
 const CLOUD_LOGIN_STATE_TTL_SECONDS = 600
 const MAX_LOGIN_STATES = 16
+
+# The login routes below are open by necessity, and /login/start turns one
+# anonymous request into an authenticated call to the provider. Budgets are
+# per client address, sized for a person signing in (a handful of attempts)
+# rather than for a script.
+const
+  LOGIN_START_LIMIT = 10
+  LOGIN_START_WINDOW = 300.0
+  LOGIN_CALLBACK_LIMIT = 30
+  LOGIN_CALLBACK_WINDOW = 300.0
+  LOGIN_OPTIONS_LIMIT = 60
+  LOGIN_OPTIONS_WINDOW = 60.0
+
+proc rateLimitedResponse(request: Request, bucket: string): bool {.gcsafe.} =
+  ## Answers 429 and reports whether the caller should stop.
+  var headers: mummy.HttpHeaders
+  headers["Retry-After"] = $retryAfterSeconds(request, bucket)
+  headers["Content-Type"] = "application/json"
+  request.respond(429, headers, $(%*{"detail": "Too many requests"}))
+  true
 
 proc linkHasScope(state: JsonNode, scope: string): bool =
   scope in state{"scope"}.getStr("").splitWhitespace()
@@ -464,13 +505,22 @@ proc addCloudApiRoutes*(router: var Router) =
 
   router.get("/api/cloud/login/options", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
+      # Open, and it takes the global cloud lock plus a state-file read on every
+      # hit, so it is worth capping before any of that work happens.
+      if rateLimitExceeded(request, "cloud:login:options", LOGIN_OPTIONS_LIMIT,
+                           LOGIN_OPTIONS_WINDOW):
+        discard rateLimitedResponse(request, "cloud:login:options")
+        return
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         let available = state{"status"}.getStr("") == "connected" and
           linkHasScope(state, "auth:login") and adminAuthEnabled()
+        # Anonymous callers learn only whether the cloud button should render.
+        # The provider URL follows only when it should, since that is the one
+        # case where the browser has to be sent there anyway.
         jsonResponse(request, Http200, %*{
           "available": available,
-          "provider_url": providerUrlFromState(state),
+          "provider_url": (if available: %providerUrlFromState(state) else: newJNull()),
           "local_login_enabled": true,
           "setup_mode": false,
         })
@@ -478,6 +528,12 @@ proc addCloudApiRoutes*(router: var Router) =
 
   router.post("/api/cloud/login/start", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
+      # One call here costs an authenticated round trip to the provider; without
+      # a cap any LAN client can amplify against the cloud indefinitely.
+      if rateLimitExceeded(request, "cloud:login:start", LOGIN_START_LIMIT,
+                           LOGIN_START_WINDOW):
+        discard rateLimitedResponse(request, "cloud:login:start")
+        return
       if not adminAuthEnabled():
         jsonResponse(request, Http409, %*{"detail": "The admin panel is disabled on this frame"})
         return
@@ -542,6 +598,10 @@ proc addCloudApiRoutes*(router: var Router) =
 
   router.get("/api/cloud/login/callback", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
+      if rateLimitExceeded(request, "cloud:login:callback", LOGIN_CALLBACK_LIMIT,
+                           LOGIN_CALLBACK_WINDOW):
+        discard rateLimitedResponse(request, "cloud:login:callback")
+        return
       let stateParam = request.queryParams.getOrDefault("state", "")
       let code = request.queryParams.getOrDefault("code", "")
       let errorParam = request.queryParams.getOrDefault("error", "")

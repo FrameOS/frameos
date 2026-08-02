@@ -50,6 +50,9 @@ class CloudBackendLink(Base):
     expires_at = mapped_column(DateTime, nullable=True)
     interval_seconds = mapped_column(Integer, nullable=False, default=5)
     poll_error = mapped_column(String(128), nullable=True)
+    # sha256 of the first-run setup claim cookie: which browser is allowed to
+    # drive setup linking and see the pending user code. Cleared once linked.
+    setup_claim = mapped_column(String(64), nullable=True)
     # Encrypted with Fernet keyed off SECRET_KEY; never returned by the API.
     access_token = mapped_column(String(4096), nullable=True)
     token_reference = mapped_column(String(256), nullable=True)

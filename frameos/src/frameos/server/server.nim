@@ -65,7 +65,14 @@ proc listenForLogThread(connectionsState: ConnectionsState) {.thread.} =
 
 var renderThread: Thread[tuple[publicState: ConnectionsState, adminState: ConnectionsState]]
 var logThread: Thread[ConnectionsState]
-const MAX_HTTP_BODY_LEN = 50 * 1024 * 1024
+# mummy buffers a whole request body in memory before any handler — and so
+# before any auth check — runs, and it has no connection cap. At 50 MB a
+# handful of concurrent unauthenticated uploads was enough to push a 512 MB
+# frame past MemoryMax=90% and into the Restart=always loop. Nothing
+# legitimate needs anywhere near this much in one request: asset uploads are
+# chunked at 512 KB by the frontend (frontend/src/utils/uploadFileInChunks.ts),
+# and the largest JSON payloads are scene definitions.
+const MAX_HTTP_BODY_LEN = 8 * 1024 * 1024
 
 proc initServerGlobals(frameOS: FrameOS) =
   globalFrameOS = frameOS

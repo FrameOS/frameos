@@ -35,6 +35,24 @@ describe("safeLocalOrigin", () => {
     expect(safeLocalOrigin(undefined)).toBeUndefined();
     expect(safeLocalOrigin(42)).toBeUndefined();
   });
+
+  it("accepts the addresses a self-hosted install can actually have", () => {
+    expect(safeLocalOrigin("http://localhost:8989")).toBe("http://localhost:8989");
+    expect(safeLocalOrigin("http://127.0.0.1:8989")).toBe("http://127.0.0.1:8989");
+    expect(safeLocalOrigin("http://10.1.2.3")).toBe("http://10.1.2.3");
+    expect(safeLocalOrigin("http://172.16.0.9")).toBe("http://172.16.0.9");
+    expect(safeLocalOrigin("http://frame.local:8787")).toBe("http://frame.local:8787");
+  });
+
+  it("rejects public origins", () => {
+    // The consent screen shows this as "Request from" and the login handoff
+    // uses it as the redirect_uri allowlist, so a public origin here is how a
+    // phishing link looks legitimate and then collects login codes.
+    expect(safeLocalOrigin("https://frameos.example.com")).toBeUndefined();
+    expect(safeLocalOrigin("http://8.8.8.8")).toBeUndefined();
+    expect(safeLocalOrigin("https://172.32.0.1")).toBeUndefined();
+    expect(safeLocalOrigin("https://192.169.1.1")).toBeUndefined();
+  });
 });
 
 describe("parseClientKind", () => {
