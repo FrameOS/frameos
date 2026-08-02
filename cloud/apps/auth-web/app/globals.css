@@ -1024,9 +1024,10 @@ a.tag-pill--active:hover {
 
 .store-search {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 20px;
-  max-width: 520px;
+  max-width: 640px;
 }
 
 .store-search__input {
@@ -1038,6 +1039,16 @@ a.tag-pill--active:hover {
   background: var(--bg-soft);
   color: inherit;
   font: inherit;
+}
+
+.store-search__select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 8px;
+  background: var(--bg-soft);
+  color: inherit;
+  font: inherit;
+  max-width: 220px;
 }
 
 .store-pager {

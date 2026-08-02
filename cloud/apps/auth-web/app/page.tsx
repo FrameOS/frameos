@@ -1,12 +1,12 @@
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import Link from "next/link";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
-import { CopyUrlField } from "../src/components/CopyUrlField";
 import { PublicShell } from "../src/components/PublicShell";
 import { SceneCard, type SceneCardScene } from "../src/components/SceneCard";
 import { StoreSceneFeed } from "../src/components/StoreSceneFeed";
+import { StoreVersionSelect } from "../src/components/StoreVersionSelect";
 import { getStoreCategory, storeCategories } from "../src/lib/categories";
-import { getAccountUrl, getScenesBaseUrl, hasDatabaseUrl } from "../src/lib/env";
+import { getAccountUrl, hasDatabaseUrl } from "../src/lib/env";
 import { readSession } from "../src/lib/session";
 import {
   countStoreScenes,
@@ -185,13 +185,6 @@ export default async function HomePage({
       ].filter((section) => section.scenes.length > 0)
     : [];
   const totalPages = Math.max(1, Math.ceil(total / storePageSize));
-  // The repository URL an install of this exact version can subscribe to.
-  const versionRepositoryUrl = version
-    ? new URL(
-        `/api/store/${version}/repository.json`,
-        getScenesBaseUrl(),
-      ).toString()
-    : undefined;
 
   return (
     <PublicShell
@@ -253,7 +246,9 @@ export default async function HomePage({
           <input name="category" type="hidden" value={filters.category} />
         ) : null}
         {tag ? <input name="tag" type="hidden" value={tag} /> : null}
-        {version ? (
+        {versionOptions.length > 0 ? (
+          <StoreVersionSelect filters={filters} options={versionOptions} />
+        ) : version ? (
           <input name="version" type="hidden" value={version} />
         ) : null}
         <button className="button" type="submit">
@@ -289,49 +284,6 @@ export default async function HomePage({
               </Link>
             ))}
         </div>
-      ) : null}
-
-      {/* FrameOS version filter: picking a version hides every scene that
-          needs a newer FrameOS than that. */}
-      {versionOptions.length > 0 ? (
-        <div className="tag-list store-tag-row">
-          <Link
-            aria-current={version ? undefined : "true"}
-            className={version ? "tag-pill" : "tag-pill tag-pill--active"}
-            href={storeBrowseHref({ ...filters, version: "" })}
-          >
-            All FrameOS versions
-          </Link>
-          {versionOptions.map((option) => (
-            <Link
-              aria-current={option.version === version ? "true" : undefined}
-              className={
-                option.version === version
-                  ? "tag-pill tag-pill--active"
-                  : "tag-pill"
-              }
-              href={storeBrowseHref({
-                ...filters,
-                version: option.version === version ? "" : option.version,
-              })}
-              key={option.version}
-              title={`Scenes that run on FrameOS ${option.version}`}
-            >
-              FrameOS {option.version}{" "}
-              <span className="tag-pill__count">{option.count}</span>
-            </Link>
-          ))}
-        </div>
-      ) : null}
-
-      {versionRepositoryUrl ? (
-        <section className="section-block">
-          <p className="copy">
-            Add this repository URL in FrameOS {version} to install these scenes
-            straight from the device:
-          </p>
-          <CopyUrlField value={versionRepositoryUrl} />
-        </section>
       ) : null}
 
       {sections.map((section) => (
