@@ -529,7 +529,9 @@ function frameIsActiveInCurrentState(frame: FrameType): boolean {
 }
 
 function frameSortName(frame: FrameType): string {
-  return (frame.name || frameHost(frame)).trim()
+  // A freshly enrolled cloud frame can have neither a name nor a host —
+  // undefined here crashed the home list's sort into a white screen.
+  return String(frame.name ?? frameHost(frame) ?? frame.id ?? '').trim()
 }
 
 function compareFramesForHome(first: FrameType, second: FrameType): number {

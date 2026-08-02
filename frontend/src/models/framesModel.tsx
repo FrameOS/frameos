@@ -64,7 +64,9 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
 
 function sortFrames(frames: FrameType[]): FrameType[] {
   return frames.sort(
-    (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
+    (a, b) =>
+      // Cloud frames can have no frame_host at all (fresh enrollment).
+      (a.frame_host || '').localeCompare(b.frame_host || '') || (a.ssh_user || '').localeCompare(b.ssh_user || '')
   )
 }
 
