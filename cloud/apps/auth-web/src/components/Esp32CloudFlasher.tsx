@@ -268,15 +268,19 @@ async function provisionOverSerial(
   }
 }
 
-export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefined }) {
+export function Esp32CloudFlasher({
+  cloudOrigin,
+  frameName,
+}: {
+  // Server-provided; provisioned into the board's NVS as cloud_url, so it must
+  // be the deployment's public URL, not the browser's address bar.
+  cloudOrigin: string;
+  frameName?: string | undefined;
+}) {
   const [phase, setPhase] = useState<FlashPhase>("idle");
   const [lines, setLines] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
-  const [cloudUrl] = useState(() =>
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "https://cloud.frameos.net",
-  );
+  const cloudUrl = cloudOrigin;
   const [wifiSsid, setWifiSsid] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
   const [error, setError] = useState<string | undefined>();

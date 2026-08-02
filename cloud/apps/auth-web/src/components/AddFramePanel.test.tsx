@@ -50,7 +50,7 @@ afterEach(() => {
 
 describe("AddFramePanel", () => {
   it("stays closed without the URL flag and opens by navigating", () => {
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     expect(screen.queryByText(/Add a frame/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /add frame/i }));
@@ -69,7 +69,7 @@ describe("AddFramePanel", () => {
   // whole quota for 24 hours.
   it("mints nothing when the panel opens", async () => {
     currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     expect(screen.getByText("Add a frame")).toBeDefined();
     // The command is shown with the code masked, so it is clear what will run.
@@ -83,7 +83,7 @@ describe("AddFramePanel", () => {
 
   it("mints one code when the user asks for the install command", async () => {
     currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -102,7 +102,7 @@ describe("AddFramePanel", () => {
       Response.json({ error: "claim_token_quota_exceeded" }, { status: 403 }),
     );
     currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -118,7 +118,7 @@ describe("AddFramePanel", () => {
       Response.json({ error: "frame_quota_exceeded" }, { status: 403 }),
     );
     currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -137,14 +137,14 @@ describe("AddFramePanel", () => {
         }),
     );
     currentParams = new URLSearchParams("add=frame");
-    const view = render(<AddFramePanel claimTokenTtlHours={24} />);
+    const view = render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
     // Back closes the panel, then Forward reopens it.
     currentParams = new URLSearchParams();
-    view.rerender(<AddFramePanel claimTokenTtlHours={24} />);
+    view.rerender(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
     currentParams = new URLSearchParams("add=frame");
-    view.rerender(<AddFramePanel claimTokenTtlHours={24} />);
+    view.rerender(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
     await act(async () => {
       deliver?.(Response.json({ claim_token: "FRCT_stale" }));
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -158,7 +158,7 @@ describe("AddFramePanel", () => {
 
   it("closes by dropping the flag while keeping other query params", () => {
     currentParams = new URLSearchParams("revoked=1&add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} />);
+    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
 
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
 

@@ -98,10 +98,14 @@ function slugify(value: string): string {
 export function SdImageBuilder({
   claimToken,
   claimTokenExpiresAt,
+  cloudOrigin,
   mintClaimToken,
 }: {
   claimToken?: string | undefined;
   claimTokenExpiresAt?: string | undefined;
+  // Server-provided; this is written into the image's frameos-cloud.txt, so it
+  // must be the deployment's public URL rather than the browser's address bar.
+  cloudOrigin: string;
   mintClaimToken: (opts: { multiUse: boolean }) => Promise<string>;
 }) {
   const [release, setRelease] = useState<ReleaseState>({ status: "loading" });
@@ -115,15 +119,20 @@ export function SdImageBuilder({
   const [error, setError] = useState<string | undefined>();
   const busyRef = useRef(false);
 
-  const origin =
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "https://cloud.frameos.net";
-  const supported =
-    typeof DecompressionStream !== "undefined" &&
-    typeof ReadableStream !== "undefined";
-  const canStreamToDisk =
-    typeof window !== "undefined" && "showSaveFilePicker" in window;
+  const origin = cloudOrigin;
+  // Both of these are client-only facts. Evaluated during render they make the
+  // server emit one branch and the hydrating client another, which is a
+  // hydration error; decide them after mount so both render the same thing
+  // first and capable browsers then upgrade.
+  const [supported, setSupported] = useState(false);
+  const [canStreamToDisk, setCanStreamToDisk] = useState(false);
+  useEffect(() => {
+    setSupported(
+      typeof DecompressionStream !== "undefined" &&
+        typeof ReadableStream !== "undefined",
+    );
+    setCanStreamToDisk("showSaveFilePicker" in window);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

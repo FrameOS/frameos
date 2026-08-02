@@ -8,6 +8,7 @@ import {
 import { AddFramePanel } from "../../../src/components/AddFramePanel";
 import { FrameRowActions } from "../../../src/components/FrameRowActions";
 import { formatBytes, formatDateTime } from "../../../src/lib/format";
+import { getAccountBaseUrl } from "../../../src/lib/env";
 import { claimTokenTtlMs } from "../../../src/lib/frames";
 import { readSession } from "../../../src/lib/session";
 
@@ -75,6 +76,7 @@ export default async function AccountFramesPage() {
         <div className="inline-actions">
           <AddFramePanel
             claimTokenTtlHours={Math.round(claimTokenTtlMs / (60 * 60 * 1000))}
+            cloudOrigin={new URL(getAccountBaseUrl()).origin}
           />
         </div>
       </div>

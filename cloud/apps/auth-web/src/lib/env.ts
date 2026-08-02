@@ -52,6 +52,10 @@ export function getAppOrigins() {
   ]);
 }
 
+function pathMatchesAccountFrames(path: string) {
+  return path === "/account/frames" || path.startsWith("/account/frames/");
+}
+
 export function getAccountPath(path: string) {
   if (
     new URL(getAccountBaseUrl()).origin === new URL(getCloudBaseUrl()).origin
@@ -61,6 +65,12 @@ export function getAccountPath(path: string) {
 
   if (path === "/account" || path === "/account/installs") {
     return "/";
+  }
+  // "/frames" on the account host is the fleet SPA (app/frames/[[...path]]),
+  // so the "My frames" account page cannot shorten into it — it would serve
+  // the workspace instead of the frame list. It keeps its full path.
+  if (pathMatchesAccountFrames(path)) {
+    return path;
   }
   if (path.startsWith("/account/")) {
     return path.slice("/account".length);

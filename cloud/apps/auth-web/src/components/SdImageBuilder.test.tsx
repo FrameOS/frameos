@@ -177,7 +177,7 @@ afterEach(() => {
 describe("SdImageBuilder", () => {
   it("lists boards from the latest release and disables missing ones", async () => {
     mockReleaseAndImage();
-    render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_x")} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
 
     const available = await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
@@ -194,7 +194,7 @@ describe("SdImageBuilder", () => {
     fetchMock.mockResolvedValueOnce(
       new Response("{}", { status: 500 }),
     );
-    render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_x")} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
 
     await screen.findByText(/Could not look up the latest FrameOS release/);
   });
@@ -202,7 +202,7 @@ describe("SdImageBuilder", () => {
   it("refuses WiFi values with double quotes before downloading anything", async () => {
     mockReleaseAndImage();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
-    render(<SdImageBuilder mintClaimToken={mint} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
@@ -229,7 +229,7 @@ describe("SdImageBuilder", () => {
     mockReleaseAndImage();
     const saved = stubSaveFilePicker();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi_use_token"));
-    render(<SdImageBuilder mintClaimToken={mint} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
@@ -283,6 +283,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_should_not_mint"));
     render(
       <SdImageBuilder
+        cloudOrigin={window.location.origin}
         claimToken="FRCT_existing"
         claimTokenExpiresAt="2030-01-01T00:00:00Z"
         mintClaimToken={mint}
@@ -324,7 +325,7 @@ describe("SdImageBuilder", () => {
         clicked.push(this);
       });
 
-    render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
@@ -368,7 +369,7 @@ describe("SdImageBuilder", () => {
       return Promise.resolve(new Response(large.slice()));
     });
     stubFailingSaveFilePicker("The target volume is full.");
-    render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
@@ -388,7 +389,7 @@ describe("SdImageBuilder", () => {
   it("reports a config that does not fit the placeholder on its own terms", async () => {
     mockReleaseAndImage();
     stubSaveFilePicker();
-    render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
@@ -420,7 +421,7 @@ describe("SdImageBuilder", () => {
     });
     stubSaveFilePicker();
     render(
-      <SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_multi")} />,
+      <SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_multi")} />,
     );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",

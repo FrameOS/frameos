@@ -154,8 +154,6 @@ export default async function AccountLayout({
               {storageBytes > 0
                 ? ` — backups ${formatBytes(backupBytes)} · store scenes ${formatBytes(sceneBytes)} · frame logs ${formatBytes(frameLogBytes)}`
                 : ""}
-              . Per-account quotas are coming; today only per-item limits
-              apply.
             </p>
           ) : null}
         </div>

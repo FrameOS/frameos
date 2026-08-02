@@ -46,9 +46,19 @@ interface AddFramePanelProps {
   // (FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS), and this is a client component, so
   // hardcoding 24 here would quietly lie on any tuned install.
   claimTokenTtlHours: number;
+  // The origin frames enrol against. Comes from the server (getAccountBaseUrl)
+  // rather than window.location, for two reasons: reading window during render
+  // makes SSR and the client disagree (hydration error), and this value is
+  // baked into SD images, ESP32 NVS and install commands — it has to be the
+  // deployment's real public URL, not whatever host the admin happens to be
+  // browsing through (a tunnel, a LAN IP, 127.0.0.1 vs localhost).
+  cloudOrigin: string;
 }
 
-export function AddFramePanel({ claimTokenTtlHours }: AddFramePanelProps) {
+export function AddFramePanel({
+  claimTokenTtlHours,
+  cloudOrigin,
+}: AddFramePanelProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -68,10 +78,7 @@ export function AddFramePanel({ claimTokenTtlHours }: AddFramePanelProps) {
   const abortRef = useRef<AbortController | undefined>(undefined);
   const cancelledRef = useRef(false);
 
-  const origin =
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "https://cloud.frameos.net";
+  const origin = cloudOrigin;
   const installCommandFor = (token: string) =>
     `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${token} sh`;
   const installCommand = claimToken ? installCommandFor(claimToken) : undefined;
@@ -285,6 +292,7 @@ export function AddFramePanel({ claimTokenTtlHours }: AddFramePanelProps) {
           <SdImageBuilder
             claimToken={multiUseToken}
             claimTokenExpiresAt={multiUseExpiresAt}
+            cloudOrigin={cloudOrigin}
             mintClaimToken={mintClaimToken}
           />
         </div>
@@ -303,7 +311,10 @@ export function AddFramePanel({ claimTokenTtlHours }: AddFramePanelProps) {
             the code proves you can see the device.
           </p>
         </div>
-        <Esp32CloudFlasher frameName={name || undefined} />
+        <Esp32CloudFlasher
+          cloudOrigin={cloudOrigin}
+          frameName={name || undefined}
+        />
       </div>
     </div>
   );

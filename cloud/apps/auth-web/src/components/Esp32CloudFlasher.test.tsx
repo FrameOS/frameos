@@ -196,7 +196,7 @@ describe("wifiInputError", () => {
 
 describe("Esp32CloudFlasher", () => {
   it("falls back to the manual instructions without WebSerial", () => {
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     expect(screen.getByText(/needs WebSerial/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /connect & flash/i })).toBeNull();
   });
@@ -204,7 +204,7 @@ describe("Esp32CloudFlasher", () => {
   it("refuses control characters in the WiFi fields before touching the network", async () => {
     mockCloudApi();
     stubSerial(createHealthyPort());
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     // jsdom's value sanitization strips CR/LF from text inputs, so the paste
@@ -226,7 +226,7 @@ describe("Esp32CloudFlasher", () => {
     mockCloudApi();
     const port = createHealthyPort();
     stubSerial(port);
-    render(<Esp32CloudFlasher frameName="Kitchen" />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} frameName="Kitchen" />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     fireEvent.change(screen.getByLabelText("WiFi network"), {
@@ -267,7 +267,7 @@ describe("Esp32CloudFlasher", () => {
     mockCloudApi();
     const port = createHealthyPort();
     stubSerial(port);
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     clickFlash();
@@ -283,7 +283,7 @@ describe("Esp32CloudFlasher", () => {
       ),
     );
     stubSerial(createHealthyPort());
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     clickFlash();
@@ -306,7 +306,7 @@ describe("Esp32CloudFlasher", () => {
         },
       }),
     );
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     clickFlash();
@@ -324,7 +324,7 @@ describe("Esp32CloudFlasher", () => {
     mockCloudApi();
     esptool.writeFlash.mockRejectedValueOnce(new Error("flash write failed"));
     stubSerial(createHealthyPort());
-    render(<Esp32CloudFlasher />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
     clickFlash();
