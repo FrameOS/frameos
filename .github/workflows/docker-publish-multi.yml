@@ -293,13 +293,16 @@ jobs:
   # Prebuilt ESP32 firmware with no baked credentials: WiFi and cloud config
   # are provisioned after flashing via the captive portal, the serial console,
   # or the cloud browser flasher (cloud_url + claim_token over the USB API —
-  # docs/cloud-frames.md). The panel driver is NOT runtime-selectable: it is
-  # generated at compile time from FRAMEOS_SELECTED_PANEL (see
-  # embedded/esp32/components/frameos_display/CMakeLists.txt), so this binary
-  # drives the Waveshare 7.5" V2 panel only — hence the epd7in5v2 in its name.
-  # Other panels need a build from source.
+  # docs/cloud-frames.md). Every supported Waveshare panel driver is compiled
+  # in and the active panel is chosen at runtime (`set panel <key>` on the
+  # serial console or the setup portal dropdown); FRAMEOS_SELECTED_PANEL only
+  # sets the boot-time default, kept at EPD_7in5_V2 for backward compat.
+  # The binary is published as -generic.bin; an identical copy keeps the old
+  # -epd7in5v2.bin name for one release cycle so cloud deployments that still
+  # reference it keep working — drop the copy after the cloud side reads
+  # -generic.bin from release metadata.
   build-esp32-generic-firmware:
-    name: Build ESP32 firmware (EPD 7in5 V2)
+    name: Build ESP32 firmware (generic, all panels)
     needs: [update-versions]
     runs-on: ubuntu-latest
     steps:
@@ -330,6 +333,10 @@ jobs:
               set -euo pipefail
               bash embedded/esp32/ci_build_image.sh
               cp embedded/esp32/build-ci/merged-binary.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic.bin"
+              # Transitional copy under the pre-runtime-panel-selection name;
+              # remove once no deployed cloud references it.
+              cp embedded/esp32/build-ci/merged-binary.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-epd7in5v2.bin"
             '
           ls -lh release-assets/
@@ -340,8 +347,10 @@ jobs:
           # The github-release job downloads artifacts by the
           # frameos-<version>-* name pattern, so this name must keep that
           # prefix.
-          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-epd7in5v2
-          path: release-assets/*-esp32-s3-epd7in5v2.bin
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
+          path: |
+            release-assets/*-esp32-s3-generic.bin
+            release-assets/*-esp32-s3-epd7in5v2.bin
           if-no-files-found: error
 
   build:

@@ -203,10 +203,17 @@ handle_cloud_config() {
   cloud_name=''
   cloud_wifi_ssid=''
   cloud_wifi_password=''
+  cloud_device=''
+  cloud_width=''
+  cloud_height=''
+  cloud_rotate=''
+  cloud_vcom=''
+  cloud_upload_url=''
   cloud_recognized=0
   cloud_unknown_keys=''
   cloud_enrolled=0
   cloud_wifi_applied=0
+  cloud_display_applied=0
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -223,6 +230,12 @@ handle_cloud_config() {
       name) cloud_name="$cloud_value"; cloud_recognized=1 ;;
       wifi_ssid) cloud_wifi_ssid="$cloud_value"; cloud_recognized=1 ;;
       wifi_password) cloud_wifi_password="$cloud_value"; cloud_recognized=1 ;;
+      device) cloud_device="$cloud_value"; cloud_recognized=1 ;;
+      width) cloud_width="$cloud_value"; cloud_recognized=1 ;;
+      height) cloud_height="$cloud_value"; cloud_recognized=1 ;;
+      rotate) cloud_rotate="$cloud_value"; cloud_recognized=1 ;;
+      vcom) cloud_vcom="$cloud_value"; cloud_recognized=1 ;;
+      upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
       *)
         echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE"
         cloud_unknown_keys="$cloud_unknown_keys $cloud_key"
@@ -286,6 +299,63 @@ handle_cloud_config() {
     fi
   fi
 
+  # Display driver personalization: the release image ships every compiled
+  # driver as a .so, so selecting one is a frame.json edit plus a driver-setup
+  # run — no rebuild. Only the device key gates the block; width/height/rotate
+  # and deviceConfig values ride along with it. Invalid numbers make the
+  # patcher exit nonzero and the frame.json stays untouched — the setup portal
+  # remains the fallback.
+  if [ -n "$cloud_device" ]; then
+    cloud_frame_json="$SRV_DIR"/frameos/current/frame.json
+    if [ ! -f "$cloud_frame_json" ]; then
+      echo "Warning: $cloud_frame_json missing; cannot apply display device '$cloud_device'"
+    elif command -v python3 >/dev/null 2>&1 && \\
+      FRAMEOS_FRAME_JSON="$cloud_frame_json" FRAMEOS_CLOUD_DEVICE="$cloud_device" \\
+      FRAMEOS_CLOUD_WIDTH="$cloud_width" FRAMEOS_CLOUD_HEIGHT="$cloud_height" \\
+      FRAMEOS_CLOUD_ROTATE="$cloud_rotate" FRAMEOS_CLOUD_VCOM="$cloud_vcom" \\
+      FRAMEOS_CLOUD_UPLOAD_URL="$cloud_upload_url" \\
+      python3 -c 'import json, os, sys
+path = os.environ["FRAMEOS_FRAME_JSON"]
+with open(path) as handle:
+    data = json.load(handle)
+data["device"] = os.environ["FRAMEOS_CLOUD_DEVICE"]
+def set_int(key, name, allowed=None):
+    raw = os.environ.get(name, "")
+    if not raw:
+        return
+    try:
+        value = int(raw)
+    except ValueError:
+        sys.exit("invalid " + name + ": " + raw)
+    if allowed is not None and value not in allowed:
+        sys.exit("invalid " + name + ": " + raw)
+    data[key] = value
+set_int("width", "FRAMEOS_CLOUD_WIDTH")
+set_int("height", "FRAMEOS_CLOUD_HEIGHT")
+set_int("rotate", "FRAMEOS_CLOUD_ROTATE", (0, 90, 180, 270))
+config = data.get("deviceConfig") or {}
+vcom = os.environ.get("FRAMEOS_CLOUD_VCOM", "")
+if vcom:
+    try:
+        config["vcom"] = float(vcom)
+    except ValueError:
+        sys.exit("invalid FRAMEOS_CLOUD_VCOM: " + vcom)
+upload_url = os.environ.get("FRAMEOS_CLOUD_UPLOAD_URL", "")
+if upload_url:
+    config["uploadUrl"] = upload_url
+data["deviceConfig"] = config
+tmp = path + ".cloud-tmp"
+with open(tmp, "w") as handle:
+    json.dump(data, handle, indent=2)
+os.replace(tmp, path)'; then
+      echo "Applied display device '$cloud_device' to $cloud_frame_json"
+      cloud_display_applied=1
+    else
+      # Covers both "no python3" (busybox-only image) and invalid values.
+      echo "Warning: could not apply display device '$cloud_device'; pick the display in the setup portal instead"
+    fi
+  fi
+
   if [ -z "$claim_token" ]; then
     echo "Warning: no claim_token in $CLOUD_FILE; skipping cloud enrollment state"
   else
@@ -340,11 +410,11 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
   # (e.g. "claim_tokn=FRCT_..." next to a valid cloud_url: recognized keys
   # exist, but no enrollment), so keep it and say why. /boot is mounted
   # root-only (umask=077), so keeping it does not leak to other users.
-  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ]; then
+  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ] && [ "$cloud_display_applied" -eq 0 ]; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -354,7 +424,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi
@@ -368,6 +438,24 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
   fi
   claim_token=''
   cloud_wifi_password=''
+
+  # After the shred on purpose: driver setup edits /boot/config.txt and may
+  # schedule a reboot, and a reboot must not replay personalization. The
+  # binary loads its driver .so from the release dir, hence the exports.
+  if [ "$cloud_display_applied" -eq 1 ]; then
+    echo "Running driver setup for device '$cloud_device'"
+    export FRAMEOS_HOME="$SRV_DIR"/frameos/current
+    export LD_LIBRARY_PATH="$SRV_DIR/frameos/current/drivers:$SRV_DIR/frameos/current/scenes:/usr/lib:/usr/local/lib"
+    if [ "$(id -u)" = "0" ]; then
+      "$SRV_DIR"/frameos/current/frameos driver-setup --reboot-if-required || \\
+        echo "Warning: driver setup failed; run it again from the setup portal"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -E "$SRV_DIR"/frameos/current/frameos driver-setup --reboot-if-required || \\
+        echo "Warning: driver setup failed; run it again from the setup portal"
+    else
+      echo "Warning: driver setup requires root, but sudo is not available"
+    fi
+  fi
   return 0
 }
 

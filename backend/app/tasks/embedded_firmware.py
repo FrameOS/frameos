@@ -53,7 +53,7 @@ EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 44  # Acknowledge OTA requests before the scheduled reboot
+EMBEDDED_FIRMWARE_VERSION = 45  # All panel drivers in one image; runtime panel selection
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -179,12 +179,17 @@ EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
     "SixteenGray": FOS_PIXEL_4BPP_GRAY,
 }
 # These Waveshare variants are in the Linux catalog but not the ESP32 e-paper
-# SPI component: IT8951 and the 12.48" family use different controller stacks.
+# SPI component: IT8951 and the 12.48" family use different controller stacks,
+# and the *_old / *_gray legacy resync variants collide at link time with
+# their successors now that one firmware links every driver.
 EMBEDDED_UNSUPPORTED_PANELS = {
     "EPD_10in3",
     "EPD_12in48",
     "EPD_12in48b",
     "EPD_12in48b_V2",
+    "EPD_7in5_V2_gray",
+    "EPD_4in2b_V2_old",
+    "EPD_7in5b_V2_old",
 }
 EMBEDDED_PANEL_FORMATS = {
     key: EMBEDDED_PIXEL_FORMAT_BY_COLOR[convert_waveshare_source(key).color_option]
@@ -196,7 +201,7 @@ EMBEDDED_PANEL_FORMATS = {
     )
     and convert_waveshare_source(key).color_option in EMBEDDED_PIXEL_FORMAT_BY_COLOR
 }
-# Must mirror components/frameos_display/generate_selected_panel.py.
+# Must mirror components/frameos_display/generate_panel_table.py.
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
 EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
@@ -1494,6 +1499,10 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     )
     env["IDF_PATH"] = str(idf_path)
     env["IDF_TARGET"] = EMBEDDED_IDF_TARGET
+    # All panel drivers are compiled into every firmware image; this env var
+    # only sets the default panel a plain checkout would bake in. Per-frame
+    # builds get the same value via FRAMEOS_DEFAULT_PANEL in generated_config.h
+    # below, which takes precedence.
     env["FRAMEOS_SELECTED_PANEL"] = selected_panel
     pixie_path = embedded_pixie_path()
     if pixie_path is not None:

@@ -664,9 +664,12 @@ function FrameScenesBlock({
         scenes: allScenes,
       })
     : flatSceneDependencyEntries(scenes)
-  // Allow-list per control plane — see workspaceSurfaces.ts.
+  // Allow-list per control plane, narrowed by the frame's device profile —
+  // see workspaceSurfaces.ts. An esp32 cloud frame keeps no schedule,
+  // settings, logs or metrics shortcut: those verbs come back
+  // `unsupported_verb` from the device.
   const visibleSceneToolButtons = sceneToolButtons.filter(({ panel }) =>
-    sceneToolPanelIsAllowed(workspaceMode(), panel)
+    sceneToolPanelIsAllowed(workspaceMode(), panel, frame)
   )
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {

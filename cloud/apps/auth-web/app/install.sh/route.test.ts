@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // The install command used to name the provider twice — once in the curl URL
 // and once in FRAMEOS_CLOUD_URL — because a piped script cannot know where it
 // came from. The route stamps it in, so the two can never disagree.
 const anchor = "# __FRAMEOS_CLOUD_URL_DEFAULT__";
-let scriptOnDisk = [
-  "#!/bin/sh",
-  `FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" ${anchor}`,
-  'FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"',
-].join("\n");
+// Same trick for the release: the script's pinned version went stale once and
+// installs silently got a months-old build, so the route stamps the newest
+// published release in at request time.
+const releaseAnchor = "# __FRAMEOS_RELEASE_VERSION_DEFAULT__";
+
+function templateScript() {
+  return [
+    "#!/bin/sh",
+    `FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" ${releaseAnchor}`,
+    'FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"',
+    `FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" ${anchor}`,
+    'FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"',
+  ].join("\n");
+}
+
+let scriptOnDisk = templateScript();
 let readFails = false;
 
 vi.mock("node:fs/promises", () => ({
@@ -27,14 +38,21 @@ function get(url: string) {
   return GET(new NextRequest(new Request(url)));
 }
 
+const fetchMock = vi.fn<typeof fetch>();
+
 describe("GET /install.sh", () => {
   beforeEach(() => {
     readFails = false;
-    scriptOnDisk = [
-      "#!/bin/sh",
-      `FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" ${anchor}`,
-      'FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"',
-    ].join("\n");
+    scriptOnDisk = templateScript();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(
+      Response.json({ tag_name: "v2026.9.1" }) as never,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("stamps the origin the frame was actually pointed at", async () => {
@@ -47,6 +65,41 @@ describe("GET /install.sh", () => {
       `FRAMEOS_CLOUD_URL_DEFAULT="http://10.4.0.47:3000" ${anchor}`,
     );
     expect(body).not.toContain("cloud.frameos.net");
+  });
+
+  it("stamps the newest published release version", async () => {
+    const response = await get("https://cloud.frameos.net/install.sh");
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain(
+      `FRAMEOS_RELEASE_VERSION_DEFAULT="2026.9.1" ${releaseAnchor}`,
+    );
+  });
+
+  it("keeps the script's pinned release when GitHub is unreachable", async () => {
+    // Best-effort on purpose: a stale-but-working install beats a 503.
+    fetchMock.mockResolvedValue(
+      Response.json({ message: "rate limited" }, { status: 403 }) as never,
+    );
+    const response = await get("https://cloud.frameos.net/install.sh");
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain(
+      `FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" ${releaseAnchor}`,
+    );
+  });
+
+  it("never stamps a release tag that could break out of the shell quoting", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ tag_name: 'v2026"; rm -rf / #' }) as never,
+    );
+    const response = await get("https://cloud.frameos.net/install.sh");
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain(
+      `FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" ${releaseAnchor}`,
+    );
+    expect(body).not.toContain("rm -rf");
   });
 
   it("keeps the script readable in a browser rather than downloading it", async () => {
@@ -62,6 +115,16 @@ describe("GET /install.sh", () => {
     const response = await get("https://self.hosted.example/install.sh");
     expect(response.status).toBe(503);
     expect(await response.text()).toContain(anchor);
+  });
+
+  it("refuses to serve an installer without the release marker", async () => {
+    scriptOnDisk = [
+      "#!/bin/sh",
+      `FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" ${anchor}`,
+    ].join("\n");
+    const response = await get("https://cloud.frameos.net/install.sh");
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain(releaseAnchor);
   });
 
   it("says so when the installer is missing from the deployment", async () => {

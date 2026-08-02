@@ -1,7 +1,16 @@
 #!/bin/sh
 set -eu
 
-FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-2026.6.8}"
+# The release the installer downloads. A provider serving this script stamps
+# the marked line with the newest published release at request time
+# (cloud/apps/auth-web/app/install.sh/route.ts), so fresh installs track
+# releases without anyone editing this pin — it went stale once already and
+# installed a months-old build. An explicit FRAMEOS_RELEASE_VERSION always
+# wins; the pin is only the fallback for running this script straight from
+# the repo. Keep the marker comment: the route refuses to serve the script
+# without it.
+FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
+FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
 FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
@@ -26,6 +35,20 @@ GENERATED_ADMIN_PASSWORD=""
 
 if [ ! -r "$TTY" ] || [ ! -w "$TTY" ] || ! ( : <"$TTY" ) 2>/dev/null; then
   TTY=""
+fi
+
+# Where prompts read from and print to. Ubuntu ships sudo with
+# `Defaults use_pty`: the command runs on a freshly created pty, and
+# depending on how the terminal session was set up (seen with `sudo sh
+# install.sh` inside an OrbStack VM terminal), /dev/tty there can be a
+# device the relay never feeds — the first question then hangs with nothing
+# on screen. When stdin IS a terminal, use stdin/stderr for the dialogue:
+# they are the streams sudo's relay demonstrably serves (all the apt output
+# arrived through them). /dev/tty remains for `curl | sudo sh`, where stdin
+# is the script pipe. Empty TTY still means "unattended" below.
+TTY_READ="$TTY"
+if [ -t 0 ]; then
+  TTY_READ=""
 fi
 
 # Unattended installs answer nothing: every question takes its default. This is
@@ -55,17 +78,47 @@ need_cmd() {
   fi
 }
 
+# The device's reachable IPv4, so the closing message can print an admin URL
+# someone can actually click instead of "http://<frame-ip>:8787/". Empty when
+# nothing is routable yet (e.g. WiFi comes up after a reboot).
+frame_lan_ip() {
+  lan_ip=""
+  if command -v hostname >/dev/null 2>&1; then
+    # hostname -I is Debian/Ubuntu-specific but present on every supported OS;
+    # the first entry is the primary interface address.
+    lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || lan_ip=""
+  fi
+  if [ -z "$lan_ip" ] && command -v ip >/dev/null 2>&1; then
+    lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')" || lan_ip=""
+  fi
+  printf '%s' "$lan_ip"
+}
+
+say_admin_panel_url() {
+  panel_ip="$(frame_lan_ip)"
+  if [ -n "$panel_ip" ]; then
+    say "Open the local admin panel at http://$panel_ip:$FRAMEOS_FRAME_PORT/"
+    # mDNS usually resolves on home networks; offer it as the stable name.
+    panel_host="$(hostname 2>/dev/null || true)"
+    if [ -n "$panel_host" ]; then
+      say "  (or http://$panel_host.local:$FRAMEOS_FRAME_PORT/ if your network resolves mDNS)"
+    fi
+  else
+    say "Open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/ once the device is on the network."
+  fi
+}
+
 prompt_out() {
-  if [ -n "$TTY" ]; then
-    printf '%s' "$*" >"$TTY"
+  if [ -n "$TTY" ] && [ -n "$TTY_READ" ]; then
+    printf '%s' "$*" >"$TTY_READ"
   else
     printf '%s' "$*" >&2
   fi
 }
 
 prompt_line() {
-  if [ -n "$TTY" ]; then
-    printf '%s\n' "$*" >"$TTY"
+  if [ -n "$TTY" ] && [ -n "$TTY_READ" ]; then
+    printf '%s\n' "$*" >"$TTY_READ"
   else
     printf '%s\n' "$*" >&2
   fi
@@ -81,7 +134,11 @@ ask() {
     prompt_out "$prompt: "
   fi
   if [ -n "$TTY" ]; then
-    IFS= read -r answer <"$TTY" || answer=""
+    if [ -n "$TTY_READ" ]; then
+      IFS= read -r answer <"$TTY_READ" || answer=""
+    else
+      IFS= read -r answer || answer=""
+    fi
   fi
   if [ -z "$answer" ]; then
     answer="$default"
@@ -135,13 +192,24 @@ ask_secret() {
     prompt_out "$prompt: "
   fi
   if [ -n "$TTY" ]; then
-    old_stty="$(stty -g <"$TTY" 2>/dev/null || true)"
-    stty -echo <"$TTY" 2>/dev/null || true
-    IFS= read -r answer <"$TTY" || answer=""
-    if [ -n "$old_stty" ]; then
-      stty "$old_stty" <"$TTY" 2>/dev/null || true
+    if [ -n "$TTY_READ" ]; then
+      old_stty="$(stty -g <"$TTY_READ" 2>/dev/null || true)"
+      stty -echo <"$TTY_READ" 2>/dev/null || true
+      IFS= read -r answer <"$TTY_READ" || answer=""
+      if [ -n "$old_stty" ]; then
+        stty "$old_stty" <"$TTY_READ" 2>/dev/null || true
+      else
+        stty echo <"$TTY_READ" 2>/dev/null || true
+      fi
     else
-      stty echo <"$TTY" 2>/dev/null || true
+      old_stty="$(stty -g 2>/dev/null || true)"
+      stty -echo 2>/dev/null || true
+      IFS= read -r answer || answer=""
+      if [ -n "$old_stty" ]; then
+        stty "$old_stty" 2>/dev/null || true
+      else
+        stty echo 2>/dev/null || true
+      fi
     fi
     prompt_line ""
   fi
@@ -1141,6 +1209,21 @@ TTYReset=yes
 ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
 fi
 
+# Type=notify only when the downloaded binary can actually send READY=1
+# (releases before 2026.6.14 predate the sd_notify code). Probe the binary,
+# not the version string: with Type=notify and a mute binary, systemd times
+# the start out after five minutes and kills a perfectly healthy frame —
+# then does it again after every restart, forever.
+if LC_ALL=C grep -aq NOTIFY_SOCKET "$frameos_release_dir/frameos" 2>/dev/null; then
+  frameos_service_startup="Type=notify
+TimeoutStartSec=300
+# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+WatchdogSec=900"
+else
+  frameos_service_startup="Type=simple"
+fi
+
 # Memory caps for frameos.service: everything except a small OS reserve, so a
 # leak OOM-kills frameos instead of swap-thrashing the device. Computed from
 # MemTotal because percentages cannot express a fixed reserve on 128MB..8GB.
@@ -1166,11 +1249,7 @@ WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
 RestartSec=5
-Type=notify
-TimeoutStartSec=300
-# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
-# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
-WatchdogSec=900
+$frameos_service_startup
 # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
 # device swap itself into an unreachable state.
 MemoryHigh=${mem_high_kb}K
@@ -1242,7 +1321,8 @@ fi
 if [ "$setup_status" -eq 2 ]; then
   say ""
   say "FrameOS is installed, but hardware setup requested a reboot before the service starts."
-  say "Reboot this device, then open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
+  say "Reboot this device, then:"
+  say_admin_panel_url
 else
   # --no-block, then poll: frameos.service is Type=notify with
   # TimeoutStartSec=300, so a plain `systemctl restart` blocks until the new
@@ -1256,6 +1336,9 @@ else
   systemctl restart --no-block frameos.service
   frameos_started=""
   waited=0
+  # Twenty silent seconds reads as a hung installer — narrate the wait.
+  say ""
+  prompt_out "Waiting for the FrameOS service to start (up to 20s) "
   while [ "$waited" -lt 20 ]; do
     if [ "$(systemctl is-active frameos.service 2>/dev/null || true)" = "active" ]; then
       frameos_started="yes"
@@ -1264,9 +1347,12 @@ else
     if [ "$(systemctl is-failed frameos.service 2>/dev/null || true)" = "failed" ]; then
       break
     fi
+    prompt_out "."
     sleep 1
     waited=$((waited + 1))
   done
+  prompt_out "
+"
   say ""
   if [ -n "$frameos_started" ]; then
     say "FrameOS is installed and started."
@@ -1277,7 +1363,7 @@ else
     say "  systemctl status frameos"
     say "  journalctl -u frameos -f"
   fi
-  say "Open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
+  say_admin_panel_url
 fi
 
 say ""

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BackForwardRefresh } from "./BackForwardRefresh";
-import { BrandMark } from "./BrandMark";
+import { HeaderBrand } from "./HeaderBrand";
 import {
   getAccountBaseUrl,
   getAccountUrl,
@@ -36,45 +36,43 @@ export function PublicShell({
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="topbar__inner">
-          <div className="topbar__lead">
-            <BrandMark href={scenesHomeUrl} showName={!title} />
-            {title ? <span className="topbar__title">{title}</span> : null}
-          </div>
-          <nav aria-label="Primary" className="nav">
-            <Link className="nav-link-button" href={scenesHomeUrl}>
-              Scenes
-            </Link>
-            {signedIn ? (
-              <>
-                {/* Signed-in only, and ordered as in AppShell (Scenes, Frames,
-                    Account): a signed-out visitor has no frames, so the link
-                    would only bounce them through the login page. */}
-                <Link className="nav-link-button" href={framesUrl}>
-                  Frames
-                </Link>
-                <Link className="nav-link-button" href={accountUrl}>
-                  Account
-                </Link>
-                {isSuperadmin ? (
-                  <Link className="nav-link-button" href={adminUrl}>
-                    Admin
-                  </Link>
-                ) : null}
-                <form action={logoutUrl} method="post">
-                  <button className="nav-link-button" type="submit">
-                    Sign out
-                  </button>
-                </form>
-              </>
-            ) : (
-              <Link className="nav-link-button" href={signInUrl.toString()}>
-                Sign in
+      <header className="frameos-account-header">
+        <HeaderBrand href={scenesHomeUrl} title={title} />
+        <nav aria-label="Primary" className="frameos-account-header__nav">
+          <Link className="frameos-account-header__link" href={scenesHomeUrl}>
+            Scenes
+          </Link>
+          {signedIn ? (
+            <>
+              {/* Signed-in only, and ordered as in AppShell (Scenes, Frames,
+                  Account): a signed-out visitor has no frames, so the link
+                  would only bounce them through the login page. */}
+              <Link className="frameos-account-header__link" href={framesUrl}>
+                Frames
               </Link>
-            )}
-          </nav>
-        </div>
+              <Link className="frameos-account-header__link" href={accountUrl}>
+                Account
+              </Link>
+              {isSuperadmin ? (
+                <Link className="frameos-account-header__link" href={adminUrl}>
+                  Admin
+                </Link>
+              ) : null}
+              <form action={logoutUrl} method="post">
+                <button className="frameos-account-header__link" type="submit">
+                  Sign out
+                </button>
+              </form>
+            </>
+          ) : (
+            <Link
+              className="frameos-account-header__link"
+              href={signInUrl.toString()}
+            >
+              Sign in
+            </Link>
+          )}
+        </nav>
       </header>
       <main className="content">{children}</main>
       <BackForwardRefresh />

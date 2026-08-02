@@ -1,0 +1,127 @@
+/* The FrameOS Cloud header, shared by the two web apps.
+ *
+ * The /frames fleet workspace (cloud-frontend, a client-only SPA) and the
+ * Next.js pages (this app: the scene store, /account, /backends, auth) are
+ * separate bundles, but they are one product — so they render one header,
+ * styled here and imported by both:
+ *
+ *   - cloud/apps/auth-web/app/globals.css        (@import "./cloud-chrome.css")
+ *   - cloud-frontend/src/index.css               (@import of this file)
+ *
+ * The SPA is the reference: these rules started life as the
+ * .frameos-account-header block in cloud-frontend/src/index.css. Two things
+ * are generalized so the same rules work in the Next app:
+ *
+ *   - dark mode has two signals — the SPA sets `data-frameos-theme="dark"`
+ *     on <html> (frontend/src/utils/frameosTheme.ts), the Next pages set the
+ *     `theme-dark` class (app/layout.tsx + ThemeToggle). Every dark rule
+ *     matches both, so the header cannot disagree with the page around it.
+ *   - SPA-only custom properties are referenced with fallbacks
+ *     (--frameos-account-header-height, --frameos-primary-ring), so the
+ *     header renders identically where they are not defined.
+ */
+
+.frameos-account-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: var(--frameos-account-header-height, 3.25rem);
+  padding: 0 1.25rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+}
+
+/* Brand plus an optional page title (the Next pages show the current page's
+   heading in the name slot; the SPA always shows the wordmark). */
+.frameos-account-header__lead {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.frameos-account-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.frameos-account-header__name,
+.frameos-account-header__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.frameos-account-header__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frameos-account-header__logo {
+  height: 1.5rem;
+  width: auto;
+}
+
+.frameos-account-header__logo--dark {
+  display: none;
+}
+
+.frameos-account-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.frameos-account-header__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.frameos-account-header__link:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.frameos-account-header__link:focus-visible {
+  outline: 2px solid var(--frameos-primary-ring, rgb(28 124 102 / 0.42));
+  outline-offset: 2px;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header,
+html.theme-dark .frameos-account-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: rgba(24, 26, 31, 0.86);
+  color: #f3f4f6;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__link:hover,
+html.theme-dark .frameos-account-header__link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__logo--light,
+html.theme-dark .frameos-account-header__logo--light {
+  display: none;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__logo--dark,
+html.theme-dark .frameos-account-header__logo--dark {
+  display: block;
+}

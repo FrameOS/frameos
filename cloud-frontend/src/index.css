@@ -1,4 +1,10 @@
 @import "../../frontend/src/index.css";
+/* The cloud header, shared with the Next.js pages (store, /account, auth):
+   one stylesheet so the two apps cannot drift apart. It lives in
+   cloud/apps/auth-web because Next only bundles CSS from its own tree, while
+   esbuild follows any relative path — this import mirrors the frontend/ one
+   above. */
+@import "../../cloud/apps/auth-web/app/cloud-chrome.css";
 
 @tailwind base;
 @tailwind components;
@@ -69,83 +75,6 @@ body {
   }
 }
 
-.frameos-account-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  height: var(--frameos-account-header-height);
-  padding: 0 1.25rem;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(16px);
-}
-
-.frameos-account-header__brand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: inherit;
-  text-decoration: none;
-}
-
-.frameos-account-header__name {
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-
-.frameos-account-header__logo--dark {
-  display: none;
-}
-
-.frameos-account-header__nav {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.frameos-account-header__link {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.4rem 0.7rem;
-  border: 0;
-  border-radius: 0.65rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.875rem;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.frameos-account-header__link:hover {
-  background: rgba(15, 23, 42, 0.06);
-}
-
-.frameos-account-header__link:focus-visible {
-  outline: 2px solid var(--frameos-primary-ring);
-  outline-offset: 2px;
-}
-
-html[data-frameos-theme='dark'] .frameos-account-header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  background: rgba(24, 26, 31, 0.86);
-  color: #f3f4f6;
-}
-
-html[data-frameos-theme='dark'] .frameos-account-header__link:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-html[data-frameos-theme='dark'] .frameos-account-header__logo--light {
-  display: none;
-}
-
-html[data-frameos-theme='dark'] .frameos-account-header__logo--dark {
-  display: block;
-}
+/* .frameos-account-header and friends come from the shared
+   cloud/apps/auth-web/app/cloud-chrome.css, imported at the top: the Next
+   pages (store, /account) render the exact same header. */

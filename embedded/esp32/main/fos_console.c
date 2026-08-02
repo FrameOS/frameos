@@ -135,7 +135,7 @@ static int cmd_set(int argc, char **argv)
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hardware|panel|render_mode|"
                "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
-               "deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
+               "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -169,9 +169,79 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "claim_token") == 0) strlcpy(config->claim_token, value, sizeof(config->claim_token));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
-    else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0)
+    else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0) {
+        /* Integrated boards are bundles, not just labels: the preset implies
+         * the panel, the EPD wiring, the buttons and the TF socket. Apply the
+         * known ones here so one `set hardware` provisions the whole board —
+         * keep the table in sync with EMBEDDED_HARDWARE_PRESETS in
+         * backend/app/tasks/embedded_firmware.py. Unknown names are stored
+         * as-is (labels from newer backends must not brick provisioning). */
+        static const struct {
+            const char *name;
+            const char *panel;
+            const char *pins;
+            const char *gpio_buttons;
+            const char *assets_sd_pins;
+        } presets[] = {
+            { "waveshare_esp32_s3_photopainter", "EPD_7in3e",
+              "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1",
+              "0:BOOT\n4:KEY1",
+              "cs=38,sck=39,miso=40,mosi=41" },
+            { "waveshare_esp32_s3_epaper_13_3e6", "EPD_13in3e",
+              "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
+              "",
+              "cs=15,sck=6,miso=5,mosi=7" },
+        };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
-    else if (strcmp(key, "panel") == 0) strlcpy(config->panel, value, sizeof(config->panel));
+        for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
+            if (strcmp(value, presets[i].name) != 0) continue;
+            strlcpy(config->panel, presets[i].panel, sizeof(config->panel));
+            if (fos_config_parse_pins(presets[i].pins, &config->pins) != ESP_OK ||
+                fos_config_parse_gpio_buttons(presets[i].gpio_buttons, config) != ESP_OK ||
+                fos_config_parse_assets_sd_pins(presets[i].assets_sd_pins, &config->assets_sd) != ESP_OK) {
+                printf("internal error applying preset %s\n", presets[i].name);
+                return 1;
+            }
+            config->assets_sd.enabled = true;
+            printf("applied %s: panel=%s pins=%s buttons=%u sd_pins=%s\n",
+                   presets[i].name, presets[i].panel, presets[i].pins,
+                   (unsigned)config->gpio_button_count, presets[i].assets_sd_pins);
+            break;
+        }
+    }
+    else if (strcmp(key, "gpio_buttons") == 0) {
+        /* The stored spec is newline-separated pin:LABEL lines; commas make
+         * it typeable on one console line (`set gpio_buttons 0:BOOT,4:KEY1`;
+         * an empty value clears the buttons). */
+        for (char *c = value; *c; c++) {
+            if (*c == ',') *c = '\n';
+        }
+        if (fos_config_parse_gpio_buttons(value, config) != ESP_OK) {
+            printf("bad button spec, want e.g. 0:BOOT,4:KEY1\n");
+            return 1;
+        }
+    }
+    else if (strcmp(key, "panel") == 0) {
+        /* Every supported panel is compiled in, so an unknown key can only be
+         * a typo — and it would surface as a frame that renders to nothing
+         * after the next restart. Refuse it now, while someone is looking. */
+        if (strcmp(value, "none") != 0) {
+            bool panel_known = false;
+            for (size_t i = 0; i < fos_display_panel_count(); i++) {
+                if (strcmp(fos_display_panel_name(i), value) == 0) {
+                    panel_known = true;
+                    break;
+                }
+            }
+            if (!panel_known) {
+                printf("unknown panel \"%s\" — this firmware compiles in %u panels; "
+                       "see the setup portal's list or `set panel none`\n",
+                       value, (unsigned)fos_display_panel_count());
+                return 1;
+            }
+        }
+        strlcpy(config->panel, value, sizeof(config->panel));
+    }
     else if (strcmp(key, "render_mode") == 0)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
@@ -347,7 +417,7 @@ static int cmd_display_test(int argc, char **argv)
     }
 
     printf("display_test: mode=%s panel=%s %dx%d format=%d bytes=%u\n",
-           mode, fos_display_panel_name(0), width, height, (int)format, (unsigned)len);
+           mode, fos_display_selected_panel(), width, height, (int)format, (unsigned)len);
     esp_err_t err = fos_display_blit(buf, len);
     free(buf);
     printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);

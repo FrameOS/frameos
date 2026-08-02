@@ -213,6 +213,86 @@ def test_cloud_config_fallback_json_writer_sanitizes_values(tmp_path):
     assert _mode(sandbox.pending_file) == 0o600
 
 
+def test_cloud_config_display_keys_patch_frame_json_and_run_driver_setup(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    argv_log = sandbox.add_fake_frameos()
+    frame_json = sandbox.srv / "frameos" / "current" / "frame.json"
+    frame_json.write_text(
+        json.dumps({"device": "framebuffer", "width": 800, "height": 480, "rotate": 0}),
+        encoding="utf-8",
+    )
+    sandbox.write_cloud_file(
+        "cloud_url=https://cloud.example.com\n"
+        "claim_token=FRCT-abc\n"
+        "device=waveshare.EPD_13in3e\n"
+        "width=1600\n"
+        "height=1200\n"
+        "rotate=90\n"
+        "vcom=-1.48\n"
+        "upload_url=https://frames.example.com/upload\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(frame_json.read_text(encoding="utf-8"))
+    assert data["device"] == "waveshare.EPD_13in3e"
+    assert data["width"] == 1600
+    assert data["height"] == 1200
+    assert data["rotate"] == 90
+    assert data["deviceConfig"]["vcom"] == -1.48
+    assert data["deviceConfig"]["uploadUrl"] == "https://frames.example.com/upload"
+    # Driver setup ran (after the shred), with the reboot flag the portal uses.
+    argv = argv_log.read_text(encoding="utf-8")
+    assert "driver-setup" in argv
+    assert "--reboot-if-required" in argv
+    # Enrollment still happened and the secrets are gone from /boot.
+    assert sandbox.pending_file.exists()
+    assert not (sandbox.boot / "frameos-cloud.txt").exists()
+
+
+def test_cloud_config_display_invalid_value_leaves_frame_json_untouched(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    argv_log = sandbox.add_fake_frameos()
+    frame_json = sandbox.srv / "frameos" / "current" / "frame.json"
+    original = json.dumps({"device": "framebuffer", "width": 800, "height": 480})
+    frame_json.write_text(original, encoding="utf-8")
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-abc\n"
+        "device=waveshare.EPD_13in3e\n"
+        "rotate=45\n"
+    )
+
+    result = sandbox.run()
+
+    # A bad number must not half-apply a display config, and must not block
+    # enrollment either.
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert frame_json.read_text(encoding="utf-8") == original
+    assert not argv_log.exists() or "driver-setup" not in argv_log.read_text(encoding="utf-8")
+    assert sandbox.pending_file.exists()
+    assert "could not apply display device" in (sandbox.boot / "frameos-setup-reset.log").read_text(encoding="utf-8")
+
+
+def test_cloud_config_display_only_file_is_applied_and_shredded(tmp_path):
+    # A card personalized only with a display choice (no cloud enrollment)
+    # still applies it and still cleans up /boot.
+    sandbox = Sandbox(tmp_path)
+    argv_log = sandbox.add_fake_frameos()
+    frame_json = sandbox.srv / "frameos" / "current" / "frame.json"
+    frame_json.write_text(json.dumps({"device": "framebuffer"}), encoding="utf-8")
+    sandbox.write_cloud_file("device=waveshare.EPD_7in5_V2\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(frame_json.read_text(encoding="utf-8"))
+    assert data["device"] == "waveshare.EPD_7in5_V2"
+    assert "driver-setup" in argv_log.read_text(encoding="utf-8")
+    assert not (sandbox.boot / "frameos-cloud.txt").exists()
+    assert not sandbox.pending_file.exists()
+
+
 def test_cloud_only_boot_does_not_invoke_frameos_setup(tmp_path):
     sandbox = Sandbox(tmp_path)
     argv_log = sandbox.add_fake_frameos(exit_status=0)

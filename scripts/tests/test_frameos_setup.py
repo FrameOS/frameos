@@ -100,6 +100,32 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertIn("/tmp/out/srv/frameos/runtime/frameos-last-exit", service)
         self.assertNotIn("TTYPath=/dev/tty1", service)
 
+    def test_old_release_binary_gets_a_simple_service_type(self) -> None:
+        # Releases before 2026.6.14 never send READY=1. With Type=notify,
+        # systemd would time the start out after five minutes and kill a
+        # perfectly healthy frame — after every restart, forever. The installer
+        # probes the binary for NOTIFY_SOCKET and falls back to Type=simple.
+        self._write_fake_release_archive(notify_capable=False)
+        self._run_setup(
+            {
+                "FRAMEOS_NAME": "Old Release Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_BACKEND_ENABLED": "false",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                "FRAMEOS_SAVE_ASSETS": "true",
+            }
+        )
+        service = self._installed_frameos_service()
+        self.assertIn("Type=simple", service)
+        self.assertNotIn("Type=notify", service)
+        self.assertNotIn("WatchdogSec", service)
+        self.assertNotIn("TimeoutStartSec", service)
+
     def test_framebuffer_install_claims_tty1(self) -> None:
         self._run_setup(
             {
@@ -437,8 +463,10 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertNotIn("\\nDevice choices", menu.stderr)
         self.assertNotIn("custom device key\\nDevice", menu.stderr)
 
-    def _write_fake_release_archive(self) -> None:
+    def _write_fake_release_archive(self, notify_capable: bool = True) -> None:
         artifact_root = self.tmp_path / "artifact" / f"frameos-{VERSION}-{TARGET}"
+        if artifact_root.exists():
+            shutil.rmtree(artifact_root)
         artifact_root.mkdir(parents=True)
         (artifact_root / "metadata.json").write_text(json.dumps({"slug": TARGET}) + "\n", encoding="utf-8")
         (artifact_root / "drivers").mkdir()
@@ -447,12 +475,17 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         (artifact_root / "scenes" / "scene-marker").write_text("scene\n", encoding="utf-8")
         (artifact_root / "vendor").mkdir()
         (artifact_root / "vendor" / "vendor-marker").write_text("vendor\n", encoding="utf-8")
+        # The installer greps the binary for NOTIFY_SOCKET to decide between
+        # Type=notify and Type=simple; releases since 2026.6.14 contain the
+        # string, older ones don't.
+        notify_marker = "# sd_notify support marker: NOTIFY_SOCKET" if notify_capable else "# no sd_notify"
         self._write_executable(
             artifact_root / "frameos",
-            """#!/bin/sh
+            f"""#!/bin/sh
+            {notify_marker}
             echo "$@" >> /tmp/out/frameos-binary.log
-            if [ "${1:-}" = "setup" ]; then
-              exit "${FRAMEOS_STUB_SETUP_EXIT:-0}"
+            if [ "${{1:-}}" = "setup" ]; then
+              exit "${{FRAMEOS_STUB_SETUP_EXIT:-0}}"
             fi
             exit 0
             """,
@@ -466,7 +499,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         )
 
         release_version_dir = self.releases_dir / f"v{VERSION}"
-        release_version_dir.mkdir(parents=True)
+        release_version_dir.mkdir(parents=True, exist_ok=True)
         archive_path = release_version_dir / f"frameos-{VERSION}-{TARGET}.tar.gz"
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(artifact_root, arcname=artifact_root.name)

@@ -31,7 +31,7 @@
 #include "Debug.h"
 
 /************4 Gray******************************************************/
-unsigned char LUT_DATA_4Gray[] = 
+static unsigned char LUT_DATA_4Gray[] = 
 {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

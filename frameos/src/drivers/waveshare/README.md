@@ -10,3 +10,9 @@ To update:
 4. If not, you might need to edit the auto-detection routine in `convert_waveshare_source` in `backend/app/drivers/waveshare.py`.
 5. If the color remains `Unknown` and the `Display` function takes just one parameter, update the `VARIANT_COLORS` dictionary with the right color. 
 6. Finally, copy the output of `list_devices.py` into `frontend/src/devices.ts` 
+
+Local change to reapply after a resync: the ESP32 firmware links every driver
+into one binary, so the `LUT_DATA_4Gray` globals in `EPD_13in3k.c`,
+`EPD_2in7_V2.c`, `EPD_4in26.c` and `EPD_5in79.c` are marked `static` (they are
+file-local anyway; the vendor tree leaves them external and they collide at
+link time). No other vendor sources are modified.

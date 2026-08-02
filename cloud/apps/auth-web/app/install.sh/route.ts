@@ -20,6 +20,37 @@ export const runtime = "nodejs";
 // strings land in proxy logs, browser history and shell history.
 
 const originAnchor = "# __FRAMEOS_CLOUD_URL_DEFAULT__";
+const releaseAnchor = "# __FRAMEOS_RELEASE_VERSION_DEFAULT__";
+
+const releaseApiUrl =
+  "https://api.github.com/repos/FrameOS/frameos/releases/latest";
+
+// The newest published release, stamped into the script the same way the
+// origin is. The script's own pin went stale once (it sat at 2026.6.8 while
+// 2026.8.0 was out) and every install silently got a months-old build whose
+// binary didn't even match the systemd unit the script writes. Best-effort:
+// when GitHub is unreachable the script's pinned fallback still installs.
+async function latestReleaseVersion(): Promise<string | undefined> {
+  try {
+    const response = await fetch(releaseApiUrl, {
+      headers: { accept: "application/vnd.github+json" },
+      // Releases change rarely; caching keeps us far from GitHub's rate limit.
+      next: { revalidate: 300 },
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    const release = (await response.json()) as { tag_name?: string };
+    const version = release.tag_name?.replace(/^v/, "");
+    // The value lands inside a double-quoted shell assignment — accept only a
+    // plain version so a hijacked API response cannot inject shell.
+    return version && /^[0-9][0-9A-Za-z.-]*$/.test(version)
+      ? version
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function GET(request: NextRequest) {
   let script: string;
@@ -54,10 +85,28 @@ export async function GET(request: NextRequest) {
   // actually reached us on — a LAN IP during development, the public hostname
   // in production — not a configured guess.
   const origin = new URL(request.url).origin;
-  const stamped = script.replace(
+  let stamped = script.replace(
     line,
     `FRAMEOS_CLOUD_URL_DEFAULT="${origin}" ${originAnchor}`,
   );
+
+  const releaseLine = script
+    .split("\n")
+    .find((candidate) => candidate.trimEnd().endsWith(releaseAnchor));
+  if (!releaseLine) {
+    return new NextResponse(
+      `The installer has no ${releaseAnchor} marker, so the current release ` +
+        "version cannot be stamped into it. Update scripts/frameos-setup.sh.\n",
+      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  }
+  const version = await latestReleaseVersion();
+  if (version) {
+    stamped = stamped.replace(
+      releaseLine,
+      `FRAMEOS_RELEASE_VERSION_DEFAULT="${version}" ${releaseAnchor}`,
+    );
+  }
 
   return new NextResponse(stamped, {
     headers: {

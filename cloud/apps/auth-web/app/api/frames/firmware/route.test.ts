@@ -1,4 +1,7 @@
 import { NextRequest } from "next/server";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
@@ -170,5 +173,65 @@ describe("GET /api/frames/firmware", () => {
     });
     // Only the API lookup happened; the untrusted host was never contacted.
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("local generic firmware escape hatch", () => {
+  // Until a release publishes the all-panels build, a dev/self-hosted
+  // deployment can serve a locally built binary via
+  // FRAMEOS_ESP32_GENERIC_FIRMWARE — a published release always wins.
+  const localBytes = new Uint8Array(48).fill(0xab);
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "frameos-fw-"));
+    writeFileSync(join(dir, "merged-binary.bin"), localBytes);
+    process.env.FRAMEOS_ESP32_GENERIC_FIRMWARE = join(dir, "merged-binary.bin");
+  });
+
+  afterEach(() => {
+    delete process.env.FRAMEOS_ESP32_GENERIC_FIRMWARE;
+    rmSync(dir, { force: true, recursive: true });
+  });
+
+  it("advertises and serves the local build when the release has no generic asset", async () => {
+    mockGitHub();
+    const listing = (await (await GET(request())).json()) as {
+      assets: { name: string; platform: string; size: number }[];
+    };
+    expect(listing.assets).toContainEqual({
+      name: "merged-binary.bin",
+      platform: "esp32-s3-generic",
+      size: localBytes.length,
+    });
+
+    mockGitHub();
+    const response = await GET(request("?platform=esp32-s3-generic"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-frameos-release")).toBe("local-dev");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(localBytes);
+  });
+
+  it("prefers the release's generic asset over the local file", async () => {
+    mockGitHub({
+      assets: [
+        {
+          browser_download_url:
+            "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-s3-generic.bin",
+          name: "frameos-1.2.3-esp32-s3-generic.bin",
+          size: firmwareBytes.length,
+        },
+      ],
+      tag_name: "v1.2.3",
+    });
+    const listing = (await (await GET(request())).json()) as {
+      assets: { name: string }[];
+    };
+    expect(listing.assets.map((asset) => asset.name)).toContain(
+      "frameos-1.2.3-esp32-s3-generic.bin",
+    );
+    expect(listing.assets.map((asset) => asset.name)).not.toContain(
+      "merged-binary.bin",
+    );
   });
 });

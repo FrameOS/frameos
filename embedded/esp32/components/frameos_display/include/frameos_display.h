@@ -1,10 +1,11 @@
 /*
  * Panel-agnostic display API for the FrameOS embedded runtime.
  *
- * One panel is selected at firmware build time. The selected root Waveshare
- * source is symlinked into the IDF build tree so it resolves against this
- * component's ESP-IDF DEV_Config; runtime config may choose that panel or
- * "none", but it cannot switch to a different uncompiled driver.
+ * Every supported root Waveshare driver is symlinked into the IDF build tree
+ * (so it resolves against this component's ESP-IDF DEV_Config) and compiled
+ * into one firmware image. The active panel is picked at runtime from the
+ * configured panel name — `set panel <key>` on the serial console, the setup
+ * portal dropdown, or NVS — with "none" meaning headless.
  */
 #pragma once
 
@@ -33,11 +34,15 @@ typedef struct {
 /* Select panel + pins. Does not touch hardware yet. */
 esp_err_t fos_display_init(const fos_display_config_t *config);
 bool fos_display_present(void);  /* false for panel "none" */
+/* The panel actually driving the display ("none" when headless). With the
+ * whole panel table compiled in, fos_display_panel_name(0) is just the first
+ * table entry — never use it to mean "the selected panel". */
+const char *fos_display_selected_panel(void);
 int fos_display_width(void);
 int fos_display_height(void);
 fos_pixel_format_t fos_display_format(void);
 size_t fos_display_buffer_size(void);
-size_t fos_display_panel_count(void); /* selected compiled panel only */
+size_t fos_display_panel_count(void); /* all panels compiled into this firmware */
 const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);
