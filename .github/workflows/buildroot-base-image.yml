@@ -12,7 +12,7 @@ on:
           - raspberry-pi-zero-2-w
           - raspberry-pi-zero-w
       runner_label:
-        description: "Runner label override; empty uses the platform default (x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
+        description: "Runner label override; empty uses the platform default (16-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
         required: false
         default: ""
         type: string
@@ -60,11 +60,15 @@ jobs:
           if [ -n "${RUNNER_OVERRIDE}" ]; then
             runner="${RUNNER_OVERRIDE}"
           else
-            # Keep in sync with default_runner_label in
-            # backend/app/tasks/buildroot_platforms.py.
+            # 16-core Depot runners: a Buildroot build is compile-bound and
+            # scales nearly linearly, and Depot serves actions/cache from its
+            # own storage (faster restores, no 10GB repo quota squeezing the
+            # ccache). Keep the arch split in sync with default_runner_label
+            # in backend/app/tasks/buildroot_platforms.py: 32-bit ARM targets
+            # build on x86_64 so the prebuilt Bootlin toolchains apply.
             case "${PLATFORM}" in
-              raspberry-pi-zero-w) runner="ubuntu-24.04" ;;
-              *) runner="ubuntu-24.04-arm" ;;
+              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-16" ;;
+              *) runner="depot-ubuntu-24.04-arm-16" ;;
             esac
           fi
           echo "runner_label=${runner}" >> "$GITHUB_OUTPUT"

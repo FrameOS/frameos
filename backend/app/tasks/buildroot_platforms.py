@@ -53,9 +53,11 @@ class BuildrootPlatform:
     # The Zero 2 W ships a BCM43436 whose firmware only exists in the
     # RPi-Distro firmware-nonfree repo; enables the download/symlink fixups.
     needs_zero_2_w_wifi_firmware: bool = False
-    # Default GitHub Actions runner label for base-image builds. x86_64
-    # runners can use prebuilt Bootlin toolchains for 32-bit ARM targets.
-    default_runner_label: str = "ubuntu-24.04-arm"
+    # Default GitHub Actions runner label for base-image builds: 16-core
+    # Depot runners (Buildroot is compile-bound and scales with cores, and
+    # Depot serves actions/cache from its own storage). x86_64 runners can
+    # use prebuilt Bootlin toolchains for 32-bit ARM targets.
+    default_runner_label: str = "depot-ubuntu-24.04-arm-16"
 
     def build_target_copy(self) -> TargetMetadata:
         # TargetMetadata is a mutable dataclass; hand out copies so callers
@@ -101,7 +103,7 @@ RASPBERRY_PI_ZERO_2_W = BuildrootPlatform(
         "raspberrypi,model-zero-2-2",
     ),
     needs_zero_2_w_wifi_firmware=True,
-    default_runner_label="ubuntu-24.04-arm",
+    default_runner_label="depot-ubuntu-24.04-arm-16",
 )
 
 RASPBERRY_PI_ZERO_W = BuildrootPlatform(
@@ -138,7 +140,7 @@ RASPBERRY_PI_ZERO_W = BuildrootPlatform(
     wifi_firmware_models=("raspberrypi,model-zero-w",),
     needs_zero_2_w_wifi_firmware=False,
     # x86_64 so the Bootlin ARMv6 rootfs toolchain applies.
-    default_runner_label="ubuntu-24.04",
+    default_runner_label="depot-ubuntu-24.04-16",
 )
 
 # TODO(luckfox-pico): Rockchip RV1103/RV1106 boards (Luckfox Pico family).
@@ -156,7 +158,7 @@ LUCKFOX_PICO = BuildrootPlatform(
     docker_platform="linux/arm/v7",
     release_target="debian-bookworm-armhf",
     enabled=False,
-    default_runner_label="ubuntu-24.04",
+    default_runner_label="depot-ubuntu-24.04-16",
 )
 
 # TODO(t113): Allwinner T113-S3/S4 boards (MangoPi, Lctech, etc.). Needs a
@@ -173,7 +175,7 @@ ALLWINNER_T113 = BuildrootPlatform(
     docker_platform="linux/arm/v7",
     release_target="debian-bookworm-armhf",
     enabled=False,
-    default_runner_label="ubuntu-24.04",
+    default_runner_label="depot-ubuntu-24.04-16",
 )
 
 BUILDROOT_PLATFORMS: dict[str, BuildrootPlatform] = {
