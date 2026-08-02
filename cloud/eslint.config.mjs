@@ -14,6 +14,11 @@ export default tseslint.config(
       "**/public/frameos-editor/**",
       "**/public/frames-app/**",
       "pnpm-lock.yaml",
+      // Renders the legacy workspace's FrameActionsMenu; its import graph
+      // (frontend/src) predates auth-web's strict compiler options, so the
+      // file is excluded from that tsconfig — which typed linting requires.
+      // Vitest still runs it.
+      "**/src/test/shared-spa/esp32-frame-controls.test.tsx",
     ],
   },
   js.configs.recommended,

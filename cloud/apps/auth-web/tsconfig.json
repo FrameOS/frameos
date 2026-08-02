@@ -15,5 +15,11 @@
     ".next/types/**/*.ts",
     "../../packages/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Renders the legacy workspace's FrameActionsMenu, whose import graph
+    // (frontend/src components) predates this package's strict compiler
+    // options. Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/esp32-frame-controls.test.tsx"
+  ]
 }
