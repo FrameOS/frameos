@@ -24,6 +24,7 @@ interface CloudAppConfig {
   cloud_logout_url?: string
   cloud_origin?: string
   cloud_scenes_url?: string
+  cloud_theme_cookie_domain?: string
 }
 
 function config(): CloudAppConfig {
@@ -46,6 +47,16 @@ export function cloudOrigin(): string {
 export function claimTokenTtlHours(): number {
   const value = config().cloud_claim_token_ttl_hours
   return typeof value === 'number' && value > 0 ? value : 24
+}
+
+/**
+ * Domain for the shared frameos_theme cookie, or '' for a host-only cookie.
+ * Empty is correct on a single-origin install (localhost, self-hosted); on a
+ * split-host deployment it is the parent domain the account pages use, so both
+ * surfaces read and write the same cookie.
+ */
+export function themeCookieDomain(): string {
+  return config().cloud_theme_cookie_domain || ''
 }
 
 /** Where the account header's links point. */

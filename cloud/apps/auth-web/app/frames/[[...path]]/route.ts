@@ -6,6 +6,7 @@ import {
   getAccountUrl,
   getCloudBaseUrl,
   getScenesBaseUrl,
+  getSessionCookieDomain,
 } from "../../../src/lib/env";
 import { claimTokenTtlMs } from "../../../src/lib/frames";
 
@@ -31,6 +32,12 @@ function appConfigLines(): string[] {
     `cloud_scenes_url: ${JSON.stringify(new URL("/", getScenesBaseUrl()).toString())},`,
     `cloud_origin: ${JSON.stringify(accountOrigin)},`,
     `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
+    // The workspace and the account pages are two different apps sharing one
+    // theme preference, carried in the frameos_theme cookie. The SPA has to
+    // write it with the same Domain the account pages use, or on a split-host
+    // deployment it would set a host-only cookie that shadows the shared one
+    // and the two surfaces would disagree again.
+    `cloud_theme_cookie_domain: ${JSON.stringify(getSessionCookieDomain() ?? "")},`,
   ];
 }
 

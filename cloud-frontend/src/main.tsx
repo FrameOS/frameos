@@ -5,6 +5,7 @@ import { initKea } from '../../frontend/src/initKea'
 import { registerAddFramePanel } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
 import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
 import { cloudAssetsBasePath, cloudRouteBasePath } from './routes'
+import { seedThemeFromSharedCookie, syncThemeToSharedCookie } from './cloudThemeSync'
 
 if (typeof window !== 'undefined') {
   // Cloud mode is NOT frameMode: the fleet has many frames, and project
@@ -29,7 +30,14 @@ if (typeof window !== 'undefined') {
 // sees it the moment it mounts.
 registerAddFramePanel(CloudAddFrameDrawer)
 
+// The account pages and this workspace share one theme preference. Seeding
+// must happen before initKea — authThemeLogic reads its stored value once,
+// when the reducer default is evaluated.
+seedThemeFromSharedCookie()
+
 initKea()
+
+syncThemeToSharedCookie()
 
 const rootElement = document.getElementById('root')
 
