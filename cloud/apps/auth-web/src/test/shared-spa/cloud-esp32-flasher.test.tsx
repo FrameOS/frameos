@@ -16,7 +16,7 @@ const esptool = vi.hoisted(() => {
   const calls = {
     disconnects: 0,
     main: vi.fn(() => Promise.resolve()),
-    writeFlash: vi.fn(() => Promise.resolve()),
+    writeFlash: vi.fn((_options: unknown) => Promise.resolve()),
   };
   return {
     calls,
@@ -29,13 +29,24 @@ const esptool = vi.hoisted(() => {
         main() {
           return calls.main();
         }
-        writeFlash() {
-          return calls.writeFlash();
+        writeFlash(options: unknown) {
+          return calls.writeFlash(options);
+        }
+        // The post-flash reset pokes RTC watchdog registers over the stub
+        // protocol (watchdogResetAfterFlash) instead of pulsing DTR/RTS.
+        writeReg() {
+          return Promise.resolve();
         }
       },
       Transport: class {
         disconnect() {
           calls.disconnects += 1;
+          return Promise.resolve();
+        }
+        setDTR() {
+          return Promise.resolve();
+        }
+        setRTS() {
           return Promise.resolve();
         }
       },
@@ -55,8 +66,15 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 const firmwareBytes = new Uint8Array(64).fill(0xa5);
+// Current releases publish the all-panels build plus a transitional copy
+// under the old single-panel name (docker-publish-multi.yml esp32 job).
 const metadataPayload = {
   assets: [
+    {
+      name: "frameos-1.2.3-esp32-s3-generic.bin",
+      platform: "esp32-s3-generic",
+      size: firmwareBytes.length,
+    },
     {
       name: "frameos-1.2.3-esp32-s3-epd7in5v2.bin",
       platform: "esp32-s3-epd7in5v2",
@@ -69,6 +87,13 @@ const metadataPayload = {
     },
   ],
   release: "v1.2.3",
+};
+// A release from before the runtime panel table shipped.
+const legacyMetadataPayload = {
+  assets: metadataPayload.assets.filter(
+    (asset) => asset.platform !== "esp32-s3-generic",
+  ),
+  release: "v1.0.0",
 };
 
 interface FakePort {
@@ -155,11 +180,12 @@ function mockCloudApi(
         headers: { "content-type": "application/octet-stream" },
       }),
     ),
+  metadata: typeof metadataPayload = metadataPayload,
 ) {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
     if (url === "/api/frames/firmware") {
-      return Promise.resolve(Response.json(metadataPayload));
+      return Promise.resolve(Response.json(metadata));
     }
     if (url.startsWith("/api/frames/firmware?")) {
       return firmware();
@@ -237,7 +263,12 @@ describe("Esp32CloudFlasher", () => {
       "textContent",
       expect.stringMatching(/line breaks or control characters/),
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Only the mount-time release listing probe (for the panel picker) may
+    // have fired — validation must run before anything else touches the
+    // network.
+    expect(
+      fetchedUrls().filter((url) => url !== "/api/frames/firmware"),
+    ).toHaveLength(0);
   });
 
   it("flashes and provisions using only same-origin requests, quoting WiFi values", async () => {
@@ -264,10 +295,22 @@ describe("Esp32CloudFlasher", () => {
     ).toHaveLength(0);
     expect(fetchedUrls()).toContain("/api/frames/firmware");
     expect(fetchedUrls()).toContain(
-      "/api/frames/firmware?platform=esp32-s3-epd7in5v2",
+      "/api/frames/firmware?platform=esp32-s3-generic",
     );
     expect(esptool.calls.writeFlash).toHaveBeenCalledOnce();
     expect(esptool.calls.disconnects).toBe(1);
+    // esptool-js 0.6 takes a Uint8Array. A binary string reaches pako's
+    // deflate(), which UTF-8-encodes it — the stub then decompresses more
+    // bytes than declared and every attempt fails with status 201
+    // (ESP_TOO_MUCH_DATA), writing corrupt data along the way.
+    const flashOptions = esptool.calls.writeFlash.mock.calls[0]![0] as {
+      compress: boolean;
+      fileArray: { address: number; data: unknown }[];
+    };
+    expect(flashOptions.fileArray).toHaveLength(1);
+    expect(flashOptions.fileArray[0]!.address).toBe(0);
+    expect(flashOptions.fileArray[0]!.data).toBeInstanceOf(Uint8Array);
+    expect(flashOptions.compress).toBe(true);
 
     // Spaces survive because the value is quoted; the embedded quote is escaped.
     expect(port.writes).toEqual([
@@ -279,6 +322,44 @@ describe("Esp32CloudFlasher", () => {
     expect(
       fetchedUrls().filter((url) => url === "/api/frames/claim-tokens"),
     ).toHaveLength(1);
+  });
+
+  it("provisions the chosen e-paper panel when the release ships the all-panels firmware", async () => {
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    fireEvent.change(await screen.findByLabelText("E-paper panel"), {
+      target: { value: "EPD_13in3e" },
+    });
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(port.writes).toEqual([
+      `set cloud_url "${window.location.origin}"`,
+      'set claim_token "FRCT_minted"',
+      'set panel "EPD_13in3e"',
+      "restart",
+    ]);
+  });
+
+  it("hides the panel picker for releases without the all-panels firmware", async () => {
+    // Old single-panel firmware hard-fails display init on any other panel,
+    // so offering a choice there would brick the render loop.
+    mockCloudApi(undefined, legacyMetadataPayload);
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+
+    expect(screen.queryByLabelText("E-paper panel")).toBeNull();
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+    expect(fetchedUrls()).toContain(
+      "/api/frames/firmware?platform=esp32-s3-epd7in5v2",
+    );
+    expect(port.writes.some((line) => line.startsWith("set panel"))).toBe(false);
   });
 
   it("restarts the board when no WiFi is given, without waiting for output it never prints", async () => {
@@ -306,9 +387,11 @@ describe("Esp32CloudFlasher", () => {
 
     clickFlash();
 
+    // A 502 from the firmware pipe means GitHub (the release host) is down —
+    // the message says so instead of a bare status code.
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
-      expect.stringMatching(/Firmware download failed \(502\)/),
+      expect.stringMatching(/GitHub seems to be having trouble.*HTTP 502/),
     );
     expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
@@ -373,8 +456,9 @@ describe("Esp32CloudFlasher", () => {
     // "It failed" is useless on its own — the causes are physical.
     expect(alert.textContent).toMatch(/USB cable/);
     // The port went back to the browser after every attempt, so a manual retry
-    // can reopen it.
-    expect(esptool.calls.disconnects).toBe(3);
+    // can reopen it. Two attempts, both compressed: esptool-js 0.6 has no
+    // uncompressed write path ("Yet to handle Non Compressed writes").
+    expect(esptool.calls.disconnects).toBe(2);
     // Nothing enrolled: claim codes are single-use, so a failed flash must not
     // spend one.
     expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");

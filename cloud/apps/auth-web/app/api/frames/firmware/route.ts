@@ -34,13 +34,14 @@ const releaseApiUrl =
 
 // Explicit allow-list of platform -> exact asset suffix. The upstream host and
 // path are never taken from user input, so this cannot be steered into an SSRF.
-// The panel driver is compiled in (generate_selected_panel.py), so the published
-// firmware is generic in credentials only, not in hardware — the name states the
-// panel it actually drives. Keep in sync with the esp32 job in
+// esp32-s3-generic carries every supported panel driver and selects one at
+// runtime (`set panel` over serial / NVS); esp32-s3-epd7in5v2 is the older
+// single-panel build kept so deployments running this code against an old
+// release still flash something. Keep in sync with the esp32 job in
 // .github/workflows/docker-publish-multi.yml.
-const esp32FirmwareSuffix = "-esp32-s3-epd7in5v2.bin";
 const provisioningAssets = [
-  { platform: "esp32-s3-epd7in5v2", suffix: esp32FirmwareSuffix },
+  { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic.bin" },
+  { platform: "esp32-s3-epd7in5v2", suffix: "-esp32-s3-epd7in5v2.bin" },
   {
     platform: "raspberry-pi-zero-2-w",
     suffix: "-raspberry-pi-zero-2-w-buildroot.img.gz",
@@ -52,7 +53,7 @@ const provisioningAssets = [
 ] as const;
 
 // Only the ESP32 firmware (a few MB) is streamed from here.
-const streamablePlatform = "esp32-s3-epd7in5v2";
+const streamablePlatforms = new Set(["esp32-s3-generic", "esp32-s3-epd7in5v2"]);
 
 interface ReleaseAsset {
   browser_download_url: string;
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
   if (!session?.accountId) {
     return jsonError("login_required", 401);
   }
-  if (!listing && platform !== streamablePlatform) {
+  if (!listing && !streamablePlatforms.has(platform)) {
     return jsonError("invalid_platform", 400);
   }
 
@@ -120,7 +121,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const asset = findAsset(release, esp32FirmwareSuffix);
+  const requested = provisioningAssets.find(
+    (entry) => entry.platform === platform,
+  );
+  const asset = requested ? findAsset(release, requested.suffix) : undefined;
   if (!asset) {
     return jsonError("firmware_not_published", 404, {
       platform,
