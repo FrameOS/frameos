@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import {
   storeSceneVersions,
   storeScenes,
@@ -7,7 +7,12 @@ import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { sha256Hex } from "../../../../../../src/lib/backups";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
+import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import {
+  extractScenesFromZip,
+  sceneDisplayName,
+} from "../../../../../../src/lib/scene-title";
 import {
   maxSceneEditsPer15Minutes,
   maxSceneEditsPerHour,
@@ -82,9 +87,75 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("version_not_found", 404);
   }
 
+  // The listing title lives in the zip's template.json (that is what publishing
+  // reads into storeScenes.name, and what the /s/[slug] <h1>, the social card
+  // and the frameos:name meta tag all render). The editor's gear → Rename only
+  // touches the scene inside scenes.json, so without this the page kept showing
+  // the pre-rename title forever. template.json stays authoritative; it just
+  // follows the scene it was minted from.
+  //
+  // Only when the two were already in sync: a publisher who deliberately gave
+  // the listing a different title from the scene keeps that title, and a
+  // multi-scene pack is never retitled by an unrelated edit.
+  const previousSceneName = sceneDisplayName(
+    extractScenesFromZip(Buffer.from(latest.content)),
+  );
+  const nextSceneName = sceneDisplayName(body.scenes);
+  let renameTo: string | undefined;
+  if (
+    nextSceneName &&
+    previousSceneName &&
+    nextSceneName !== previousSceneName &&
+    previousSceneName === scene.name
+  ) {
+    // Publishing resolves "same account + same name" to an existing scene, so
+    // two of an account's scenes sharing a name would make later publishes
+    // ambiguous. Say so instead of silently keeping the old title.
+    const [clash] = await db
+      .select({ id: storeScenes.id })
+      .from(storeScenes)
+      .where(
+        and(
+          eq(storeScenes.accountId, scene.accountId),
+          ne(storeScenes.id, scene.id),
+          sql`lower(${storeScenes.name}) = lower(${nextSceneName})`,
+        ),
+      )
+      .limit(1);
+    if (clash) {
+      return jsonError("scene_name_taken", 409, { name: nextSceneName });
+    }
+    // Names show on public pages, so a rename passes the same gate publishing
+    // and description edits do.
+    const moderation = await moderateStoreContent({ texts: [nextSceneName] });
+    if (!moderation.ok) {
+      if (moderation.error === "content_rejected") {
+        await recordAuditEvent(db, {
+          accountId: session.accountId,
+          actor: {
+            accountId: session.accountId,
+            providerSubject: session.providerSubject,
+          },
+          eventType: "store.publish_rejected",
+          metadata: {
+            categories: moderation.categories,
+            name: nextSceneName,
+          },
+          target: { sceneId: scene.id },
+        });
+        return jsonError("content_rejected", 422, {
+          categories: moderation.categories,
+        });
+      }
+      return jsonError("moderation_unavailable", 503);
+    }
+    renameTo = nextSceneName;
+  }
+
   const content = rebuildZipWithScenes(
     Buffer.from(latest.content),
     JSON.stringify(body.scenes, null, 2),
+    renameTo,
   );
   if (!content) {
     return jsonError("invalid_scene_zip", 500);
@@ -122,6 +193,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .update(storeScenes)
     .set({
       latestVersion: nextVersion,
+      // The slug is deliberately NOT re-derived: it is the URL people have
+      // shared, pasted into a frame's Templates panel and bookmarked.
+      ...(renameTo ? { name: renameTo } : {}),
       riskFlags: validated.value.riskFlags,
       updatedAt: new Date(),
     })
@@ -139,7 +213,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     },
     eventType: "store.scene_content_edited",
     metadata: {
-      name: scene.name,
+      name: renameTo ?? scene.name,
+      ...(renameTo ? { renamedFrom: scene.name } : {}),
       sceneCount: validated.value.sceneCount,
       version: nextVersion,
     },

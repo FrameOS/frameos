@@ -79,8 +79,8 @@ export default async function AccountScenesPage({
           <h2>My published scenes</h2>
           <p className="copy">
             Scenes you published to the FrameOS store. Private scenes are
-            visible only to you; public scenes appear on the{" "}
-            <Link href={storeUrl}>store front</Link> and in the in-app store
+            visible only to you; public scenes appear in the{" "}
+            <Link href={storeUrl}>store</Link> and in the in-app store
             repository for everyone.
           </p>
         </div>

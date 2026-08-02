@@ -94,7 +94,7 @@ export function SceneZipUpload() {
       <div>
         <h3>Upload a scene ZIP</h3>
         <p>
-          Upload a FrameOS scene export. New uploads are private; uploading the
+          Upload a scene export. New uploads are private; uploading the
           same scene name again creates a new version.
         </p>
       </div>

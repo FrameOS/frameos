@@ -1478,3 +1478,31 @@ a.tag-pill:hover {
   width: min(1120px, 100%);
   margin: 0 auto;
 }
+
+/* The live preview mounts frameos-wasm's own DOM (.frameos-manager) here, and
+   that bundle injects its stylesheet into <head> at mount time — i.e. after
+   this file. These selectors are deliberately more specific than the injected
+   single-class rules so they win regardless of injection order.
+
+   Without them a single unwrappable log line (the wasm manager's log pane is a
+   <pre> with the default `white-space: pre`) becomes the widest thing in the
+   grid, the `auto` column grows to fit it, and the canvas stage — which
+   centres the frame inside itself — is stretched with it, shoving the preview
+   image off to the side. The `minmax(0, 1fr)` column is the containment that
+   makes that impossible for *any* over-wide child, log pane or not; the
+   wrapping rules keep the log itself readable instead of just clipped. */
+.editor-modal__body.stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.editor-modal__body .frameos-manager {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.editor-modal__body pre.frameos-manager__logs {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

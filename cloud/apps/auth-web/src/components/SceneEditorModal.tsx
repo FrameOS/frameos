@@ -263,7 +263,13 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(`Saving failed: ${payload.error ?? response.status}`);
+        setError(
+          // Renaming the scene renames the store listing with it, and two of
+          // your scenes may not share a name.
+          payload.error === "scene_name_taken"
+            ? `You already have another scene called “${payload.name ?? "that"}” — rename this one to something else.`
+            : `Saving failed: ${payload.error ?? response.status}`,
+        );
         return;
       }
       setDirty(false);
