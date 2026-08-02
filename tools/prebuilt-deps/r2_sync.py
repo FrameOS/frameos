@@ -78,6 +78,7 @@ DEFAULT_BUCKET = os.environ.get("R2_BUCKET", "frameos-archive")
 DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 
 # Keep the target matrix in sync with tools/prebuilt-deps/build.sh
+# TODO(armv6): no debian-bookworm-armv6 entry yet; see tools/prebuilt-deps/build.sh.
 DEFAULT_TARGETS = [
     "debian-bullseye-armhf",
     "debian-bullseye-arm64",

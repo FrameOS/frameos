@@ -35,6 +35,7 @@ from app.utils.build_executor import (
     create_build_executor,
 )
 from app.utils.cross_toolchain_packages import (
+    CONTAINERLESS_TARGET_PLATFORMS,
     TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS,
     TARGET_CROSS_TOOLCHAIN_PACKAGES,
     TARGET_CROSS_TOOLCHAINS,
@@ -62,6 +63,10 @@ FEATURE_FLAG_ENV = "FRAMEOS_CROSS_FEATURE_CFLAGS"
 DEFAULT_FEATURE_CFLAGS = {
     "amd64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
     "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
+    # ARM1176JZF-S (Raspberry Pi Zero W / 1): anything newer than ARMv6+VFPv2
+    # SIGILLs on device.
+    "armv6l": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
+    "armv6": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
 }
 CROSS_TOOLCHAIN_IMAGE = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE")
 TOOLCHAIN_IMAGE_REPO = os.environ.get(
@@ -98,6 +103,7 @@ PLATFORM_MAP = {
     "armv7": "linux/arm/v7",
     "armhf": "linux/arm/v7",
     "armv6l": "linux/arm/v6",
+    "armv6": "linux/arm/v6",
 }
 def can_cross_compile_target(arch: str | None) -> bool:
     """Return ``True`` when *arch* has a known Docker platform mapping."""
@@ -329,6 +335,11 @@ class CrossCompiler:
             lib_dirs = self._dedupe_preserve_order(
                 [f"/usr/lib/{target_cross_toolchain.triplet}", *lib_dirs]
             )
+            if target_cross_toolchain.tarball_url:
+                # Standalone toolchains only search their own sysroot; expose
+                # the container's arch-independent headers (openssl, zlib, ...)
+                # explicitly.
+                include_dirs = self._dedupe_preserve_order([*include_dirs, "/usr/include"])
         include_flags = [f"-I{path}" for path in include_dirs]
         extra_cflags_parts = [*feature_flags, *include_flags]
         extra_cflags = (
@@ -836,6 +847,8 @@ class CrossCompiler:
 
     def _container_platform(self) -> str:
         platform = self._platform()
+        if platform in CONTAINERLESS_TARGET_PLATFORMS:
+            return CONTAINERLESS_TARGET_PLATFORMS[platform]
         if self.executor is None:
             return platform
         platform_for_target = getattr(self.executor, "container_platform_for_target", None)
@@ -857,9 +870,17 @@ class CrossCompiler:
             f"/usr/lib/{toolchain.triplet}/pkgconfig:"
             f"/usr/share/pkgconfig"
         )
-        return dedent(
+        apt_probe = (
+            f"! test -e /usr/lib/{shlex.quote(toolchain.triplet)}/libssl.so"
+            if toolchain.tarball_url
+            else (
+                f"! command -v {shlex.quote(toolchain.cc)} >/dev/null 2>&1 || "
+                f"! test -e /usr/lib/{shlex.quote(toolchain.triplet)}/libssl.so"
+            )
+        )
+        script = dedent(
             f"""
-            if ! command -v {shlex.quote(toolchain.cc)} >/dev/null 2>&1 || ! test -e /usr/lib/{shlex.quote(toolchain.triplet)}/libssl.so; then
+            if {apt_probe}; then
                 log_debug "Installing {toolchain.triplet} cross compiler and target libraries"
                 if ! command -v apt-get >/dev/null 2>&1; then
                     log_debug "apt-get is required to install target cross compiler packages"
@@ -873,11 +894,41 @@ class CrossCompiler:
                 apt-get install -y --no-install-recommends {package_list}
                 rm -rf /var/lib/apt/lists/*
             fi
-            export CC={shlex.quote(toolchain.cc)}
-            export PKG_CONFIG_LIBDIR={shlex.quote(pkg_config_libdir)}
-            log_debug "Using target compiler: $CC"
             """
         ).strip()
+        if toolchain.tarball_url:
+            tarball_name = toolchain.tarball_url.rsplit("/", 1)[-1]
+            extract_dir = tarball_name
+            for suffix in (".tar.xz", ".tar.gz", ".tar.bz2"):
+                if extract_dir.endswith(suffix):
+                    extract_dir = extract_dir[: -len(suffix)]
+                    break
+            toolchain_root = f"/opt/frameos/toolchains/{extract_dir}"
+            script += "\n" + dedent(
+                f"""
+                toolchain_root={shlex.quote(toolchain_root)}
+                if [ ! -x "$toolchain_root/bin/{toolchain.tarball_cc}" ]; then
+                    log_debug "Downloading standalone target toolchain {tarball_name}"
+                    mkdir -p /opt/frameos/toolchains
+                    curl -fsSL --retry 3 --retry-delay 2 -o "/tmp/{tarball_name}" {shlex.quote(toolchain.tarball_url)}
+                    printf '%s  %s\\n' {shlex.quote(toolchain.tarball_sha256 or "")} "/tmp/{tarball_name}" | sha256sum -c -
+                    tar -C /opt/frameos/toolchains -xf "/tmp/{tarball_name}"
+                    rm -f "/tmp/{tarball_name}"
+                    if [ -x "$toolchain_root/relocate-sdk.sh" ]; then
+                        "$toolchain_root/relocate-sdk.sh"
+                    fi
+                fi
+                export CC="$toolchain_root/bin/{toolchain.tarball_cc}"
+                export CXX="$toolchain_root/bin/{toolchain.tarball_cxx or toolchain.tarball_cc}"
+                """
+            ).strip()
+        else:
+            script += f"\nexport CC={shlex.quote(toolchain.cc)}"
+        script += (
+            f"\nexport PKG_CONFIG_LIBDIR={shlex.quote(pkg_config_libdir)}"
+            '\nlog_debug "Using target compiler: $CC"'
+        )
+        return script
 
     def _target_cross_toolchain_build_args(self, container_platform: str) -> tuple[str, str]:
         if container_platform != "linux/amd64":

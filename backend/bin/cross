@@ -53,6 +53,11 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "bookworm", "amd64", "linux/amd64", "debian:bookworm"),
+    # ARMv6 hard-float for the Raspberry Pi Zero W Buildroot image. Debian has
+    # no ARMv6 port, so this builds in an amd64 container with the Bootlin
+    # armv6-eabihf toolchain (see cross_toolchain_packages.py); armhf packages
+    # only provide headers and link stubs.
+    TargetDefinition("debian", "bookworm", "armv6", "linux/arm/v6", "debian:bookworm"),
     TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
@@ -60,6 +65,8 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
     TargetDefinition("ubuntu", "26.04", "arm64", "linux/arm64", "ubuntu:26.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "26.04", "amd64", "linux/amd64", "ubuntu:26.04"),
+    # TODO(rockchip/allwinner): 32-bit ARMv7 targets for Luckfox Pico
+    # (RV1103/RV1106) and T113-S3/S4 boards can reuse the armhf toolchain:
     # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:26.04"),
 )
 

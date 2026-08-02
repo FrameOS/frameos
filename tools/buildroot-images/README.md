@@ -5,6 +5,39 @@ per-frame BOOT payloads, FRAMEOS, and ASSETS partition images. The slow Buildroo
 base image is built manually in CI or locally, uploaded to the `frameos-archive`
 R2 bucket, and referenced by this manifest.
 
+## Platforms
+
+Every supported board is described by one entry in the platform registry,
+`backend/app/tasks/buildroot_platforms.py`: Buildroot defconfig, binary
+cross-compile target, extra Buildroot config, boot config, and Wi-Fi firmware
+quirks all live there. Currently enabled:
+
+| Platform | Bits | Defconfig | Binary target |
+| --- | --- | --- | --- |
+| `raspberry-pi-zero-2-w` | 64 | `raspberrypizero2w_64_defconfig` | `debian-bookworm-arm64` |
+| `raspberry-pi-zero-w` | 32 | `raspberrypi0w_defconfig` | `debian-bookworm-armv6` |
+
+The Pi Zero W is ARMv6 hard-float. Debian has no ARMv6 port, so its FrameOS
+and Remote binaries are cross-compiled with the Bootlin `armv6-eabihf`
+toolchain inside an amd64 container (`backend/bin/cross` target
+`debian-bookworm-armv6`); the Debian armhf packages only provide headers and
+link-time stubs, and at runtime binaries resolve against the ARMv6 Buildroot
+rootfs libraries. Never ship `armhf` (ARMv7) binaries to a Pi Zero W — they
+SIGILL on its ARM1176 core.
+
+Base images for 32-bit ARM platforms are best built on x86_64 hosts, where the
+prebuilt Bootlin rootfs toolchain applies; on other hosts Buildroot silently
+falls back to building the toolchain from source (slower, same result).
+
+Registered but not yet implemented (`enabled=False`, see TODOs in the
+registry): `luckfox-pico` (Rockchip RV1103/RV1106) and `allwinner-t113`
+(T113-S3/S4). Both are ARMv7 and can reuse the `debian-bookworm-armhf` binary
+target, but need their own defconfig/BR2_EXTERNAL tree and a non-Raspberry-Pi
+boot layout in the post-image flow.
+
+The `manifest.json` in this directory holds one entry per platform; `upload`
+replaces only the entry for the platform being uploaded.
+
 ## CI publishing
 
 Use the manual GitHub workflow `.github/workflows/buildroot-base-image.yml` for
@@ -14,15 +47,20 @@ manifest commit:
 ```bash
 gh workflow run buildroot-base-image.yml --ref your-branch
 
+# Build the 32-bit Raspberry Pi Zero W base image:
+gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-zero-w
+
 # Use a custom runner label, for example a larger ARM runner:
 gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-arm-runner-label
 ```
 
-The workflow defaults to `ubuntu-24.04-arm` and can be dispatched with a custom
-runner label when a larger/self-hosted ARM runner is available. It builds the
-base image, uploads it to R2, verifies the refreshed manifest, and commits the
-resulting `tools/buildroot-images/manifest.json` change back to the selected
-branch.
+The workflow picks the platform's default runner (`ubuntu-24.04-arm` for the
+Zero 2 W, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
+Bootlin toolchain applies) and can be dispatched with a custom runner label
+when a larger/self-hosted runner is available. It builds the base image,
+uploads it to R2, verifies the refreshed manifest, and commits the resulting
+`tools/buildroot-images/manifest.json` change back to the selected branch.
+Run it once per platform; the manifest keeps one entry per platform.
 
 Repository secrets required by the upload step:
 
@@ -53,7 +91,13 @@ python tools/buildroot-images/buildroot_images.py download --force
 
 # Inspect remote entries.
 python tools/buildroot-images/buildroot_images.py list
+
+# Print the enabled platform matrix (used by CI).
+python tools/buildroot-images/buildroot_images.py platforms
 ```
+
+All commands accept `--platform raspberry-pi-zero-w` for the 32-bit Pi Zero W;
+`release-image` derives `--target` from the platform when omitted.
 
 The helper reads R2 credentials from the environment or a `.env` file:
 
@@ -93,9 +137,14 @@ FrameOS/Remote artifacts, ship without WiFi credentials, and keep
 reach the network. The first-boot setup service is present but dormant until a
 future SD card builder copies `frameos-setup.json` to the BOOT partition.
 
-Add future hardware targets by adding a platform alias/target in
-`backend/app/tasks/buildroot_image.py`, extending the CLI defaults, then building
-and uploading another manifest entry. The partition layout must stay:
+Add future hardware targets by adding a `BuildrootPlatform` entry in
+`backend/app/tasks/buildroot_platforms.py` (plus, for a new CPU target, a
+`TargetDefinition` in `backend/bin/cross` and a toolchain entry in
+`backend/app/utils/cross_toolchain_packages.py`), then building and uploading
+another manifest entry. Non-Raspberry-Pi families additionally need their own
+post-build/post-image flow in `backend/app/tasks/buildroot_image.py` — the
+Raspberry-Pi-only spots raise `NotImplementedError` with TODOs. The partition
+layout must stay:
 
 1. FAT boot
 2. ext4 root

@@ -16,7 +16,6 @@ import pytest
 from app.models.assets import Assets
 from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import (
-    BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
@@ -34,7 +33,10 @@ from app.tasks.buildroot_image import (
     stage_buildroot_frameos_service,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
+    render_post_build_script,
+    render_post_image_script,
 )
+from app.tasks.buildroot_platforms import RASPBERRY_PI_ZERO_2_W, RASPBERRY_PI_ZERO_W
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import (
@@ -306,7 +308,7 @@ def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     config_path = tmp_path / "frameos-buildroot.config"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_2_W)
     config = config_path.read_text(encoding="utf-8")
 
     assert "BR2_PACKAGE_BASH=y" in config
@@ -352,7 +354,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
 def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path):
     fragment_path = tmp_path / "linux-fragment.config"
 
-    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path)
+    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, RASPBERRY_PI_ZERO_2_W)
     fragment = fragment_path.read_text(encoding="utf-8")
 
     assert "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set" in fragment
@@ -371,7 +373,7 @@ def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
-    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img")
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_2_W)
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output" in script
@@ -408,8 +410,8 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     post_image_path = tmp_path / "post-image.sh"
 
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path)
-    BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
+    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh", RASPBERRY_PI_ZERO_2_W)
 
     partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
     post_image = post_image_path.read_text(encoding="utf-8")
@@ -1474,10 +1476,10 @@ def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatc
     partition_post_build_path = tmp_path / "partition-post-build.sh"
     post_image_path = tmp_path / "post-image.sh"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path)
-    BuildrootImageBuilder._write_post_build_script(post_build_path)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_post_build_script(post_build_path, RASPBERRY_PI_ZERO_2_W)
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path)
+    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_ZERO_2_W)
 
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
@@ -1695,7 +1697,7 @@ def test_buildroot_boot_config_defaults_minimize_gpu_memory(monkeypatch):
 
     lines = _frame_boot_config_lines(SimpleNamespace(id=1))
 
-    assert lines == list(BUILDROOT_DEFAULT_BOOT_CONFIG_LINES)
+    assert lines == list(RASPBERRY_PI_ZERO_2_W.default_boot_config_lines)
     assert "gpu_mem=32" in lines
 
 
@@ -1802,3 +1804,80 @@ def test_buildroot_setup_payload_supports_gzip(tmp_path):
 
     decoded = gzip.decompress(output_path.read_bytes()).decode("utf-8")
     assert json.loads(decoded) == payload
+
+
+def test_buildroot_config_for_zero_w_selects_bootlin_armv6_toolchain(tmp_path):
+    config_path = tmp_path / "frameos-buildroot.config"
+
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_W)
+    config = config_path.read_text(encoding="utf-8")
+
+    assert "BR2_TOOLCHAIN_EXTERNAL=y" in config
+    assert "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_STABLE=y" in config
+    # Shared FrameOS package selection stays identical across platforms.
+    assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
+    assert "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y" in config
+
+
+def test_buildroot_build_script_uses_platform_defconfig(tmp_path):
+    script_path = tmp_path / "buildroot-build.sh"
+
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_W)
+    script = script_path.read_text(encoding="utf-8")
+
+    assert "O=/build/output raspberrypi0w_defconfig" in script
+    assert "raspberrypizero2w" not in script
+
+
+def test_post_build_script_wifi_firmware_is_platform_specific():
+    zero_2_w = render_post_build_script(RASPBERRY_PI_ZERO_2_W)
+    zero_w = render_post_build_script(RASPBERRY_PI_ZERO_W)
+
+    assert "raspberrypi,model-zero-2-w" in zero_2_w
+    assert "firmware-nonfree" in zero_2_w
+
+    # The Zero W uses the stock brcmfmac43430 firmware from linux-firmware;
+    # only device-tree name symlinks are needed.
+    assert "raspberrypi,model-zero-w" in zero_w
+    assert "raspberrypi,model-zero-2-w" not in zero_w
+    assert "firmware-nonfree" not in zero_w
+    assert "brcmfmac43436-sdio.bin" not in zero_w
+
+
+def test_post_image_script_keeps_gpu_memory_reserve_for_zero_w():
+    post_image = render_post_image_script(RASPBERRY_PI_ZERO_W)
+
+    assert 'line = "gpu_mem=32"' in post_image
+    assert "genimage" in post_image
+
+
+def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+
+    frame = SimpleNamespace(id=1, buildroot={"platform": "raspberry-pi-zero-w"})
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    target = builder.platform.build_target_copy()
+
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=target,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+
+    assert compiler._platform() == "linux/arm/v6"
+    # No distro publishes linux/arm/v6 containers; the build must run in an
+    # amd64 container with the standalone ARMv6 toolchain.
+    assert compiler._container_platform() == "linux/amd64"
+    toolchain = compiler._target_cross_toolchain("linux/amd64")
+    assert toolchain is not None
+    assert toolchain.tarball_url and "armv6-eabihf" in toolchain.tarball_url
+    setup_script = compiler._target_cross_toolchain_setup_script(toolchain)
+    assert "relocate-sdk.sh" in setup_script
+    assert "sha256sum -c -" in setup_script
+    assert 'export CC="$toolchain_root/bin/arm-buildroot-linux-gnueabihf-gcc"' in setup_script
+    flags = " ".join(compiler._cpu_feature_cflags())
+    assert "-march=armv6zk" in flags
+    assert "-mfloat-abi=hard" in flags

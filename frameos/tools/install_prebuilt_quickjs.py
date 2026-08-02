@@ -102,7 +102,10 @@ def normalize_arch(arch: str) -> str | None:
         "armv8": "arm64",
         "armv8l": "armhf",
         "armv7l": "armhf",
-        "armv6l": "armhf",
+        # ARMv6 (Pi Zero W / 1) must never fall back to armhf: those artifacts
+        # are built for ARMv7 and SIGILL on ARM1176.
+        "armv6l": "armv6",
+        "armv6": "armv6",
         "armhf": "armhf",
         "x86_64": "amd64",
         "amd64": "amd64",

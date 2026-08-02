@@ -23,7 +23,13 @@ import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
-import { buildrootPlatforms, devices, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../devices'
+import {
+  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  buildrootPlatforms,
+  devices,
+  partialRefreshDefaultsByDevice,
+  partialRefreshDevices,
+} from '../../devices'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import type {
   FrameOSSettings,
@@ -1075,7 +1081,7 @@ function BuildrootSdCardSection({
   const device = frameForm.device ?? frame.device ?? 'web_only'
   const deviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
-  const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
+  const platform = buildroot.platform ?? BUILDROOT_RASPBERRY_PI_ZERO_2_W
   const compilationMode = String(buildroot.compilationMode ?? '')
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
