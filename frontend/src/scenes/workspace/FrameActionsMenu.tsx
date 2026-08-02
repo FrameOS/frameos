@@ -21,7 +21,12 @@ import { frameHost } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { workspaceLogic } from './workspaceLogic'
-import { frameMenuActionIsAllowed, workspaceMode, type FrameMenuAction } from './workspaceSurfaces'
+import {
+  frameMenuActionDisabledReason,
+  frameMenuActionIsAllowed,
+  workspaceMode,
+  type FrameMenuAction,
+} from './workspaceSurfaces'
 
 interface FrameActionsMenuProps {
   frame: FrameType
@@ -50,14 +55,18 @@ export function FrameActionsMenu({
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
-  // Which verbs exist is a property of the control plane and of the device's
-  // profile, not of this menu — see workspaceSurfaces.ts. Reboot and restart
-  // DO exist on the cloud (they are two of its four command verbs); deploys,
-  // SSH power actions and backend bookkeeping do not, and an esp32 cloud
-  // frame additionally loses rename (it rides the set_settings verb, which
-  // that profile answers `unsupported_verb`).
+  // Which verbs exist is a property of the control plane, not of this menu —
+  // see workspaceSurfaces.ts. Reboot and restart DO exist on the cloud (they
+  // are two of its four command verbs); deploys, SSH power actions and
+  // backend bookkeeping do not. The frame's device profile never hides an
+  // entry — an esp32 cloud frame shows Rename disabled with the reason (it
+  // rides the set_settings verb, which that firmware answers
+  // `unsupported_verb` for) instead of quietly dropping it.
   const mode = workspaceMode()
-  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
+  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action)
+  const disabledReason = (action: FrameMenuAction): string | null =>
+    frameMenuActionDisabledReason(mode, action, frame)
+  const renameDisabledReason = disabledReason('rename')
 
   return (
     <DropdownMenu
@@ -69,7 +78,8 @@ export function FrameActionsMenu({
           ? [
               {
                 label: 'Rename',
-                title: 'Rename frame',
+                title: renameDisabledReason ?? 'Rename frame',
+                disabled: Boolean(renameDisabledReason),
                 onClick: () => openRenameFrameDialog(frame.id, frameName),
                 icon: <PencilSquareIcon className="h-5 w-5" />,
               },

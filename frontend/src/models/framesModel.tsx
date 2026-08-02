@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { FrameScene, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
@@ -474,6 +474,11 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: FrameId) => ({ id }),
     deleteFrame: (id: FrameId) => ({ id }),
     renameFrame: (id: FrameId, name: string) => ({ id, name }),
+    // Cloud only: a freshly enrolled frame is `pending` until its owner
+    // confirms it, and the control plane refuses scene/settings pushes with
+    // frame_not_active until then (POST /api/frames/{id}/confirm).
+    confirmCloudFrame: (id: FrameId) => ({ id }),
+    confirmCloudFrameFailure: (id: FrameId, error: string) => ({ id, error }),
     deployRemote: (id: FrameId, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
@@ -540,6 +545,30 @@ export const framesModel = kea<framesModelType>([
       false,
       {
         loadFramesSuccess: () => true,
+      },
+    ],
+    // Per-frame confirm-in-flight flags and errors for the cloud's pending
+    // banner. Keyed by String(id) — reducers index with the raw FrameId.
+    cloudFramesConfirming: [
+      {} as Record<FrameId, boolean>,
+      {
+        confirmCloudFrame: (state, { id }) => ({ ...state, [id]: true }),
+        confirmCloudFrameFailure: (state, { id }) => ({ ...state, [id]: false }),
+        loadFrameSuccess: (state) => (Object.keys(state).length > 0 ? {} : state),
+      },
+    ],
+    cloudFrameConfirmErrors: [
+      {} as Record<FrameId, string>,
+      {
+        confirmCloudFrame: (state, { id }) => {
+          if (!(id in state)) {
+            return state
+          }
+          const next = { ...state }
+          delete next[id]
+          return next
+        },
+        confirmCloudFrameFailure: (state, { id, error }) => ({ ...state, [id]: error }),
       },
     ],
     frames: [
@@ -613,7 +642,7 @@ export const framesModel = kea<framesModelType>([
                     ...frame.embedded,
                     firmware: mergeEmbeddedFirmwareStatus(state[frame.id]?.embedded?.firmware, frame.embedded.firmware),
                   }
-                : frame.embedded ?? state[frame.id]?.embedded,
+                : (frame.embedded ?? state[frame.id]?.embedded),
           }),
         }),
         [socketLogic.actionTypes.newLog]: (state, { log }) => {
@@ -675,8 +704,28 @@ export const framesModel = kea<framesModelType>([
     ],
     framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0],
   }),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, cache }) => {
     actions.loadFrames()
+    // Cloud fleets change behind the SPA's back: enrollment is an HTTP call
+    // into auth-web, and the hub only broadcasts a frame once it connects its
+    // WebSocket — which a pending frame flashed from an SD image may not do
+    // for minutes (or, unreachable, ever). Without a refresh the list stayed
+    // frozen until a manual reload. A slow, tab-visible-only poll keeps it
+    // honest; the websocket still delivers the fast-path updates. Backend
+    // mode keeps its pure event-sourcing — its server owns every mutation.
+    if (isCloudMode() && typeof window !== 'undefined') {
+      cache.cloudFleetRefreshInterval = window.setInterval(() => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          actions.loadFrames()
+        }
+      }, 15_000)
+    }
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.cloudFleetRefreshInterval) {
+      window.clearInterval(cache.cloudFleetRefreshInterval)
+      cache.cloudFleetRefreshInterval = undefined
+    }
   }),
   listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
@@ -933,8 +982,8 @@ export const framesModel = kea<framesModelType>([
           firmware?.status === 'ready' && !force
             ? 'Requesting OTA update'
             : firmware?.status === 'building' || firmware?.status === 'queued'
-            ? 'Waiting for firmware build'
-            : 'Preparing firmware image',
+              ? 'Waiting for firmware build'
+              : 'Preparing firmware image',
       })
 
       try {
@@ -1074,6 +1123,21 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
+      }
+    },
+    confirmCloudFrame: async ({ id }) => {
+      try {
+        const response = await apiFetch(`/api/frames/${id}/confirm`, { method: 'POST' })
+        if (!response.ok) {
+          const detail = (await response.json().catch(() => ({}))) as { error?: string }
+          throw new Error(detail.error ?? `error_${response.status}`)
+        }
+        // The row flips to active server-side; refetch so the banner drops
+        // and Save/scene pushes stop being refused with frame_not_active.
+        actions.loadFrame(id)
+      } catch (error) {
+        console.error(error)
+        actions.confirmCloudFrameFailure(id, error instanceof Error ? error.message : 'Failed to confirm the frame')
       }
     },
     renameFrame: async ({ id, name }) => {

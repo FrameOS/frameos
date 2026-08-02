@@ -221,8 +221,20 @@ export const addFrameFlows: Record<WorkspaceMode, AddFrameFlow> = {
  * only a subset of the management verbs — it answers `unsupported_verb` for
  * `set_schedule`, `set_settings`, `get_logs`, `get_metrics` and
  * `notify_update_available` (docs/cloud-frames.md, "Device profiles";
- * device-side allowlist in embedded/esp32/main/fos_cloud.c). The UI hides
- * those controls instead of enqueueing commands that come back refused.
+ * device-side allowlist in embedded/esp32/main/fos_cloud.c).
+ *
+ * A missing capability DISABLES the control with an explanation — it never
+ * hides it. Hiding made the workspace look gutted for esp32 frames and gave
+ * the user nothing to learn from; a disabled button with a tooltip says what
+ * is missing and why. Visibility stays a property of the mode allow-lists
+ * alone.
+ *
+ * Logs are the exception that proves the layering: the cloud's Logs panel
+ * never uses the `get_logs` verb — frames PUSH log batches over the hub
+ * WebSocket and the panel reads them back from the cloud's store
+ * (GET /api/frames/{id}/logs + the `new_log` browser socket event), so the
+ * esp32 profile keeps the `logs` capability even though its firmware refuses
+ * `get_logs`.
  *
  * Scene management, current scene, render, reboot, restart and state stay:
  * the ESP32 profile implements all of them.
@@ -240,9 +252,19 @@ export interface FrameCapabilityInput {
 
 const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings', 'logs', 'metrics', 'updateNotify']
 
+/** What the esp32 cloud profile keeps of the gated set: logs are served from
+ * the cloud's own store (pushed by the frame, read over HTTP), so they work
+ * regardless of which verbs the firmware answers. */
+const esp32CloudCapabilities: readonly FrameCapability[] = ['logs']
+
 /** `platform: "esp32"` today; prefix-matched so "esp32-s3" variants gate too. */
 function isEsp32Platform(platform: unknown): boolean {
   return typeof platform === 'string' && platform.toLowerCase().startsWith('esp32')
+}
+
+/** A cloud-managed frame whose enrollment hardware report says esp32. */
+export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: WorkspaceMode = workspaceMode()): boolean {
+  return mode === 'cloud' && isEsp32Platform(frame?.hardware?.platform)
 }
 
 /**
@@ -257,11 +279,8 @@ export function frameCapabilities(
   frame?: FrameCapabilityInput | null,
   mode: WorkspaceMode = workspaceMode()
 ): ReadonlySet<FrameCapability> {
-  if (mode === 'cloud' && isEsp32Platform(frame?.hardware?.platform)) {
-    // The ESP32 cloud profile: scenes, current scene, state, render, reboot,
-    // restart_runtime — none of which are capability-gated surfaces. Every
-    // gated capability rides a verb it answers `unsupported_verb` for.
-    return new Set<FrameCapability>()
+  if (isEsp32CloudFrame(frame, mode)) {
+    return new Set(esp32CloudCapabilities)
   }
   return new Set(allFrameCapabilities)
 }
@@ -270,7 +289,7 @@ export function frameCapabilities(
 const panelCapabilities: Partial<Record<WorkspaceUtilityPanel, FrameCapability>> = {
   schedule: 'schedule', // set_schedule
   settings: 'settings', // set_settings
-  logs: 'logs', // get_logs / telemetry:logs
+  logs: 'logs', // pushed telemetry, read back from the cloud store
   metrics: 'metrics', // get_metrics / telemetry:metrics
 }
 
@@ -281,44 +300,91 @@ const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> 
   rename: 'settings',
 }
 
+/**
+ * Tooltip shown on a control its frame's device profile cannot serve. One
+ * message per capability so every surface riding the same verb explains
+ * itself the same way.
+ */
+const capabilityDisabledReasons: Record<FrameCapability, string> = {
+  schedule: "This ESP32 frame's firmware does not support schedules yet.",
+  settings: "This ESP32 frame's firmware does not accept settings changes from the cloud yet.",
+  logs: 'This frame does not report logs to the cloud.',
+  metrics: 'This ESP32 frame does not report metrics to the cloud.',
+  updateNotify: 'This ESP32 frame does not take update notifications.',
+}
+
 function allows<T extends string>(list: Record<WorkspaceMode, readonly T[]>, mode: WorkspaceMode, value: T): boolean {
   return list[mode].includes(value)
 }
 
-function capabilityAllows(
+function capabilityDisabledReason(
   capability: FrameCapability | undefined,
   mode: WorkspaceMode,
   frame?: FrameCapabilityInput | null
-): boolean {
-  return !capability || frameCapabilities(frame, mode).has(capability)
+): string | null {
+  if (!capability || frameCapabilities(frame, mode).has(capability)) {
+    return null
+  }
+  return capabilityDisabledReasons[capability]
 }
 
-export function frameToolPanelIsAllowed(
+// Visibility is the mode's business alone — see the capability block comment
+// above for why the device profile disables rather than hides.
+
+export function frameToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
+  return allows(allowedFrameToolPanels, mode, panel)
+}
+
+/** Non-null when the panel is visible for the mode but the frame's device profile cannot serve it. */
+export function frameToolPanelDisabledReason(
   mode: WorkspaceMode,
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
-): boolean {
-  return allows(allowedFrameToolPanels, mode, panel) && capabilityAllows(panelCapabilities[panel], mode, frame)
+): string | null {
+  return capabilityDisabledReason(panelCapabilities[panel], mode, frame)
 }
 
-export function sceneToolPanelIsAllowed(
+export function sceneToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
+  return allows(allowedSceneToolPanels, mode, panel)
+}
+
+export function sceneToolPanelDisabledReason(
   mode: WorkspaceMode,
   panel: WorkspaceUtilityPanel,
   frame?: FrameCapabilityInput | null
-): boolean {
-  return allows(allowedSceneToolPanels, mode, panel) && capabilityAllows(panelCapabilities[panel], mode, frame)
+): string | null {
+  return capabilityDisabledReason(panelCapabilities[panel], mode, frame)
 }
 
 export function sceneUtilityPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
   return allows(allowedSceneUtilityPanels, mode, panel)
 }
 
-export function frameMenuActionIsAllowed(
+export function frameMenuActionIsAllowed(mode: WorkspaceMode, action: FrameMenuAction): boolean {
+  return allows(allowedFrameMenuActions, mode, action)
+}
+
+export function frameMenuActionDisabledReason(
   mode: WorkspaceMode,
   action: FrameMenuAction,
   frame?: FrameCapabilityInput | null
+): string | null {
+  return capabilityDisabledReason(menuActionCapabilities[action], mode, frame)
+}
+
+/**
+ * Whether the workspace should offer streaming this frame's USB serial
+ * console into the Logs panel (WebSerial). True for cloud-managed ESP32
+ * frames: a board that never joins WiFi can still be debugged from the
+ * browser over its USB console. The backend/on-device planes have their own
+ * probe (frame.mode === 'embedded' in Logs.tsx); callers must additionally
+ * feature-detect WebSerial before showing anything.
+ */
+export function frameSupportsUsbSerialConsole(
+  frame?: FrameCapabilityInput | null,
+  mode: WorkspaceMode = workspaceMode()
 ): boolean {
-  return allows(allowedFrameMenuActions, mode, action) && capabilityAllows(menuActionCapabilities[action], mode, frame)
+  return isEsp32CloudFrame(frame, mode)
 }
 
 export function frameSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {

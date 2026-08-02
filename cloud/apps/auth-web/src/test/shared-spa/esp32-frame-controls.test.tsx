@@ -7,8 +7,9 @@
 // `unsupported_verb` for set_schedule, set_settings, get_logs, get_metrics
 // and notify_update_available (docs/cloud-frames.md "Device profiles";
 // device-side allowlist in embedded/esp32/main/fos_cloud.c). Rename rides
-// set_settings, so the menu must not offer it for an esp32 frame — while
-// render, reboot and restart (all in the esp32 profile) must stay.
+// set_settings, so for an esp32 frame the menu shows it DISABLED with the
+// reason as its tooltip — visible, never hidden — while render, reboot and
+// restart (all in the esp32 profile) stay live.
 //
 // The component lives in frontend/src (the shared SPA), which has no test
 // runner, so it is tested from auth-web's vitest across the package boundary
@@ -52,11 +53,16 @@ function renderMenu(frame: FrameType) {
   return view;
 }
 
+function menuItems(): HTMLElement[] {
+  return Array.from(document.querySelectorAll(".frameos-dropdown-item"));
+}
+
 function menuLabels(): string[] {
-  return Array.from(
-    document.querySelectorAll(".frameos-dropdown-item"),
-    (item) => item.textContent?.trim() ?? "",
-  );
+  return menuItems().map((item) => item.textContent?.trim() ?? "");
+}
+
+function menuItem(label: string): HTMLElement | undefined {
+  return menuItems().find((item) => item.textContent?.trim() === label);
 }
 
 // The cloud fleet UI's runtime globals (cloud-frontend/src/main.tsx).
@@ -89,14 +95,23 @@ afterEach(() => {
 });
 
 describe("FrameActionsMenu in cloud mode", () => {
-  it("hides Rename for an esp32 frame and keeps render, restart and reboot", () => {
+  it("disables Rename with an explanation for an esp32 frame and keeps render, restart and reboot live", () => {
     renderMenu(cloudFrame("esp32"));
 
     const labels = menuLabels();
-    expect(labels).not.toContain("Rename");
+    expect(labels).toContain("Rename");
     expect(labels).toContain("Re-render");
     expect(labels).toContain("Restart FrameOS");
     expect(labels).toContain("Reboot device");
+
+    const rename = menuItem("Rename");
+    expect(rename?.className).toContain("cursor-not-allowed");
+    expect(rename?.getAttribute("title")).toContain("ESP32");
+
+    // The live entries carry no disabling and their normal tooltips.
+    const rerender = menuItem("Re-render");
+    expect(rerender?.className).not.toContain("cursor-not-allowed");
+    expect(rerender?.getAttribute("title")).toBe("Render frame now");
   });
 
   it("still offers nothing the cloud protocol itself lacks on esp32", () => {
@@ -108,7 +123,7 @@ describe("FrameActionsMenu in cloud mode", () => {
     }
   });
 
-  it("keeps Rename for a Pi frame", () => {
+  it("keeps Rename enabled for a Pi frame", () => {
     renderMenu(cloudFrame("pi-zero2w"));
 
     const labels = menuLabels();
@@ -116,5 +131,9 @@ describe("FrameActionsMenu in cloud mode", () => {
     expect(labels).toContain("Re-render");
     expect(labels).toContain("Restart FrameOS");
     expect(labels).toContain("Reboot device");
+
+    const rename = menuItem("Rename");
+    expect(rename?.className).not.toContain("cursor-not-allowed");
+    expect(rename?.getAttribute("title")).toBe("Rename frame");
   });
 });
