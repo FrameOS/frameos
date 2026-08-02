@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "auth:login", {
+  const limited = await rateLimitResponse(request, "auth:login", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
 
   // A second limit keyed on the target email caps distributed brute force
   // against one account across many source IPs.
-  const emailLimited = identityRateLimitResponse(email, "auth:login-email", {
+  const emailLimited = await identityRateLimitResponse(email, "auth:login-email", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   // verification link (throttled) since the correct password proves this is
   // the account owner, then tell them to check their inbox.
   if (!account.emailVerified) {
-    const resend = checkRateLimit(`auth:verify-email-resend:${account.id}`, {
+    const resend = await checkRateLimit(`auth:verify-email-resend:${account.id}`, {
       limit: 3,
       windowMs: 60 * 60 * 1000,
     });

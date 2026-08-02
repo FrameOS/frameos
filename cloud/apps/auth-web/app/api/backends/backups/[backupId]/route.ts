@@ -21,7 +21,7 @@ async function loadBackup(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const limited = rateLimitResponse(request, "backend:backups", {
+  const limited = await rateLimitResponse(request, "backend:backups", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

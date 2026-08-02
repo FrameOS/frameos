@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "device:deny", {
+  const limited = await rateLimitResponse(request, "device:deny", {
     limit: 30,
     windowMs: 15 * 60 * 1000,
   });
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Cap user-code guessing per account (IP limits are spoofable behind proxies).
-  const accountLimited = identityRateLimitResponse(
+  const accountLimited = await identityRateLimitResponse(
     session.accountId,
     "device:deny",
     { limit: 30, windowMs: 15 * 60 * 1000 },

@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "device:revoke", {
+  const limited = await rateLimitResponse(request, "device:revoke", {
     limit: 30,
     windowMs: 15 * 60 * 1000,
   });

@@ -1,12 +1,15 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { frameosLoginCodes, linkedClients } from "@frameos-cloud/db";
+import {
+  accountIdentities,
+  frameosLoginCodes,
+  linkedClients,
+} from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
 import { requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   loginCodeExpiresInSeconds,
   verifyFrameosLoginRequestToken,
-  type FrameosLoginCodeProfile,
   type FrameosLoginRequest,
 } from "../../../../../src/lib/frameos-login";
 import { createSecretToken, hashSecret } from "../../../../../src/lib/secrets";
@@ -62,23 +65,32 @@ export async function GET(request: NextRequest) {
     return redirectWithError(loginRequest, "insufficient_scope");
   }
 
-  // The code in the redirect URL is an opaque single-use token. The profile
-  // claims stay server-side and are released only at the token endpoint, so
-  // browser history and proxy/access logs never see PII.
-  const profile: FrameosLoginCodeProfile = {
-    accountId: session.accountId,
-    email: session.email,
-    emailVerified: session.emailVerified,
-    name: session.name,
-    providerIssuer: session.providerIssuer,
-    providerSubject: session.providerSubject,
-  };
+  // The code in the redirect URL is an opaque single-use token. The row
+  // stores only references to the signed-in account and identity; the token
+  // endpoint resolves the profile claims fresh at redemption, so neither the
+  // URL nor the row carries a PII snapshot.
+  const [identity] = await db
+    .select({ id: accountIdentities.id })
+    .from(accountIdentities)
+    .where(
+      and(
+        eq(accountIdentities.accountId, session.accountId),
+        eq(accountIdentities.providerIssuer, session.providerIssuer),
+        eq(accountIdentities.providerSubject, session.providerSubject),
+      ),
+    )
+    .limit(1);
+  if (!identity) {
+    return redirectWithError(loginRequest, "linked_client_required");
+  }
+
   const code = createSecretToken("fc_login", 32);
   await db.insert(frameosLoginCodes).values({
+    accountId: session.accountId,
     codeHash: hashSecret(code),
     expiresAt: new Date(Date.now() + loginCodeExpiresInSeconds * 1000),
+    identityId: identity.id,
     linkedClientId: linkedClient.id,
-    profile,
   });
 
   const redirect = new URL(loginRequest.redirectUri);

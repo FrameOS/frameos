@@ -21,6 +21,7 @@ const
     "ubuntu-26.04",
   ]
   SupportedArches = ["arm64", "armhf", "amd64"]
+  MaxReleaseArchiveBytes = 512 * 1024 * 1024
 
 type
   FrameOSReleaseInfo* = object
@@ -140,7 +141,7 @@ proc detectArch(): string =
   else:
     raise newException(ValueError, "Unsupported CPU architecture: " & uname & ". Supported architectures: " & SupportedArches.join(", "))
 
-proc normalizeDistroRelease(values: Table[string, string]): tuple[distro, release: string] =
+proc normalizeDistroRelease*(values: Table[string, string]): tuple[distro, release: string] =
   result.distro = getEnv("FRAMEOS_DISTRO_OVERRIDE", values.getOrDefault("ID", "")).strip()
   result.release = getEnv("FRAMEOS_OS_RELEASE_OVERRIDE", "").strip()
   if result.release.len == 0:
@@ -152,6 +153,11 @@ proc normalizeDistroRelease(values: Table[string, string]): tuple[distro, releas
 
   if result.distro in ["raspbian", "raspios"]:
     result.distro = "debian"
+  elif result.distro == "buildroot":
+    # Buildroot images ship the Debian Bookworm precompiled FrameOS artifact;
+    # the os-release VERSION_ID is the Buildroot version, not a binary target.
+    result.distro = "debian"
+    result.release = "bookworm"
   elif result.distro notin ["debian", "ubuntu"] and "debian" in values.getOrDefault("ID_LIKE", ""):
     result.distro = "debian"
 
@@ -319,14 +325,12 @@ proc ensureCompatibleInstalledLayout(release: FrameOSReleaseInfo) =
     raise newException(ValueError, "FrameOS upgrade requires " & currentDir & " to point at a release under " & frameosInstallDir() / "releases")
   let config = currentFrameConfig()
   let mode = config{"mode"}.getStr("rpios")
-  if mode != "rpios":
-    raise newException(ValueError, "FrameOS upgrade supports installed Raspberry Pi OS frames only; current mode is " & mode)
+  if mode notin ["rpios", "buildroot"]:
+    raise newException(ValueError, "FrameOS upgrade supports installed Raspberry Pi OS and Buildroot frames only; current mode is " & mode)
   if not commandExists("systemctl"):
     raise newException(ValueError, "FrameOS upgrade requires systemd/systemctl")
   if not commandExists("tar"):
     raise newException(ValueError, "FrameOS upgrade requires tar")
-  if not commandExists("curl") and not commandExists("wget"):
-    raise newException(ValueError, "FrameOS upgrade requires curl or wget")
   if not commandSucceeds("test \"$(id -u)\" = 0 || sudo -n true >/dev/null 2>&1"):
     raise newException(ValueError, "FrameOS upgrade must run as root or with passwordless sudo")
   discard release
@@ -340,7 +344,18 @@ proc downloadReleaseArchive(release: FrameOSReleaseInfo, destination: string) =
   elif commandExists("wget"):
     discard runSetupCommand("wget -qO " & shellQuote(destination) & " " & shellQuote(release.assetUrl))
   else:
-    raise newException(ValueError, "Missing required command: curl or wget")
+    # Buildroot images ship neither curl nor wget; use the bounded HTTP client.
+    setupLog("FrameOS upgrade: downloading with built-in HTTP client")
+    var headers = newHttpHeaders()
+    headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+    let body = boundedGetContent(
+      release.assetUrl,
+      headers = headers,
+      timeoutMs = 60_000,
+      maxBytes = MaxReleaseArchiveBytes,
+      maxSeconds = 1800,
+    )
+    writeFile(destination, body)
 
 proc findFileNamed(root, name: string): string =
   for path in walkDirRec(root):
@@ -411,6 +426,12 @@ proc copyDirIfExists(source, destination: string) =
   if dirExists(source):
     copyDir(source, destination)
 
+proc copyFirstExistingFile(sources: openArray[string], destination: string) =
+  for source in sources:
+    if fileExists(source):
+      copyFile(source, destination)
+      return
+
 proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   let timestamp = format(now(), "yyyyMMddHHmmss")
   result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
@@ -419,7 +440,11 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   if dirExists(result.frameosReleaseDir) or dirExists(result.remoteReleaseDir):
     raise newException(ValueError, "Release directory already exists: " & result.name)
 
-  let workDir = getTempDir() / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
+  let mode = currentFrameConfig(){"mode"}.getStr("rpios")
+  # /tmp is a small tmpfs on Buildroot; stage the download and extraction on
+  # the SD-backed data partition instead of RAM.
+  let workBase = if mode == "buildroot": frameosInstallDir() / "tmp" else: getTempDir()
+  let workDir = workBase / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
   try:
     createDir(workDir)
     createDir(workDir / "extract")
@@ -454,6 +479,7 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
       discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))
 
     let oldReleaseDir = realPath(frameosInstallDir() / "current")
+    let oldRemoteReleaseDir = realPath(frameosRemoteInstallDir() / "current")
     writeFrameConfigForUpgrade(currentFrameConfigPath(), result.frameosReleaseDir / "frame.json", release.version)
     copyFile(result.frameosReleaseDir / "frame.json", result.remoteReleaseDir / "frame.json")
     copyScenePayloads(result.frameosReleaseDir, oldReleaseDir)
@@ -462,11 +488,25 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
 
     let serviceUser = serviceUserFromFile("/etc/systemd/system/frameos.service")
     result.serviceUser = serviceUser
-    writeFile(
-      result.frameosReleaseDir / "frameos.service",
-      frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
-    )
-    writeFile(result.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
+    if mode == "buildroot":
+      # Buildroot service files carry image-specific settings (User=root,
+      # FRAMEOS_HOME and LD_LIBRARY_PATH pointing into the release); carry them
+      # over instead of generating the Raspberry Pi OS variants.
+      copyFirstExistingFile(
+        [oldReleaseDir / "frameos.service", "/etc/systemd/system/frameos.service"],
+        result.frameosReleaseDir / "frameos.service",
+      )
+      copyFirstExistingFile(
+        [oldRemoteReleaseDir / "frameos-remote.service", "/etc/systemd/system/frameos-remote.service"],
+        result.remoteReleaseDir / "frameos-remote.service",
+      )
+    if not fileExists(result.frameosReleaseDir / "frameos.service"):
+      writeFile(
+        result.frameosReleaseDir / "frameos.service",
+        frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
+      )
+    if not fileExists(result.remoteReleaseDir / "frameos-remote.service"):
+      writeFile(result.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
 
     discard runSetupCommand(
       privilegedCommand(

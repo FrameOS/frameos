@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 const rotationGraceWindowSeconds = 5 * 60;
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:rotate-token", {
+  const limited = await rateLimitResponse(request, "backend:rotate-token", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });

@@ -36,7 +36,7 @@ const intervalSeconds = 5;
 // usual /device screen, and approval rewrites the granted scopes while the
 // link token stays the same.
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:scopes", {
+  const limited = await rateLimitResponse(request, "backend:scopes", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });

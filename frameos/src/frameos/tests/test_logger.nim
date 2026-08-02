@@ -144,3 +144,29 @@ suite "Logger Tests":
       if itemJson.hasKey("event") and itemJson["event"].getStr() == "disabledTest":
         anyFromDisabled = true
     doAssert not anyFromDisabled, "We found a log from the disabled period, which should not happen"
+
+  test "cleanupOldRotatedLogs removes only expired date-stamped files":
+    let dir = getTempDir() / "frameos-logger-retention-test"
+    if dirExists(dir):
+      removeDir(dir)
+    createDir(dir)
+    let today = parse("2026-08-02", "yyyy-MM-dd")
+    let fresh = dir / "frameos-20260801.log.gz"
+    let expired = dir / "frameos-20260701.log.gz"
+    let expiredPlain = dir / "frameos-20260615.log"
+    let unrelated = dir / "other-20260101.log.gz"
+    let notDated = dir / "frameos-nodate.log"
+    for path in [fresh, expired, expiredPlain, unrelated, notDated]:
+      writeFile(path, "x")
+
+    cleanupOldRotatedLogs(dir / "frameos-{date}.log", today)
+
+    doAssert fileExists(fresh), "recent rotated log must be kept"
+    doAssert not fileExists(expired), "expired rotated log must be removed"
+    doAssert not fileExists(expiredPlain), "expired plain log must be removed"
+    doAssert fileExists(unrelated), "files with another prefix must be kept"
+    doAssert fileExists(notDated), "files without a date must be kept"
+    removeDir(dir)
+
+  test "cleanupOldRotatedLogs ignores paths without a date placeholder":
+    cleanupOldRotatedLogs("/tmp/frameos-static.log", now())

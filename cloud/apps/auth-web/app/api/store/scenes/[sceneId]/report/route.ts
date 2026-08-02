@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "store:report", {
+  const limited = await rateLimitResponse(request, "store:report", {
     limit: 30,
     windowMs: 15 * 60 * 1000,
   });
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("login_required", 401);
   }
 
-  const identityLimited = identityRateLimitResponse(
+  const identityLimited = await identityRateLimitResponse(
     session.accountId,
     "store:report",
     { limit: maxReportsPerDay, windowMs: 24 * 60 * 60 * 1000 },

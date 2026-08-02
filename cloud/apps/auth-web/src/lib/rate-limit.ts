@@ -1,14 +1,20 @@
+import { sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
+import { createDb, rateLimitBuckets } from "@frameos-cloud/db";
+import { hasDatabaseUrl } from "./env";
 
 type Bucket = {
   count: number;
   resetAt: number;
 };
 
+// Fixed-window limits backed by Postgres, so they hold across app replicas
+// and survive restarts. The in-memory buckets remain as the store for
+// database-less contexts (unit tests, misconfigured dev) and as the fallback
+// when the database query fails — a database outage must not turn every
+// endpoint into a 429 or disable limits entirely.
 const buckets = new Map<string, Bucket>();
 
-// In-memory buckets are per-instance only; a multi-replica deployment needs a
-// shared store (e.g. Redis) for limits to hold across instances.
 let operationsSinceSweep = 0;
 const sweepEvery = 1000;
 
@@ -20,24 +26,27 @@ function sweepExpired(now: number) {
   }
 }
 
-export function checkRateLimit(
-  key: string,
-  options: {
-    limit: number;
-    now?: number;
-    windowMs: number;
-  },
-) {
-  const now = options.now ?? Date.now();
-
-  // Evict expired buckets periodically so spoofed/rotating keys cannot grow the
-  // map without bound.
+function bumpSweepCounter(now: number) {
+  // Evict expired buckets periodically so spoofed/rotating keys cannot grow
+  // the map (or table) without bound.
   operationsSinceSweep += 1;
   if (operationsSinceSweep >= sweepEvery) {
     operationsSinceSweep = 0;
     sweepExpired(now);
+    return true;
   }
+  return false;
+}
 
+function checkRateLimitInMemory(
+  key: string,
+  options: {
+    limit: number;
+    now: number;
+    windowMs: number;
+  },
+) {
+  const now = options.now;
   const existing = buckets.get(key);
 
   if (!existing || existing.resetAt <= now) {
@@ -57,6 +66,81 @@ export function checkRateLimit(
   };
 }
 
+async function checkRateLimitInDatabase(
+  key: string,
+  options: {
+    limit: number;
+    windowMs: number;
+  },
+  sweep: boolean,
+) {
+  const db = createDb();
+  // One atomic upsert decides the outcome: expired windows restart at 1,
+  // live windows increment. Counting past the limit is harmless — only the
+  // comparison against `limit` matters, and reset_at never moves inside a
+  // window, so denied attempts cannot extend it.
+  const windowInterval = sql`make_interval(secs => ${options.windowMs / 1000})`;
+  const rows = await db
+    .insert(rateLimitBuckets)
+    .values({
+      count: 1,
+      key,
+      resetAt: sql`now() + ${windowInterval}`,
+    })
+    .onConflictDoUpdate({
+      set: {
+        count: sql`CASE WHEN ${rateLimitBuckets.resetAt} <= now() THEN 1 ELSE ${rateLimitBuckets.count} + 1 END`,
+        resetAt: sql`CASE WHEN ${rateLimitBuckets.resetAt} <= now() THEN now() + ${windowInterval} ELSE ${rateLimitBuckets.resetAt} END`,
+      },
+      target: rateLimitBuckets.key,
+    })
+    .returning({
+      count: rateLimitBuckets.count,
+      resetAt: rateLimitBuckets.resetAt,
+    });
+
+  if (sweep) {
+    await db
+      .delete(rateLimitBuckets)
+      .where(sql`${rateLimitBuckets.resetAt} <= now()`);
+  }
+
+  const row = rows[0];
+  if (!row) {
+    throw new Error("rate limit upsert returned no row");
+  }
+  const allowed = row.count <= options.limit;
+  return {
+    allowed,
+    remaining: allowed ? options.limit - row.count : 0,
+    resetAt: row.resetAt.getTime(),
+  };
+}
+
+export async function checkRateLimit(
+  key: string,
+  options: {
+    limit: number;
+    now?: number;
+    windowMs: number;
+  },
+) {
+  const now = options.now ?? Date.now();
+  const sweep = bumpSweepCounter(now);
+
+  // A caller-supplied clock only makes sense for the in-memory store; the
+  // database path uses the database's own now().
+  if (options.now === undefined && hasDatabaseUrl()) {
+    try {
+      return await checkRateLimitInDatabase(key, options, sweep);
+    } catch {
+      // Fall through to the per-instance buckets.
+    }
+  }
+
+  return checkRateLimitInMemory(key, { ...options, now });
+}
+
 function tooManyRequests(resetAt: number) {
   const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
   return NextResponse.json(
@@ -68,7 +152,7 @@ function tooManyRequests(resetAt: number) {
   );
 }
 
-export function rateLimitResponse(
+export async function rateLimitResponse(
   request: NextRequest,
   action: string,
   options: {
@@ -76,7 +160,7 @@ export function rateLimitResponse(
     windowMs: number;
   },
 ) {
-  const result = checkRateLimit(`${action}:${clientKey(request)}`, options);
+  const result = await checkRateLimit(`${action}:${clientKey(request)}`, options);
   if (result.allowed) {
     return undefined;
   }
@@ -87,7 +171,7 @@ export function rateLimitResponse(
 // Rate limit keyed on a non-spoofable identity (e.g. the authenticated account)
 // rather than the client IP. Used to cap brute-force guessing of device user
 // codes by a logged-in attacker, which the IP-based limit cannot reliably stop.
-export function identityRateLimitResponse(
+export async function identityRateLimitResponse(
   identity: string,
   action: string,
   options: {
@@ -95,7 +179,7 @@ export function identityRateLimitResponse(
     windowMs: number;
   },
 ) {
-  const result = checkRateLimit(`${action}:identity:${identity}`, options);
+  const result = await checkRateLimit(`${action}:identity:${identity}`, options);
   if (result.allowed) {
     return undefined;
   }

@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 // backend with the store scope; URLs are absolute because the backend
 // attaches the link token when requesting them from the provider host.
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "store:drive", {
+  const limited = await rateLimitResponse(request, "store:drive", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

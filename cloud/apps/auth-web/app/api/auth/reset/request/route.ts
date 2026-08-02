@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "auth:reset-request", {
+  const limited = await rateLimitResponse(request, "auth:reset-request", {
     limit: 10,
     windowMs: 60 * 60 * 1000,
   });
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const emailLimited = identityRateLimitResponse(
+  const emailLimited = await identityRateLimitResponse(
     email,
     "auth:reset-request-email",
     { limit: 5, windowMs: 60 * 60 * 1000 },

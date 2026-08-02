@@ -21,7 +21,7 @@ const expiresInSeconds = 10 * 60;
 const intervalSeconds = 5;
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "device:start", {
+  const limited = await rateLimitResponse(request, "device:start", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });

@@ -12,19 +12,19 @@ function requestWithHeaders(headers: Record<string, string>) {
 }
 
 describe("rate limit", () => {
-  it("allows requests until the bucket limit is reached", () => {
-    expect(checkRateLimit("device:start:local", { limit: 2, now: 100, windowMs: 1000 }).allowed)
+  it("allows requests until the bucket limit is reached", async () => {
+    expect((await checkRateLimit("device:start:local", { limit: 2, now: 100, windowMs: 1000 })).allowed)
       .toBe(true);
-    expect(checkRateLimit("device:start:local", { limit: 2, now: 200, windowMs: 1000 }).allowed)
+    expect((await checkRateLimit("device:start:local", { limit: 2, now: 200, windowMs: 1000 })).allowed)
       .toBe(true);
-    expect(checkRateLimit("device:start:local", { limit: 2, now: 300, windowMs: 1000 }).allowed)
+    expect((await checkRateLimit("device:start:local", { limit: 2, now: 300, windowMs: 1000 })).allowed)
       .toBe(false);
   });
 
-  it("resets a bucket after the window", () => {
-    expect(checkRateLimit("device:poll:local", { limit: 1, now: 100, windowMs: 1000 }).allowed)
+  it("resets a bucket after the window", async () => {
+    expect((await checkRateLimit("device:poll:local", { limit: 1, now: 100, windowMs: 1000 })).allowed)
       .toBe(true);
-    expect(checkRateLimit("device:poll:local", { limit: 1, now: 1200, windowMs: 1000 }).allowed)
+    expect((await checkRateLimit("device:poll:local", { limit: 1, now: 1200, windowMs: 1000 })).allowed)
       .toBe(true);
   });
 });

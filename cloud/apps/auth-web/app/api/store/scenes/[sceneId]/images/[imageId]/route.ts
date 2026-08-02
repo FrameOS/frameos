@@ -18,7 +18,7 @@ type RouteContext = { params: Promise<{ sceneId: string; imageId: string }> };
 // An owner-uploaded gallery image; same visibility rules and fixed content
 // type as the primary preview image route.
 export async function GET(request: NextRequest, context: RouteContext) {
-  const limited = rateLimitResponse(request, "store:image", {
+  const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
     windowMs: 15 * 60 * 1000,
   });

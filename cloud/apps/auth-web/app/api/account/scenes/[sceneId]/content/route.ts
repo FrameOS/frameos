@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   // Interactive editor saves have a separate, higher allowance than uploads
   // and linked-backend publishing so experimentation does not exhaust either.
-  const accountLimited = identityRateLimitResponse(
+  const accountLimited = await identityRateLimitResponse(
     session.accountId!,
     "store:scene-edit",
     { limit: maxSceneEditsPerHour, windowMs: 60 * 60 * 1000 },

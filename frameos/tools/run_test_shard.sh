@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-total_shards=5
+total_shards="${FRAMEOS_TEST_TOTAL_SHARDS:-8}"
 
 usage() {
-  cat <<'EOF'
-Usage: tools/run_test_shard.sh <1|2|3|4|5> [--print]
+  cat <<EOF
+Usage: tools/run_test_shard.sh <1..${total_shards}> [--print]
 
 Runs one deterministic FrameOS Nim test shard from the frameos/ directory.
-Any test files under `src/**/tests/` that are not explicitly listed below are
-assigned to shards in a deterministic pseudo-random order.
+Every test file under \`src/**/tests/\` is assigned to a shard in a
+deterministic pseudo-random (filename hash) order, so adding or removing test
+files rebalances automatically. Set FRAMEOS_TEST_TOTAL_SHARDS to change the
+shard count (default ${total_shards}).
 Pass --print to list the shard contents without running testament.
 EOF
 }
@@ -29,156 +31,6 @@ elif [[ $# -eq 2 ]]; then
   exit 1
 fi
 
-frameos_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$frameos_dir"
-
-discover_tests() {
-  find src -type f -name '*.nim' | awk -F/ '$(NF-1) == "tests" && $NF ~ /^test.*\.nim$/ { print }' | sort
-}
-
-select_extra_tests_for_shard() {
-  local shard_index="$1"
-
-  while IFS= read -r discovered_test; do
-    [[ -z "$discovered_test" ]] && continue
-
-    if ! printf '%s\n' "${all_listed_tests[@]}" | grep -Fqx -- "$discovered_test"; then
-      extra_tests+=("$discovered_test")
-    fi
-  done < <(discover_tests)
-
-  if (( ${#extra_tests[@]} == 0 )); then
-    return
-  fi
-
-  local idx=0
-  local hash
-  local test_file
-
-  while IFS=$'\t' read -r hash test_file; do
-    if (( idx % total_shards == shard_index - 1 )); then
-      shard_extra_tests+=("$test_file")
-    fi
-    idx=$((idx + 1))
-  done < <(
-    for test_file in "${extra_tests[@]}"; do
-      hash="$(printf '%s' "$test_file" | cksum | awk '{print $1}')"
-      printf '%s\t%s\n' "$hash" "$test_file"
-    done | sort -n -k1,1 -k2,2
-  )
-}
-
-declare -a tests=()
-declare -a extra_tests=()
-declare -a shard_extra_tests=()
-declare -a shard_1_tests=(
-  "src/frameos/tests/test_runner_loop.nim"
-  "src/apps/data/openaiImage/tests/test_app.nim"
-  "src/frameos/tests/test_tls_proxy.nim"
-  "src/frameos/server/tests/test_common.nim"
-  "src/frameos/tests/test_config.nim"
-  "src/apps/logic/breakIfRendering/tests/test_app.nim"
-  "src/frameos/tests/test_interpreter_errors.nim"
-  "src/frameos/tests/test_setup_proxy.nim"
-  "src/apps/data/weather/tests/test_app.nim"
-  "src/apps/data/rotateImage/tests/test_app.nim"
-  "src/apps/data/prettyJson/tests/test_app.nim"
-  "src/frameos/js_runtime/tests/test_scene_runtime_cleanup.nim"
-  "src/frameos/tests/test_scenes_persistence.nim"
-  "src/apps/render/svg/tests/test_app.nim"
-  "src/apps/data/icalJson/tests/test_ical.nim"
-  "src/apps/data/eventsToAgenda/tests/test_events_to_agenda.nim"
-  "src/apps/data/parseJson/tests/test_app.nim"
-  "src/frameos/server/tests/test_workers.nim"
-)
-declare -a shard_2_tests=(
-  "src/frameos/server/tests/test_api.nim"
-  "src/scenes/tests/test_scenes_registry.nim"
-  "src/apps/data/qr/tests/test_app.nim"
-  "src/frameos/server/tests/test_state.nim"
-  "src/apps/logic/setAsState/tests/test_app.nim"
-  "src/frameos/tests/test_boot_guard.nim"
-  "src/frameos/server/tests/test_admin_api_routes_behavior.nim"
-  "src/system/tests/test_scenes_registry.nim"
-  "src/apps/render/text/tests/test_app.nim"
-  "src/apps/data/downloadUrl/tests/test_app.nim"
-  "src/apps/data/xmlToJson/tests/test_app.nim"
-  "src/drivers/inkyHyperPixel2r/tests/test_helpers.nim"
-  "src/frameos/tests/test_interpreter_smoke.nim"
-  "src/frameos/utils/tests/test_image.nim"
-  "src/apps/data/haSensor/tests/test_app.nim"
-  "src/apps/render/calendar/tests/test_grouping.nim"
-  "src/apps/render/gradient/tests/test_app.nim"
-  "src/frameos/server/tests/test_admin_api_assets_routes.nim"
-)
-declare -a shard_3_tests=(
-  "src/frameos/tests/test_portal.nim"
-  "src/apps/data/rstpSnapshot/tests/test_app.nim"
-  "src/apps/data/icalJson/tests/test_app.nim"
-  "src/frameos/tests/test_metrics.nim"
-  "src/frameos/tests/test_channels.nim"
-  "src/frameos/utils/tests/test_period.nim"
-  "src/frameos/server/tests/test_routes.nim"
-  "src/apps/data/downloadImage/tests/test_app.nim"
-  "src/frameos/utils/tests/test_text.nim"
-  "src/apps/data/resizeImage/tests/test_app.nim"
-  "src/apps/render/opacity/tests/test_app.nim"
-  "src/frameos/tests/test_types_ids.nim"
-  "src/frameos/server/tests/test_frame_api_routes_behavior.nim"
-  "src/system/index/tests/test_scene.nim"
-  "src/apps/render/image/tests/test_app.nim"
-  "src/frameos/utils/tests/test_font.nim"
-  "src/apps/data/log/tests/test_app.nim"
-  "src/apps/logic/ifElse/tests/test_app.nim"
-)
-declare -a shard_4_tests=(
-  "src/frameos/tests/test_scenes_helpers.nim"
-  "src/system/wifiHotspot/tests/test_scene.nim"
-  "src/apps/data/openaiText/tests/test_app.nim"
-  "src/apps/data/newImage/tests/test_app.nim"
-  "src/apps/logic/nextSleepDuration/tests/test_app.nim"
-  "src/frameos/tests/test_runner_reload.nim"
-  "src/frameos/tests/test_frameos_startup.nim"
-  "src/apps/data/chromiumScreenshot/tests/test_app.nim"
-  "src/drivers/httpUpload/tests/test_http_upload.nim"
-  "src/drivers/inkyPython/tests/test_helpers.nim"
-  "src/drivers/waveshare/tests/test_types.nim"
-  "src/frameos/utils/tests/test_system.nim"
-  "src/frameos/server/tests/test_web_routes_behavior.nim"
-  "src/apps/data/unsplash/tests/test_app.nim"
-  "src/frameos/tests/test_logger.nim"
-  "src/frameos/js_runtime/tests/test_js_runtime_helpers.nim"
-  "src/frameos/utils/tests/test_url.nim"
-  "src/frameos/utils/tests/test_dither.nim"
-)
-declare -a shard_5_tests=(
-  "src/apps/tests/test_apps_dispatch.nim"
-  "src/system/bootGuard/tests/test_scene.nim"
-  "src/frameos/server/tests/test_auth.nim"
-  "src/frameos/tests/test_apps_helpers.nim"
-  "src/apps/data/clock/tests/test_app.nim"
-  "src/frameos/js_runtime/tests/test_js_app_runtime.nim"
-  "src/frameos/tests/test_scenes_registry_state_cleanup.nim"
-  "src/apps/data/frameOSGallery/tests/test_app.nim"
-  "src/apps/data/beRecycle/tests/test_app.nim"
-  "src/frameos/tests/test_values.nim"
-  "src/apps/render/split/tests/test_split_math.nim"
-  "src/drivers/waveshare/tests/test_preview_memory.nim"
-  "src/frameos/server/tests/test_server.nim"
-  "src/apps/data/localImage/tests/test_app.nim"
-  "src/frameos/tests/test_scheduler.nim"
-  "src/frameos/tests/test_config_helpers.nim"
-  "src/apps/render/color/tests/test_app.nim"
-  "src/frameos/utils/tests/test_time.nim"
-)
-declare -a all_listed_tests=(
-  "${shard_1_tests[@]}"
-  "${shard_2_tests[@]}"
-  "${shard_3_tests[@]}"
-  "${shard_4_tests[@]}"
-  "${shard_5_tests[@]}"
-)
-
 if ! [[ "$shard" =~ ^[0-9]+$ ]]; then
   usage >&2
   exit 1
@@ -191,20 +43,33 @@ if (( shard < 1 || shard > total_shards )); then
   exit 1
 fi
 
-shard_tests_var="shard_${shard}_tests[@]"
-tests=("${!shard_tests_var}")
+frameos_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$frameos_dir"
 
-extra_test_count=0
-select_extra_tests_for_shard "$shard"
+discover_tests() {
+  find src -type f -name '*.nim' | awk -F/ '$(NF-1) == "tests" && $NF ~ /^test.*\.nim$/ { print }' | sort
+}
 
-if [[ ${shard_extra_tests[*]+_} ]]; then
-  extra_test_count=${#shard_extra_tests[@]}
-  if (( extra_test_count > 0 )); then
-    tests+=("${shard_extra_tests[@]}")
+declare -a tests=()
+idx=0
+while IFS=$'\t' read -r _hash test_file; do
+  if (( idx % total_shards == shard - 1 )); then
+    tests+=("$test_file")
   fi
-fi
+  idx=$((idx + 1))
+done < <(
+  while IFS= read -r test_file; do
+    [[ -z "$test_file" ]] && continue
+    hash="$(printf '%s' "$test_file" | cksum | awk '{print $1}')"
+    printf '%s\t%s\n' "$hash" "$test_file"
+  done < <(discover_tests) | sort -n -k1,1 -k2,2
+)
 
-echo "FrameOS Nim test shard ${shard}: ${#tests[@]} files (${extra_test_count} auto-discovered)"
+echo "FrameOS Nim test shard ${shard}/${total_shards}: ${#tests[@]} of ${idx} test files"
+
+if (( ${#tests[@]} == 0 )); then
+  exit 0
+fi
 
 if (( print_only )); then
   printf '%s\n' "${tests[@]}"

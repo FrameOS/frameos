@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 // itself. The session-authenticated, user-facing counterpart is
 // /api/device/revoke.
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:unlink", {
+  const limited = await rateLimitResponse(request, "backend:unlink", {
     limit: 20,
     windowMs: 15 * 60 * 1000,
   });

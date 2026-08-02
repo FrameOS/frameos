@@ -8,6 +8,7 @@ const sections = [
   { href: "/account/scenes", key: "scenes", label: "My scenes" },
   { href: "/account/backups", key: "backups", label: "Backups" },
   { href: "/account/activity", key: "activity", label: "Activity" },
+  { href: "/account/security", key: "security", label: "Security" },
 ] as const;
 
 export function AccountNav({

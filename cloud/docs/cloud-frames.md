@@ -34,10 +34,8 @@ relay, and fleet view.
 
 The management UI is the existing FrameOS frontend — the same SPA that
 already serves the self-hosted backend and the on-device admin panel — built
-as a third wrapper bundle for the cloud (see "Frontend: the fourth adapter").
-To make that sharing work, the cloud has been relicensed AGPL-3.0 and merged
-into this monorepo as `cloud/` (see "Repo layout" and "Licensing" — both
-done as of 2026-07).
+as a third wrapper bundle for the cloud (see "Frontend: the fourth adapter",
+"Repo layout", and "Licensing").
 
 ## Goals
 
@@ -316,49 +314,19 @@ Per-frame capability gating reuses the existing
 compiled-only features are filtered for cloud frames exactly as they are for
 `frame.mode === "embedded"`.
 
-## Repo layout: monorepo merge
+## Repo layout
 
-**Done (2026-08): the cloud lives in the `frameos` monorepo as `cloud/`, in
-one unified pnpm workspace — `frameos-wasm` and `frameos-editor` are
-`workspace:` dependencies, with Turborepo orchestrating the cross-package
-builds.** The
-original rationale, kept for the record: the frontend
-sharing model above is relative deep imports inside one pnpm workspace —
-there is no published component library, and extracting one would fight
-kea-typegen, Tailwind content globs, Monaco asset wiring, and 88k lines of
-SPA that change in lockstep with the API. The monorepo *is* the sharing
-mechanism; it is how the on-device admin consumes the frontend today.
-`docs/agpl-cloud-boundary.md` was the reason for the split, and relicensing
-dissolves it — including the `vendor/frameos-editor.tgz` + patch + iframe
-workarounds, which become direct imports.
+The cloud lives in this monorepo as `cloud/` (sibling of `backend/`,
+`frontend/`, `frameos/`), in one unified pnpm workspace — `frameos-wasm` and
+`frameos-editor` are `workspace:` dependencies, with Turborepo orchestrating
+the cross-package builds. The frontend sharing model above is relative deep
+imports inside that workspace — there is no published component library; the
+monorepo *is* the sharing mechanism, the same way the on-device admin
+consumes the frontend today. `cloud-frontend/` will sit beside
+`frameos/frontend/` as the two thin SPA wrappers.
 
-- **Sequence: relicense first, then merge.** A proprietary app cannot
-  meaningfully sit inside an AGPL repo.
-- **History audit: done (2026-07-31), clean.** A full-history sweep (all 89
-  commits: key formats, credential assignments, connection strings, JWTs,
-  high-entropy strings, env files, emails, IPs) found no secrets — no real
-  value was ever committed, including in any version of `.env.example`.
-  The only production details were the deploy target (a `root@<ip>` default
-  and an SSH key path) in
-  `scripts/deploy.sh` and in `docs/deployment.md` — the IP is
-  DNS-discoverable from `frameos.net` anyway, but before the repo goes
-  public, drop the hardcoded default (require `FRAMEOS_CLOUD_DEPLOY_HOST`)
-  and move host specifics to the private ops notes. With that done,
-  history can be kept as-is; squash-import remains an option, not a
-  necessity.
-- **Layout**: the cloud app lands as `cloud/` at the frameos repo root
-  (sibling of `backend/`, `frontend/`, `frameos/`); its packages join the
-  existing pnpm workspace; `cloud-frontend/` sits beside
-  `frameos/frontend/` as the two thin SPA wrappers.
-- **Tooling reconciliation**: the frameos root `pnpm.overrides` pins
-  `@types/react` to 18.x workspace-wide — narrow it to scoped selectors
-  (`@frameos/frontend>@types/react`) before the React 19 Next app joins.
-  Two esbuild majors and two TS versions coexist per-package; fine.
-- **Monorepo ≠ mono-deploy.** Device releases stay `versions.json`-driven;
-  the cloud keeps `deploy:prod` shipping continuously from its
-  subdirectory; CI splits by path filters.
-- **Ops docs**: runbooks and rehearsal docs containing production details
-  move to a private ops repo (or are scrubbed) before the merge.
+**Monorepo ≠ mono-deploy.** Device releases stay `versions.json`-driven; the
+cloud ships continuously from its subdirectory; CI splits by path filters.
 
 ## Changes required outside `cloud/` (device + shared frontend)
 
@@ -392,38 +360,16 @@ documentation (see Licensing) so third-party clouds can implement it.
 
 ## Licensing
 
-**Decided: AGPL-3.0 everywhere, no MIT carve-out.** This repo is relicensed
-AGPL-3.0 (replacing the current all-rights-reserved NOTICE), matching
-the rest of the monorepo, and everything stays under that one license.
-
-Two earlier ideas are explicitly dropped:
-
-- *Proprietary cloud to protect business interest*: it forces the
-  iframe/vendored-asset boundary in `docs/agpl-cloud-boundary.md`, blocks
-  the shared-frontend model entirely, and blocks the monorepo merge. The
-  business moat is the hosted service, the store network, the archive, and
-  the trademark — not the source (see Monetization).
-- *AGPL app + MIT protocol layer*: unnecessary. A protocol **spec** does not
-  need a permissive code license to be freely implementable — copyright
-  covers the text of the document, not the interface it describes, so
-  independent implementations built from the documentation owe us nothing
-  under any license. MIT would only matter for importable code artifacts
-  (`packages/auth-client`, schema types) linked into non-AGPL software, and
-  their actual consumer is the AGPL frameos code. Maintaining a second
-  license regime inside one monorepo is exactly the boundary-policing
-  overhead the merge is meant to delete.
-
-What we keep:
-
-- **The contract itself, as public documentation** — this doc plus the
-  `cloud-link.md` successor. It costs little and it is worth having even in
-  a single repo: it keeps device and cloud loosely coupled and versionable,
-  keeps the "reimplementable by third parties" promise credible, and keeps
-  the capability boundary honest.
-- An explicit statement in the spec that **independent implementations of
-  the documented protocol require no permission or license from us**.
-- Trademark/branding ("FrameOS", "FrameOS Cloud", `frameos.net`) stays
-  reserved.
+Everything in this repo, `cloud/` included, is AGPL-3.0 — one license
+everywhere. The wire contract stays public documentation (this doc plus the
+`cloud-link.md` successor): it keeps device and cloud loosely coupled and
+versionable, keeps the "reimplementable by third parties" promise credible,
+and keeps the capability boundary honest. The spec states explicitly that
+independent implementations of the documented protocol require no permission
+or license from us. Trademark/branding ("FrameOS", "FrameOS Cloud",
+`frameos.net`) stays reserved. The business moat is the hosted service, the
+store network, the archive, and the trademark — not the source (see
+Monetization).
 
 ## Monetization
 
@@ -449,12 +395,7 @@ enforcement) is ever paywalled.
 
 ## Phasing
 
-The relicense + monorepo merge that this plan once sequenced is done
-(2026-08): AGPL switch, history audit, moved as `cloud/` into the frameos
-repo, workspaces unified into one root lockfile with Turborepo builds, the
-vendored editor tgz and wasm patch replaced by `workspace:` packages. Still
-remaining from it: the standalone-bundle production deploy
-(`docs/deployment.md`, "Monorepo cutover"). What's left, in order:
+In order:
 
 1. **Protocol + profile (foundations)** — cloud agent profile in
    the device runtime, keypair enrollment, claim tokens, WS hub + `frames` table

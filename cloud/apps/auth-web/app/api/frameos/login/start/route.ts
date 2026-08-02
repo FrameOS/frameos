@@ -18,7 +18,7 @@ import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "frameos-login:start", {
+  const limited = await rateLimitResponse(request, "frameos-login:start", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });

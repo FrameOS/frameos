@@ -1,8 +1,29 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, tables, unittest]
 
 import ../upgrade
 
 suite "FrameOS upgrade helpers":
+  test "distro release normalization maps buildroot to debian bookworm":
+    check normalizeDistroRelease({
+      "ID": "buildroot",
+      "VERSION_ID": "2025.02.13",
+    }.toTable) == (distro: "debian", release: "bookworm")
+
+    check normalizeDistroRelease({
+      "ID": "raspbian",
+      "VERSION_CODENAME": "bookworm",
+    }.toTable) == (distro: "debian", release: "bookworm")
+
+    check normalizeDistroRelease({
+      "ID": "debian",
+      "VERSION_CODENAME": "trixie",
+    }.toTable) == (distro: "debian", release: "trixie")
+
+    check normalizeDistroRelease({
+      "ID": "ubuntu",
+      "VERSION_CODENAME": "noble",
+    }.toTable) == (distro: "ubuntu", release: "24.04")
+
   test "release payload selects stable target asset":
     let release = releaseInfoFromPayload(
       %*{

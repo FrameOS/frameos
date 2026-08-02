@@ -14,7 +14,7 @@ import { readSession } from "../../../../src/lib/session";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "device:request", {
+  const limited = await rateLimitResponse(request, "device:request", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });

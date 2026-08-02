@@ -22,7 +22,7 @@ export const runtime = "nodejs";
 // `return_to` must be on the origin of one of the account's linked clients
 // (or loopback, for development) so this cannot be used as an open redirect.
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "auth:logout", {
+  const limited = await rateLimitResponse(request, "auth:logout", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
