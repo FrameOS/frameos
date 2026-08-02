@@ -7,22 +7,23 @@ import {
   QrCode,
   TerminalSquare,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Esp32CloudFlasher } from "./Esp32CloudFlasher";
 import { SdImageBuilder } from "./SdImageBuilder";
 
-// "Add frame": mints a single-use claim token and walks through the three
-// enrollment paths (SD image, link code on the device, ESP32 USB flashing).
-// The token is displayed exactly once — the server stores only a hash.
+// "Add frame": four enrollment paths (install script, SD image, link code,
+// ESP32 USB flashing). Claim codes are plumbing, not UX: a single-use code
+// is minted automatically when the panel opens and embedded where it is
+// needed (the install command, the setup-portal paste); the SD builder and
+// the ESP32 flasher mint their own. The server stores only hashes; every
+// enrolled frame appears as pending until the owner confirms it.
 export function AddFramePanel() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [claimToken, setClaimToken] = useState<string | undefined>();
-  const [expiresAt, setExpiresAt] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [installCopied, setInstallCopied] = useState(false);
+  const [portalCopied, setPortalCopied] = useState(false);
   // Multi-use token for the SD image builder: one personalized image can be
   // flashed to many cards, each boot enrolling a distinct frame. Minted once
   // per panel session, on the first build.
@@ -30,47 +31,52 @@ export function AddFramePanel() {
   const [multiUseExpiresAt, setMultiUseExpiresAt] = useState<
     string | undefined
   >();
+  const mintedRef = useRef(false);
 
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
       : "https://cloud.frameos.net";
-  const installCommand = `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${claimToken ?? "<your claim code>"} sh`;
+  const installCommand = claimToken
+    ? `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${claimToken} sh`
+    : undefined;
 
-  async function copyText(
-    text: string,
-    setFlag: (value: boolean) => void,
-  ) {
+  // Mint the panel's single-use code as soon as it opens, so every command
+  // shown below just works without the user handling codes. The ref guards
+  // React strict-mode double effects from minting twice.
+  useEffect(() => {
+    if (!open || mintedRef.current) {
+      return;
+    }
+    mintedRef.current = true;
+    void (async () => {
+      try {
+        const response = await fetch("/api/frames/claim-tokens", {
+          body: JSON.stringify({}),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          claim_token?: string;
+          error?: string;
+        };
+        if (!response.ok || !data.claim_token) {
+          setError(data.error ?? "claim_token_failed");
+          mintedRef.current = false;
+          return;
+        }
+        setClaimToken(data.claim_token);
+      } catch {
+        setError("network_error");
+        mintedRef.current = false;
+      }
+    })();
+  }, [open]);
+
+  async function copyText(text: string, setFlag: (value: boolean) => void) {
     await navigator.clipboard.writeText(text);
     setFlag(true);
     setTimeout(() => setFlag(false), 2000);
-  }
-
-  async function mintToken() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const response = await fetch("/api/frames/claim-tokens", {
-        body: JSON.stringify(name ? { name } : {}),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const data = (await response.json()) as {
-        claim_token?: string;
-        error?: string;
-        expires_at?: string;
-      };
-      if (!response.ok || !data.claim_token) {
-        setError(data.error ?? "claim_token_failed");
-        return;
-      }
-      setClaimToken(data.claim_token);
-      setExpiresAt(data.expires_at);
-    } catch {
-      setError("network_error");
-    } finally {
-      setBusy(false);
-    }
   }
 
   // Passed to SdImageBuilder; the multi_use flag is forwarded to the claim
@@ -103,15 +109,6 @@ export function AddFramePanel() {
     return data.claim_token;
   }
 
-  async function copyToken() {
-    if (!claimToken) {
-      return;
-    }
-    await navigator.clipboard.writeText(claimToken);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   if (!open) {
     return (
       <button
@@ -131,43 +128,11 @@ export function AddFramePanel() {
         <div>
           <h3>Add a frame</h3>
           <p className="copy">
-            A claim code enrolls one frame. It can be used once and expires in
-            24 hours; the frame appears here as <em>pending</em> until you
-            confirm it.
+            Pick whichever path fits your hardware. New frames appear here as{" "}
+            <em>pending</em> until you confirm them.
           </p>
         </div>
         <div className="inline-actions">
-          <button
-            className="button button--subtle button--small"
-            onClick={() => setOpen(false)}
-            type="button"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-
-      {claimToken ? (
-        <div className="card" data-testid="claim-token">
-          <p className="copy">
-            Claim code (shown once{expiresAt ? `, valid until ${new Date(expiresAt).toLocaleString()}` : ""}):
-          </p>
-          <p>
-            <code style={{ fontSize: "1.1rem", userSelect: "all" }}>
-              {claimToken}
-            </code>{" "}
-            <button
-              className="button button--subtle button--small"
-              onClick={() => void copyToken()}
-              type="button"
-            >
-              <Copy aria-hidden size={16} />
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </p>
-        </div>
-      ) : (
-        <div className="inline-actions" style={{ margin: "0.5rem 0" }}>
           <input
             className="input"
             maxLength={256}
@@ -176,16 +141,28 @@ export function AddFramePanel() {
             value={name}
           />
           <button
-            className="button button--small"
-            disabled={busy}
-            onClick={() => void mintToken()}
+            className="button button--subtle button--small"
+            onClick={() => {
+              // The session code is single-use and may have been spent by an
+              // install; reopening mints a fresh one. The SD builder's
+              // multi-use token is kept — it lives inside downloaded images.
+              setOpen(false);
+              setClaimToken(undefined);
+              setError(undefined);
+              mintedRef.current = false;
+            }}
             type="button"
           >
-            {busy ? "Creating…" : "Create claim code"}
+            Close
           </button>
-          {error ? <span className="pill pill--error">{error}</span> : null}
         </div>
-      )}
+      </div>
+      {error ? (
+        <p className="copy" style={{ color: "var(--warning)" }}>
+          Could not prepare the enrollment ({error}) — reload and try again,
+          or check whether you hit the frame limit.
+        </p>
+      ) : null}
 
       <div className="grid" style={{ gap: "0.75rem", marginTop: "0.75rem" }}>
         <div className="card">
@@ -195,24 +172,25 @@ export function AddFramePanel() {
           </h4>
           <p className="copy">
             Already running Raspberry Pi OS — or Debian/Ubuntu on any Pi or
-            other Linux box? One command installs the FrameOS binaries and
-            enrolls the frame here (asks a few questions about your display):
+            other Linux box? Run this on the device; it installs FrameOS, asks
+            a few questions about your display, and links the frame here:
           </p>
           <pre className="copy" style={{ overflowX: "auto", userSelect: "all" }}>
-            {installCommand}
+            {installCommand ?? "Preparing the command…"}
           </pre>
           <button
             className="button button--subtle button--small"
-            onClick={() => void copyText(installCommand, setInstallCopied)}
+            disabled={!installCommand}
+            onClick={() =>
+              installCommand
+                ? void copyText(installCommand, setInstallCopied)
+                : undefined
+            }
             type="button"
           >
             <Copy aria-hidden size={16} />
             {installCopied ? "Copied" : "Copy command"}
           </button>
-          <p className="copy">
-            The claim code is single-use and the script disables any backend
-            connection — a frame has exactly one control plane.
-          </p>
         </div>
         <div className="card">
           <h4>
@@ -232,8 +210,26 @@ export function AddFramePanel() {
           <p className="copy">
             On the frame&apos;s admin page (Settings → FrameOS Cloud), choose
             Connect and approve the code it shows on the{" "}
-            <a href="/device">device page</a> — no claim code needed. Or paste
-            a claim code into the frame&apos;s setup portal.
+            <a href="/device">device page</a>. Or, in the frame&apos;s
+            <code> FrameOS-Setup</code> portal, paste this one-time code:
+          </p>
+          <p>
+            <code style={{ userSelect: "all" }}>
+              {claimToken ?? "preparing…"}
+            </code>{" "}
+            <button
+              className="button button--subtle button--small"
+              disabled={!claimToken}
+              onClick={() =>
+                claimToken
+                  ? void copyText(claimToken, setPortalCopied)
+                  : undefined
+              }
+              type="button"
+            >
+              <Copy aria-hidden size={16} />
+              {portalCopied ? "Copied" : "Copy"}
+            </button>
           </p>
         </div>
         <Esp32CloudFlasher frameName={name || undefined} />
