@@ -23,10 +23,11 @@ The backend should still preserve local email/password login by default. A
 cloud-only setting must require a verified working cloud owner/admin session
 before local fallback can be disabled.
 
-The hosted Scene Store is canonical at `https://scenes.frameos.net`, account
-and device-approval pages are canonical at `https://account.frameos.net`, and
-login/auth plus backend-link endpoints remain under
-`https://cloud.frameos.net`. Store API routes continue to answer on the cloud
+The hosted Scene Store is canonical at `https://scenes.frameos.net`; account
+and device-approval pages, login/auth, and backend-link endpoints are all
+canonical at `https://cloud.frameos.net` (account pages lived at
+`https://account.frameos.net` until 2026-08; that host now redirects, with
+API routes still answering). Store API routes continue to answer on the cloud
 origin as a backwards-compatibility path for already linked backends, while
 new public repository configuration should use:
 

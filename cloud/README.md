@@ -38,8 +38,9 @@ Current scope:
   running lint, typecheck, tests, build, and the integration suite on every
   push and pull request.
 - Single-instance production deployment shared by `cloud.frameos.net`
-  (login), `account.frameos.net` (account), and `scenes.frameos.net` (store),
-  updated with `pnpm deploy:prod` (see `docs/deployment.md`).
+  (login + account) and `scenes.frameos.net` (store), updated with
+  `pnpm deploy:prod` (see `docs/deployment.md`). The legacy
+  `account.frameos.net` redirects to `cloud.frameos.net` (APIs stay).
 - Deployment, auth, FrameOS integration, operational runbook, rehearsal, and
   service-boundary documentation.
 

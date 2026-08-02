@@ -118,9 +118,11 @@ describe("frames SPA shell", () => {
     expect(lines).toContain(
       'cloud_logout_url: "https://frameos.net/api/auth/logout",',
     );
-    // On a split-host deployment "/account" shortens to "/" — the SPA cannot
-    // know that rule, so the server sends the finished URL.
-    expect(lines).toContain('cloud_account_url: "https://account.frameos.net/",');
+    // On a split-host deployment "/account" shortens to "/backends" — the
+    // SPA cannot know that rule, so the server sends the finished URL.
+    expect(lines).toContain(
+      'cloud_account_url: "https://account.frameos.net/backends",',
+    );
     // Baked into SD images and ESP32 NVS: the deployment's public URL, never
     // the browser's address bar.
     expect(lines).toContain('cloud_origin: "https://account.frameos.net",');

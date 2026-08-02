@@ -119,7 +119,7 @@ implementation entry points in parentheses.
   `apps/frame-hub` WebSocket hub, the restricted on-device cloud client
   (`frameos/src/frameos/cloud/`, interpreted-only, closed verb set,
   device-held Ed25519 identity), the shared-SPA `cloud-frontend` wrapper at
-  `account.frameos.net/frames`, log shipping with retention counted into
+  `cloud.frameos.net/frames`, log shipping with retention counted into
   storage usage, buildroot `frameos-cloud.txt` personalization, and ESP32
   browser flashing. Wire contract: `docs/cloud-frames.md`; design:
   `cloud/docs/cloud-frames.md`.
