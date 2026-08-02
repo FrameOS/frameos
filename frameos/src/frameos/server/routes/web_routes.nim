@@ -90,7 +90,13 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         elif adminPanelEnabled() and hasAdminSession(request):
           redirectTo(request, "/admin")
         elif not hasAccess(request, Read):
-          request.respond(Http401, body = "Unauthorized")
+          if adminPanelEnabled():
+            # A private frame used to answer a bare-body 401 here, which a
+            # browser renders as a blank page. Whoever typed the frame's
+            # address wants the admin login, so send them there.
+            redirectTo(request, "/login")
+          else:
+            request.respond(Http401, body = "Unauthorized")
         else:
           request.respond(Http200, body = frameWebHtml())
   )
