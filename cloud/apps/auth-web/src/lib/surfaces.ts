@@ -19,7 +19,7 @@ const authPagePrefixes = [
 // asset path below.
 const accountPagePrefixes = ["/account", "/admin", "/device", "/frames"] as const;
 const accountSectionRewrites = new Map([
-  ["/", "/account/installs"],
+  ["/backends", "/account/installs"],
   ["/scenes", "/account/scenes"],
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
@@ -87,6 +87,11 @@ export function resolveSurfaceRoute(
     return undefined;
   }
 
+  // The account surface may share the cloud origin (production since
+  // 2026-08): the cloud host then serves account pages itself instead of
+  // bouncing to a second hostname.
+  const accountIsCloud = account.origin === cloud.origin;
+
   if (host === cloud.host.toLowerCase()) {
     if (matchesAny(pathname, authPagePrefixes)) {
       return undefined;
@@ -95,10 +100,30 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, scenes, pathname);
     }
     if (pathname === "/") {
-      return redirectTo(requestUrl, cloud, "/login");
+      // With the account surface on this host, the root is the account home
+      // ("Linked backends"); the signed-out redirect to /login happens in
+      // the account layout. Otherwise the cloud host is only the login door.
+      return accountIsCloud
+        ? redirectTo(requestUrl, account, "/backends")
+        : redirectTo(requestUrl, cloud, "/login");
     }
     if (matchesAny(pathname, accountPagePrefixes)) {
-      return redirectTo(requestUrl, account, getAccountPath(pathname));
+      const cleanPath = getAccountPath(pathname);
+      if (accountIsCloud && cleanPath === pathname) {
+        // Paths that keep their full form (/account/frames, /admin, /device,
+        // the /frames SPA) are served here — redirecting would loop.
+        return undefined;
+      }
+      return redirectTo(requestUrl, account, cleanPath);
+    }
+    if (accountIsCloud) {
+      if (pathname === "/installs") {
+        return redirectTo(requestUrl, account, "/backends");
+      }
+      const internalPath = accountSectionRewrites.get(pathname);
+      if (internalPath) {
+        return rewriteTo(requestUrl, internalPath);
+      }
     }
   }
 
@@ -114,12 +139,15 @@ export function resolveSurfaceRoute(
     }
   }
 
-  if (host === account.host.toLowerCase()) {
+  if (host === account.host.toLowerCase() && !accountIsCloud) {
     if (matchesAny(pathname, authPagePrefixes)) {
       return redirectTo(requestUrl, cloud, pathname);
     }
     if (isPublicScenePath(pathname)) {
       return redirectTo(requestUrl, scenes, pathname);
+    }
+    if (pathname === "/") {
+      return redirectTo(requestUrl, account, "/backends");
     }
     if (pathMatchesPrefix(pathname, "/account")) {
       // getAccountPath keeps some paths as-is (e.g. "/account/frames", which
@@ -132,7 +160,7 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, account, cleanPath);
     }
     if (pathname === "/installs") {
-      return redirectTo(requestUrl, account, "/");
+      return redirectTo(requestUrl, account, "/backends");
     }
     const internalPath = accountSectionRewrites.get(pathname);
     if (internalPath) {

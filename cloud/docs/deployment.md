@@ -189,18 +189,22 @@ location ~ ^/api/frames/([^/]+/)?updates$ {
 Health check: `curl http://127.0.0.1:3100/healthz` on the host returns
 `{"connected_frames": N}`.
 
-All three public hostnames point at the same process. `cloud.frameos.net` is
-the login/auth domain, `account.frameos.net` owns account, device, and admin
-pages, and `scenes.frameos.net` owns the public store and scene/publisher
-pages. “My scenes” is the `/scenes` section of the account site. API routes
-remain reachable on every hostname for compatibility with linked FrameOS
-backends.
+The public hostnames point at the same process. `cloud.frameos.net` owns
+login/auth plus the account, device, admin, and frames pages (root redirects
+to `/backends`, the linked-backends home), and `scenes.frameos.net` owns the
+public store and scene/publisher pages. “My scenes” is the `/scenes` section
+of the account surface. API routes remain reachable on every hostname for
+compatibility with linked FrameOS backends — including the legacy
+`account.frameos.net`, where nginx keeps `/api/*` and the frame-hub
+WebSocket paths proxied but 308-redirects every other path to
+`cloud.frameos.net` (the account surface lived there until 2026-08).
 
 Production uses:
 
 ```text
 FRAMEOS_CLOUD_APP_URL=https://cloud.frameos.net
-FRAMEOS_ACCOUNT_APP_URL=https://account.frameos.net
+# FRAMEOS_ACCOUNT_APP_URL is unset: the account surface shares the cloud
+# origin and getAccountBaseUrl() falls back to it.
 FRAMEOS_SCENES_APP_URL=https://scenes.frameos.net
 FRAMEOS_SESSION_COOKIE_DOMAIN=frameos.net
 ```
@@ -264,12 +268,13 @@ location / {
 }
 ```
 
-After deployment, verify that `https://cloud.frameos.net/` redirects to its
-login page, `https://account.frameos.net/` opens the root account page,
-`https://account.frameos.net/scenes` opens “My scenes,” and public scenes stay
-on `scenes.frameos.net`. Signing in on cloud must make both other sites
-authenticated without another login, and the light/dark preference must carry
-between them.
+After deployment, verify that `https://cloud.frameos.net/` redirects to
+`/backends` (which lands on login when signed out), that
+`https://cloud.frameos.net/scenes` opens “My scenes,” that public scenes stay
+on `scenes.frameos.net`, and that `https://account.frameos.net/` redirects to
+`cloud.frameos.net` while `account.frameos.net/api/*` still answers. Signing
+in on cloud must make the scenes site authenticated without another login,
+and the light/dark preference must carry between them.
 
 ## Google SSO Redirect URIs
 

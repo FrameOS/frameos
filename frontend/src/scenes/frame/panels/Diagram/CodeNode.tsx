@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { NodeProps, Handle, Position, NodeResizer, useUpdateNodeInternals } from 'reactflow'
-import { useEffect, useRef } from 'react'
-import type { CodeArg as CodeArgType, CodeNodeData, FieldType } from '../../../../types'
+import { useEffect, useId, useRef, useState } from 'react'
+import type { CodeNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { TextArea } from '../../../../components/TextArea'
@@ -15,6 +15,11 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { NodeZoomLabel } from './NodeZoomLabel'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import {
+  registerCodeNodeArgs,
+  setActiveCodeNode,
+  unregisterCodeNodeArgs,
+} from '../../../../utils/codeNodeTypeDeclarations'
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
@@ -27,60 +32,12 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
-  const monacoRef = useRef<Monaco | null>(null)
-  const codeArgsLibRef = useRef<{ dispose: () => void } | null>(null)
+  // State, not a ref: the declarations effect below has to re-run once the
+  // editor hands us its monaco instance.
+  const [monaco, setMonaco] = useState<Monaco | null>(null)
   const isSelectedRef = useRef<boolean>(isSelected)
-
-  const fieldTypeToTsType: Record<FieldType, string> = {
-    string: 'string',
-    text: 'string',
-    float: 'number',
-    integer: 'number',
-    boolean: 'boolean',
-    color: 'string',
-    date: 'string',
-    json: 'Record<string, any>',
-    node: 'any',
-    scene: 'string',
-    image: 'string',
-    font: 'string',
-  }
-
-  const isValidIdentifier = (name: string): boolean => /^[A-Za-z_$][\w$]*$/.test(name)
-
-  const buildCodeNodeDeclarations = (codeArgs: CodeArgType[] = []): string => {
-    const frameosGlobals = `
-declare function now(): number;
-declare function parseTs(format: string, text: string): number;
-declare function format(ts: number, format: string): string;
-declare function getState(key: string): any;
-declare function getArg(key: string): any;
-declare function getContext(key: string): any;
-declare const state: Record<string, any>;
-declare const args: Record<string, any>;
-declare const context: {
-  loopIndex?: number;
-  loopKey?: string;
-  event?: string;
-  payload?: any;
-  hasImage?: boolean;
-};
-`
-
-    const declarations = codeArgs
-      .filter((arg) => isValidIdentifier(arg.name))
-      .map((arg) => `declare const ${arg.name}: ${fieldTypeToTsType[arg.type] ?? 'any'};`)
-
-    return `${frameosGlobals}${declarations.length ? `${declarations.join('\n')}\n` : ''}`
-  }
-
-  const updateCodeArgGlobals = (monaco: Monaco, codeArgs: CodeArgType[] = []): void => {
-    const declarations = buildCodeNodeDeclarations(codeArgs)
-    codeArgsLibRef.current?.dispose()
-    codeArgsLibRef.current = declarations
-      ? monaco.languages.typescript.typescriptDefaults.addExtraLib(declarations, `inmemory://code-node/${id}.d.ts`)
-      : null
-  }
+  // Identifies this mounted editor in the shared declaration registry.
+  const instanceKey = useId()
 
   useEffect(() => {
     isSelectedRef.current = isSelected
@@ -89,19 +46,29 @@ declare const context: {
     }
   }, [isSelected])
 
+  // The diagram publishes one shared .d.ts for all its code nodes (see
+  // utils/codeNodeTypeDeclarations): re-registering here on every codeArgs
+  // change is what makes a field's type switch reach Monaco live.
   useEffect(() => {
-    if (!monacoRef.current) {
+    if (!monaco) {
       return
     }
-    updateCodeArgGlobals(monacoRef.current, data.codeArgs ?? [])
-  }, [data.codeArgs])
+    registerCodeNodeArgs(monaco, instanceKey, id, data.codeArgs ?? [])
+  }, [monaco, instanceKey, id, data.codeArgs])
+
+  // Clicking a node is enough to want its types to win the name collisions it
+  // shares with the nodes it is wired to; focusing its editor doubly so.
+  useEffect(() => {
+    if (monaco && isSelected) {
+      setActiveCodeNode(id)
+    }
+  }, [monaco, isSelected, id])
 
   useEffect(() => {
     return () => {
-      codeArgsLibRef.current?.dispose()
-      codeArgsLibRef.current = null
+      unregisterCodeNodeArgs(instanceKey)
     }
-  }, [])
+  }, [instanceKey])
 
   function beforeMount(monaco: Monaco): void {
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -143,11 +110,14 @@ declare const context: {
 
   function handleEditorMount(editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco): void {
     editorRef.current = editor
-    monacoRef.current = monaco
     updateWheelHandling(editor)
-    editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
+    editor.onDidFocusEditorWidget(() => {
+      updateWheelHandling(editor)
+      setActiveCodeNode(id)
+    })
     editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
-    updateCodeArgGlobals(monaco, data.codeArgs ?? [])
+    registerCodeNodeArgs(monaco, instanceKey, id, data.codeArgs ?? [])
+    setMonaco(monaco)
   }
 
   const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900'

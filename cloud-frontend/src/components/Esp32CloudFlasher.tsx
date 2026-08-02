@@ -334,43 +334,79 @@ export function Esp32CloudFlasher({
 
       setPhase('flashing')
       const { ESPLoader, Transport } = await loadEsptool()
-      const transport = new Transport(port as never, false)
-      const loader = new ESPLoader({
-        baudrate: flashBaudrate,
-        romBaudrate: 115200,
-        transport,
-      } as never)
-      try {
-        await loader.main()
-        log(`Connected: ${loader.chip?.CHIP_NAME ?? 'ESP32'}`)
-        // esptool-js wants binary strings; convert in chunks.
-        let binary = ''
-        const chunkSize = 0x8000
-        for (let offset = 0; offset < firmware.length; offset += chunkSize) {
-          binary += String.fromCharCode(...firmware.subarray(offset, offset + chunkSize))
+      // esptool-js wants binary strings; convert in chunks.
+      let binary = ''
+      const chunkSize = 0x8000
+      for (let offset = 0; offset < firmware.length; offset += chunkSize) {
+        binary += String.fromCharCode(...firmware.subarray(offset, offset + chunkSize))
+      }
+
+      // Writing 3 MB over a flaky USB-serial link fails part-way often enough
+      // to matter: a bad cable, a hub, or a board whose bridge does not keep up
+      // at 460800 gives "Failed to write compressed data to flash after seq N"
+      // and the port drops. None of that means the firmware is wrong, so retry
+      // on progressively more conservative settings before giving up. Slower,
+      // uncompressed writes are the ones that survive marginal links.
+      const attempts = [
+        { baudrate: flashBaudrate, compress: true, label: 'fast' },
+        { baudrate: 115200, compress: true, label: 'slower' },
+        { baudrate: 115200, compress: false, label: 'slowest, uncompressed' },
+      ]
+      let flashed = false
+      let lastError: unknown
+      for (const [index, attempt] of attempts.entries()) {
+        if (index > 0) {
+          log(`Retrying at ${attempt.baudrate} baud (${attempt.label})…`)
+          setProgress(0)
         }
-        await loader.writeFlash({
-          compress: true,
-          eraseAll: false,
-          fileArray: [{ address: 0x0, data: binary }],
-          flashFreq: 'keep',
-          flashMode: 'keep',
-          flashSize: 'keep',
-          reportProgress: (_index: number, written: number, total: number) => {
-            setProgress(Math.round((written / total) * 100))
-          },
+        const transport = new Transport(port as never, false)
+        const loader = new ESPLoader({
+          baudrate: attempt.baudrate,
+          romBaudrate: 115200,
+          transport,
         } as never)
-        log('Firmware written. Resetting…')
-        await loader.after()
-      } finally {
-        // Always give the port back, including on a mid-flash throw: esptool-js
-        // holds the WebSerial reader/writer, and provisioning (or a retry)
-        // needs to reopen the same port.
         try {
-          await transport.disconnect()
-        } catch {
-          // Never mask the flash error with a teardown error.
+          await loader.main()
+          log(`Connected: ${loader.chip?.CHIP_NAME ?? 'ESP32'}`)
+          await loader.writeFlash({
+            compress: attempt.compress,
+            eraseAll: false,
+            fileArray: [{ address: 0x0, data: binary }],
+            flashFreq: 'keep',
+            flashMode: 'keep',
+            flashSize: 'keep',
+            reportProgress: (_index: number, written: number, total: number) => {
+              setProgress(Math.round((written / total) * 100))
+            },
+          } as never)
+          log('Firmware written. Resetting…')
+          await loader.after()
+          flashed = true
+        } catch (error) {
+          lastError = error
+          log(`Flash attempt failed: ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+          // Always give the port back, including on a mid-flash throw:
+          // esptool-js holds the WebSerial reader/writer, and the next attempt
+          // (or provisioning) needs to reopen the same port.
+          try {
+            await transport.disconnect()
+          } catch {
+            // Never mask the flash error with a teardown error.
+          }
         }
+        if (flashed) {
+          break
+        }
+      }
+      if (!flashed) {
+        const detail = lastError instanceof Error ? lastError.message : String(lastError)
+        throw new Error(
+          `${detail}. The firmware itself is fine — this is the USB link giving out part-way. ` +
+            'Try a different USB cable (charge-only cables are a common culprit), plug the board ' +
+            'straight into the computer rather than through a hub, and if it still stops, hold BOOT ' +
+            'while connecting.',
+        )
       }
 
       setPhase('provisioning')

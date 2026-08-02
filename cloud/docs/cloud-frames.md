@@ -41,7 +41,7 @@ as a third wrapper bundle for the cloud (see "Frontend: the fourth adapter",
 
 - One-click onboarding: download image / enter code / flash from browser,
   frame appears in the account.
-- Manage frames from `account.frameos.net` with no self-hosted backend.
+- Manage frames from `cloud.frameos.net` with no self-hosted backend.
 - Assign store scenes and private scenes to frames; edit them in the hosted
   editor; changes go live without a deploy.
 - Fleet basics: online/offline, health, logs and metrics (opt-in scopes),
@@ -234,7 +234,7 @@ One button, three tiles, one shared enrollment endpoint.
 The RFC 8628 device flow already implemented for backends, initiated from
 the frame: the setup portal or the local admin page — or, best, **the e-ink
 panel itself** — shows a short code and QR pointing at
-`account.frameos.net/device`. Displaying the code on the physical panel
+`cloud.frameos.net/device`. Displaying the code on the physical panel
 doubles as proof of possession. This reuses `client_kind = "frame"`,
 which the device-flow tables already support.
 
@@ -285,7 +285,7 @@ bundle** of that SPA:
 - A `cloud-frontend/` wrapper package, modeled on `frameos/frontend/`, sets
   `FRAMEOS_APP_CONFIG = { cloudMode: true }`, imports the workspace shell
   and the scenes it needs, and esbuilds a static bundle.
-- Next.js serves that bundle at `account.frameos.net/frames/**` as a
+- Next.js serves that bundle at `cloud.frameos.net/frames/**` as a
   first-class route (HTML shell + static assets) — **not an iframe**.
   Since the 2026-08 React 19 unification the whole workspace shares one
   React major, so the wrapper bundle is a packaging choice (esbuild SPA vs
@@ -296,7 +296,7 @@ bundle** of that SPA:
   scoping in `src/utils/projectApi.ts`); the cloud adapter is one more
   rewrite rule. Auth is the existing session cookie — the SPA already sends
   `credentials: "include"`, and the shared cookie domain covers
-  `account.frameos.net`.
+  `cloud.frameos.net`.
 - WebSocket: the frame hub emits the same event names `socketLogic` already
   dispatches (`update_frame`, `new_log`, `new_metrics`, `frame_rendered`,
   …), so the live UI works unchanged.

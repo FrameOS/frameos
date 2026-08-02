@@ -53,8 +53,8 @@ describe("surface routing", () => {
     configureSplitOrigins();
 
     for (const [legacy, canonical] of [
-      ["/account", "/"],
-      ["/account/installs", "/"],
+      ["/account", "/backends"],
+      ["/account/installs", "/backends"],
       ["/account/scenes?q=clock", "/scenes?q=clock"],
       ["/account/backups", "/backups"],
       ["/account/activity", "/activity"],
@@ -86,7 +86,7 @@ describe("surface routing", () => {
     configureSplitOrigins();
 
     for (const [external, internal] of [
-      ["/", "/account/installs"],
+      ["/backends", "/account/installs"],
       ["/scenes?q=mine", "/account/scenes?q=mine"],
       ["/backups", "/account/backups"],
       ["/activity", "/account/activity"],
@@ -97,6 +97,67 @@ describe("surface routing", () => {
         url: `https://account.frameos.net${internal}`,
       });
     }
+    expectRoute("https://account.frameos.net/", {
+      kind: "redirect",
+      url: "https://account.frameos.net/backends",
+    });
+    expectRoute("https://account.frameos.net/installs", {
+      kind: "redirect",
+      url: "https://account.frameos.net/backends",
+    });
+  });
+
+  it("serves the account surface on the cloud host when the origins merge", () => {
+    configureMergedOrigins();
+
+    // Root is the account home; the account layout handles signed-out.
+    expectRoute("https://cloud.frameos.net/", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/backends",
+    });
+    // Legacy /account/* URLs shorten in place on the same host.
+    expectRoute("https://cloud.frameos.net/account/scenes?q=clock", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/scenes?q=clock",
+    });
+    expectRoute("https://cloud.frameos.net/account/installs", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/backends",
+    });
+    // Clean paths rewrite to the app routes.
+    expectRoute("https://cloud.frameos.net/backends", {
+      kind: "rewrite",
+      url: "https://cloud.frameos.net/account/installs",
+    });
+    expectRoute("https://cloud.frameos.net/security", {
+      kind: "rewrite",
+      url: "https://cloud.frameos.net/account/security",
+    });
+    // Full-form paths serve directly instead of redirect-looping.
+    for (const path of [
+      "/frames",
+      "/frames/frames/5",
+      "/account/frames",
+      "/admin/scenes",
+      "/device",
+    ]) {
+      expect(
+        resolveSurfaceRoute(new URL(`https://cloud.frameos.net${path}`)),
+      ).toBeUndefined();
+    }
+    // Auth stays served, public scenes still move to the scenes host.
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/login")),
+    ).toBeUndefined();
+    expectRoute("https://cloud.frameos.net/s/sunrise", {
+      kind: "redirect",
+      url: "https://scenes.frameos.net/s/sunrise",
+    });
+    // The scenes host sends account pages to the merged cloud host.
+    expectRoute("https://scenes.frameos.net/account/scenes", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/scenes",
+    });
   });
 
   it("keeps the frames SPA on the account domain", () => {
@@ -211,6 +272,14 @@ function expectRoute(
 
 function configureSplitOrigins() {
   process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
+  process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+  process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+}
+
+// Production since 2026-08: the account surface shares the cloud origin and
+// only the public store keeps its own hostname.
+function configureMergedOrigins() {
+  delete process.env.FRAMEOS_ACCOUNT_APP_URL;
   process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
   process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
 }

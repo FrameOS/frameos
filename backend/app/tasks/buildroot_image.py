@@ -287,16 +287,19 @@ def _frameos_version() -> str:
     return current_frameos_version() or ""
 
 
-async def _buildroot_base_manifest() -> dict[str, Any]:
-    manifest_file = Path(BUILDROOT_BASE_MANIFEST_FILE)
-    if manifest_file.is_file() and not BUILDROOT_BASE_USE_REMOTE:
-        return json.loads(manifest_file.read_text(encoding="utf-8"))
-
+async def _remote_buildroot_base_manifest() -> dict[str, Any]:
     manifest_url = urljoin(_normalize_url_base(BUILDROOT_ARCHIVE_BASE_URL), BUILDROOT_BASE_MANIFEST_PATH)
     async with httpx.AsyncClient(timeout=BUILDROOT_BASE_TIMEOUT) as client:
         response = await client.get(manifest_url)
         response.raise_for_status()
         return response.json()
+
+
+async def _buildroot_base_manifest() -> dict[str, Any]:
+    manifest_file = Path(BUILDROOT_BASE_MANIFEST_FILE)
+    if manifest_file.is_file() and not BUILDROOT_BASE_USE_REMOTE:
+        return json.loads(manifest_file.read_text(encoding="utf-8"))
+    return await _remote_buildroot_base_manifest()
 
 
 def _normalize_url_base(url: str) -> str:
@@ -385,8 +388,20 @@ async def resolve_buildroot_base_entry(platform: str, frameos_version: str | Non
     wanted_version = frameos_version if frameos_version is not None else _frameos_version()
     manifest = await _buildroot_base_manifest()
     entries = [entry for entry in manifest.get("entries", []) if entry.get("platform") == normalized_platform]
+    if not entries and not BUILDROOT_BASE_USE_REMOTE:
+        # The checked-in manifest goes stale the moment a base for a new
+        # platform is published — an install that has not pulled since then
+        # would dead-end here, so ask the archive before giving up.
+        try:
+            manifest = await _remote_buildroot_base_manifest()
+        except (httpx.HTTPError, ValueError):
+            manifest = {}
+        entries = [entry for entry in manifest.get("entries", []) if entry.get("platform") == normalized_platform]
     if not entries:
-        raise RuntimeError(f"No cached Buildroot base image found for {normalized_platform}")
+        raise RuntimeError(
+            f"No Buildroot base image is available for {normalized_platform} "
+            "(checked the local manifest and the archive)"
+        )
 
     if wanted_version:
         for entry in entries:

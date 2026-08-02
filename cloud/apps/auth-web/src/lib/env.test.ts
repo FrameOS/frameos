@@ -70,11 +70,23 @@ describe("env", () => {
     expect(getAccountUrl("/account")).toBe("http://localhost:3000/account");
 
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
-    expect(getAccountPath("/account/installs")).toBe("/");
+    expect(getAccountPath("/account/installs")).toBe("/backends");
     expect(getAccountPath("/account/scenes")).toBe("/scenes");
     expect(getAccountUrl("/account/scenes")).toBe(
       "https://account.frameos.net/scenes",
     );
+
+    // Account merged into cloud with a split scenes host (production shape)
+    // still uses clean paths — only a fully single-origin dev setup keeps
+    // the raw /account/* routes.
+    delete process.env.FRAMEOS_ACCOUNT_APP_URL;
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+    expect(getAccountPath("/account/installs")).toBe("/backends");
+    expect(getAccountUrl("/account/scenes")).toBe(
+      "https://cloud.frameos.net/scenes",
+    );
+    process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
 
     // "My frames" keeps its full path: /frames on the account host is the
     // fleet SPA, so shortening it would send the nav tab (and the /account

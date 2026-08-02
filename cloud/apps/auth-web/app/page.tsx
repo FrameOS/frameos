@@ -1,52 +1,65 @@
-import { and, desc, eq, gt, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import Link from "next/link";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { PublicShell } from "../src/components/PublicShell";
 import { SceneCard, type SceneCardScene } from "../src/components/SceneCard";
+import { StoreSceneFeed } from "../src/components/StoreSceneFeed";
+import { StoreVersionSelect } from "../src/components/StoreVersionSelect";
 import { getStoreCategory, storeCategories } from "../src/lib/categories";
 import { getAccountUrl, hasDatabaseUrl } from "../src/lib/env";
 import { readSession } from "../src/lib/session";
+import {
+  countStoreScenes,
+  listStoreScenes,
+  serializeStoreScene,
+  type StoreBrowseRow,
+} from "../src/lib/store-browse";
+import {
+  parseStoreBrowseFilters,
+  parseStorePage,
+  storeBrowseHref,
+  storeHasFilters,
+  storePageSize,
+  type StoreBrowseParams,
+} from "../src/lib/store-filters";
+import {
+  frameosVersionSatisfies,
+  normalizeRequestedFrameosVersion,
+  sortFrameosVersionsDesc,
+} from "../src/lib/store-versions";
 import { accountIsSuperadmin } from "../src/lib/superadmin";
 
 export const metadata = { title: "FrameOS Scenes" };
 
 export const dynamic = "force-dynamic";
 
-const pageSize = 48;
-
 // The store front: every public scene in the registry, featured shelf first,
 // then one curated shelf per store category (categories.ts), with simple
-// search (name / description / publisher), category/tag filters, and
-// pagination.
+// search (name / description / publisher), category/tag/FrameOS-version
+// filters, and a lazily loaded list (the first page is server-rendered, the
+// rest streams in from /api/store/browse as you scroll).
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    category?: string;
-    page?: string;
-    q?: string;
-    tag?: string;
-  }>;
+  searchParams: Promise<StoreBrowseParams>;
 }) {
   const session = await readSession();
   const isSuperadmin = await accountIsSuperadmin(session?.accountId);
   const params = await searchParams;
-  const query = params.q?.trim().slice(0, 100) ?? "";
-  const tag = params.tag?.trim().toLowerCase().slice(0, 24) ?? "";
-  // Only taxonomy slugs are meaningful filters; anything else is ignored.
-  const categoryFilter = getStoreCategory(
-    params.category?.trim().toLowerCase(),
-  );
-  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const filters = parseStoreBrowseFilters(params);
+  const { query, tag, version } = filters;
+  const categoryFilter = getStoreCategory(filters.category);
+  const page = parseStorePage(params.page);
 
-  let scenes: (SceneCardScene & {
-    category: string | null;
-    featuredAt: Date | null;
-  })[] = [];
+  let scenes: StoreBrowseRow[] = [];
   let privateScenes: SceneCardScene[] = [];
   let total = 0;
   let allTags: { count: number; name: string }[] = [];
   const categoryCounts = new Map<string, number>();
+  // Every FrameOS version declared by a public scene, newest first, with the
+  // number of scenes that run on it (a scene runs on every version at or
+  // above its own minimum, so these counts are cumulative).
+  let versionOptions: { count: number; version: string }[] = [];
 
   if (hasDatabaseUrl()) {
     const db = createDb();
@@ -78,68 +91,17 @@ export default async function HomePage({
         .orderBy(desc(storeScenes.updatedAt));
     }
 
-    const conditions: SQL[] = [
-      eq(storeScenes.visibility, "public"),
-      eq(storeScenes.status, "active"),
-      gt(storeScenes.latestVersion, 0),
-    ];
-    if (query) {
-      const pattern = `%${query.replace(/[%_\\]/g, "\\$&")}%`;
-      const match = or(
-        ilike(storeScenes.name, pattern),
-        ilike(storeScenes.description, pattern),
-        ilike(accounts.displayName, pattern),
-        sql`array_to_string(${storeScenes.tags}, ' ') ilike ${pattern}`,
-      );
-      if (match) {
-        conditions.push(match);
-      }
-    }
-    if (tag) {
-      conditions.push(sql`${storeScenes.tags} @> array[${tag}]::text[]`);
-    }
-    if (categoryFilter) {
-      conditions.push(eq(storeScenes.category, categoryFilter.slug));
-    }
+    total = await countStoreScenes(db, filters);
+    scenes = await listStoreScenes(db, filters, page);
 
-    const [counted] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(storeScenes)
-      .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
-      .where(and(...conditions));
-    total = counted?.count ?? 0;
-
-    scenes = await db
+    // Every category, tag and declared FrameOS version in use across public
+    // scenes — the filter rows above the shelves (tags most-used first).
+    const facetRows = await db
       .select({
         category: storeScenes.category,
-        description: storeScenes.description,
-        downloadCount: storeScenes.downloadCount,
         frameosVersion: storeScenes.frameosVersion,
-        featuredAt: storeScenes.featuredAt,
-        hasPreview: sql<boolean>`${storeScenes.previewImage} is not null`,
-        id: storeScenes.id,
-        name: storeScenes.name,
-        publisher: accounts.displayName,
-        riskFlags: storeScenes.riskFlags,
-        slug: storeScenes.slug,
         tags: storeScenes.tags,
-        updatedAt: storeScenes.updatedAt,
       })
-      .from(storeScenes)
-      .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
-      .where(and(...conditions))
-      .orderBy(
-        sql`${storeScenes.featuredAt} desc nulls last`,
-        desc(storeScenes.downloadCount),
-        desc(storeScenes.updatedAt),
-      )
-      .limit(pageSize)
-      .offset((page - 1) * pageSize);
-
-    // Every category and tag in use across public scenes — the filter rows
-    // above the shelves (tags most-used first).
-    const tagRows = await db
-      .select({ category: storeScenes.category, tags: storeScenes.tags })
       .from(storeScenes)
       .where(
         and(
@@ -149,13 +111,15 @@ export default async function HomePage({
         ),
       );
     const tagCounts = new Map<string, number>();
-    for (const row of tagRows) {
+    const declaredVersions: (string | null)[] = [];
+    for (const row of facetRows) {
       if (row.category) {
         categoryCounts.set(
           row.category,
           (categoryCounts.get(row.category) ?? 0) + 1,
         );
       }
+      declaredVersions.push(row.frameosVersion);
       for (const sceneTag of row.tags ?? []) {
         tagCounts.set(sceneTag, (tagCounts.get(sceneTag) ?? 0) + 1);
       }
@@ -163,11 +127,25 @@ export default async function HomePage({
     allTags = [...tagCounts.entries()]
       .sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b))
       .map(([name, count]) => ({ count, name }));
+    versionOptions = sortFrameosVersionsDesc(
+      declaredVersions
+        // Only plain dotted versions make usable filters (and usable
+        // repository URLs); "nightly" or "2026.9.0-rc1" are not offered.
+        .map((value) => normalizeRequestedFrameosVersion(value))
+        .filter((value): value is string => Boolean(value)),
+    )
+      .map((value) => ({
+        count: declaredVersions.filter((declared) =>
+          frameosVersionSatisfies(declared, value),
+        ).length,
+        version: value,
+      }));
   }
 
   // The category shelves only make sense on the unfiltered first page;
-  // searches, category/tag filters, and later pages show one flat grid.
-  const splitSections = !query && !tag && !categoryFilter && page === 1;
+  // searches, category/tag/version filters, and later pages show one flat
+  // grid.
+  const splitSections = !storeHasFilters(filters) && page === 1;
   const featured = splitSections
     ? scenes.filter((scene) => scene.featuredAt !== null)
     : [];
@@ -206,25 +184,7 @@ export default async function HomePage({
         },
       ].filter((section) => section.scenes.length > 0)
     : [];
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  const pageHref = (target: number) => {
-    const search = new URLSearchParams();
-    if (query) {
-      search.set("q", query);
-    }
-    if (tag) {
-      search.set("tag", tag);
-    }
-    if (categoryFilter) {
-      search.set("category", categoryFilter.slug);
-    }
-    if (target > 1) {
-      search.set("page", String(target));
-    }
-    const suffix = search.toString();
-    return suffix ? `/?${suffix}` : "/";
-  };
+  const totalPages = Math.max(1, Math.ceil(total / storePageSize));
 
   return (
     <PublicShell
@@ -281,6 +241,16 @@ export default async function HomePage({
           placeholder="Search scenes, descriptions, publishers…"
           type="search"
         />
+        {/* Keep the other filters when the search form navigates. */}
+        {filters.category ? (
+          <input name="category" type="hidden" value={filters.category} />
+        ) : null}
+        {tag ? <input name="tag" type="hidden" value={tag} /> : null}
+        {versionOptions.length > 0 ? (
+          <StoreVersionSelect filters={filters} options={versionOptions} />
+        ) : version ? (
+          <input name="version" type="hidden" value={version} />
+        ) : null}
         <button className="button" type="submit">
           Search
         </button>
@@ -300,11 +270,11 @@ export default async function HomePage({
                     ? "tag-pill tag-pill--active"
                     : "tag-pill"
                 }
-                href={
-                  category.slug === categoryFilter?.slug
-                    ? "/"
-                    : `/?category=${encodeURIComponent(category.slug)}`
-                }
+                href={storeBrowseHref({
+                  ...filters,
+                  category:
+                    category.slug === categoryFilter?.slug ? "" : category.slug,
+                })}
                 key={category.slug}
               >
                 {category.title}{" "}
@@ -343,8 +313,10 @@ export default async function HomePage({
                 ? categoryFilter.title
                 : tag
                   ? `Scenes tagged “${tag}”`
-                  : "All scenes"}
-            {tag || categoryFilter ? (
+                  : version
+                    ? `Scenes for FrameOS ${version}`
+                    : "All scenes"}
+            {tag || categoryFilter || version ? (
               <>
                 {" "}
                 <Link className="tag-pill" href="/">
@@ -359,11 +331,13 @@ export default async function HomePage({
             </p>
           ) : null}
           {rest.length > 0 ? (
-            <div className="grid scene-grid">
-              {rest.map((scene) => (
-                <SceneCard key={scene.id} scene={scene} />
-              ))}
-            </div>
+            // Server-rendered first page; the feed appends the next ones.
+            <StoreSceneFeed
+              filters={filters}
+              initialScenes={rest.map(serializeStoreScene)}
+              loadedPage={page}
+              totalPages={totalPages}
+            />
           ) : (
             <section className="card">
               <p>
@@ -371,7 +345,9 @@ export default async function HomePage({
                   ? "No scenes match that search."
                   : categoryFilter
                     ? "No scenes in this category yet."
-                    : "No scenes carry that tag."}
+                    : version
+                      ? `No scenes run on FrameOS ${version} yet.`
+                      : "No scenes carry that tag."}
               </p>
             </section>
           )}
@@ -387,16 +363,16 @@ export default async function HomePage({
         </section>
       ) : null}
 
-      {totalPages > 1 ? (
-        <nav aria-label="Pagination" className="store-pager">
-          {page > 1 ? <Link href={pageHref(page - 1)}>← Previous</Link> : null}
-          <span>
-            Page {page} of {totalPages}
-          </span>
-          {page < totalPages ? (
-            <Link href={pageHref(page + 1)}>Next →</Link>
-          ) : null}
-        </nav>
+      {splitSections ? (
+        // The shelves above are built from the first page; everything past it
+        // loads as you scroll.
+        <StoreSceneFeed
+          filters={filters}
+          heading="More from the store"
+          initialScenes={[]}
+          loadedPage={1}
+          totalPages={totalPages}
+        />
       ) : null}
 
       {/* The full tag cloud lives at the very bottom: with auto-tagging
@@ -412,7 +388,10 @@ export default async function HomePage({
                 className={
                   name === tag ? "tag-pill tag-pill--active" : "tag-pill"
                 }
-                href={name === tag ? "/" : `/?tag=${encodeURIComponent(name)}`}
+                href={storeBrowseHref({
+                  ...filters,
+                  tag: name === tag ? "" : name,
+                })}
                 key={name}
               >
                 {name} <span className="tag-pill__count">{count}</span>

@@ -57,14 +57,16 @@ function pathMatchesAccountFrames(path: string) {
 }
 
 export function getAccountPath(path: string) {
-  if (
-    new URL(getAccountBaseUrl()).origin === new URL(getCloudBaseUrl()).origin
-  ) {
+  // Only local development runs every surface on one origin; there the
+  // /account/* app routes are the real URLs and nothing shortens. In
+  // production the account surface shares the cloud origin (with scenes on
+  // its own host), and clean paths still apply.
+  if (getAppOrigins().size === 1) {
     return path;
   }
 
   if (path === "/account" || path === "/account/installs") {
-    return "/";
+    return "/backends";
   }
   // "/frames" on the account host is the fleet SPA (app/frames/[[...path]]),
   // so the "My frames" account page cannot shorten into it — it would serve
