@@ -60,17 +60,30 @@ export async function GET(request: NextRequest) {
       ? "http://localhost:3100"
       : undefined);
   if (hubOrigin) {
-    if (!html.includes(wsOriginAnchor)) {
+    // Match the anchor as a whole LINE, not as a substring. The shell also
+    // documents the anchor in a comment above the config object, and a plain
+    // .replace() rewrites that first occurrence instead — leaving the real
+    // line untouched, the socket pointed at this server, and the explanation
+    // above it mangled into nonsense. Only the line that is nothing but the
+    // anchor is the injection point.
+    const lines = html.split("\n");
+    const anchorIndex = lines.findIndex(
+      (line) => line.trim() === wsOriginAnchor,
+    );
+    if (anchorIndex === -1) {
       return new NextResponse(
-        `FRAME_HUB_PUBLIC_URL is set but the frames app shell has no ${wsOriginAnchor} anchor, ` +
+        `The frames app shell has no line consisting solely of ${wsOriginAnchor}, ` +
           "so the fleet websocket origin cannot be injected. Rebuild cloud-frontend.",
         { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
       );
     }
-    html = html.replace(
-      wsOriginAnchor,
-      `cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,
+    const indent = lines[anchorIndex]!.slice(
+      0,
+      lines[anchorIndex]!.indexOf(wsOriginAnchor),
     );
+    lines[anchorIndex] =
+      `${indent}cloud_ws_origin: ${JSON.stringify(hubOrigin)},`;
+    html = lines.join("\n");
   }
 
   return new NextResponse(html, {

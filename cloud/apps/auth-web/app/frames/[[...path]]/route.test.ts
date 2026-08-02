@@ -4,8 +4,13 @@ import { NextRequest } from "next/server";
 // The fleet SPA learns where its WebSocket lives from cloud_ws_origin in the
 // shell. Get it wrong and the SPA dials the Next server itself, which has no
 // WebSocket handler: a 1006 reconnect loop with no useful error.
+// The real shell documents the anchor in a comment ABOVE the config object,
+// so the token appears twice. A substring replace rewrites the comment and
+// leaves the actual line alone — which is precisely how this shipped broken:
+// the socket kept pointing at the Next server and looped on 1006.
 const shell = [
   "<html><head><script>",
+  "// NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ line below is a named anchor.",
   "window.FRAMEOS_APP_CONFIG = {",
   "  cloudMode: true,",
   "  //__FRAMEOS_CLOUD_WS_ORIGIN__",
@@ -32,7 +37,27 @@ describe("frames SPA shell", () => {
   it("points a localhost request at the dev hub's own port", async () => {
     const body = await (await get("http://localhost:3000/frames")).text();
     expect(body).toContain('cloud_ws_origin: "http://localhost:3100"');
-    expect(body).not.toContain("__FRAMEOS_CLOUD_WS_ORIGIN__");
+  });
+
+  it("injects into the config line, not the comment that names the anchor", async () => {
+    const body = await (await get("http://localhost:3000/frames")).text();
+    const lines = body.split("\n");
+
+    // The config object got the origin...
+    expect(
+      lines.some(
+        (line) => line.trim() === 'cloud_ws_origin: "http://localhost:3100",',
+      ),
+    ).toBe(true);
+    // ...and the comment above it is still a comment, not a mangled sentence
+    // with a config line spliced into the middle of it.
+    expect(body).toContain(
+      "// NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ line below is a named anchor.",
+    );
+    // Exactly one injection: no leftover anchor line pretending to be config.
+    expect(
+      lines.filter((line) => line.trim() === "//__FRAMEOS_CLOUD_WS_ORIGIN__"),
+    ).toHaveLength(0);
   });
 
   it("leaves a real hostname same-origin, where nginx proxies the socket", async () => {

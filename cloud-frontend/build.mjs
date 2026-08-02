@@ -37,10 +37,16 @@ await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir
 // websocket routing with no error anywhere, so fail the build loudly instead.
 const configInjectionAnchor = '//__FRAMEOS_CLOUD_WS_ORIGIN__'
 const shellHtml = await fs.readFile(path.join(outputDir, 'index.html'), 'utf8')
-if (!shellHtml.includes(configInjectionAnchor)) {
+// A whole line, not just "appears somewhere": the comment above the config
+// object names the anchor too, so an `includes` check stays happy even if the
+// real line is gone — and the route would then serve a shell whose websocket
+// points at itself.
+const anchorLines = shellHtml.split('\n').filter((line) => line.trim() === configInjectionAnchor)
+if (anchorLines.length !== 1) {
   throw new Error(
-    `cloud-frontend/src/index.html must contain the literal ${JSON.stringify(configInjectionAnchor)}: ` +
-      'cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces it to inject cloud_ws_origin in dev.'
+    `cloud-frontend/src/index.html must contain exactly one line that is only ${JSON.stringify(configInjectionAnchor)} ` +
+      `(found ${anchorLines.length}): cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces that line ` +
+      'to inject cloud_ws_origin in dev.'
   )
 }
 await fs.cp(publicDir, outputDir, {

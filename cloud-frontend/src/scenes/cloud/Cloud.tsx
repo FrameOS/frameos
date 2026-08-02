@@ -30,9 +30,13 @@ function CloudGate({ children }: { children: ReactNode }) {
   useMountedLogic(entityImagesModel)
   useMountedLogic(templatesModel)
 
-  const { framesLoaded } = useValues(framesModel)
+  // framesEverLoaded, not framesLoaded: the latter means "has at least one
+  // frame", so an account that has not added one yet — every new account —
+  // would wait here forever instead of seeing the empty fleet and the Add
+  // frame button.
+  const { framesEverLoaded } = useValues(framesModel)
 
-  if (!framesLoaded) {
+  if (!framesEverLoaded) {
     return <div>Loading...</div>
   }
 

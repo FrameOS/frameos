@@ -530,6 +530,18 @@ export const framesModel = kea<framesModelType>([
     ],
   })),
   reducers(() => ({
+    // Whether the frame list has come back at least once — NOT whether it
+    // contains anything. `framesLoaded` below means "has at least one frame",
+    // which reads the same at a glance and is what gates the cloud workspace:
+    // an account with no frames yet sat on "Loading..." forever, which is
+    // exactly what a brand-new account sees. The loader swallows its own
+    // errors, so success is the only outcome to listen for.
+    framesEverLoaded: [
+      false,
+      {
+        loadFramesSuccess: () => true,
+      },
+    ],
     frames: [
       {} as Record<FrameId, FrameType>,
       {
