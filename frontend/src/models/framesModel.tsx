@@ -5,6 +5,7 @@ import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
+import { compareFrames } from '../utils/frameSort'
 import { apiFetch } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
 import { sendCloudFrameCommand, pushCloudFrameSettings } from '../utils/cloudFrameApi'
@@ -63,9 +64,10 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
 }
 
 function sortFrames(frames: FrameType[]): FrameType[] {
-  return frames.sort(
-    (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
-  )
+  // compareFrames is null-safe: cloud frames have no frame_host, and a
+  // freshly enrolled one can lack a name too — sorting one used to throw
+  // inside the fleet selectors and white-screen the workspace.
+  return frames.sort(compareFrames)
 }
 
 function activeSceneIdFromLogLine(line: string): string | null {

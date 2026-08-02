@@ -9,10 +9,13 @@ export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): bo
 }
 
 export function frameHost(frame: FrameType): string {
+  // Cloud frames have no host at all — never hand back undefined, or every
+  // `frame.name || frameHost(frame)` fallback turns into a crash downstream.
+  const host = frame.frame_host ?? ''
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
-    return frame.frame_host
+    return host
   }
-  return `${frame.ssh_user}@${frame.frame_host}`
+  return `${frame.ssh_user}@${host}`
 }
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
