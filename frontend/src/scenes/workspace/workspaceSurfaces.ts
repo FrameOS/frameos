@@ -189,6 +189,29 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   ],
 }
 
+/**
+ * What "Add frame" opens.
+ *
+ *   backendForm  the self-hosted creation form (POST /api/frames/new): SSH
+ *                credentials, install method, build host — all backend-only.
+ *   cloudPanel   the cloud enrollment panel (claim codes, SD images, ESP32
+ *                flashing), supplied by the cloud bundle through
+ *                addFramePanelRegistry.
+ *
+ * The cloud has no /api/frames/new — a frame gets there by enrolling itself
+ * with a claim code — so showing the backend form there produced a 405 on
+ * submit. The on-device panel manages the one frame it runs on and never
+ * creates another, but it reaches FramesHome through the same component, so
+ * it keeps the backend form rather than silently having no button at all.
+ */
+export type AddFrameFlow = 'backendForm' | 'cloudPanel'
+
+export const addFrameFlows: Record<WorkspaceMode, AddFrameFlow> = {
+  backend: 'backendForm',
+  frameAdmin: 'backendForm',
+  cloud: 'cloudPanel',
+}
+
 function allows<T extends string>(list: Record<WorkspaceMode, readonly T[]>, mode: WorkspaceMode, value: T): boolean {
   return list[mode].includes(value)
 }

@@ -37,6 +37,8 @@ import { FrameScene, FrameType, FrameId } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
+import { registeredAddFramePanel } from './addFramePanelRegistry'
+import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
@@ -1055,11 +1057,27 @@ function SceneControlChangeNotice({
   )
 }
 
+// The "Add frame" drawer for this control plane: the self-hosted creation
+// form, or — in the cloud bundle — the enrollment panel it registered at
+// startup (claim codes, SD images, ESP32 flashing). See workspaceSurfaces'
+// addFrameFlows and addFramePanelRegistry.
 function AddFramePanel(): JSX.Element | null {
   const { formVisible } = useValues(newFrameForm)
   const { hideForm } = useActions(newFrameForm)
+  const RegisteredPanel = addFrameFlows[workspaceMode()] === 'cloudPanel' ? registeredAddFramePanel() : null
 
   if (!formVisible) {
+    return null
+  }
+
+  if (RegisteredPanel) {
+    return <RegisteredPanel />
+  }
+
+  // A cloud bundle that somehow registered nothing shows no drawer at all:
+  // the backend form below posts to /api/frames/new, which the cloud does not
+  // implement (405 on submit).
+  if (addFrameFlows[workspaceMode()] !== 'backendForm') {
     return null
   }
 
@@ -1097,6 +1115,9 @@ export function FramesHome(): JSX.Element {
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
+  // The self-hosted form is a narrow 390px drawer; the cloud enrollment panel
+  // is a full-width one, like the template and scene control drawers.
+  const addFramePanelIsCompact = formVisible && addFrameFlows[workspaceMode()] === 'backendForm'
 
   return (
     <FrameosShell
@@ -1119,7 +1140,7 @@ export function FramesHome(): JSX.Element {
           <SceneControlPanel />
         ) : null
       }
-      rightPanelSize={formVisible ? 'compact' : 'normal'}
+      rightPanelSize={addFramePanelIsCompact ? 'compact' : 'normal'}
     >
       <div className="space-y-12 pb-12">
         {hasFrameSections ? (

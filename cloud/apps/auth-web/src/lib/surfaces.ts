@@ -23,6 +23,7 @@ const accountSectionRewrites = new Map([
   ["/scenes", "/account/scenes"],
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
+  ["/security", "/account/security"],
 ]);
 
 function pathMatchesPrefix(pathname: string, prefix: string) {
@@ -121,7 +122,14 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, scenes, pathname);
     }
     if (pathMatchesPrefix(pathname, "/account")) {
-      return redirectTo(requestUrl, account, getAccountPath(pathname));
+      // getAccountPath keeps some paths as-is (e.g. "/account/frames", which
+      // cannot shorten into the /frames SPA) — serve those directly instead
+      // of redirecting a URL to itself.
+      const cleanPath = getAccountPath(pathname);
+      if (cleanPath === pathname) {
+        return undefined;
+      }
+      return redirectTo(requestUrl, account, cleanPath);
     }
     if (pathname === "/installs") {
       return redirectTo(requestUrl, account, "/");

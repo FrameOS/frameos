@@ -1,8 +1,72 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  getAccountBaseUrl,
+  getAccountUrl,
+  getCloudBaseUrl,
+  getScenesBaseUrl,
+} from "../../../src/lib/env";
+import { claimTokenTtlMs } from "../../../src/lib/frames";
 
 export const runtime = "nodejs";
+
+// Config the SPA cannot work out for itself, injected into the shell before
+// it is served (cloud-frontend/src/cloudConfig.ts consumes it):
+//
+//   * the account/scenes/auth surfaces may sit on three different origins, and
+//     getAccountPath() shortens /account/* on a split-host deployment;
+//   * the enrollment origin is written into SD images, ESP32 NVS and install
+//     commands, so it must be the deployment's public URL rather than whatever
+//     host the admin is browsing through (a tunnel, a LAN IP, 127.0.0.1);
+//   * the claim-code TTL is FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS, so a
+//     hardcoded "24 hours" in the panel would lie on a tuned install.
+function appConfigLines(): string[] {
+  const accountOrigin = new URL(getAccountBaseUrl()).origin;
+  return [
+    `cloud_account_url: ${JSON.stringify(getAccountUrl())},`,
+    // The fleet SPA is served from the account origin (this route).
+    `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
+    `cloud_logout_url: ${JSON.stringify(new URL("/api/auth/logout", getCloudBaseUrl()).toString())},`,
+    `cloud_scenes_url: ${JSON.stringify(new URL("/", getScenesBaseUrl()).toString())},`,
+    `cloud_origin: ${JSON.stringify(accountOrigin)},`,
+    `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
+  ];
+}
+
+// Replace the line that is nothing but `anchor` with `lines`, keeping its
+// indentation. Whole line, never a substring: the shell documents both anchors
+// in a comment above the config object, and a plain .replace() rewrites that
+// comment instead — leaving the real line untouched and the explanation above
+// it mangled into nonsense. That is exactly how the websocket origin shipped
+// broken once (see route.test.ts).
+function injectAtAnchor(
+  html: string,
+  anchor: string,
+  lines: string[],
+): string | undefined {
+  const htmlLines = html.split("\n");
+  const anchorIndex = htmlLines.findIndex((line) => line.trim() === anchor);
+  if (anchorIndex === -1) {
+    return undefined;
+  }
+  const anchorLine = htmlLines[anchorIndex]!;
+  const indent = anchorLine.slice(0, anchorLine.indexOf(anchor));
+  htmlLines.splice(
+    anchorIndex,
+    1,
+    ...lines.map((line) => `${indent}${line}`),
+  );
+  return htmlLines.join("\n");
+}
+
+function anchorMissing(anchor: string, purpose: string) {
+  return new NextResponse(
+    `The frames app shell has no line consisting solely of ${anchor}, ` +
+      `so ${purpose} cannot be injected. Rebuild cloud-frontend.`,
+    { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
+  );
+}
 
 // SPA fallback for the cloud frames UI: every /frames/** path serves the
 // @frameos/cloud-frontend shell (copied into public/frames-app by
@@ -34,6 +98,7 @@ export async function GET(request: NextRequest) {
   // shell can't silently turn this into a no-op — and if it goes missing
   // entirely we say so instead of serving a SPA whose websocket points nowhere.
   const wsOriginAnchor = "//__FRAMEOS_CLOUD_WS_ORIGIN__";
+  const appConfigAnchor = "//__FRAMEOS_CLOUD_APP_CONFIG__";
   // In development the hub is a second process on its own port, so without an
   // origin the SPA dials ws://localhost:3000/api/frames/updates — this Next
   // server, which has no WebSocket handler — and loops on 1006 forever.
@@ -60,31 +125,26 @@ export async function GET(request: NextRequest) {
       ? "http://localhost:3100"
       : undefined);
   if (hubOrigin) {
-    // Match the anchor as a whole LINE, not as a substring. The shell also
-    // documents the anchor in a comment above the config object, and a plain
-    // .replace() rewrites that first occurrence instead — leaving the real
-    // line untouched, the socket pointed at this server, and the explanation
-    // above it mangled into nonsense. Only the line that is nothing but the
-    // anchor is the injection point.
-    const lines = html.split("\n");
-    const anchorIndex = lines.findIndex(
-      (line) => line.trim() === wsOriginAnchor,
-    );
-    if (anchorIndex === -1) {
-      return new NextResponse(
-        `The frames app shell has no line consisting solely of ${wsOriginAnchor}, ` +
-          "so the fleet websocket origin cannot be injected. Rebuild cloud-frontend.",
-        { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
-      );
+    const injected = injectAtAnchor(html, wsOriginAnchor, [
+      `cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,
+    ]);
+    if (injected === undefined) {
+      return anchorMissing(wsOriginAnchor, "the fleet websocket origin");
     }
-    const indent = lines[anchorIndex]!.slice(
-      0,
-      lines[anchorIndex]!.indexOf(wsOriginAnchor),
-    );
-    lines[anchorIndex] =
-      `${indent}cloud_ws_origin: ${JSON.stringify(hubOrigin)},`;
-    html = lines.join("\n");
+    html = injected;
   }
+
+  // Unconditional, unlike the websocket origin: the account header's links and
+  // the enrollment origin are wrong on every deployment without them, not just
+  // in dev.
+  const withAppConfig = injectAtAnchor(html, appConfigAnchor, appConfigLines());
+  if (withAppConfig === undefined) {
+    return anchorMissing(
+      appConfigAnchor,
+      "the account header URLs, enrollment origin and claim-code TTL",
+    );
+  }
+  html = withAppConfig;
 
   return new NextResponse(html, {
     headers: {

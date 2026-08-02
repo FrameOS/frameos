@@ -28,20 +28,13 @@ if [ ! -r "$TTY" ] || [ ! -w "$TTY" ] || ! ( : <"$TTY" ) 2>/dev/null; then
   TTY=""
 fi
 
-# A cloud install is a one-shot command pasted from the "Add frame" panel: the
-# frame is named and managed from the account, so stopping to ask about the
-# display, timezone, admin login and so on has nothing to answer it. Take every
-# default and run straight through. With TTY empty, ask()/ask_int()/ask_yes_no()
-# return their defaults without reading, and the questions still print (to
-# stderr) so the log shows what was chosen.
-# Set FRAMEOS_INTERACTIVE=1 to get the questions back, and any FRAMEOS_* value
-# passed on the command line still overrides the default it would have used.
-if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
-  case "$(printf '%s' "${FRAMEOS_INTERACTIVE:-}" | tr '[:upper:]' '[:lower:]')" in
-    1|y|yes|true|on) ;;
-    *) TTY="" ;;
-  esac
-fi
+# Unattended installs answer nothing: every question takes its default. This is
+# opt-in, NOT implied by a claim token — a cloud install is still a person at a
+# terminal who wants to pick the display and set an admin password, and reading
+# from /dev/tty works fine there even though stdin is the curl pipe.
+case "$(printf '%s' "${FRAMEOS_UNATTENDED:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|y|yes|true|on) TTY="" ;;
+esac
 
 say() {
   printf '%s\n' "$*"
@@ -1234,12 +1227,39 @@ if [ "$setup_status" -eq 2 ]; then
   say "FrameOS is installed, but hardware setup requested a reboot before the service starts."
   say "Reboot this device, then open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
 else
+  # --no-block, then poll: frameos.service is Type=notify with
+  # TimeoutStartSec=300, so a plain `systemctl restart` blocks until the new
+  # instance signals readiness — up to five minutes with no output, which reads
+  # as a hung installer. It is worst on a box that already runs FrameOS, where
+  # the outgoing instance may still hold the admin port while the new one waits
+  # for it. Kick the job off, watch briefly, and always hand the terminal back.
   if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-    systemctl restart frameos-remote.service
+    systemctl restart --no-block frameos-remote.service
   fi
-  systemctl restart frameos.service
+  systemctl restart --no-block frameos.service
+  frameos_started=""
+  waited=0
+  while [ "$waited" -lt 20 ]; do
+    if [ "$(systemctl is-active frameos.service 2>/dev/null || true)" = "active" ]; then
+      frameos_started="yes"
+      break
+    fi
+    if [ "$(systemctl is-failed frameos.service 2>/dev/null || true)" = "failed" ]; then
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
   say ""
-  say "FrameOS is installed and started."
+  if [ -n "$frameos_started" ]; then
+    say "FrameOS is installed and started."
+  else
+    # Not an error: a first render can take a while. Say what is true and how
+    # to look, instead of waiting in silence or claiming success.
+    say "FrameOS is installed. The service is still starting — check it with:"
+    say "  systemctl status frameos"
+    say "  journalctl -u frameos -f"
+  fi
   say "Open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
 fi
 
@@ -1256,8 +1276,14 @@ fi
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   say "  Backend: $FRAMEOS_SERVER_HOST:$FRAMEOS_SERVER_PORT"
 elif [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
-  say "  Cloud: enrolling with $FRAMEOS_CLOUD_URL"
-  say "         The frame appears as PENDING in your account — confirm it there."
+  # %/ strips a trailing slash: the URL is user-supplied and "https://x/" would
+  # otherwise print "https://x//frames". The pending-enrollment file normalizes
+  # the same way.
+  say "  Cloud: enrolling with ${FRAMEOS_CLOUD_URL%/}"
+  say "         The frame appears as PENDING in your account once it enrolls,"
+  say "         which happens when the service starts. Confirm it there to"
+  say "         finish — nothing is pushed to the frame until you do:"
+  say "         ${FRAMEOS_CLOUD_URL%/}/frames"
 else
   say "  Backend: not configured; FrameOS will run standalone."
 fi

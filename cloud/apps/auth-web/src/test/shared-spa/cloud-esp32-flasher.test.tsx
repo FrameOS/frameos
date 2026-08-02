@@ -1,35 +1,53 @@
 // @vitest-environment jsdom
+//
+// The ESP32 browser flasher inside the workspace's "Add frame" panel. It lives
+// in cloud-frontend/, which has no test runner, so it is tested from auth-web's
+// vitest across the package boundary (see the other shared-spa tests).
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Esp32CloudFlasher, wifiInputError } from "./Esp32CloudFlasher";
+import {
+  Esp32CloudFlasher,
+  wifiInputError,
+} from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
 
 // esptool-js drives real USB hardware; the tests only care that the flasher
 // calls it, hands the port back, and provisions afterwards.
-const esptool = vi.hoisted(() => ({
-  disconnects: 0,
-  main: vi.fn(() => Promise.resolve()),
-  writeFlash: vi.fn(() => Promise.resolve()),
-}));
+const esptool = vi.hoisted(() => {
+  const calls = {
+    disconnects: 0,
+    main: vi.fn(() => Promise.resolve()),
+    writeFlash: vi.fn(() => Promise.resolve()),
+  };
+  return {
+    calls,
+    module: {
+      ESPLoader: class {
+        chip = { CHIP_NAME: "ESP32-S3" };
+        after() {
+          return Promise.resolve();
+        }
+        main() {
+          return calls.main();
+        }
+        writeFlash() {
+          return calls.writeFlash();
+        }
+      },
+      Transport: class {
+        disconnect() {
+          calls.disconnects += 1;
+          return Promise.resolve();
+        }
+      },
+    },
+  };
+});
 
-vi.mock("esptool-js", () => ({
-  ESPLoader: class {
-    chip = { CHIP_NAME: "ESP32-S3" };
-    after() {
-      return Promise.resolve();
-    }
-    main() {
-      return esptool.main();
-    }
-    writeFlash() {
-      return esptool.writeFlash();
-    }
-  },
-  Transport: class {
-    disconnect() {
-      esptool.disconnects += 1;
-      return Promise.resolve();
-    }
-  },
+// Mocked through the flasher's own loader module, not the bare "esptool-js"
+// specifier: this package does not depend on esptool-js, so the specifier
+// would resolve somewhere else (or nowhere) and the real driver would load.
+vi.mock("../../../../../../cloud-frontend/src/lib/esptool", () => ({
+  loadEsptool: () => Promise.resolve(esptool.module),
 }));
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -168,11 +186,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   fetchMock.mockReset();
-  esptool.main.mockReset();
-  esptool.main.mockImplementation(() => Promise.resolve());
-  esptool.writeFlash.mockReset();
-  esptool.writeFlash.mockImplementation(() => Promise.resolve());
-  esptool.disconnects = 0;
+  esptool.calls.main.mockReset();
+  esptool.calls.main.mockImplementation(() => Promise.resolve());
+  esptool.calls.writeFlash.mockReset();
+  esptool.calls.writeFlash.mockImplementation(() => Promise.resolve());
+  esptool.calls.disconnects = 0;
   vi.unstubAllGlobals();
   delete (navigator as { serial?: unknown }).serial;
 });
@@ -248,8 +266,8 @@ describe("Esp32CloudFlasher", () => {
     expect(fetchedUrls()).toContain(
       "/api/frames/firmware?platform=esp32-s3-epd7in5v2",
     );
-    expect(esptool.writeFlash).toHaveBeenCalledOnce();
-    expect(esptool.disconnects).toBe(1);
+    expect(esptool.calls.writeFlash).toHaveBeenCalledOnce();
+    expect(esptool.calls.disconnects).toBe(1);
 
     // Spaces survive because the value is quoted; the embedded quote is escaped.
     expect(port.writes).toEqual([
@@ -322,7 +340,7 @@ describe("Esp32CloudFlasher", () => {
 
   it("releases the serial port when the flash itself throws", async () => {
     mockCloudApi();
-    esptool.writeFlash.mockRejectedValueOnce(new Error("flash write failed"));
+    esptool.calls.writeFlash.mockRejectedValueOnce(new Error("flash write failed"));
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
@@ -334,7 +352,7 @@ describe("Esp32CloudFlasher", () => {
       expect.stringMatching(/flash write failed/),
     );
     // The port went back to the browser, so the offered retry can reopen it.
-    expect(esptool.disconnects).toBe(1);
+    expect(esptool.calls.disconnects).toBe(1);
     expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
   });
 });

@@ -22,7 +22,6 @@
     "@frameos-cloud/auth-client": "workspace:*",
     "@frameos-cloud/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "esptool-js": "^0.6.0",
     "fflate": "^0.8.3",
     "frameos-wasm": "workspace:*",
     "jose": "^6.2.3",
