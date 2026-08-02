@@ -238,6 +238,68 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertTrue(checks["frameos_service_installed"])
         self.assertTrue(checks["agent_service_installed"])
 
+    def test_cloud_claim_token_writes_pending_enrollment_and_disables_backend(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Cloud Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_ADMIN_AUTH_ENABLED": "true",
+                "FRAMEOS_ADMIN_USER": "admin",
+                "FRAMEOS_ADMIN_PASSWORD": "admin-secret",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                # Deliberately NOT setting FRAMEOS_BACKEND_ENABLED: the claim
+                # token must force it off without prompting.
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "https://cloud.example/",
+            }
+        )
+
+        self.assertIn("Cloud: enrolling with https://cloud.example", result.stdout)
+        self.assertIn("appears as PENDING in your account", result.stdout)
+
+        frame_json = self._installed_frame_json()
+        self.assertEqual(frame_json["agent"]["agentEnabled"], False)
+        self.assertEqual(frame_json["serverHost"], "")
+        self.assertEqual(frame_json["serverSendLogs"], False)
+
+        releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
+        self.assertEqual(len(releases), 1)
+        state_dir = releases[0] / "state"
+        pending_path = state_dir / "cloud_enroll_pending.json"
+        self.assertTrue(pending_path.is_file())
+        pending = json.loads(pending_path.read_text(encoding="utf-8"))
+        self.assertEqual(pending, {
+            "claim_token": "FRCT_test-claim-token",
+            # Trailing slash is stripped so the runtime's URL joining is safe.
+            "provider_url": "https://cloud.example",
+            "name": "Cloud Frame",
+        })
+        self.assertEqual(os.stat(state_dir).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(pending_path).st_mode & 0o777, 0o600)
+
+        systemctl_calls = self._stub_log("systemctl.log")
+        self.assertIn("restart frameos.service", systemctl_calls)
+        self.assertNotIn("restart frameos-remote.service", systemctl_calls)
+
+    def test_cloud_claim_token_refuses_explicit_backend(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Conflicted Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_BACKEND_ENABLED": "true",
+            },
+            expect_failure=True,
+        )
+        self.assertIn("exactly one control plane", result.stdout + result.stderr)
+        # Nothing was installed.
+        self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
     def test_device_menu_prints_real_newlines(self) -> None:
         menu = subprocess.run(
             [
@@ -361,7 +423,9 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             """,
         )
 
-    def _run_setup(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def _run_setup(
+        self, env: dict[str, str], expect_failure: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         merged_env = {
             "FRAMEOS_RELEASE_VERSION": VERSION,
             "FRAMEOS_RELEASE_BASE_URL": "file:///tmp/releases",
@@ -417,6 +481,14 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             text=True,
             timeout=90,
         )
+        if expect_failure:
+            if result.returncode == 0:
+                self.fail(
+                    "setup container unexpectedly succeeded\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}\n"
+                )
+            return result
         if result.returncode != 0:
             self.fail(
                 "setup container failed\n"

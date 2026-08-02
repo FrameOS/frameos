@@ -110,6 +110,22 @@ describe("surface routing", () => {
     ).toBeUndefined();
   });
 
+  it("serves the frame installer script on every host", () => {
+    configureSplitOrigins();
+
+    // curl doesn't follow our host conventions — /install.sh must resolve
+    // as-is wherever the user pasted it from.
+    expect(
+      resolveSurfaceRoute(new URL("https://account.frameos.net/install.sh")),
+    ).toBeUndefined();
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/install.sh")),
+    ).toBeUndefined();
+    expect(
+      resolveSurfaceRoute(new URL("https://scenes.frameos.net/install.sh")),
+    ).toBeUndefined();
+  });
+
   it("keeps public scenes on the scenes domain", () => {
     configureSplitOrigins();
 

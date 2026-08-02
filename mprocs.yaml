@@ -9,6 +9,8 @@ procs:
     shell: pnpm --dir frontend run dev:kea
   redis:
     shell: pnpm run dev:redis
+  postgres:
+    shell: pnpm run dev:postgres
   wasm:
     shell: bash frameos/tools/build_wasm.sh
     autostart: true

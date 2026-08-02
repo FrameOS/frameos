@@ -19,6 +19,8 @@ fi
 
 if pg_ctl -D "$pgdata" status >/dev/null 2>&1; then
   echo "Postgres is already running"
+elif pg_isready -q -h 127.0.0.1 -p "$pgport"; then
+  echo "Postgres is already listening on 127.0.0.1:$pgport (e.g. the mprocs postgres proc or a sibling checkout)"
 else
   echo "Starting Postgres on 127.0.0.1:$pgport"
   pg_ctl -D "$pgdata" -l "$pgroot/postgres.log" -o "-p $pgport" start >/dev/null

@@ -207,6 +207,28 @@ until its expiry, then the portal shows a "get a new code" hint. Downloads
 with embedded WiFi credentials must be short-lived links and labeled as
 containing secrets.
 
+### Install script (existing OS)
+
+For a device that already runs a supported Linux (Raspberry Pi OS on any Pi,
+Debian, Ubuntu — the standalone installer's target matrix), the provider
+serves the standalone setup script at `{provider}/install.sh` (the same
+`scripts/frameos-setup.sh` published as `frameos.net/setup.sh`) and the "Add
+frame" panel shows a one-liner:
+
+```sh
+curl -fsSL {provider}/install.sh | \
+  sudo FRAMEOS_CLOUD_URL={provider} FRAMEOS_CLAIM_TOKEN=FRCT_… sh
+```
+
+The script installs the prebuilt release binaries and services as usual,
+then writes the same `state/cloud_enroll_pending.json` handoff (mode `0600`,
+dir `0700`) the SD-image flow uses, so the frame enrolls via flow A on first
+start and appears as pending. Setting a claim token forces the backend
+connection off and refuses an explicit `FRAMEOS_BACKEND_ENABLED=true` — one
+control plane at a time. Display questions stay interactive (the script
+keeps its prompts); every prompt can be pre-answered with the script's
+`FRAMEOS_*` environment variables for unattended installs.
+
 ### ESP32 browser flashing
 
 The provider's flasher page uses WebSerial + esptool-js to write the prebuilt

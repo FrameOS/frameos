@@ -40,6 +40,9 @@ function isApiOrAsset(pathname: string) {
     pathMatchesPrefix(pathname, "/frameos-editor") ||
     pathMatchesPrefix(pathname, "/frameos-wasm") ||
     pathMatchesPrefix(pathname, "/frames-app") ||
+    // The standalone frame installer (curl -fsSL {origin}/install.sh | sh),
+    // copied from scripts/frameos-setup.sh by copy-install-script.mjs.
+    pathname === "/install.sh" ||
     pathname === "/favicon.ico" ||
     pathname === "/logo-dark.svg" ||
     pathname === "/logo-light.svg" ||

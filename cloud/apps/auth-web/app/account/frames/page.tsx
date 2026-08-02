@@ -40,7 +40,10 @@ export default async function AccountFramesPage() {
             hardware: frames.hardware,
             id: frames.id,
             lastSeenAt: frames.lastSeenAt,
-            logBytes: sql<number>`coalesce((select sum(${frameLogs.sizeBytes}) from ${frameLogs} where ${frameLogs.frameId} = ${frames.id}), 0)::float8`,
+            // ${frames.id} would render unqualified here (drizzle strips table
+            // names in single-table projections) and resolve to frame_logs.id;
+            // ${frames}.id keeps the correlation qualified.
+            logBytes: sql<number>`coalesce((select sum(${frameLogs.sizeBytes}) from ${frameLogs} where ${frameLogs.frameId} = ${frames}.id), 0)::float8`,
             name: frames.name,
             scenesChecksum: frames.scenesChecksum,
             status: frames.status,
@@ -120,9 +123,10 @@ export default async function AccountFramesPage() {
         </table>
       ) : (
         <p className="copy">
-          No frames yet. Click “Add frame” to enroll your first one — all you
-          need is a Raspberry Pi Zero 2 W (or W) and an SD card, or an ESP32
-          board.
+          No frames yet. Click “Add frame” to enroll your first one — a
+          one-line install script for any Raspberry Pi (or most Linux boxes),
+          an SD card image for the Pi Zero 2 W / W, or an ESP32 flashed from
+          this browser.
         </p>
       )}
     </section>

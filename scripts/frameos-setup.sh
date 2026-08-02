@@ -6,6 +6,12 @@ FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
 FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
 FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"
+# Cloud-managed enrollment (docs/cloud-frames.md, flow "install script"):
+# a single-use claim token from the account's "Add frame" panel. When set,
+# the frame enrolls with the cloud on first start and the self-hosted
+# backend connection is disabled — a frame has exactly one control plane.
+FRAMEOS_CLAIM_TOKEN="${FRAMEOS_CLAIM_TOKEN:-}"
+FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-https://cloud.frameos.net}"
 SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
 SUPPORTED_ARCHES="arm64 armhf amd64"
 TTY="/dev/tty"
@@ -784,6 +790,36 @@ Path(env("FRAMEOS_CONFIG_DESTINATION")).write_text(json.dumps(data, indent=2, so
 PY
 }
 
+# Hand the claim token to the runtime: frameos reads
+# ./state/cloud_enroll_pending.json on start and exchanges it for a cloud
+# link (see frameos/src/frameos/cloud/enrollment.nim). 0600 in a 0700 dir —
+# the token is a secret until redeemed.
+write_cloud_enrollment() {
+  release_dir="$1"
+  install -d -m 0700 "$release_dir/state"
+  FRAMEOS_CLAIM_TOKEN="$FRAMEOS_CLAIM_TOKEN" \
+  FRAMEOS_CLOUD_URL="$FRAMEOS_CLOUD_URL" \
+  FRAMEOS_NAME="$FRAMEOS_NAME" \
+  python3 - "$release_dir/state/cloud_enroll_pending.json" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+data = {
+    "claim_token": os.environ["FRAMEOS_CLAIM_TOKEN"],
+    "provider_url": os.environ["FRAMEOS_CLOUD_URL"].rstrip("/"),
+}
+name = os.environ.get("FRAMEOS_NAME", "")
+if name:
+    data["name"] = name
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as fh:
+    json.dump(data, fh)
+    fh.write("\n")
+PY
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   die "Run this setup script as root, for example: curl -fsSL https://frameos.net/setup.sh | sudo sh"
 fi
@@ -914,6 +950,28 @@ case "$FRAMEOS_DEVICE" in
     ;;
 esac
 
+if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  # One control plane at a time: a cloud-managed frame never also connects
+  # to a self-hosted backend. Refuse loudly instead of silently ignoring one.
+  case "${FRAMEOS_BACKEND_ENABLED:-}" in
+    y|Y|yes|YES|true|TRUE|1)
+      die "FRAMEOS_CLAIM_TOKEN and FRAMEOS_BACKEND_ENABLED=true are mutually exclusive: a frame has exactly one control plane. Drop one of them."
+      ;;
+  esac
+  FRAMEOS_BACKEND_ENABLED="false"
+  case "$FRAMEOS_CLOUD_URL" in
+    https://*) ;;
+    http://*)
+      warn "FRAMEOS_CLOUD_URL uses plain http; only do this for local development providers."
+      ;;
+    *) die "FRAMEOS_CLOUD_URL must be an http(s) origin, got: $FRAMEOS_CLOUD_URL" ;;
+  esac
+  case "$FRAMEOS_CLAIM_TOKEN" in
+    FRCT_*) ;;
+    *) warn "Claim token does not start with FRCT_ — continuing, but double-check it was copied correctly." ;;
+  esac
+fi
+
 backend_default="n"
 if [ "$default_remote_enabled" = "true" ] || { [ -n "$default_server_host" ] && [ "$default_server_host" != "localhost" ]; }; then
   backend_default="y"
@@ -1021,6 +1079,9 @@ fi
 write_frame_config "$existing_config" "$frameos_release_dir/frame.json"
 cp "$frameos_release_dir/frame.json" "$remote_release_dir/frame.json"
 copy_scene_payloads "$frameos_release_dir" "$existing_release_dir"
+if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  write_cloud_enrollment "$frameos_release_dir"
+fi
 
 remote_user="${SUDO_USER:-}"
 if [ -z "$remote_user" ] || [ "$remote_user" = "root" ]; then
@@ -1170,6 +1231,9 @@ if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
 fi
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   say "  Backend: $FRAMEOS_SERVER_HOST:$FRAMEOS_SERVER_PORT"
+elif [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  say "  Cloud: enrolling with $FRAMEOS_CLOUD_URL"
+  say "         The frame appears as PENDING in your account — confirm it there."
 else
   say "  Backend: not configured; FrameOS will run standalone."
 fi

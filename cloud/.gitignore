@@ -19,3 +19,4 @@ apps/auth-web/public/frameos-wasm/
 apps/auth-web/public/frameos-editor/
 apps/auth-web/public/frames-app/
 .env.local
+apps/auth-web/public/install.sh

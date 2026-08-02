@@ -1,6 +1,12 @@
 "use client";
 
-import { Copy, MonitorSmartphone, Plus, QrCode } from "lucide-react";
+import {
+  Copy,
+  MonitorSmartphone,
+  Plus,
+  QrCode,
+  TerminalSquare,
+} from "lucide-react";
 import { useState } from "react";
 import { Esp32CloudFlasher } from "./Esp32CloudFlasher";
 
@@ -15,6 +21,22 @@ export function AddFramePanel() {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [installCopied, setInstallCopied] = useState(false);
+
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://cloud.frameos.net";
+  const installCommand = `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${claimToken ?? "<your claim code>"} sh`;
+
+  async function copyText(
+    text: string,
+    setFlag: (value: boolean) => void,
+  ) {
+    await navigator.clipboard.writeText(text);
+    setFlag(true);
+    setTimeout(() => setFlag(false), 2000);
+  }
 
   async function mintToken() {
     setBusy(true);
@@ -128,6 +150,32 @@ export function AddFramePanel() {
       )}
 
       <div className="grid" style={{ gap: "0.75rem", marginTop: "0.75rem" }}>
+        <div className="card">
+          <h4>
+            <TerminalSquare aria-hidden size={18} /> Install script (any Pi /
+            most Linux)
+          </h4>
+          <p className="copy">
+            Already running Raspberry Pi OS — or Debian/Ubuntu on any Pi or
+            other Linux box? One command installs the FrameOS binaries and
+            enrolls the frame here (asks a few questions about your display):
+          </p>
+          <pre className="copy" style={{ overflowX: "auto", userSelect: "all" }}>
+            {installCommand}
+          </pre>
+          <button
+            className="button button--subtle button--small"
+            onClick={() => void copyText(installCommand, setInstallCopied)}
+            type="button"
+          >
+            <Copy aria-hidden size={16} />
+            {installCopied ? "Copied" : "Copy command"}
+          </button>
+          <p className="copy">
+            The claim code is single-use and the script disables any backend
+            connection — a frame has exactly one control plane.
+          </p>
+        </div>
         <div className="card">
           <h4>
             <MonitorSmartphone aria-hidden size={18} /> SD card image
