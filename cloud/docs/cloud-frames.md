@@ -395,8 +395,7 @@ enforcement) is ever paywalled.
 
 ## Phasing
 
-Before the phases below: the standalone-bundle production deploy
-(`docs/deployment.md`, "Monorepo cutover"). Then, in order:
+In order:
 
 1. **Protocol + profile (foundations)** — cloud agent profile in
    the device runtime, keypair enrollment, claim tokens, WS hub + `frames` table

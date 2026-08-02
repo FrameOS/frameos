@@ -53,8 +53,6 @@ the WebSocket hub) now **have** a concrete design: see
 
 Near-term cleanup:
 
-- Cut production deploys over to the standalone bundle (`docs/deployment.md`,
-  "Monorepo cutover").
 - Add operator-facing audit/event export only when there is an operator surface.
 
 Done (kept for context):

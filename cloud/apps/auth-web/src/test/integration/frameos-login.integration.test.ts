@@ -208,7 +208,7 @@ describe("frameos login handoff", () => {
     expect(replayResponse.status).toBe(400);
   });
 
-  it("clears the profile snapshot once the claims are released", async () => {
+  it("stores no profile snapshot: rows carry only references", async () => {
     const { accessToken } = await linkBackend([
       "backend:link",
       "backend:read",
@@ -216,17 +216,21 @@ describe("frameos login handoff", () => {
     ]);
     const code = await runHandoffForCode(accessToken);
 
+    // Before redemption the row already holds no PII — just the account and
+    // identity references the token endpoint resolves at redemption time.
+    const [pending] = await db.select().from(frameosLoginCodes);
+    expect(pending?.accountId).toBeTruthy();
+    expect(pending?.identityId).toBeTruthy();
+    expect(Object.keys(pending ?? {})).not.toContain("profile");
+
     const tokenResponse = await redeemLoginCode(
       postJson("/api/frameos/login/token", { code }, bearer(accessToken)),
     );
     expect(tokenResponse.status).toBe(200);
 
-    // The row still proves the code was used, but no longer carries the
-    // account's email, name and subject waiting for a cleanup run.
     const rows = await db.select().from(frameosLoginCodes);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.redeemedAt).not.toBeNull();
-    expect(rows[0]?.profile).toEqual({});
   });
 
   it("stops honouring a login request once auth:login is removed", async () => {
