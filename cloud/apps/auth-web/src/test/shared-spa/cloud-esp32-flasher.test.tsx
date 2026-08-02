@@ -7,6 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Esp32CloudFlasher,
+  pinsSpecError,
   wifiInputError,
 } from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
 
@@ -365,6 +366,49 @@ describe("Esp32CloudFlasher", () => {
       JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
     );
     localStorage.removeItem("frameos-sd-image-wifi");
+  });
+
+  it("provisions a GPIO pin override after the hardware choice, so it wins", async () => {
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "hw:waveshare_esp32_s3_photopainter" },
+    });
+    fireEvent.change(screen.getByLabelText("GPIO pins (optional)"), {
+      target: { value: "rst=1,dc=2,cs=3,cs2=-1,busy=4,sck=5,mosi=6,pwr=-1" },
+    });
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    const hardwareIndex = port.writes.findIndex((line) => line.startsWith("set hardware"));
+    const pinsIndex = port.writes.indexOf('set pins "rst=1,dc=2,cs=3,cs2=-1,busy=4,sck=5,mosi=6,pwr=-1"');
+    expect(hardwareIndex).toBeGreaterThanOrEqual(0);
+    expect(pinsIndex).toBeGreaterThan(hardwareIndex);
+  });
+
+  it("refuses a malformed pin spec before touching the board", async () => {
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByLabelText("Frame hardware");
+
+    fireEvent.change(screen.getByLabelText("GPIO pins (optional)"), {
+      target: { value: "rst=banana" },
+    });
+    clickFlash();
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      expect.stringMatching(/comma-separated key=number pairs/),
+    );
+
+    expect(pinsSpecError("")).toBeUndefined();
+    expect(pinsSpecError("rst=5,cs2=-1")).toBeUndefined();
+    expect(pinsSpecError("bogus=5")).toMatch(/Unknown pin/);
+    expect(pinsSpecError("rst=99")).toMatch(/between -1/);
   });
 
   it("provisions integrated boards as hardware bundles, not bare panels", async () => {

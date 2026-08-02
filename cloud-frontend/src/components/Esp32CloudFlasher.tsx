@@ -43,8 +43,34 @@ const genericFirmwareSuffix = '-esp32-s3-generic.bin'
 const boardChoices = [
   { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.5" V2 (default)', value: '' },
   { label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)', value: 'hw:waveshare_esp32_s3_photopainter' },
-  { label: 'Waveshare 13.3" E frame (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
+  { label: 'Waveshare PhotoPainter 13.3" (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
 ] as const
+
+// The console's `set pins` spec (fos_config_parse_pins): comma-separated
+// key=gpio pairs, -1 meaning "not wired".
+const pinKeys = ['rst', 'dc', 'cs', 'cs2', 'busy', 'sck', 'mosi', 'pwr'] as const
+const defaultPinsPlaceholder = 'rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'
+
+export function pinsSpecError(spec: string): string | undefined {
+  const trimmed = spec.trim()
+  if (!trimmed) {
+    return undefined
+  }
+  for (const pair of trimmed.split(',')) {
+    const match = pair.trim().match(/^([a-z0-9]+)=(-?\d+)$/)
+    if (!match) {
+      return `GPIO pins must be comma-separated key=number pairs, e.g. ${defaultPinsPlaceholder}`
+    }
+    if (!(pinKeys as readonly string[]).includes(match[1]!)) {
+      return `Unknown pin "${match[1]}" — valid pins are ${pinKeys.join(', ')}.`
+    }
+    const value = Number(match[2])
+    if (value < -1 || value > 48) {
+      return `Pin ${match[1]} must be a GPIO number between -1 (not wired) and 48.`
+    }
+  }
+  return undefined
+}
 const flashBaudrate = 460800
 const consoleBaudrate = 115200
 
@@ -417,6 +443,9 @@ export function Esp32CloudFlasher({
   // display init on a panel other than the one compiled in).
   const [panelSelectable, setPanelSelectable] = useState(false)
   const [panelChoice, setPanelChoice] = useState('')
+  // Optional GPIO override, like the backend frame settings: applied after
+  // the hardware/panel choice, so it wins over a preset's wiring.
+  const [pinsSpec, setPinsSpec] = useState('')
   const busyRef = useRef(false)
 
   useEffect(() => {
@@ -479,6 +508,12 @@ export function Esp32CloudFlasher({
     const inputError = wifiInputError(wifiSsid, wifiPassword)
     if (inputError) {
       setError(inputError)
+      setPhase('error')
+      return
+    }
+    const pinsError = panelSelectable ? pinsSpecError(pinsSpec) : undefined
+    if (pinsError) {
+      setError(pinsError)
       setPhase('error')
       return
     }
@@ -625,6 +660,16 @@ export function Esp32CloudFlasher({
           text: `set ${provisionCommand} ${quoteConsoleArgument(provisionKey)}`,
         })
       }
+      if (panelSelectable && pinsSpec.trim()) {
+        // After the hardware/panel command on purpose: a preset applies its
+        // own wiring, and an explicit override must win.
+        commands.push({
+          display: `set pins ${pinsSpec.trim()}`,
+          expect: consolePrompt,
+          required: true,
+          text: `set pins ${quoteConsoleArgument(pinsSpec.trim())}`,
+        })
+      }
       if (wifiSsid) {
         // `wifi` saves credentials and reboots; enrollment starts on boot.
         commands.push({
@@ -715,6 +760,15 @@ export function Esp32CloudFlasher({
                 ))}
               </optgroup>
             </select>
+            <input
+              aria-label="GPIO pins (optional)"
+              className={controlClassName}
+              disabled={busy}
+              maxLength={128}
+              onChange={(event) => setPinsSpec(event.target.value)}
+              placeholder={`GPIO pins (optional — e.g. ${defaultPinsPlaceholder})`}
+              value={pinsSpec}
+            />
           </>
         ) : null}
         <input
