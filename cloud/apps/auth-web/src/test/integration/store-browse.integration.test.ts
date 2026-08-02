@@ -242,10 +242,14 @@ describe("store browse feed", () => {
     expect(markup).toContain("Scenes for FrameOS 2026.9.0");
     expect(markup).toContain("Nine");
     expect(markup).not.toContain(">Ten<");
-    // The version picker offers both declared versions.
+    // The version picker offers both declared versions and keeps the choice
+    // selected, so submitting the search again preserves the filter.
     expect(markup).toContain("FrameOS 2026.10.0");
-    // …and points the install at the matching repository URL.
-    expect(markup).toContain("/api/store/2026.9.0/repository.json");
+    expect(markup).toContain('<option value="2026.9.0" selected="">');
+    // The "Add this repository URL…" box was deliberately dropped from the
+    // store front; the per-version repository.json endpoint (covered above)
+    // is unchanged but no longer advertised here.
+    expect(markup).not.toContain("repository.json");
   });
 
   it("ignores a malformed version instead of failing the page", async () => {

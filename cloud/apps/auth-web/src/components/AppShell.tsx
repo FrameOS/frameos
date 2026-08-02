@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BackForwardRefresh } from "./BackForwardRefresh";
-import { BrandMark } from "./BrandMark";
+import { HeaderBrand } from "./HeaderBrand";
 import {
   getAccountBaseUrl,
   getAccountUrl,
@@ -9,6 +9,8 @@ import {
 } from "../lib/env";
 
 // `title` is the page's heading, shown in the top row next to the logo.
+// The header is the /frames fleet workspace's (cloud-frontend
+// AccountHeader.tsx + cloud-chrome.css): same chrome on every surface.
 export function AppShell({
   children,
   isSuperadmin = false,
@@ -28,34 +30,29 @@ export function AppShell({
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="topbar__inner">
-          <div className="topbar__lead">
-            <BrandMark href={accountUrl} showName={!title} />
-            {title ? <span className="topbar__title">{title}</span> : null}
-          </div>
-          <nav aria-label="Primary" className="nav">
-            <Link className="nav-link-button" href={scenesUrl}>
-              Scenes
+      <header className="frameos-account-header">
+        <HeaderBrand href={accountUrl} title={title} />
+        <nav aria-label="Primary" className="frameos-account-header__nav">
+          <Link className="frameos-account-header__link" href={scenesUrl}>
+            Scenes
+          </Link>
+          <Link className="frameos-account-header__link" href={framesUrl}>
+            Frames
+          </Link>
+          <Link className="frameos-account-header__link" href={accountUrl}>
+            Account
+          </Link>
+          {isSuperadmin ? (
+            <Link className="frameos-account-header__link" href={adminUrl}>
+              Admin
             </Link>
-            <Link className="nav-link-button" href={framesUrl}>
-              Frames
-            </Link>
-            <Link className="nav-link-button" href={accountUrl}>
-              Account
-            </Link>
-            {isSuperadmin ? (
-              <Link className="nav-link-button" href={adminUrl}>
-                Admin
-              </Link>
-            ) : null}
-            <form action={logoutUrl} method="post">
-              <button className="nav-link-button" type="submit">
-                Sign out
-              </button>
-            </form>
-          </nav>
-        </div>
+          ) : null}
+          <form action={logoutUrl} method="post">
+            <button className="frameos-account-header__link" type="submit">
+              Sign out
+            </button>
+          </form>
+        </nav>
       </header>
       <main className="content">{children}</main>
       <BackForwardRefresh />

@@ -5,6 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS Cloud</title>
     <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <script>
+      // Pre-paint theme, mirroring the Next app's inline script in
+      // app/layout.tsx: the shared frameos_theme cookie first, then the
+      // workspace's own localStorage, then the system preference — the same
+      // precedence cloudThemeSync.ts seeds kea with, so the pre-paint theme
+      // and the one the workspace applies after mount always agree. Without
+      // this, arriving on /frames from a dark account page flashed the light
+      // background until the lazy workspace chunk loaded — the one place the
+      // two apps still visibly disagreed about the theme.
+      ;(function () {
+        try {
+          var match = document.cookie.match(/(?:^|;\s*)frameos_theme=(dark|light)/)
+          var theme = match ? match[1] : null
+          if (!theme) {
+            var stored = window.localStorage.getItem('frameos.workspaceTheme')
+            theme =
+              stored === 'dark' || stored === 'light'
+                ? stored
+                : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+          }
+          document.documentElement.dataset.frameosTheme = theme
+          document.documentElement.style.colorScheme = theme
+        } catch (e) {}
+      })()
+    </script>
     <link rel="stylesheet" href="/frames-app/static/main.css" />
     <script>
       // NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ and //__FRAMEOS_CLOUD_APP_CONFIG__
