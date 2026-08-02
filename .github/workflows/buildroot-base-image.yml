@@ -221,17 +221,43 @@ jobs:
       - name: Commit manifest changes
         run: |
           set -euo pipefail
-          git add tools/buildroot-images/manifest.json
-          if git diff --cached --quiet; then
-            echo "No manifest changes to commit."
-            exit 0
-          fi
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
           version="$(python3 -c "import json; print(json.load(open('versions.json'))['frameos'].split('+', 1)[0])")"
-          git commit -m "chore: refresh Buildroot base image manifest for ${version}"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # The manifest's source of truth is R2 — `upload` already upserted
+          # this build's entry there. The repo copy is a mirror, so parallel
+          # platform builds must NOT rebase their local mutations onto each
+          # other (that ended in a manifest.json merge conflict after a
+          # 90-minute build). Instead: re-download the converged manifest from
+          # R2 on top of the current branch tip and retry when a concurrent
+          # job pushes first.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            python3 tools/buildroot-images/buildroot_images.py \
+              --platform "${PLATFORM}" \
+              --bucket "${R2_BUCKET}" \
+              --prefix "${R2_PREFIX}" \
+              download
+            # R2's manifest upsert is read-modify-write: two uploads finishing
+            # in the same instant could drop an entry. Committing a mirror
+            # that lost OUR image would silently unpublish it — fail loudly
+            # instead (rerunning the upload step with force_upload repairs it).
+            python3 -c "import json, os, sys; m = json.load(open('tools/buildroot-images/manifest.json')); p = os.environ['PLATFORM']; v = '${version}'; sys.exit(0 if any(e.get('platform') == p and e.get('frameos_version') == v for e in m.get('entries', [])) else f'R2 manifest lost the {p} {v} entry (concurrent upload race) — rerun with force_upload')"
+            git add tools/buildroot-images/manifest.json
+            if git diff --cached --quiet; then
+              echo "No manifest changes to commit."
+              exit 0
+            fi
+            git commit -m "chore: refresh Buildroot base image manifest for ${version} (${PLATFORM})"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Push rejected — a concurrent build updated the branch; retrying (${attempt}/5)"
+            sleep $((RANDOM % 20 + 5))
+          done
+          echo "Could not push the manifest after 5 attempts."
+          exit 1
 
       - name: Upload build metadata
         if: always()
