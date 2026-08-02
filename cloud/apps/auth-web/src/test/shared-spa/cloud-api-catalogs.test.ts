@@ -42,6 +42,20 @@ describe("cloud mode backend catalogs", () => {
     const assets = await apiFetch("/api/assets");
     expect(await assets.json()).toEqual([]);
 
+    // The backend's own cloud-link status: inside the cloud there is no link
+    // to report on, so the shape is a permanent "disabled, disconnected".
+    const cloudStatus = await apiFetch("/api/cloud/status");
+    expect(await cloudStatus.json()).toEqual({
+      can_edit_provider: false,
+      connection: null,
+      default_provider_url: null,
+      enabled: false,
+      link: null,
+      poll_error: null,
+      provider_url: null,
+      status: "disconnected",
+    });
+
     // No request reached the network: that is the whole point.
     expect(fetchMock).not.toHaveBeenCalled();
   });

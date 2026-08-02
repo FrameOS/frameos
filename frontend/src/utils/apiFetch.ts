@@ -73,6 +73,12 @@ const cloudEmptyCatalogs: Record<string, string> = {
   // The workspace's uploaded-asset catalog (settingsLogic loadCustomFonts
   // filters it for fonts/*.ttf) — backend file storage the cloud lacks.
   '/api/assets': '[]',
+  // The backend's own cloud-link status (types.tsx CloudStatus). Inside the
+  // cloud there is no link to report on, so answer with the permanent
+  // "this install has no cloud features" shape cloudLogic renders as-is.
+  '/api/cloud/status':
+    '{"enabled":false,"provider_url":null,"default_provider_url":null,"status":"disconnected",' +
+    '"can_edit_provider":false,"poll_error":null,"connection":null,"link":null}',
   '/api/fonts': '{"fonts":[]}',
   // Backend-wide settings (SSH defaults, API keys, repositories…). The cloud
   // stores none of that; loaders merge this over their defaults.
