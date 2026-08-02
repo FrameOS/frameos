@@ -128,6 +128,20 @@ function createNextConfig(phase: string): NextConfig {
           source: "/frameos-editor/index.html",
         },
         {
+          // The frames SPA references hashless assets
+          // (/frames-app/static/main.js): with no origin cache-control,
+          // Cloudflare's 4-hour default TTL kept serving the previous
+          // deploy's UI after every release. no-cache forces revalidation
+          // while the ETag keeps repeat loads as cheap 304s.
+          headers: [
+            {
+              key: "Cache-Control",
+              value: "no-cache",
+            },
+          ],
+          source: "/frames-app/:path*",
+        },
+        {
           headers: [noStoreHeader],
           source: "/account/:path*",
         },
