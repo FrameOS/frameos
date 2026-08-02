@@ -193,6 +193,44 @@ test.describe('on-frame admin UI @e2e', () => {
     await expect(page.locator('input[type="password"]').first()).toBeVisible()
   })
 
+  test('redirects to the login page exactly once when frame data lands mid-redirect', async ({ page }) => {
+    // The gate used to assign window.location during render, so any re-render
+    // that happened while unauthenticated started a second navigation and
+    // aborted the first (net::ERR_ABORTED, blank page). Frames resolving after
+    // the redirect begins is the render that used to trigger it.
+    const loginNavigations: number[] = []
+    page.on('request', (request) => {
+      if (request.isNavigationRequest() && new URL(request.url()).pathname === '/login') {
+        loginNavigations.push(Date.now())
+      }
+    })
+
+    await page.setViewportSize({ width: 900, height: 900 })
+    await serveFrameAdmin(page, { authenticated: false })
+    // Registered last, so these win. The /login document is slow, so the
+    // redirecting page is still alive and rendering when frames arrive —
+    // exactly the window CI hit.
+    await page.route(`${FRAME_ORIGIN}/login`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      return route.fallback()
+    })
+    await page.route(`${FRAME_ORIGIN}/api/frames`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ frames: [frameFixture] }),
+      })
+    })
+
+    await page.goto(`${FRAME_ORIGIN}/admin`, { waitUntil: 'domcontentloaded' })
+    await page.waitForURL(`${FRAME_ORIGIN}/login`)
+    await expect(page.locator('input[type="password"]').first()).toBeVisible()
+    await page.waitForTimeout(1000)
+
+    expect(loginNavigations.length).toBe(1)
+  })
+
   test('cloud settings never expose backend-only backup controls on the frame', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)
     await page.setViewportSize({ width: 1440, height: 1000 })
