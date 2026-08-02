@@ -82,7 +82,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
 
         systemctl_calls = self._stub_log("systemctl.log")
         self.assertIn("enable frameos.service", systemctl_calls)
-        self.assertIn("restart frameos.service", systemctl_calls)
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
         self.assertIn("disable --now frameos-remote.service", systemctl_calls)
         self.assertNotIn("restart frameos-remote.service", systemctl_calls)
 
@@ -232,7 +232,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
 
         systemctl_calls = self._stub_log("systemctl.log")
         self.assertIn("enable frameos-remote.service", systemctl_calls)
-        self.assertIn("restart frameos-remote.service", systemctl_calls)
+        self.assertIn("restart --no-block frameos-remote.service", systemctl_calls)
 
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
@@ -288,15 +288,15 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(os.stat(pending_path).st_mode & 0o777, 0o600)
 
         systemctl_calls = self._stub_log("systemctl.log")
-        self.assertIn("restart frameos.service", systemctl_calls)
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
         self.assertNotIn("restart frameos-remote.service", systemctl_calls)
 
-    def test_cloud_claim_token_install_needs_no_answers(self) -> None:
-        # The install command is one line pasted from "Add frame". Nothing is
-        # there to answer a question, so a claim-token install must run to the
-        # end on defaults alone — it used to stop at "Frame name" and sit there.
-        # (This harness has no TTY, so it pins the outcome rather than the
-        # TTY-suppression branch: no prompt may be load-bearing for the flow.)
+    def test_install_hands_the_terminal_back_and_links_to_the_account(self) -> None:
+        # frameos.service is Type=notify with TimeoutStartSec=300, so a plain
+        # `systemctl restart` blocks until the new instance signals readiness —
+        # up to five minutes of silence, which reads as a hung installer, and is
+        # worst on a box already running FrameOS where the old instance still
+        # holds the admin port. The start must be queued, not waited on.
         result = self._run_setup(
             {
                 "FRAMEOS_CLAIM_TOKEN": "FRCT_unattended",
@@ -306,13 +306,28 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             }
         )
 
+        systemctl_calls = self._stub_log("systemctl.log")
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
+
+        # And the summary has to say where the frame turns up, since enrollment
+        # only happens once the service is running — the user is otherwise left
+        # with a finished install and no idea what to look at.
         self.assertIn("Cloud: enrolling with https://cloud.example", result.stdout)
+        self.assertIn("https://cloud.example/frames", result.stdout)
 
         frame_json = self._installed_frame_json()
-        # Defaulted, not asked for.
         self.assertTrue(frame_json["name"])
         self.assertTrue(frame_json["device"])
         self.assertEqual(frame_json["serverHost"], "")
+
+    def test_prompts_are_asked_unless_unattended_is_requested(self) -> None:
+        # A claim token does NOT imply unattended: a cloud install is still a
+        # person at a terminal choosing a display and an admin password, and
+        # reading /dev/tty works there even though stdin is the curl pipe.
+        # Only FRAMEOS_UNATTENDED suppresses the questions.
+        script = (ROOT / "scripts" / "frameos-setup.sh").read_text(encoding="utf-8")
+        self.assertIn('case "$(printf \'%s\' "${FRAMEOS_UNATTENDED:-}"', script)
+        self.assertNotIn("FRAMEOS_INTERACTIVE", script)
 
     def test_cloud_claim_token_refuses_explicit_backend(self) -> None:
         result = self._run_setup(
@@ -500,8 +515,15 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         )
         self._write_executable(
             stub_dir / "systemctl",
+            # is-active answers like a healthy systemd would. Without it the
+            # installer's post-start poll finds nothing active and burns its
+            # whole timeout on every test that installs.
             """#!/bin/sh
             echo "$@" >> /tmp/out/systemctl.log
+            case "$1" in
+              is-active) echo active ;;
+              is-failed) echo inactive ;;
+            esac
             exit 0
             """,
         )

@@ -8,6 +8,7 @@
 // state in the URL (?add=frame). In the workspace the drawer around it owns
 // that — the panel is mounted only while it is open — so "opened" here means
 // "rendered" and "closed" means "unmounted".
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddFramePanel } from "../../../../../../cloud-frontend/src/components/AddFramePanel";
@@ -38,6 +39,12 @@ function renderPanel() {
   );
 }
 
+function mintCalls() {
+  return fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes("/api/frames/claim-tokens"),
+  );
+}
+
 beforeEach(() => {
   onClose.mockReset();
   fetchMock.mockReset();
@@ -56,21 +63,85 @@ afterEach(() => {
 });
 
 describe("AddFramePanel", () => {
-  // Regression: the panel used to mint a single-use code on every open.
-  // Nothing revokes an unused code, the account holds only a few at a time,
-  // and re-opening the drawer is one click — so a couple of dozen open/close
-  // cycles burned the whole quota for 24 hours.
-  it("mints nothing when the panel opens", async () => {
+  // The install command is ready to copy on sight: opening the panel mints the
+  // code. That was once forbidden — every open spent one of the account's 50
+  // claim-code slots permanently, so browsing in and out of the panel locked
+  // enrollment for a whole TTL — and it is allowed now only because the server
+  // recycles: at the cap it deletes the oldest never-used single-use codes
+  // (evictOldestUnusedClaimTokens) instead of refusing. Repeat opens churn one
+  // slot rather than consuming many. If that recycling ever goes away, so must
+  // this test.
+  it("mints exactly one code when the panel opens", async () => {
+    // Not at import time and not during render: the request belongs to a
+    // mounted, visible panel, which is what keeps a closed drawer free.
+    expect(fetchMock).not.toHaveBeenCalled();
+
     renderPanel();
 
     expect(screen.getByText("Add a frame")).toBeDefined();
-    // The command is shown with the code masked, so it is clear what will run.
-    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/);
+    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
+    expect(mintCalls()).toHaveLength(1);
+    // Copyable straight away — no claim code to transcribe by hand, and no
+    // button to press first.
     expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes("/api/frames/claim-tokens"),
-      ),
-    ).toHaveLength(0);
+      screen.queryByRole("button", { name: /generate command/i }),
+    ).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: /copy command/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("mints once per opening, not once per render", async () => {
+    const view = renderPanel();
+    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
+
+    view.rerender(
+      <AddFramePanel
+        claimTokenTtlHours={24}
+        cloudOrigin="https://account.frameos.net"
+        onClose={onClose}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Frame name (optional)"), {
+      target: { value: "Kitchen" },
+    });
+
+    expect(mintCalls()).toHaveLength(1);
+  });
+
+  // React strict mode mounts, unmounts and mounts again in development. The
+  // guard is a ref for exactly this reason: a second POST would spend a second
+  // code that nothing can ever hand back.
+  it("mints once through a strict-mode double mount", async () => {
+    render(
+      <StrictMode>
+        <AddFramePanel
+          claimTokenTtlHours={24}
+          cloudOrigin="https://account.frameos.net"
+          onClose={onClose}
+        />
+      </StrictMode>,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mintCalls()).toHaveLength(1);
+  });
+
+  // While the code is in flight the command keeps its shape with the code
+  // masked, so nothing jumps when the real one lands.
+  it("shows the masked command while the code is still in flight", async () => {
+    fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
+    renderPanel();
+
+    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/);
+    expect(screen.getByText(/Creating a single-use claim code/)).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: /copy command/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   // The origin is written into SD images, ESP32 NVS and this command, so it is
@@ -85,28 +156,11 @@ describe("AddFramePanel", () => {
     expect(window.location.origin).not.toBe("https://account.frameos.net");
   });
 
-  it("mints one code when the user asks for the install command", async () => {
-    renderPanel();
-
-    fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
-
-    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
-    const minted = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes("/api/frames/claim-tokens"),
-    );
-    expect(minted).toHaveLength(1);
-    // The code becomes copyable; no raw claim code to transcribe by hand.
-    expect(screen.getByRole("button", { name: /copy command/i })).toBeDefined();
-    expect(screen.queryByText(/paste this one-time code/i)).toBeNull();
-  });
-
   it("explains a claim-code quota rejection instead of blaming the frame limit", async () => {
     fetchMock.mockResolvedValue(
       Response.json({ error: "claim_token_quota_exceeded" }, { status: 403 }),
     );
     renderPanel();
-
-    fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
     const alert = await screen.findByRole("alert");
     // Unused single-use codes recycle automatically, so this error can only
@@ -121,38 +175,42 @@ describe("AddFramePanel", () => {
     );
     renderPanel();
 
-    fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
-
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("frame limit");
   });
 
   // A code that arrives after the panel closed belongs to the closed panel:
-  // letting it land would overwrite whatever the reopened panel holds, and the
-  // reopened panel would show a code the account may already have spent.
+  // letting it land would show the reopened panel a code the account may
+  // already have spent on an install, on top of the one it minted for itself.
   it("drops a mint that was still in flight when the panel closed", async () => {
-    let deliver: ((response: Response) => void) | undefined;
-    let signal: AbortSignal | undefined;
+    // One entry per request, because closing and reopening now makes two: the
+    // stale one must not be able to land in the panel that replaced it.
+    const pending: {
+      deliver: (response: Response) => void;
+      signal: AbortSignal | undefined;
+    }[] = [];
     fetchMock.mockImplementation(
       (_input, init) =>
         new Promise<Response>((resolve) => {
-          signal = init?.signal ?? undefined;
-          deliver = resolve;
+          pending.push({ deliver: resolve, signal: init?.signal ?? undefined });
         }),
     );
     const view = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
+    expect(pending).toHaveLength(1);
 
     // Closing the drawer unmounts the panel; reopening mounts a fresh one.
     view.unmount();
-    expect(signal?.aborted).toBe(true);
+    expect(pending[0]?.signal?.aborted).toBe(true);
     renderPanel();
     await act(async () => {
-      deliver?.(Response.json({ claim_token: "FRCT_stale" }));
+      pending[0]?.deliver(Response.json({ claim_token: "FRCT_stale" }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(screen.queryByText(/FRCT_stale/)).toBeNull();
+    // The reopened panel's own request is still in flight, so the command
+    // still shows the placeholder rather than a code from the closed one.
+    expect(pending[1]?.signal?.aborted).toBe(false);
     expect(screen.getByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/)).toBeDefined();
   });
 

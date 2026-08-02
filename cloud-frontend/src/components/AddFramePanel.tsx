@@ -27,12 +27,13 @@ const mintErrorMessages: Record<string, string> = {
 }
 
 // "Add frame": four enrollment paths (install script, SD image, link code,
-// ESP32 USB flashing). Claim codes are plumbing, not UX, but they are also a
-// capped resource (see maxClaimTokensPerAccount) that nothing can revoke once
-// minted — so nothing is minted until the user actually asks for a command.
-// Opening and closing the panel costs zero codes; the SD builder and the ESP32
-// flasher likewise mint their own on first use. The server stores only hashes;
-// every enrolled frame appears as pending until the owner confirms it.
+// ESP32 USB flashing). Claim codes are plumbing, not UX: the install command
+// is ready to copy the moment the panel appears, minted once per opening (see
+// the mint site below for why that is safe now). The SD builder and the ESP32
+// flasher mint their own — multi-use and single-use respectively — on first
+// use, because those flows can take minutes and burn a code per attempt. The
+// server stores only hashes; every enrolled frame appears as pending until the
+// owner confirms it.
 //
 // Ported from cloud/apps/auth-web/src/components/AddFramePanel.tsx, which owned
 // the only copy of this flow while /account/frames and /frames both showed
@@ -68,6 +69,10 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   const [minting, setMinting] = useState(false)
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
+  // One mint per opening, whatever React does with renders. A ref, not state:
+  // it must survive a re-render and a strict-mode double mount without
+  // triggering either.
+  const mintStartedRef = useRef(false)
 
   const origin = cloudOrigin
   // No FRAMEOS_CLOUD_URL: /install.sh is served with this provider's origin
@@ -80,22 +85,49 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // with the code itself masked until it is minted.
   const maskedInstallCommand = installCommandFor('<claim code>')
 
-  // Closing the panel unmounts it, which discards the single-use code — an
-  // install may already have spent it — and cancels a mint still in flight, so
-  // a slow response can never land on top of a newer token.
+  // The panel is mounted only while it is on screen — the drawer renders it
+  // when "Add frame" is clicked, the first-run screen when the fleet is empty
+  // — so mounting IS opening, and that is when the code is minted.
+  //
+  // Closing unmounts, which discards the single-use code (an install may
+  // already have spent it) and cancels a mint still in flight, so a slow
+  // response can never land on top of a newer token.
   useEffect(() => {
     cancelledRef.current = false
+    if (!mintStartedRef.current) {
+      mintStartedRef.current = true
+      void mintInstallCode()
+    }
     return () => {
       cancelledRef.current = true
       abortRef.current?.abort()
       abortRef.current = undefined
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Minted on demand, when the user asks for the install command. Nothing is
-  // revocable once minted, so an unused code sits against the account's quota
-  // until it expires.
-  async function generateInstallCommand(): Promise<void> {
+  // Minted when the panel opens, so the install command is copyable on sight
+  // rather than one click away.
+  //
+  // This deliberately reverses the earlier lazy-minting rule, and the reason
+  // that rule existed is gone: codes are stored only as hashes and nothing can
+  // revoke one, so every open used to spend a slot of
+  // FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT (50) permanently, and a user
+  // browsing in and out of the panel could lock themselves out for a full TTL.
+  // The server now recycles instead of refusing: at the cap it deletes the
+  // oldest never-used SINGLE-USE codes (evictOldestUnusedClaimTokens in
+  // cloud/apps/auth-web/src/lib/frames.ts) — which is exactly the kind this
+  // mints — so repeat opens churn one slot instead of consuming many.
+  //
+  // Eager minting therefore DEPENDS on that recycling. Remove or narrow it and
+  // this has to go back to being lazy, or opening the panel a few dozen times
+  // locks the account out of enrollment for a day.
+  //
+  // (Under React StrictMode the double mount's cleanup would abort this single
+  // request and the guard above would not re-issue it; the bundle does not
+  // enable StrictMode, and spending a second code to cover a dev-only remount
+  // is the worse trade.)
+  async function mintInstallCode(): Promise<void> {
     if (claimToken || minting) {
       return
     }
@@ -220,32 +252,25 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
           <pre className="frameos-inset mt-2 overflow-x-auto rounded-xl px-3 py-2 text-[11px] leading-relaxed [user-select:all]">
             {installCommand ?? maskedInstallCommand}
           </pre>
-          {installCommand ? (
-            <button
-              className="frameos-secondary-button mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              onClick={() => void copyText(installCommand, setInstallCopied)}
-              type="button"
-            >
-              <ClipboardDocumentIcon aria-hidden className="h-4 w-4" />
-              {installCopied ? 'Copied' : 'Copy command'}
-            </button>
-          ) : (
-            <>
-              <button
-                className="frameos-secondary-button mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={minting}
-                onClick={() => void generateInstallCommand()}
-                type="button"
-              >
-                <CommandLineIcon aria-hidden className="h-4 w-4" />
-                {minting ? 'Creating a claim code…' : 'Generate command'}
-              </button>
-              <p className="frameos-muted mt-2 text-xs">
-                Generating fills in a single-use claim code. Codes expire within {claimTokenTtlHours} hours, so we
-                create one only when you ask.
-              </p>
-            </>
-          )}
+          {/* Same shape in every state — masked command, one button, one line
+              of explanation — so the code arriving does not shift the layout
+              under a cursor that is already on its way to Copy. */}
+          <button
+            className="frameos-secondary-button mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!installCommand}
+            onClick={() => (installCommand ? void copyText(installCommand, setInstallCopied) : undefined)}
+            type="button"
+          >
+            <ClipboardDocumentIcon aria-hidden className="h-4 w-4" />
+            {installCopied ? 'Copied' : 'Copy command'}
+          </button>
+          <p className="frameos-muted mt-2 text-xs">
+            {minting
+              ? 'Creating a single-use claim code…'
+              : installCommand
+              ? `The claim code above is single-use and expires within ${claimTokenTtlHours} hours.`
+              : `Claim codes are single-use and expire within ${claimTokenTtlHours} hours.`}
+          </p>
         </section>
 
         <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">

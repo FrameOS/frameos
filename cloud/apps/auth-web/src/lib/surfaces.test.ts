@@ -68,6 +68,20 @@ describe("surface routing", () => {
     }
   });
 
+  it("serves account paths that keep their full form instead of self-redirecting", () => {
+    configureSplitOrigins();
+
+    // getAccountPath returns these unchanged; a redirect would loop forever.
+    expect(
+      resolveSurfaceRoute(new URL("https://account.frameos.net/account/frames")),
+    ).toBeUndefined();
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://account.frameos.net/account/frames/5"),
+      ),
+    ).toBeUndefined();
+  });
+
   it("rewrites clean account paths to the existing app routes", () => {
     configureSplitOrigins();
 
@@ -76,6 +90,7 @@ describe("surface routing", () => {
       ["/scenes?q=mine", "/account/scenes?q=mine"],
       ["/backups", "/account/backups"],
       ["/activity", "/account/activity"],
+      ["/security", "/account/security"],
     ]) {
       expectRoute(`https://account.frameos.net${external}`, {
         kind: "rewrite",

@@ -55,9 +55,13 @@ echo "Assembling the release bundle"
 #   node_modules/ and cloud/apps/auth-web/{server.js,.next,node_modules}.
 # cp -a keeps the relative symlinks inside node_modules/.pnpm intact.
 cp -a "$standalone_dir/." "$stage/"
-cp -a "$app_dir/.next/static" "$stage/cloud/$app_dir/.next/static"
-cp -a "$app_dir/public" "$stage/cloud/$app_dir/public"
-cp -a "$app_dir/scripts" "$stage/cloud/$app_dir/scripts"
+# The trace may have pre-created these directories with the few files the
+# server reads at runtime, so copy *contents* — `cp -a src dst` would nest
+# src inside an existing dst (public/public/) and every asset would 404.
+mkdir -p "$stage/cloud/$app_dir/.next/static" "$stage/cloud/$app_dir/public" "$stage/cloud/$app_dir/scripts"
+cp -a "$app_dir/.next/static/." "$stage/cloud/$app_dir/.next/static/"
+cp -a "$app_dir/public/." "$stage/cloud/$app_dir/public/"
+cp -a "$app_dir/scripts/." "$stage/cloud/$app_dir/scripts/"
 # Frame hub: the single-file bundle is all the service needs at runtime.
 mkdir -p "$stage/cloud/$hub_dir"
 cp -a "$hub_dir/dist" "$stage/cloud/$hub_dir/dist"
