@@ -107,11 +107,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Buildroot download cache
+      # The cache dir holds Buildroot downloads AND the ccache (BR2_CCACHE_DIR
+      # points into it). The key ends in the run id ON PURPOSE: actions/cache
+      # only saves when the exact key is new, so a content-hash key meant the
+      # ccache warmed by a run was thrown away and every future run restored
+      # the same increasingly stale snapshot. With a per-run key each run
+      # restores the newest cache via restore-keys and saves its own warmer
+      # one.
+      - name: Restore Buildroot download + compiler cache
         uses: actions/cache@v4
         with:
           path: build/buildroot-images/cache
-          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('backend/app/tasks/buildroot_image.py', 'tools/buildroot-images/buildroot_images.py') }}
+          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ github.run_id }}
           restore-keys: |
             buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-
             buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
