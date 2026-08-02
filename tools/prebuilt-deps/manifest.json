@@ -220,6 +220,20 @@
         "nim": "eef2e35b2d5449a224d21261d7eafbd5",
         "quickjs": "f650e3c456995d519185f2e3352d87b6"
       }
+    },
+    {
+      "target": "debian-bookworm-armv6",
+      "versions": {
+        "quickjs": "2026-06-04"
+      },
+      "object_key": null,
+      "updated_at": "2026-08-02T01:41:16.941115+00:00",
+      "component_keys": {
+        "quickjs": "prebuilt-deps/debian-bookworm-armv6/quickjs-2026-06-04.tar.gz"
+      },
+      "component_md5sums": {
+        "quickjs": "73958f663dbe5ea19c21b86cbdd70989"
+      }
     }
   ]
 }
