@@ -4,8 +4,17 @@ import type { repositoriesModelType } from './repositoriesModelType'
 import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { isCloudMode } from '../utils/cloudMode'
+import { cloudStoreRepository } from '../utils/cloudStoreRepository'
 import { isFrameControlMode } from '../utils/frameControlMode'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
+
+// The public store catalog this very deployment serves (the scene picker's
+// built-in repository in cloud mode). The "system-" prefix is what marks a
+// repository non-removable in the picker (isSystemRepository in
+// Templates.tsx) — there is no /api/repositories to remove it from.
+const cloudStoreRepositoryUrl = '/api/store/repository.json'
+const cloudStoreRepositoryId = 'system-cloud-store'
 
 export const repositoriesModel = kea<repositoriesModelType>([
   path(['src', 'models', 'repositoriesModel']),
@@ -20,6 +29,17 @@ export const repositoriesModel = kea<repositoriesModelType>([
       {
         loadRepositories: async () => {
           try {
+            if (isCloudMode()) {
+              // The cloud has no /api/repositories — the store catalog IS the
+              // repository. The SPA fetches the repository JSON itself (no
+              // backend to cache it) and the picker shows it like any other
+              // repo: searchable, installable, not removable.
+              const response = await apiFetch(cloudStoreRepositoryUrl)
+              if (!response.ok) {
+                throw new Error('Failed to fetch the scene store catalog')
+              }
+              return [cloudStoreRepository(cloudStoreRepositoryId, cloudStoreRepositoryUrl, await response.json())]
+            }
             const inFrameAdminMode = isInFrameAdminMode()
             const systemResponse = await apiFetch('/api/repositories/system')
             if (!systemResponse.ok) {

@@ -16,6 +16,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { RepositoryType, TemplateType } from '../../../../types'
+import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
@@ -43,6 +44,11 @@ function isSystemRepository(repository: RepositoryType): boolean {
 
 export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
+  // On the cloud control plane the account's scene library IS the cloud
+  // drive and the store catalog is a built-in repository; the self-hosted
+  // "My local scenes" (/api/templates) and "Add repository"
+  // (/api/repositories) surfaces have no server behind them there.
+  const cloudMode = isCloudMode()
   const { applyTemplate } = useActions(frameLogic)
   const { frameId, mode, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
@@ -161,7 +167,7 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
 
       {!inFrameAdminMode && <CloudDrive openInstalledSceneDrawer={openInstalledSceneDrawer} />}
 
-      {!inFrameAdminMode && (
+      {!inFrameAdminMode && !cloudMode && (
         <div className="space-y-2 !mt-8">
           <div className="flex justify-between w-full items-center">
             <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded('')}>
@@ -347,7 +353,7 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
                 </div>
               </div>
             ) : null}
-            {showingAddRepository ? (
+            {cloudMode ? null : showingAddRepository ? (
               <Box className="frame-tool-card rounded-[22px] p-4">
                 <Form
                   logic={templatesLogic}

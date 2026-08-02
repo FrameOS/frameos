@@ -65,3 +65,39 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
   await assertOk(response, 'Failed to save the frame settings')
   return true
 }
+
+/**
+ * Assign a store scene to a cloud-managed frame. This is the cloud's actual
+ * scene contract: POST /api/frames/{id}/scenes takes the full ordered list of
+ * STORE scene ids, persists it server-side and enqueues a set_scenes push to
+ * the device — nothing here rides the settings allowlist. Read-modify-write
+ * because the endpoint replaces the whole list. Returns false when the scene
+ * was already assigned (nothing sent).
+ */
+export async function assignCloudFrameStoreScene(frameId: FrameId, sceneId: string): Promise<boolean> {
+  const listResponse = await apiFetch(`/api/frames/${frameId}/scenes`)
+  await assertOk(listResponse, 'Failed to load the frame scene list')
+  const data = (await listResponse.json()) as {
+    scenes?: { scene_id: string; scene_version?: number | null }[]
+  }
+  const existing = data.scenes ?? []
+  if (existing.some((scene) => scene.scene_id === sceneId)) {
+    return false
+  }
+  const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scenes: [
+        ...existing.map((scene) => ({
+          scene_id: scene.scene_id,
+          // null/undefined = track the latest published version.
+          ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
+        })),
+        { scene_id: sceneId },
+      ],
+    }),
+  })
+  await assertOk(response, 'Failed to add the scene to the frame')
+  return true
+}
