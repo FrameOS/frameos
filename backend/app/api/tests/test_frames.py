@@ -2183,7 +2183,7 @@ async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "luckfox-pico",
+        "platform": "commodore-64",
     }
 
     response = await async_client.post('/api/frames/new', json=payload)
@@ -2192,6 +2192,43 @@ async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client
     assert 'Unsupported Buildroot platform' in response.json()['detail']
     frames_response = await async_client.get('/api/frames')
     assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_rejects_registered_but_disabled_platform(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "luckfox-pico",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 400
+    assert 'not supported yet' in response.json()['detail']
+    frames_response = await async_client.get('/api/frames')
+    assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_accepts_raspberry_pi_zero_w(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-w",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frames_response = await async_client.get('/api/frames')
+    frames = frames_response.json()['frames']
+    assert len(frames) == 1
+    assert frames[0]['buildroot']['platform'] == 'raspberry-pi-zero-w'
 
 
 @pytest.mark.asyncio

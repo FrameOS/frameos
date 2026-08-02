@@ -10,6 +10,10 @@ QUICKJS_SHA256="${QUICKJS_SHA256:-b376e839b322978313d929fd20663b11ba58b75df5a46c
 
 declare -a COMPONENTS=("nim" "quickjs")
 
+# TODO(armv6): the debian-bookworm-armv6 cross target (Pi Zero W Buildroot
+# images) has no matching container platform, so it is absent here; quickjs is
+# rebuilt in-container by the cross compiler instead. Publishing armv6
+# prebuilts needs a Bootlin-toolchain build path in this script.
 TARGET_MATRIX=(
   "debian|bullseye|armhf|linux/arm/v7|debian:bullseye"
   "debian|bullseye|arm64|linux/arm64|debian:bullseye"

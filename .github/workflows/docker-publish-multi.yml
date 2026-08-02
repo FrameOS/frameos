@@ -238,23 +238,48 @@ jobs:
         run: |
           pip install -r backend/requirements.txt
 
-      - name: Build Raspberry Pi Zero 2 W Buildroot image
+      - name: Build Buildroot release images
         env:
           DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
         run: |
-          python3 tools/buildroot-images/buildroot_images.py \
-            --platform raspberry-pi-zero-2-w \
-            release-image \
-            --prebuilt-cross-dir release-assets \
-            --release-assets-dir release-assets \
-            --target debian-bookworm-arm64 \
-            --version "$DOCKER_VERSION"
+          set -euo pipefail
+          # Build a release image for every enabled platform that has a
+          # cached Buildroot base image in the checked-in manifest.
+          platforms=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "backend")
+          from app.tasks.buildroot_platforms import enabled_buildroot_platforms
+
+          manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
+          available = {entry.get("platform") for entry in manifest.get("entries", [])}
+          for platform in enabled_buildroot_platforms():
+              if platform.key in available:
+                  print(platform.key)
+              else:
+                  print(f"Skipping {platform.key}: no cached Buildroot base image in manifest", file=sys.stderr)
+          PY
+          )
+          if [ -z "$platforms" ]; then
+            echo "No Buildroot platforms with cached base images found." >&2
+            exit 1
+          fi
+          for platform in $platforms; do
+            python3 tools/buildroot-images/buildroot_images.py \
+              --platform "$platform" \
+              release-image \
+              --prebuilt-cross-dir release-assets \
+              --release-assets-dir release-assets \
+              --version "$DOCKER_VERSION"
+          done
           ls -lh release-assets/*.img.gz release-assets/*.metadata.json
 
-      - name: Upload Buildroot release image
+      - name: Upload Buildroot release images
         uses: actions/upload-artifact@v4
         with:
-          name: frameos-${{ needs.update-versions.outputs.docker_version }}-raspberry-pi-zero-2-w-buildroot
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-buildroot-images
           path: |
             release-assets/*.img.gz
             release-assets/*.metadata.json

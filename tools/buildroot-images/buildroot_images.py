@@ -27,7 +27,6 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_ASSETS_PARTITION_SIZE,
-    BUILDROOT_DEFCONFIG,
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
@@ -40,7 +39,6 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
-    FRAMEOS_BUILD_TARGET,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
     ensure_buildroot_base_image,
@@ -51,8 +49,12 @@ from app.tasks.buildroot_image import (  # noqa: E402
     stage_buildroot_frameos_service,
     _gzip_file,
     _sha256,
-    normalize_buildroot_platform,
     stage_buildroot_network_manager_state,
+)
+from app.tasks.buildroot_platforms import (  # noqa: E402
+    BuildrootPlatform,
+    enabled_buildroot_platforms,
+    get_buildroot_platform,
 )
 from app.models.frame import (  # noqa: E402
     DEFAULT_ERROR_BEHAVIOR,
@@ -77,7 +79,11 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "buildroot-images")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", default=SUPPORTED_BUILDROOT_PLATFORM)
+    parser.add_argument(
+        "--platform",
+        default=SUPPORTED_BUILDROOT_PLATFORM,
+        choices=sorted(platform.key for platform in enabled_buildroot_platforms()),
+    )
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--manifest-key", default=None)
@@ -122,9 +128,14 @@ def parse_args() -> argparse.Namespace:
     release = sub.add_parser("release-image", help="Build a release-ready SD image from precompiled artifacts")
     release.add_argument("--prebuilt-cross-dir", default=str(REPO_ROOT / "build" / "prebuilt-cross"))
     release.add_argument("--release-assets-dir", default=str(REPO_ROOT / "release-assets"))
-    release.add_argument("--target", default="debian-bookworm-arm64")
+    release.add_argument(
+        "--target",
+        default=None,
+        help="Precompiled release slug; defaults to the platform's release target",
+    )
     release.add_argument("--version", default=None)
     sub.add_parser("list", help="List manifest entries in R2")
+    sub.add_parser("platforms", help="Print enabled platforms as a JSON matrix for CI")
     download = sub.add_parser("download", help="Download the manifest to the repo")
     download.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -394,12 +405,12 @@ def buildroot_output_cache_root(args: argparse.Namespace, cache_root: Path) -> P
     return resolve_host_dir(args.output_cache_dir, default_buildroot_output_cache_root())
 
 
-def base_build_cache_key(paths: list[Path], *, platform: str, docker_image: str, skip_apt_install: bool) -> str:
+def base_build_cache_key(paths: list[Path], *, platform: BuildrootPlatform, docker_image: str, skip_apt_install: bool) -> str:
     digest = hashlib.sha256()
-    digest.update(f"platform={platform}\n".encode("utf-8"))
+    digest.update(f"platform={platform.key}\n".encode("utf-8"))
     digest.update(f"build-host-machine={os.uname().machine}\n".encode("utf-8"))
     digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-    digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+    digest.update(f"buildroot-defconfig={platform.defconfig}\n".encode("utf-8"))
     digest.update(f"bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
     digest.update(f"docker-image={docker_image}\n".encode("utf-8"))
     digest.update(f"skip-apt-install={skip_apt_install}\n".encode("utf-8"))
@@ -477,6 +488,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
 
 
 def build(args: argparse.Namespace) -> None:
+    platform = get_buildroot_platform(args.platform)
     out_dir = local_dir(args.platform)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_path = out_dir / "base.img"
@@ -496,13 +508,13 @@ def build(args: argparse.Namespace) -> None:
         post_image_path = tmp_path / "post-image.sh"
         boot_logo_path = tmp_path / "frameos-boot-logo.png"
         build_script_path = tmp_path / "buildroot-build.sh"
-        BuildrootImageBuilder._write_buildroot_config(config_path)
-        BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path)
-        BuildrootImageBuilder._write_post_build_script(post_build_path)
+        BuildrootImageBuilder._write_buildroot_config(config_path, platform)
+        BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path, platform)
+        BuildrootImageBuilder._write_post_build_script(post_build_path, platform)
         BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-        BuildrootImageBuilder._write_post_image_script(post_image_path)
+        BuildrootImageBuilder._write_post_image_script(post_image_path, platform)
         BuildrootImageBuilder._write_boot_logo(boot_logo_path)
-        BuildrootImageBuilder._write_build_script(build_script_path, "base.img")
+        BuildrootImageBuilder._write_build_script(build_script_path, "base.img", platform)
         cache_root = resolve_host_dir(args.cache_dir, default_buildroot_cache_dir())
         source_cache = buildroot_source_cache_dir(args, cache_root)
         cache_key = base_build_cache_key(
@@ -516,7 +528,7 @@ def build(args: argparse.Namespace) -> None:
                 boot_logo_path,
                 build_script_path,
             ],
-            platform=args.platform,
+            platform=platform,
             docker_image=BUILDROOT_DOCKER_IMAGE,
             skip_apt_install=args.skip_apt_install,
         )
@@ -573,7 +585,7 @@ def build(args: argparse.Namespace) -> None:
         "platform": args.platform,
         "frameos_version": frameos_version(),
         "buildroot_version": BUILDROOT_VERSION,
-        "defconfig": BUILDROOT_DEFCONFIG,
+        "defconfig": platform.defconfig,
         "docker_image": BUILDROOT_DOCKER_IMAGE,
         "buildroot_apt_deps": BUILDROOT_DOCKER_APT_DEPS_LINE,
         "frameos_partition_size": BUILDROOT_FRAMEOS_PARTITION_SIZE,
@@ -647,7 +659,16 @@ def upload(args: argparse.Namespace) -> None:
                 shutil.copyfileobj(source, output)
         client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
         print(f"Uploaded s3://{args.bucket}/{object_key}")
-    save_manifest(client, args.bucket, args.manifest_key, {"entries": [entry]})
+    # Replace only this platform's entry; other platforms keep theirs.
+    manifest = load_manifest(client, args.bucket, args.manifest_key)
+    entries = [
+        existing
+        for existing in manifest.get("entries", [])
+        if existing.get("platform") != args.platform
+    ]
+    entries.append(entry)
+    entries.sort(key=lambda item: str(item.get("platform", "")))
+    save_manifest(client, args.bucket, args.manifest_key, {"entries": entries})
 
 
 def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
@@ -731,12 +752,13 @@ class ReleaseBuildrootImageBuilder(BuildrootImageBuilder):
 
 
 async def build_release_image(args: argparse.Namespace) -> None:
-    platform = normalize_buildroot_platform(args.platform)
+    buildroot_platform = get_buildroot_platform(args.platform)
+    platform = buildroot_platform.key
     version = safe_segment(args.version or release_version())
     if not version:
         raise SystemExit("Unable to determine release version")
 
-    target = str(args.target)
+    target = str(args.target or buildroot_platform.release_target)
     prebuilt_cross_dir = Path(args.prebuilt_cross_dir)
     release_assets_dir = Path(args.release_assets_dir)
     release_assets_dir.mkdir(parents=True, exist_ok=True)
@@ -755,19 +777,21 @@ async def build_release_image(args: argparse.Namespace) -> None:
 
         metadata = json.loads((artifact_root / "metadata.json").read_text(encoding="utf-8"))
         frame = ReleaseImageFrame()
+        frame.buildroot = {"platform": platform}
         build_id = safe_segment(version)
         raw_output_path = release_assets_dir / f"frameos-{version}-{platform}-buildroot.img"
         output_path = release_assets_dir / f"{raw_output_path.name}.gz"
         raw_output_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
 
+        build_target = buildroot_platform.build_target_copy()
         frameos_build = FrameBinaryBuildResult(
             build_id=build_id,
             target=TargetMetadata(
-                arch=FRAMEOS_BUILD_TARGET.arch,
-                distro=FRAMEOS_BUILD_TARGET.distro,
-                version=FRAMEOS_BUILD_TARGET.version,
-                platform="linux/arm64",
+                arch=build_target.arch,
+                distro=build_target.distro,
+                version=build_target.version,
+                platform=buildroot_platform.docker_platform,
                 image="debian:bookworm",
             ),
             compilation_mode=str(metadata.get("compilation_mode") or "shared"),
@@ -873,6 +897,22 @@ def download_manifest(args: argparse.Namespace) -> None:
     print(f"Wrote {LOCAL_MANIFEST_PATH}")
 
 
+def print_platform_matrix() -> None:
+    matrix = {
+        "include": [
+            {
+                "platform": platform.key,
+                "label": platform.label,
+                "defconfig": platform.defconfig,
+                "release_target": platform.release_target,
+                "runner": platform.default_runner_label,
+            }
+            for platform in enabled_buildroot_platforms()
+        ]
+    }
+    print(json.dumps(matrix, separators=(",", ":")))
+
+
 def main() -> None:
     load_env_file()
     args = parse_args()
@@ -884,6 +924,8 @@ def main() -> None:
         asyncio.run(build_release_image(args))
     elif args.command == "list":
         list_remote(args)
+    elif args.command == "platforms":
+        print_platform_matrix()
     elif args.command == "download":
         download_manifest(args)
 

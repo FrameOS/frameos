@@ -7,11 +7,14 @@ on:
         description: "Buildroot platform to publish"
         required: true
         default: raspberry-pi-zero-2-w
-        type: string
+        type: choice
+        options:
+          - raspberry-pi-zero-2-w
+          - raspberry-pi-zero-w
       runner_label:
-        description: "Runner label to use; override with a larger/self-hosted ARM runner label if available"
-        required: true
-        default: ubuntu-24.04-arm
+        description: "Runner label override; empty uses the platform default (x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
+        required: false
+        default: ""
         type: string
       bucket:
         description: "R2 bucket"
@@ -43,9 +46,33 @@ permissions:
   contents: write
 
 jobs:
+  resolve-runner:
+    runs-on: ubuntu-24.04
+    outputs:
+      runner_label: ${{ steps.resolve.outputs.runner_label }}
+    steps:
+      - id: resolve
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          RUNNER_OVERRIDE: ${{ inputs.runner_label }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RUNNER_OVERRIDE}" ]; then
+            runner="${RUNNER_OVERRIDE}"
+          else
+            # Keep in sync with default_runner_label in
+            # backend/app/tasks/buildroot_platforms.py.
+            case "${PLATFORM}" in
+              raspberry-pi-zero-w) runner="ubuntu-24.04" ;;
+              *) runner="ubuntu-24.04-arm" ;;
+            esac
+          fi
+          echo "runner_label=${runner}" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Build and publish ${{ inputs.platform }}
-    runs-on: ${{ inputs.runner_label }}
+    needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner_label }}
     timeout-minutes: 360
     env:
       PLATFORM: ${{ inputs.platform }}
