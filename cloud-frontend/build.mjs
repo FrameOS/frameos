@@ -153,7 +153,14 @@ const buildOptions = {
   outdir: staticDir,
   sourcemap: isDev,
   minify: true,
-  entryNames: 'main',
+  // Content-hashed entry names in production builds: the no-store shell
+  // references the new names each deploy, so every cache layer between the
+  // server and the browser (Cloudflare rewrites weaker origin cache-control
+  // headers) becomes harmless and the assets can be cached forever. Watch
+  // and dev builds keep stable names — the dev server copies the bundle
+  // once at startup and a changing name would strand its index.html.
+  entryNames: isDev || isWatch ? 'main' : 'main-[hash]',
+  metafile: !isWatch,
   assetNames: 'asset-[hash]',
   // Assets are served by Next.js from public/frames-app/ — see README.md.
   publicPath: '/frames-app/static/',
@@ -172,5 +179,33 @@ if (isWatch) {
   await buildContext.watch()
   console.log(`👀 Watching ${staticDir}`)
 } else {
-  await build(buildOptions)
+  const result = await build(buildOptions)
+  // The template keeps the stable names; point the shell at the hashed
+  // outputs. Failing loudly beats serving a shell whose script 404s.
+  const entry = Object.entries(result.metafile.outputs).find(
+    ([, meta]) => meta.entryPoint === 'src/main.tsx'
+  )
+  if (!entry) {
+    throw new Error('src/main.tsx entry missing from the esbuild metafile')
+  }
+  const toRelative = (outputPath) =>
+    path.relative(outputDir, path.resolve(__dirname, outputPath)).split(path.sep).join('/')
+  const jsFile = toRelative(entry[0])
+  if (!entry[1].cssBundle) {
+    throw new Error('css bundle missing from the esbuild metafile')
+  }
+  const cssFile = toRelative(entry[1].cssBundle)
+  const indexPath = path.join(outputDir, 'index.html')
+  let html = await fs.readFile(indexPath, 'utf8')
+  for (const [from, to] of [
+    ['/frames-app/static/main.css', `/frames-app/${cssFile}`],
+    ['/frames-app/static/main.js', `/frames-app/${jsFile}`],
+  ]) {
+    if (!html.includes(from)) {
+      throw new Error(`src/index.html no longer references ${from}; the hashed-name rewrite would be a no-op`)
+    }
+    html = html.replaceAll(from, to)
+  }
+  await fs.writeFile(indexPath, html)
+  console.log(`🔗 Shell references ${jsFile} and ${cssFile}`)
 }
