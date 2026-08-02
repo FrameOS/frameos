@@ -1,7 +1,7 @@
 "use client";
 
 import { Usb, Zap } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -136,8 +136,12 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
   const [wifiPassword, setWifiPassword] = useState("");
   const busyRef = useRef(false);
 
-  const supported =
-    typeof navigator !== "undefined" && "serial" in navigator;
+  // WebSerial support is a client-only fact: decide it after mount so the
+  // server and the hydrating client render the same fallback first.
+  const [supported, setSupported] = useState(false);
+  useEffect(() => {
+    setSupported("serial" in navigator);
+  }, []);
 
   function log(line: string) {
     setLines((previous) => [...previous.slice(-200), line]);
