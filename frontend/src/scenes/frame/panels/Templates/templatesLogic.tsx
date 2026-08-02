@@ -12,6 +12,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
@@ -576,6 +577,13 @@ export const templatesLogic = kea<templatesLogicType>([
             status: 'success',
             detail: assigned ? 'Scene queued for the frame' : 'Scene was already on the frame',
           })
+          if (assigned) {
+            // The server now owns this scene; rehydrate frame.scenes from the
+            // assignment list (force skips the poll throttle) so the tiles
+            // show server truth immediately — not just until the next reload.
+            framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+            framesModel.actions.loadFrame(props.frameId)
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           longRunningTasksModel.actions.taskFailed({

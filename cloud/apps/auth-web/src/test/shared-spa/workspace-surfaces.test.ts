@@ -28,20 +28,25 @@ import {
 // These tests pin the allow-list. They live here because frontend/ has no
 // test runner; the module under test is free of React, kea and the DOM.
 
-const shellSurfaces = ["terminal", "assets", "ping", "debug"] as const;
+const shellSurfaces = ["terminal", "ping", "debug"] as const;
 
 describe("cloud mode hides everything the protocol cannot do", () => {
-  it("offers no Terminal, Assets, Ping or Debug frame tool", () => {
+  it("offers no Terminal, Ping or Debug frame tool", () => {
     for (const panel of shellSurfaces) {
       expect(frameToolPanelIsAllowed("cloud", panel)).toBe(false);
       expect(allowedFrameToolPanels.cloud).not.toContain(panel);
     }
   });
 
-  it("offers no Terminal, Assets or Ping scene-tool shortcut", () => {
-    for (const panel of ["terminal", "assets", "ping"] as const) {
+  it("offers no Terminal or Ping scene-tool shortcut", () => {
+    for (const panel of ["terminal", "ping"] as const) {
       expect(sceneToolPanelIsAllowed("cloud", panel)).toBe(false);
     }
+  });
+
+  it("offers the Assets panel (the read-only assets_list/asset_get pair)", () => {
+    expect(frameToolPanelIsAllowed("cloud", "assets")).toBe(true);
+    expect(sceneToolPanelIsAllowed("cloud", "assets")).toBe(true);
   });
 
   it("offers no generated-Nim Source panel (cloud frames are interpreted)", () => {
@@ -49,12 +54,11 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     expect(allowedSceneUtilityPanels.cloud).not.toContain("source");
   });
 
-  it("offers no deploy, SD-card build, stop, delete or archive action", () => {
+  it("offers no deploy, SD-card build, stop or archive action", () => {
     for (const action of [
       "archive",
       "buildSdCard",
       "cancelDeploy",
-      "delete",
       "deploy",
       "deployRemote",
       "localDeploy",
@@ -63,6 +67,10 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     ] as const) {
       expect(frameMenuActionIsAllowed("cloud", action)).toBe(false);
     }
+  });
+
+  it("offers delete (revoke + drop the row, DELETE /api/frames/{id})", () => {
+    expect(frameMenuActionIsAllowed("cloud", "delete")).toBe(true);
   });
 
   it("links to no SSH, Remote-agent or backend-access settings section", () => {

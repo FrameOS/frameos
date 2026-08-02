@@ -7,6 +7,8 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   createDb,
+  frameAssetFiles,
+  frameAssets,
   frameCommands,
   frameEnrollmentTokens,
   frameLogs,
@@ -499,6 +501,149 @@ export async function storeFrameLogs(
     }
   });
   return batch.length;
+}
+
+// ---------------------------------------------------------------------------
+// Asset browsing (docs/cloud-frames.md `assets_list` / `asset_get`)
+// ---------------------------------------------------------------------------
+
+// A listing bigger than this is rejected, never truncated (the device already
+// bounds itself and says `truncated: true` when it does — see the protocol's
+// reject-don't-truncate doctrine in apps/frame-hub/src/protocol.ts).
+export const maxAssetListingBytes = 256 * 1024;
+// Per cached file; matches the device-side HubMaxAssetFileBytes refusal.
+export const maxAssetFileBytes = 8 * 1024 * 1024;
+export const maxAssetPathChars = 1024;
+// Per-frame blob-cache LRU bounds. Thumbnails dominate (a few tens of KiB
+// each); the byte bound is what really matters for full-size downloads.
+export const maxAssetFilesPerFrame = 64;
+export const maxAssetCacheBytesPerFrame = 24 * 1024 * 1024;
+
+export interface FrameAssetEntry {
+  path: string;
+  size: number;
+  mtime: number;
+  is_dir?: boolean;
+}
+
+// Sanitize a device-reported listing: keep only the wire contract's fields
+// (a compromised device must not get arbitrary jsonb persisted and replayed
+// to every browser), require relative paths, drop malformed entries.
+export function parseAssetEntries(value: unknown): FrameAssetEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const entries: FrameAssetEntry[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const path = typeof record.path === "string" ? record.path : "";
+    if (
+      path.length === 0 ||
+      path.length > maxAssetPathChars ||
+      path.startsWith("/") ||
+      path.split("/").includes("..")
+    ) {
+      continue;
+    }
+    const size = typeof record.size === "number" && Number.isFinite(record.size) ? record.size : 0;
+    const mtime =
+      typeof record.mtime === "number" && Number.isFinite(record.mtime) ? record.mtime : 0;
+    entries.push({
+      ...(record.is_dir === true ? { is_dir: true } : {}),
+      mtime,
+      path,
+      size,
+    });
+  }
+  return entries;
+}
+
+export async function storeFrameAssetListing(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  entries: FrameAssetEntry[],
+  truncated: boolean,
+) {
+  const sizeBytes = Buffer.byteLength(JSON.stringify(entries), "utf8");
+  if (sizeBytes > maxAssetListingBytes) {
+    return false;
+  }
+  const now = new Date();
+  await db
+    .insert(frameAssets)
+    .values({
+      frameId,
+      payload: entries,
+      sizeBytes,
+      truncated,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      set: { payload: entries, sizeBytes, truncated, updatedAt: now },
+      target: frameAssets.frameId,
+    });
+  return true;
+}
+
+// Upsert one fetched file into the per-frame LRU cache, pruning past the
+// count/byte caps in the same transaction (the storeFrameLogs pattern).
+export async function storeFrameAssetFile(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  file: { path: string; thumb: boolean; contentType: string; content: Buffer },
+) {
+  if (file.content.length > maxAssetFileBytes) {
+    return false;
+  }
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(frameAssetFiles)
+      .values({
+        content: file.content,
+        contentType: file.contentType,
+        frameId,
+        path: file.path,
+        sizeBytes: file.content.length,
+        thumb: file.thumb,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        set: {
+          content: file.content,
+          contentType: file.contentType,
+          sizeBytes: file.content.length,
+          updatedAt: now,
+        },
+        target: [frameAssetFiles.frameId, frameAssetFiles.path, frameAssetFiles.thumb],
+      });
+    // LRU prune: walk newest-first, keep rows while under both caps, delete
+    // the rest. One frame's cache is at most a few dozen small rows, so
+    // selecting the metadata (never the bytes) stays cheap.
+    const rows = await tx
+      .select({
+        id: frameAssetFiles.id,
+        sizeBytes: frameAssetFiles.sizeBytes,
+      })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frameId))
+      .orderBy(desc(frameAssetFiles.updatedAt), desc(frameAssetFiles.id));
+    let total = 0;
+    const evict: number[] = [];
+    rows.forEach((row, index) => {
+      total += row.sizeBytes;
+      if (index >= maxAssetFilesPerFrame || total > maxAssetCacheBytesPerFrame) {
+        evict.push(row.id);
+      }
+    });
+    if (evict.length > 0) {
+      await tx.delete(frameAssetFiles).where(inArray(frameAssetFiles.id, evict));
+    }
+  });
+  return true;
 }
 
 // Revoking a frame revokes the underlying linked client (the device sees a

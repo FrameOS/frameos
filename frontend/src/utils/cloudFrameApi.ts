@@ -1,5 +1,6 @@
 import type { FrameType } from '../types'
 import { apiFetch } from './apiFetch'
+import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { cloudFrameSettingKeys, cloudFrameSettingsPayload, type CloudFrameSettingKey } from './cloudFrameSettings'
 import type { FrameId } from './frameId'
 
@@ -20,6 +21,7 @@ export type CloudFrameCommand = 'reboot' | 'render' | 'restart_runtime' | 'set_c
 // suite); re-exported here so callers keep one import.
 export { cloudFrameSettingKeys, cloudFrameSettingsPayload }
 export type { CloudFrameSettingKey }
+export type { CloudFrameSceneRow }
 
 // Compile-time guard: every allowlisted key must be a real FrameType field, so
 // a rename in the form cannot leave a dead key on the wire.
@@ -67,6 +69,18 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
 }
 
 /**
+ * The store scenes assigned to a cloud-managed frame, in position order
+ * (GET /api/frames/{frameId}/scenes). These are STORE scene ids — the runtime
+ * scene JSON lives at /api/store/scenes/{scene_id}/scenes.json.
+ */
+export async function listCloudFrameScenes(frameId: FrameId): Promise<CloudFrameSceneRow[]> {
+  const response = await apiFetch(`/api/frames/${frameId}/scenes`)
+  await assertOk(response, 'Failed to load the frame scene list')
+  const data = (await response.json()) as { scenes?: CloudFrameSceneRow[] }
+  return data.scenes ?? []
+}
+
+/**
  * Assign a store scene to a cloud-managed frame. This is the cloud's actual
  * scene contract: POST /api/frames/{id}/scenes takes the full ordered list of
  * STORE scene ids, persists it server-side and enqueues a set_scenes push to
@@ -75,12 +89,7 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
  * was already assigned (nothing sent).
  */
 export async function assignCloudFrameStoreScene(frameId: FrameId, sceneId: string): Promise<boolean> {
-  const listResponse = await apiFetch(`/api/frames/${frameId}/scenes`)
-  await assertOk(listResponse, 'Failed to load the frame scene list')
-  const data = (await listResponse.json()) as {
-    scenes?: { scene_id: string; scene_version?: number | null }[]
-  }
-  const existing = data.scenes ?? []
+  const existing = await listCloudFrameScenes(frameId)
   if (existing.some((scene) => scene.scene_id === sceneId)) {
     return false
   }

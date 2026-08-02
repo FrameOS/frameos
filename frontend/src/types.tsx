@@ -136,6 +136,8 @@ export interface FrameType {
   last_successful_deploy?: Record<string, any>
   last_successful_deploy_at?: string
   active_scene_id?: string
+  /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
+  last_state?: Record<string, any>
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string

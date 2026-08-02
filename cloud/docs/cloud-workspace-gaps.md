@@ -1,5 +1,22 @@
 # Cloud workspace: the road to full frame control
 
+> Status (2026-08-03, this branch): items **4** and **5** are done, item **8**
+> is done (tiles hydrate from the server), and asset browsing shipped as a new
+> surface: `assets_list`/`asset_get` wire verbs (docs/cloud-frames.md), hub
+> caching (`frame_assets` + `frame_asset_files`), `GET /api/frames/{id}/assets`
+> + `GET /api/frames/{id}/asset`, and a read-only Assets panel in cloud mode —
+> verified end-to-end against the bench PhotoPainter (51-entry SD listing,
+> 1.1 MB BMP streamed in 24 KiB chunks). Item 4 shipped as the
+> `POST /api/frames/{id}/event/{name}` shim (render / setCurrentScene /
+> uploadScenes → queue verbs), so "preview on frame" and the Assets panel's
+> run-image-scene buttons work unchanged. Known cosmetic issue: the ESP32
+> reports 8.3 FAT short names (`02_SYS~1`) — enable long filenames in the FAT
+> config. Separate bench finding: the PhotoPainter's gallery scene now OOMs
+> downloading a ~3 MB image (`total=2686976 psram_free≈894k` at failure, 12
+> scenes resident eat the old headroom); the fix is spilling large HTTP bodies
+> to SD/flash + streaming decode, not proxy resizing (see
+> frameos-memory-aware-rendering notes).
+
 Goal: an owner controls **both esp32 and buildroot frames entirely from the
 cloud** — upload/assign scenes, see the current image and per-scene previews,
 read logs, deploy changes, update FrameOS itself. This maps every gap between

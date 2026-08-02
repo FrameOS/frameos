@@ -1,11 +1,14 @@
 #include "fos_cloud.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 
 #include "cJSON.h"
@@ -22,6 +25,7 @@
 #include "monocypher-ed25519.h"
 #include "nvs.h"
 
+#include "fos_assets_sd.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
@@ -65,6 +69,16 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_WS_AUTH_CLOSE_CODE 4401
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
+/* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
+ * off the SD card and streamed as base64 asset_chunk frames from the cloud
+ * task — never from the WS event handler, which must stay responsive. The
+ * caps match the reference provider: it refuses to cache anything bigger. */
+#define FOS_CLOUD_ASSET_MAX_FILE_BYTES (8u * 1024u * 1024u)
+#define FOS_CLOUD_ASSET_CHUNK_BYTES (24u * 1024u)
+#define FOS_CLOUD_ASSET_LIST_MAX_ENTRIES 2000
+#define FOS_CLOUD_ASSET_LIST_MAX_DEPTH 8
+#define FOS_CLOUD_ASSET_PATH_MAX 256
+#define FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH 8
 
 static fos_cloud_state_t s_state = FOS_CLOUD_NONE;
 static char s_last_error[96] = "";
@@ -752,6 +766,299 @@ static void ws_poll_scene_ack(void)
     cJSON_Delete(msg);
 }
 
+/* ------------------------------------------------------------- asset verbs */
+
+typedef enum { ASSET_JOB_LIST = 0, ASSET_JOB_GET = 1 } asset_job_kind_t;
+
+typedef struct {
+    uint8_t kind;
+    char id[48]; /* command uuid, echoed on every reply frame */
+    char path[FOS_CLOUD_ASSET_PATH_MAX];
+} asset_job_t;
+
+static QueueHandle_t s_asset_jobs = NULL;
+
+/* Relative, inside the assets root, no dot-segments. Returns false on
+ * anything a provider should never send (the provider validates too, but the
+ * device is the enforcement point). */
+static bool asset_path_sanitize(const char *raw, char *out, size_t out_len)
+{
+    if (!raw) return false;
+    while (raw[0] == '/' || (raw[0] == '.' && raw[1] == '/')) {
+        raw += (raw[0] == '/') ? 1 : 2;
+    }
+    size_t len = strlen(raw);
+    if (len == 0 || len >= out_len) return false;
+    const char *p = raw;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        size_t seg = slash ? (size_t)(slash - p) : strlen(p);
+        if (seg == 0) return false;                       /* "a//b" */
+        if (seg == 2 && p[0] == '.' && p[1] == '.') return false;
+        p += seg;
+        if (*p == '/') p++;
+    }
+    memcpy(out, raw, len + 1);
+    return true;
+}
+
+static const char *asset_content_type(const char *path)
+{
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "application/octet-stream";
+    if (!strcasecmp(dot, ".png")) return "image/png";
+    if (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg")) return "image/jpeg";
+    if (!strcasecmp(dot, ".gif")) return "image/gif";
+    if (!strcasecmp(dot, ".bmp")) return "image/bmp";
+    if (!strcasecmp(dot, ".webp")) return "image/webp";
+    if (!strcasecmp(dot, ".svg")) return "image/svg+xml";
+    if (!strcasecmp(dot, ".txt") || !strcasecmp(dot, ".log")) return "text/plain";
+    if (!strcasecmp(dot, ".json")) return "application/json";
+    return "application/octet-stream";
+}
+
+static void asset_full_path(char *out, size_t out_len, const char *rel)
+{
+    const fos_config_t *config = fos_config();
+    const char *root = config->assets_path[0] ? config->assets_path : "/srv/assets";
+    snprintf(out, out_len, "%s/%s", root, rel);
+}
+
+/* Recursive SD walk for assets_list. Dotfiles stay local (same rule as the
+ * Linux firmware); entries beyond the cap flip `truncated` instead of
+ * silently stopping. Returns false only on allocation failure. */
+static bool asset_list_walk(cJSON *assets, char *rel, size_t rel_cap,
+                            int depth, int *count, bool *truncated)
+{
+    if (depth > FOS_CLOUD_ASSET_LIST_MAX_DEPTH) return true;
+    char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
+    asset_full_path(full, sizeof(full), rel);
+    DIR *dir = opendir(rel[0] ? full : full); /* rel=="" walks the root */
+    if (!dir) return true;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        if (*count >= FOS_CLOUD_ASSET_LIST_MAX_ENTRIES) {
+            *truncated = true;
+            break;
+        }
+        size_t rel_len = strlen(rel);
+        size_t name_len = strlen(entry->d_name);
+        if (rel_len + name_len + 2 >= rel_cap) continue;
+        if (rel_len > 0) {
+            rel[rel_len] = '/';
+            memcpy(rel + rel_len + 1, entry->d_name, name_len + 1);
+        } else {
+            memcpy(rel, entry->d_name, name_len + 1);
+        }
+        asset_full_path(full, sizeof(full), rel);
+        struct stat st;
+        if (stat(full, &st) == 0) {
+            cJSON *item = cJSON_CreateObject();
+            if (!item) {
+                closedir(dir);
+                rel[rel_len] = '\0';
+                return false;
+            }
+            cJSON_AddStringToObject(item, "path", rel);
+            bool is_dir = S_ISDIR(st.st_mode);
+            cJSON_AddNumberToObject(item, "size", is_dir ? 0 : (double)st.st_size);
+            cJSON_AddNumberToObject(item, "mtime", (double)st.st_mtime);
+            cJSON_AddBoolToObject(item, "is_dir", is_dir);
+            cJSON_AddItemToArray(assets, item);
+            (*count)++;
+            if (is_dir &&
+                !asset_list_walk(assets, rel, rel_cap, depth + 1, count, truncated)) {
+                closedir(dir);
+                rel[rel_len] = '\0';
+                return false;
+            }
+        }
+        rel[rel_len] = '\0';
+    }
+    closedir(dir);
+    return true;
+}
+
+static void asset_job_run_list(const asset_job_t *job)
+{
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
+    cJSON_AddStringToObject(msg, "type", "assets");
+    cJSON *assets = cJSON_AddArrayToObject(msg, "assets");
+    bool truncated = false;
+    if (assets && fos_assets_sd_mounted()) {
+        char rel[FOS_CLOUD_ASSET_PATH_MAX] = "";
+        int count = 0;
+        asset_list_walk(assets, rel, sizeof(rel), 0, &count, &truncated);
+    }
+    if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+}
+
+static void asset_chunk_send_error(const char *id, const char *error)
+{
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    if (id[0]) cJSON_AddStringToObject(msg, "id", id);
+    cJSON_AddStringToObject(msg, "type", "asset_chunk");
+    cJSON_AddStringToObject(msg, "error", error);
+    cJSON_AddBoolToObject(msg, "done", true);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+}
+
+static void asset_job_run_get(const asset_job_t *job)
+{
+    char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
+    asset_full_path(full, sizeof(full), job->path);
+    struct stat st;
+    if (!fos_assets_sd_mounted() || stat(full, &st) != 0) {
+        asset_chunk_send_error(job->id, "not_found");
+        return;
+    }
+    FILE *file = fopen(full, "rb");
+    if (!file) {
+        asset_chunk_send_error(job->id, "not_found");
+        return;
+    }
+    size_t total = (size_t)st.st_size;
+    uint8_t *raw = heap_caps_malloc(FOS_CLOUD_ASSET_CHUNK_BYTES,
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* +2 for base64 rounding, +1 for NUL */
+    size_t b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8;
+    char *b64 = heap_caps_malloc(b64_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!raw || !b64) {
+        free(raw);
+        free(b64);
+        fclose(file);
+        asset_chunk_send_error(job->id, "no_memory");
+        return;
+    }
+    size_t sent = 0;
+    int seq = 0;
+    bool failed = false;
+    do {
+        size_t r = fread(raw, 1, FOS_CLOUD_ASSET_CHUNK_BYTES, file);
+        if (ferror(file)) {
+            asset_chunk_send_error(job->id, "read_failed");
+            failed = true;
+            break;
+        }
+        size_t b64_len = 0;
+        if (mbedtls_base64_encode((unsigned char *)b64, b64_cap, &b64_len,
+                                  raw, r) != 0) {
+            asset_chunk_send_error(job->id, "no_memory");
+            failed = true;
+            break;
+        }
+        b64[b64_len] = '\0';
+        sent += r;
+        bool done = sent >= total || r == 0;
+        cJSON *msg = cJSON_CreateObject();
+        if (!msg) {
+            asset_chunk_send_error(job->id, "no_memory");
+            failed = true;
+            break;
+        }
+        if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
+        cJSON_AddStringToObject(msg, "type", "asset_chunk");
+        cJSON_AddNumberToObject(msg, "seq", seq);
+        cJSON_AddStringToObject(msg, "data", b64);
+        cJSON_AddBoolToObject(msg, "done", done);
+        if (seq == 0) {
+            cJSON_AddNumberToObject(msg, "size", (double)total);
+            cJSON_AddNumberToObject(msg, "mtime", (double)st.st_mtime);
+            cJSON_AddStringToObject(msg, "content_type", asset_content_type(job->path));
+        }
+        if (!s_ws_client || !s_ws_ready) {
+            /* Socket went away mid-stream: the provider discards partials and
+             * the command redelivers on the next session. */
+            cJSON_Delete(msg);
+            failed = true;
+            break;
+        }
+        ws_send_json(msg);
+        cJSON_Delete(msg);
+        seq++;
+        if (done) break;
+    } while (true);
+    (void)failed;
+    free(raw);
+    free(b64);
+    fclose(file);
+}
+
+/* Drain queued asset jobs. Called from the cloud task — file reads over SPI
+ * plus multi-frame sends must never run inside the WS event handler. */
+static bool ws_process_asset_jobs(void)
+{
+    if (!s_asset_jobs) return false;
+    bool worked = false;
+    asset_job_t job;
+    while (s_ws_client && s_ws_ready &&
+           xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
+        if (job.kind == ASSET_JOB_LIST) {
+            asset_job_run_list(&job);
+        } else {
+            asset_job_run_get(&job);
+        }
+        worked = true;
+    }
+    return worked;
+}
+
+/* WS-handler side: validate cheaply (a stat, no reads), ack, and hand the
+ * heavy part to the cloud task. A full queue is an honest `busy` — the
+ * provider's queue redelivers or the browser retries. */
+static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
+{
+    asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "" };
+    if (cJSON_IsString(id) && id->valuestring &&
+        strlen(id->valuestring) < sizeof(job.id)) {
+        strlcpy(job.id, id->valuestring, sizeof(job.id));
+    }
+    if (kind == ASSET_JOB_GET) {
+        const cJSON *path_item = cJSON_GetObjectItem(root, "path");
+        const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
+        if (!asset_path_sanitize(raw, job.path, sizeof(job.path))) {
+            ws_ack(id, false, "invalid_path");
+            return;
+        }
+        if (!fos_assets_sd_mounted()) {
+            ws_ack(id, false, "not_found");
+            return;
+        }
+        char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
+        asset_full_path(full, sizeof(full), job.path);
+        struct stat st;
+        if (stat(full, &st) != 0) {
+            ws_ack(id, false, "not_found");
+            return;
+        }
+        if (S_ISDIR(st.st_mode)) {
+            ws_ack(id, false, "is_directory");
+            return;
+        }
+        if ((size_t)st.st_size > FOS_CLOUD_ASSET_MAX_FILE_BYTES) {
+            ws_ack(id, false, "too_large");
+            return;
+        }
+        /* `thumb` is accepted and ignored: no thumbnailer on this profile,
+         * the original bytes are the reply (docs/cloud-frames.md). */
+    }
+    if (!s_asset_jobs) {
+        s_asset_jobs = xQueueCreate(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t));
+    }
+    if (!s_asset_jobs || xQueueSend(s_asset_jobs, &job, 0) != pdTRUE) {
+        ws_ack(id, false, "busy");
+        return;
+    }
+    ws_ack(id, true, NULL);
+}
+
 /* set_scenes: same storage the USB `usb_api upload-scenes` command uses —
  * fos_scenes_set_json persists the interpreted-scene JSON and the render task
  * hot-loads it (compiled payloads are refused by the interpreted runtime
@@ -782,6 +1089,14 @@ static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
         const char *detail = fos_scenes_last_error();
         ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
         return;
+    }
+    /* Optional scene_id names which pushed scene to activate (the workspace's
+     * "preview on frame" flow). Queued now, applied by the render task AFTER
+     * the payload loads — fos_client.c applies pending scenes before pending
+     * selection, so the id exists by then. Unknown ids are dropped there. */
+    const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
+    if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
+        fos_scenes_select(scene_id->valuestring);
     }
     fos_client_render_now();
     ws_ack(id, true, NULL);
@@ -954,6 +1269,10 @@ static void ws_handle_message(const char *data, size_t len)
         }
     } else if (strcmp(type, "set_scenes") == 0) {
         ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "assets_list") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
+    } else if (strcmp(type, "asset_get") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_GET, root, id);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
         ws_ack(id, true, NULL);
@@ -1245,6 +1564,7 @@ static void ws_start(void)
 
 static void ws_stop(void) {}
 static void ws_poll_scene_ack(void) {}
+static bool ws_process_asset_jobs(void) { return false; }
 static bool ws_demote_requested(void) { return false; }
 static void ws_clear_demote_request(void) {}
 
@@ -1317,7 +1637,11 @@ static void cloud_task(void *arg)
                 ws_started = true;
             }
             ws_poll_scene_ack();
-            vTaskDelay(pdMS_TO_TICKS(5000));
+            /* Streamed asset replies run here, off the WS task. A 1 s idle
+             * tick keeps browse-the-SD latency humane; both polls are cheap
+             * flag/queue checks. */
+            ws_process_asset_jobs();
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 

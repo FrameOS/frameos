@@ -8,7 +8,13 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { compareFrames } from '../utils/frameSort'
 import { apiFetch } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
-import { sendCloudFrameCommand, pushCloudFrameSettings } from '../utils/cloudFrameApi'
+import { sendCloudFrameCommand, pushCloudFrameSettings, listCloudFrameScenes } from '../utils/cloudFrameApi'
+import {
+  activeSceneFromLastState,
+  cloudSceneCacheKey,
+  cloudSceneStub,
+  scenesFromStoreSceneJson,
+} from '../utils/cloudFrameScenes'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
@@ -50,6 +56,10 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
   return {
     ...frame,
+    // Cloud rows report the device's current scene under last_state (the hub
+    // writes it); the backend's newLog-based inference below never fires
+    // there, so without this the Active badge stays dark after a reload.
+    active_scene_id: frame.active_scene_id ?? activeSceneFromLastState(frame.last_state) ?? undefined,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) ?? [],
     last_successful_deploy:
       lastSuccessfulDeploy && Array.isArray(lastSuccessfulDeploy.scenes)
@@ -98,6 +108,58 @@ function startBrowserDownload(path: string): void {
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
+}
+
+// Cloud scene hydration. Cloud frame payloads are frameSummary rows with no
+// scene JSON at all — the scene list lives server-side as store-scene
+// assignments. The tiles hydrate from GET /api/frames/{id}/scenes plus each
+// store scene's /api/store/scenes/{scene_id}/scenes.json (the exact payload
+// the device receives over set_scenes, so the tile ids match the runtime ids
+// the device reports as active_scene). scenes.json bodies are cached per
+// store scene id + version so the 15s fleet poll re-checks assignments
+// without refetching scene bodies; the assignment list itself is only
+// re-listed once a minute per frame unless forced (install flow), keeping
+// well under the endpoint's 240/15min rate limit.
+const cloudSceneJsonCache = new Map<string, FrameScene[]>()
+const cloudFrameSceneHydrationsInFlight = new Set<FrameId>()
+const cloudFrameScenesHydratedAt = new Map<FrameId, number>()
+const CLOUD_FRAME_SCENES_REFRESH_MS = 60_000
+
+async function fetchCloudFrameScenes(frameId: FrameId): Promise<FrameScene[]> {
+  const rows = await listCloudFrameScenes(frameId)
+  const scenes: FrameScene[] = []
+  for (const row of rows) {
+    const cacheKey = cloudSceneCacheKey(row)
+    let sceneJson = cloudSceneJsonCache.get(cacheKey)
+    if (!sceneJson) {
+      try {
+        const response = await apiFetch(`/api/store/scenes/${row.scene_id}/scenes.json`)
+        const parsed = response.ok ? scenesFromStoreSceneJson(await response.json()) : null
+        if (parsed) {
+          cloudSceneJsonCache.set(cacheKey, parsed)
+          sceneJson = parsed
+        }
+      } catch (error) {
+        // Fall through to the stub. Failures are deliberately not cached, so
+        // a transient error heals on the next hydration pass.
+      }
+    }
+    scenes.push(...(sceneJson ?? [cloudSceneStub(row)]))
+  }
+  return scenes
+}
+
+/**
+ * Cloud only: a frame refetch (15s fleet poll, hub broadcast) always arrives
+ * without scenes; it must not blank the hydrated tiles for the seconds until
+ * the next hydration lands. Backend frames carry their scenes inline, and a
+ * non-empty incoming list always wins, so this never masks real data.
+ */
+function withStoredCloudScenes(next: FrameType, previous?: FrameType): FrameType {
+  if (!isCloudMode() || next.scenes?.length || !previous?.scenes?.length) {
+    return next
+  }
+  return { ...next, scenes: previous.scenes }
 }
 
 const pendingSdCardImageDownloads = new Set<FrameId>()
@@ -481,6 +543,11 @@ export const framesModel = kea<framesModelType>([
     // frame_not_active until then (POST /api/frames/{id}/confirm).
     confirmCloudFrame: (id: FrameId) => ({ id }),
     confirmCloudFrameFailure: (id: FrameId, error: string) => ({ id, error }),
+    // Cloud only: pull the frame's store-scene assignments + scene JSON into
+    // frame.scenes so the tiles survive a reload. `force` skips the
+    // once-a-minute throttle (used right after an install).
+    hydrateCloudFrameScenes: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    setCloudFrameScenes: (id: FrameId, scenes: FrameScene[]) => ({ id, scenes }),
     deployRemote: (id: FrameId, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
@@ -510,7 +577,7 @@ export const framesModel = kea<framesModelType>([
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              [frame.id]: sanitizeFrameForStore(frame),
+              [frame.id]: withStoredCloudScenes(sanitizeFrameForStore(frame), values.frames[frame.id]),
             }
           } catch (error) {
             console.error(error)
@@ -525,7 +592,10 @@ export const framesModel = kea<framesModelType>([
             }
             const data = await response.json()
             const framesDict = Object.fromEntries(
-              (data.frames as FrameType[]).map((frame) => [frame.id, sanitizeFrameForStore(frame)])
+              (data.frames as FrameType[]).map((frame) => [
+                frame.id,
+                withStoredCloudScenes(sanitizeFrameForStore(frame), values.frames[frame.id]),
+              ])
             )
             return framesDict
           } catch (error) {
@@ -580,6 +650,14 @@ export const framesModel = kea<framesModelType>([
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
         }),
+        setCloudFrameScenes: (state, { id, scenes }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: sanitizeFrameForStore({ ...frame, scenes }),
+          }
+        },
         setDeployWithAgent: (state, { id, deployWithAgent }) => {
           const frame = state[id]
           if (!frame) return state
@@ -630,22 +708,30 @@ export const framesModel = kea<framesModelType>([
         },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: sanitizeFrameForStore(frame),
+          // Cloud hub broadcasts are scene-less frameSummary rows too; keep
+          // the hydrated tiles instead of blanking them until the next poll.
+          [frame.id]: withStoredCloudScenes(sanitizeFrameForStore(frame), state[frame.id]),
         }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: sanitizeFrameForStore({
-            ...(state[frame.id] ?? {}),
-            ...frame,
-            embedded:
-              frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
-                ? {
-                    ...(state[frame.id]?.embedded ?? {}),
-                    ...frame.embedded,
-                    firmware: mergeEmbeddedFirmwareStatus(state[frame.id]?.embedded?.firmware, frame.embedded.firmware),
-                  }
-                : (frame.embedded ?? state[frame.id]?.embedded),
-          }),
+          [frame.id]: withStoredCloudScenes(
+            sanitizeFrameForStore({
+              ...(state[frame.id] ?? {}),
+              ...frame,
+              embedded:
+                frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
+                  ? {
+                      ...(state[frame.id]?.embedded ?? {}),
+                      ...frame.embedded,
+                      firmware: mergeEmbeddedFirmwareStatus(
+                        state[frame.id]?.embedded?.firmware,
+                        frame.embedded.firmware
+                      ),
+                    }
+                  : (frame.embedded ?? state[frame.id]?.embedded),
+            }),
+            state[frame.id]
+          ),
         }),
         [socketLogic.actionTypes.newLog]: (state, { log }) => {
           const frame = state[log.frame_id]
@@ -1122,9 +1208,15 @@ export const framesModel = kea<framesModelType>([
       }
     },
     deleteFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
+      const response = await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
+      }
+      // The backend announces the deletion over its websocket (the reducer
+      // listens for socketLogic.deleteFrame); the cloud has no such event, so
+      // re-list to drop the row now instead of on the next 15 s poll.
+      if (response.ok && isCloudMode()) {
+        actions.loadFrames()
       }
     },
     confirmCloudFrame: async ({ id }) => {
@@ -1140,6 +1232,46 @@ export const framesModel = kea<framesModelType>([
       } catch (error) {
         console.error(error)
         actions.confirmCloudFrameFailure(id, error instanceof Error ? error.message : 'Failed to confirm the frame')
+      }
+    },
+    hydrateCloudFrameScenes: async ({ id, force }) => {
+      if (!isCloudMode() || cloudFrameSceneHydrationsInFlight.has(id)) {
+        return
+      }
+      const hydratedAt = cloudFrameScenesHydratedAt.get(id) ?? 0
+      if (!force && Date.now() - hydratedAt < CLOUD_FRAME_SCENES_REFRESH_MS) {
+        return
+      }
+      cloudFrameSceneHydrationsInFlight.add(id)
+      try {
+        const scenes = await fetchCloudFrameScenes(id)
+        cloudFrameScenesHydratedAt.set(id, Date.now())
+        const frame = values.frames[id]
+        if (!frame) {
+          return
+        }
+        // Only dispatch real changes: every write replaces the frame object,
+        // which cascades into frameLogic's `frame` subscription (frame form
+        // reset) and re-renders every tile — needless churn on a poll where
+        // nothing moved.
+        const sanitized = scenes.map((scene) => sanitizeScene(scene, frame))
+        if (JSON.stringify(frame.scenes ?? []) !== JSON.stringify(sanitized)) {
+          actions.setCloudFrameScenes(id, scenes)
+        }
+      } catch (error) {
+        console.error(error)
+      } finally {
+        cloudFrameSceneHydrationsInFlight.delete(id)
+      }
+    },
+    loadFrameSuccess: ({ frames }) => {
+      if (isCloudMode()) {
+        Object.values(frames).forEach((frame) => actions.hydrateCloudFrameScenes(frame.id))
+      }
+    },
+    loadFramesSuccess: ({ frames }) => {
+      if (isCloudMode()) {
+        Object.values(frames).forEach((frame) => actions.hydrateCloudFrameScenes(frame.id))
       }
     },
     renameFrame: async ({ id, name }) => {
