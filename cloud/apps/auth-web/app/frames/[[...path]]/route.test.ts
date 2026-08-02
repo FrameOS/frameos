@@ -128,6 +128,24 @@ describe("frames SPA shell", () => {
     expect(lines).toContain('cloud_origin: "https://account.frameos.net",');
   });
 
+  it("substitutes the machine's LAN address for a localhost enrollment origin", async () => {
+    // A frame flashed against `pnpm dev` receives cloud_url over serial; if
+    // that is http://localhost:3000 the device dials itself and never
+    // enrolls. The header links keep localhost (the browser is local), but
+    // the enrollment origin swaps in this machine's LAN IPv4.
+    const body = await (await get("http://localhost:3000/frames")).text();
+    const match = body.match(/cloud_origin: "(.*)",/);
+    expect(match).not.toBeNull();
+    const origin = new URL(match![1]!);
+    // Whatever interface the test machine has: an IPv4 that is not loopback,
+    // or (on a machine with no network at all) localhost as the fallback.
+    expect(origin.port).toBe("3000");
+    if (origin.hostname !== "localhost") {
+      expect(origin.hostname).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+      expect(origin.hostname).not.toBe("127.0.0.1");
+    }
+  });
+
   it("sends the deployment's claim-code TTL rather than a hardcoded 24h", async () => {
     const body = await (await get("http://localhost:3000/frames")).text();
     // The default; FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS is read at module load

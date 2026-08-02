@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -22,6 +23,36 @@ export const runtime = "nodejs";
 //     host the admin is browsing through (a tunnel, a LAN IP, 127.0.0.1);
 //   * the claim-code TTL is FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS, so a
 //     hardcoded "24 hours" in the panel would lie on a tuned install.
+const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+// The enrollment origin is written into ESP32 NVS and SD images — a frame on
+// the WiFi then dials it. On a dev server reached as localhost that origin is
+// useless (the frame would dial itself and never connect), so substitute this
+// machine's LAN IPv4, which the device firmware accepts over plain http for
+// private-network hosts. Real hostnames are never touched, and with no LAN
+// address the localhost origin is kept (still correct for wasm previews).
+function enrollmentOrigin(accountOrigin: string): string {
+  const url = new URL(accountOrigin);
+  if (!localHosts.has(url.hostname)) {
+    return accountOrigin;
+  }
+  const addresses = Object.values(networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal)
+    .map((entry) => entry.address);
+  // Prefer RFC1918 space: a machine can also hold carrier or VPN addresses a
+  // frame on the home network cannot reach.
+  const lan =
+    addresses.find((address) =>
+      /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(address),
+    ) ?? addresses[0];
+  if (!lan) {
+    return accountOrigin;
+  }
+  url.hostname = lan;
+  return url.origin;
+}
+
 function appConfigLines(): string[] {
   const accountOrigin = new URL(getAccountBaseUrl()).origin;
   return [
@@ -30,7 +61,7 @@ function appConfigLines(): string[] {
     `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
     `cloud_logout_url: ${JSON.stringify(new URL("/api/auth/logout", getCloudBaseUrl()).toString())},`,
     `cloud_scenes_url: ${JSON.stringify(new URL("/", getScenesBaseUrl()).toString())},`,
-    `cloud_origin: ${JSON.stringify(accountOrigin)},`,
+    `cloud_origin: ${JSON.stringify(enrollmentOrigin(accountOrigin))},`,
     `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
     // The workspace and the account pages are two different apps sharing one
     // theme preference, carried in the frameos_theme cookie. The SPA has to
@@ -121,7 +152,6 @@ export async function GET(request: NextRequest) {
   // Empty counts as unset: FRAME_HUB_PUBLIC_URL= in a .env would otherwise be
   // an empty string, which ?? happily keeps and which silently disables the
   // injection (same trap getHubPort documents for FRAME_HUB_PORT=).
-  const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
   const configuredHub = process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(
     /\/$/,
     "",
