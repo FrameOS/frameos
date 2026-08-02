@@ -14,6 +14,10 @@
  *   cloud_token opaque bearer access token
  *   cloud_fid   provider frame id
  *   cloud_ws    management WebSocket path (e.g. /api/frames/ws)
+ *   cloud_wsurl optional full ws(s):// WebSocket URL from enrollment,
+ *               used instead of cloud_url + cloud_ws when present (dev
+ *               providers whose frame hub is a separate port); held to
+ *               the same transport rule as cloud_url
  *
  * When enrolled and the firmware is built with esp_websocket_client, the
  * management WebSocket session (hello / challenge / auth / ready) runs with

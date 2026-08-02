@@ -71,6 +71,11 @@ static char s_last_error[96] = "";
 static char s_access_token[FOS_CLOUD_TOKEN_LEN] = "";
 static char s_frame_id[FOS_CLOUD_FRAME_ID_LEN] = "";
 static char s_ws_path[FOS_CLOUD_WS_PATH_LEN] = "";
+/* Optional full ws(s):// URL from enrollment: where the management WebSocket
+ * actually lives when that differs from {cloud_url}{ws_path} (a dev provider
+ * whose frame hub is a second process on its own port). Empty = use
+ * cloud_url + ws_path. */
+static char s_ws_url[FOS_URL_LEN] = "";
 static bool s_ws_ready = false;
 static TaskHandle_t s_task = NULL;
 
@@ -182,16 +187,19 @@ static bool host_is_local(const char *host)
 }
 
 /* Split "scheme://host[:port][/path]" into scheme flag + host[:port].
- * Returns false when the URL has no usable http(s) scheme or host. */
-static bool split_cloud_url(const char *url, bool *is_https, char *host, size_t host_len)
+ * Returns false when the URL has neither the secure nor the plain scheme,
+ * or no host. */
+static bool split_scheme_url(const char *url, const char *secure_scheme,
+                             const char *plain_scheme, bool *is_secure,
+                             char *host, size_t host_len)
 {
     const char *rest;
-    if (strncasecmp(url, "https://", 8) == 0) {
-        *is_https = true;
-        rest = url + 8;
-    } else if (strncasecmp(url, "http://", 7) == 0) {
-        *is_https = false;
-        rest = url + 7;
+    if (strncasecmp(url, secure_scheme, strlen(secure_scheme)) == 0) {
+        *is_secure = true;
+        rest = url + strlen(secure_scheme);
+    } else if (strncasecmp(url, plain_scheme, strlen(plain_scheme)) == 0) {
+        *is_secure = false;
+        rest = url + strlen(plain_scheme);
     } else {
         return false;
     }
@@ -218,31 +226,51 @@ static void host_only(const char *hostport, char *out, size_t out_len)
     if (colon && strchr(out, ':') == colon) *colon = '\0';
 }
 
-bool fos_cloud_url_transport_ok(const char *url, const char **reason)
+/* One transport rule for both wire shapes: the secure scheme (https/wss) is
+ * fine anywhere; the plain one (http/ws) only for the dev hosts
+ * host_is_local() accepts. */
+static bool url_transport_ok(const char *url, bool ws, const char **reason)
 {
     const char *why = NULL;
-    bool is_https = false;
+    bool is_secure = false;
     char hostport[FOS_URL_LEN];
     char host[FOS_URL_LEN];
     bool ok = false;
 
     if (!url || !url[0]) {
         why = "empty";
-    } else if (!split_cloud_url(url, &is_https, hostport, sizeof(hostport))) {
-        why = "must be an http:// or https:// URL";
-    } else if (is_https) {
+    } else if (!split_scheme_url(url, ws ? "wss://" : "https://",
+                                 ws ? "ws://" : "http://", &is_secure,
+                                 hostport, sizeof(hostport))) {
+        why = ws ? "must be a ws:// or wss:// URL"
+                 : "must be an http:// or https:// URL";
+    } else if (is_secure) {
         ok = true;
     } else {
         host_only(hostport, host, sizeof(host));
         if (host_is_local(host)) {
             ok = true;
         } else {
-            why = "http:// is allowed only for localhost, .local and "
-                  "private-network hosts (development)";
+            why = ws ? "ws:// is allowed only for localhost, .local and "
+                       "private-network hosts (development)"
+                     : "http:// is allowed only for localhost, .local and "
+                       "private-network hosts (development)";
         }
     }
     if (reason) *reason = why;
     return ok;
+}
+
+bool fos_cloud_url_transport_ok(const char *url, const char **reason)
+{
+    return url_transport_ok(url, false, reason);
+}
+
+/* Enrollment's optional ws_url override (docs/cloud-frames.md): a full
+ * WebSocket URL, held to the same rule as cloud_url. */
+static bool ws_url_transport_ok(const char *url, const char **reason)
+{
+    return url_transport_ok(url, true, reason);
 }
 
 /* ------------------------------------------------------------------ crypto */
@@ -469,6 +497,18 @@ static esp_err_t enroll_once(bool *permanent)
             ws_path[0] != '/') {
             strlcpy(ws_path, "/api/frames/ws", sizeof(ws_path));
         }
+        /* Optional ws_url: a full ws(s):// URL used INSTEAD of
+         * cloud_url + ws_path (dev providers whose frame hub is a separate
+         * port). Same transport rule as cloud_url — an override that fails
+         * it is dropped here, before it can be persisted or dialed. */
+        char ws_url[FOS_URL_LEN] = "";
+        if (json_field_str(json, "ws_url", ws_url, sizeof(ws_url))) {
+            const char *why = NULL;
+            if (!ws_url_transport_ok(ws_url, &why)) {
+                ESP_LOGW(TAG, "enroll: ignoring ws_url: %s", why ? why : "invalid");
+                ws_url[0] = '\0';
+            }
+        }
         cJSON_Delete(json);
         if (missing) {
             char detail[sizeof(s_last_error)];
@@ -479,19 +519,25 @@ static esp_err_t enroll_once(bool *permanent)
         }
         if (nvs_store_str("cloud_token", token) != ESP_OK ||
             nvs_store_str("cloud_fid", frame_id) != ESP_OK ||
-            nvs_store_str("cloud_ws", ws_path) != ESP_OK) {
+            nvs_store_str("cloud_ws", ws_path) != ESP_OK ||
+            (ws_url[0] && nvs_store_str("cloud_wsurl", ws_url) != ESP_OK)) {
             set_last_error("nvs write failed");
             crypto_wipe(token, sizeof(token));
             return ESP_FAIL;
         }
+        /* A re-enrollment whose provider stopped sending ws_url must not
+         * keep dialing a stale override from a previous life. */
+        if (!ws_url[0]) nvs_erase_key_quiet("cloud_wsurl");
         strlcpy(s_access_token, token, sizeof(s_access_token));
         strlcpy(s_frame_id, frame_id, sizeof(s_frame_id));
         strlcpy(s_ws_path, ws_path, sizeof(s_ws_path));
+        strlcpy(s_ws_url, ws_url, sizeof(s_ws_url));
         crypto_wipe(token, sizeof(token));
         erase_claim_token();
         set_last_error("");
-        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s (claim token erased)",
-                 s_frame_id[0] ? s_frame_id : "?", s_ws_path);
+        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s%s%s (claim token erased)",
+                 s_frame_id[0] ? s_frame_id : "?", s_ws_path,
+                 s_ws_url[0] ? " ws_url=" : "", s_ws_url);
         return ESP_OK;
     }
 
@@ -1072,8 +1118,21 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
  * management session cannot silently go over the open internet in the clear. */
 static bool build_ws_uri(void)
 {
-    const fos_config_t *config = fos_config();
     const char *why = NULL;
+    /* Enrollment's ws_url override wins when present. It was validated once
+     * at enrollment, but it also survives reboots in NVS — re-check at every
+     * dial so a corrupted or tampered value still cannot carry the bearer
+     * token over the open internet in the clear. */
+    if (s_ws_url[0]) {
+        if (!ws_url_transport_ok(s_ws_url, &why)) {
+            ESP_LOGE(TAG, "ws: refusing to dial ws_url: %s", why ? why : "invalid");
+            set_last_error("ws_url refused (needs wss)");
+            return false;
+        }
+        strlcpy(s_ws_uri, s_ws_url, sizeof(s_ws_uri));
+        return true;
+    }
+    const fos_config_t *config = fos_config();
     if (!fos_cloud_url_transport_ok(config->cloud_url, &why)) {
         ESP_LOGE(TAG, "ws: refusing to dial cloud_url: %s", why ? why : "invalid");
         set_last_error("cloud_url refused (needs https)");
@@ -1081,7 +1140,10 @@ static bool build_ws_uri(void)
     }
     bool is_https = false;
     char host[FOS_URL_LEN];
-    if (!split_cloud_url(config->cloud_url, &is_https, host, sizeof(host))) return false;
+    if (!split_scheme_url(config->cloud_url, "https://", "http://", &is_https,
+                          host, sizeof(host))) {
+        return false;
+    }
     /* host keeps its :port; ws_path is absolute so any base path is dropped. */
     snprintf(s_ws_uri, sizeof(s_ws_uri), "%s://%s%s", is_https ? "wss" : "ws", host,
              s_ws_path);
@@ -1091,7 +1153,7 @@ static bool build_ws_uri(void)
 static void ws_start(void)
 {
     if (s_ws_client) return;
-    if (!s_access_token[0] || !s_ws_path[0]) return;
+    if (!s_access_token[0] || (!s_ws_path[0] && !s_ws_url[0])) return;
     if (!build_ws_uri()) return;
     snprintf(s_ws_headers, sizeof(s_ws_headers), "Authorization: Bearer %s\r\n",
              s_access_token);
@@ -1121,8 +1183,13 @@ static void ws_start(void)
         s_ws_client = NULL;
         return;
     }
-    ESP_LOGI(TAG, "ws: dialing %s://…%s", strncmp(s_ws_uri, "wss", 3) == 0 ? "wss" : "ws",
-             s_ws_path);
+    {
+        /* Host elided (it may be a private admin detail); scheme + path only. */
+        bool wss = strncmp(s_ws_uri, "wss", 3) == 0;
+        const char *dial_path = strchr(s_ws_uri + (wss ? 6 : 5), '/');
+        ESP_LOGI(TAG, "ws: dialing %s://…%s", wss ? "wss" : "ws",
+                 dial_path ? dial_path : "");
+    }
     /* TODO(cloud-frames): ship log batches under telemetry:logs; apply
      * set_settings/set_schedule for the declarative allowlist. */
 }
@@ -1179,9 +1246,11 @@ static void cloud_demote(const char *reason)
     nvs_erase_key_quiet("cloud_token");
     nvs_erase_key_quiet("cloud_fid");
     nvs_erase_key_quiet("cloud_ws");
+    nvs_erase_key_quiet("cloud_wsurl");
     crypto_wipe(s_access_token, sizeof(s_access_token));
     memset(s_frame_id, 0, sizeof(s_frame_id));
     memset(s_ws_path, 0, sizeof(s_ws_path));
+    memset(s_ws_url, 0, sizeof(s_ws_url));
     s_state = FOS_CLOUD_ERROR;
     set_last_error(reason);
     ESP_LOGW(TAG, "cloud link demoted to standalone: %s", reason);
@@ -1195,6 +1264,7 @@ static void load_stored_state(void)
     nvs_load_str("cloud_token", s_access_token, sizeof(s_access_token));
     nvs_load_str("cloud_fid", s_frame_id, sizeof(s_frame_id));
     nvs_load_str("cloud_ws", s_ws_path, sizeof(s_ws_path));
+    nvs_load_str("cloud_wsurl", s_ws_url, sizeof(s_ws_url));
     if (s_access_token[0]) {
         s_state = FOS_CLOUD_ENROLLED;
     } else if (config->cloud_url[0] && config->claim_token[0]) {
