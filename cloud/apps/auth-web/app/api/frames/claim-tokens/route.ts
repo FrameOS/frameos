@@ -13,6 +13,7 @@ import {
   claimTokenPrefix,
   countActiveClaimTokens,
   countFramesForAccount,
+  evictOldestUnusedClaimTokens,
   maxClaimTokensPerAccount,
   maxFramesPerAccount,
   sweepExpiredClaimTokens,
@@ -31,8 +32,12 @@ export async function POST(request: NextRequest) {
   if (csrf) {
     return csrf;
   }
+  // Has to stay above the outstanding-code cap, or an account cannot reach a
+  // quota it is allowed to hold. Abuse is bounded by the cap itself (and by
+  // recycling, which makes hammering this endpoint pointless), so the rate
+  // limit only needs to stop a runaway loop.
   const limited = await rateLimitResponse(request, "frames:claim-tokens", {
-    limit: 30,
+    limit: Math.max(30, maxClaimTokensPerAccount + 10),
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {
@@ -69,11 +74,35 @@ export async function POST(request: NextRequest) {
   }
 
   await sweepExpiredClaimTokens(db, session.accountId);
-  if (
-    (await countActiveClaimTokens(db, session.accountId)) >=
-    maxClaimTokensPerAccount
-  ) {
-    return jsonError("claim_token_quota_exceeded", 403);
+  let active = await countActiveClaimTokens(db, session.accountId);
+  if (active >= maxClaimTokensPerAccount) {
+    // At the cap, recycle: a hashed code that was never used is one nobody can
+    // read back anyway, so the oldest of those gives way to the one being
+    // minted now. Only multi-use codes (SD images, possibly already flashed)
+    // are held, so an account whose cap is entirely those still gets the
+    // error — with the count, so the message can say something actionable.
+    const freed = await evictOldestUnusedClaimTokens(
+      db,
+      session.accountId,
+      active - maxClaimTokensPerAccount + 1,
+    );
+    if (freed > 0) {
+      await recordAuditEvent(db, {
+        accountId: session.accountId,
+        actor: {
+          accountId: session.accountId,
+          providerSubject: session.providerSubject,
+        },
+        eventType: "frame.claim_tokens_recycled",
+        metadata: { freed },
+      });
+    }
+    active -= freed;
+    if (active >= maxClaimTokensPerAccount) {
+      return jsonError("claim_token_quota_exceeded", 403, {
+        max_claim_tokens: maxClaimTokensPerAccount,
+      });
+    }
   }
   if (
     (await countFramesForAccount(db, session.accountId)) >= maxFramesPerAccount

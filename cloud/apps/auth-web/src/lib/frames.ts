@@ -30,14 +30,46 @@ export type FramesDatabase =
   | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export const claimTokenPrefix = "FRCT";
-export const claimTokenTtlMs = 24 * 60 * 60 * 1000;
 // Base scope for a cloud-managed frame; telemetry scopes are opt-in.
 export const frameManagedScope = "frame:managed";
 export const frameTelemetryLogsScope = "telemetry:logs";
 export const frameTelemetryMetricsScope = "telemetry:metrics";
 
-export const maxFramesPerAccount = 20;
-export const maxClaimTokensPerAccount = 20;
+// Deployment-tunable limits. A self-hoster with 60 frames, or a developer
+// re-opening "Add frame" all afternoon, should not have to patch the source.
+// Read once at module load: they are used as plain values throughout, and a
+// limit that changes mid-process would be worse than one that needs a restart.
+function limitFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    // Don't fail the boot over a typo'd limit, but don't silently run with a
+    // nonsense one either.
+    console.warn(
+      `${name}="${raw}" is not a positive integer; using default ${fallback}`,
+    );
+    return fallback;
+  }
+  return parsed;
+}
+
+export const maxFramesPerAccount = limitFromEnv(
+  "FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT",
+  50,
+);
+// Outstanding unused claim codes. This bounds how many enrollment secrets can
+// be live at once; it is not a product limit, so when an account reaches it we
+// evict its oldest unused single-use code rather than refuse (see
+// makeRoomForClaimToken) — the bound holds either way.
+export const maxClaimTokensPerAccount = limitFromEnv(
+  "FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT",
+  50,
+);
+export const claimTokenTtlMs =
+  limitFromEnv("FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS", 24) * 60 * 60 * 1000;
 // Hard per-frame log retention cap. Retained bytes count toward the
 // account's storage usage; db-cleanup.sh prunes by age as well.
 export const maxLogsPerFrame = 5000;
@@ -545,6 +577,52 @@ export async function sweepExpiredClaimTokens(
         lt(frameEnrollmentTokens.expiresAt, new Date()),
       ),
     );
+}
+
+// Make room for one more claim code when the account is at its cap, by
+// deleting the oldest never-used single-use codes.
+//
+// Codes are stored only as hashes, so an outstanding one can never be shown
+// again — "reuse the code you already have" is impossible by construction, and
+// every visit to "Add frame" that mints one is a code nobody can retrieve.
+// Refusing at the cap therefore locks the account out for a full TTL over
+// codes that were already unusable. Evicting keeps the same bound on live
+// secrets and only invalidates the code least likely to be in flight.
+//
+// Multi-use codes are never evicted: those back SD-card images that may have
+// been flashed to hardware already, where the code IS the enrollment path.
+// Returns the number of codes freed.
+export async function evictOldestUnusedClaimTokens(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+  wanted: number,
+) {
+  if (wanted < 1) {
+    return 0;
+  }
+  const evictable = await db
+    .select({ id: frameEnrollmentTokens.id })
+    .from(frameEnrollmentTokens)
+    .where(
+      and(
+        eq(frameEnrollmentTokens.accountId, accountId),
+        eq(frameEnrollmentTokens.maxUses, 1),
+        eq(frameEnrollmentTokens.useCount, 0),
+        gt(frameEnrollmentTokens.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(asc(frameEnrollmentTokens.createdAt))
+    .limit(wanted);
+  if (evictable.length === 0) {
+    return 0;
+  }
+  await db.delete(frameEnrollmentTokens).where(
+    inArray(
+      frameEnrollmentTokens.id,
+      evictable.map((row) => row.id),
+    ),
+  );
+  return evictable.length;
 }
 
 export async function countActiveClaimTokens(

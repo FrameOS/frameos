@@ -8,6 +8,7 @@ import {
 import { AddFramePanel } from "../../../src/components/AddFramePanel";
 import { FrameRowActions } from "../../../src/components/FrameRowActions";
 import { formatBytes, formatDateTime } from "../../../src/lib/format";
+import { claimTokenTtlMs } from "../../../src/lib/frames";
 import { readSession } from "../../../src/lib/session";
 
 export const metadata = { title: "My frames" };
@@ -72,7 +73,9 @@ export default async function AccountFramesPage() {
           </p>
         </div>
         <div className="inline-actions">
-          <AddFramePanel />
+          <AddFramePanel
+            claimTokenTtlHours={Math.round(claimTokenTtlMs / (60 * 60 * 1000))}
+          />
         </div>
       </div>
 

@@ -18,15 +18,16 @@ import { SdImageBuilder } from "./SdImageBuilder";
 const openParam = "add";
 const openValue = "frame";
 
-// Mirrors claimTokenTtlMs in src/lib/frames.ts, which cannot be imported here:
-// that module pulls in the database client. Copy only, used for wording.
-const claimTokenTtlHours = 24;
-
 // Known error codes from POST /api/frames/claim-tokens. "Could not prepare the
 // enrollment" plus a raw code told the user nothing, and the old hint ("check
 // whether you hit the frame limit") was actively wrong for a claim-code quota.
+//
+// Unused single-use codes are recycled automatically at the cap, so reaching
+// this one means the cap is full of multi-use SD-image codes — which are held
+// deliberately, because a flashed card may still be waiting to enrol.
 const mintErrorMessages: Record<string, string> = {
-  claim_token_quota_exceeded: `You have too many unused claim codes. Use one, or wait for them to expire (within ${claimTokenTtlHours} hours), then try again.`,
+  claim_token_quota_exceeded:
+    "Every outstanding claim code belongs to an SD-card image, so none can be recycled. Enrol or expire one of those images before adding another frame.",
   frame_quota_exceeded:
     "You have reached your frame limit — remove a frame before adding another.",
   login_required: "Your session expired. Sign in again to add a frame.",
@@ -40,7 +41,14 @@ const mintErrorMessages: Record<string, string> = {
 // costs zero codes; the SD builder and the ESP32 flasher likewise mint their
 // own on first use. The server stores only hashes; every enrolled frame
 // appears as pending until the owner confirms it.
-export function AddFramePanel() {
+interface AddFramePanelProps {
+  // Passed in from the server page: the TTL is deployment-configurable
+  // (FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS), and this is a client component, so
+  // hardcoding 24 here would quietly lie on any tuned install.
+  claimTokenTtlHours: number;
+}
+
+export function AddFramePanel({ claimTokenTtlHours }: AddFramePanelProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -263,9 +271,8 @@ export function AddFramePanel() {
               </button>
               <p className="copy">
                 Generating fills in a single-use claim code. Codes expire
-                within {claimTokenTtlHours} hours and an account can only hold
-                a few unused ones at a time, so we create one only when you
-                ask.
+                within {claimTokenTtlHours} hours, so we create one only when
+                you ask.
               </p>
             </>
           )}

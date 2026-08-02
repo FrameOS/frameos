@@ -223,6 +223,31 @@ FRAMEOS_SCENES_APP_URL=http://localhost:3000
 That intentionally leaves host routing disabled, so `pnpm dev` still serves
 the complete app on one localhost port exactly as before.
 
+## Frame limits
+
+Per-account limits for cloud-managed frames, all optional:
+
+```text
+FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=50       # enrolled frames
+FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT=50 # outstanding unused claim codes
+FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS=24        # how long a claim code lives
+```
+
+Values are read at startup; a non-integer or non-positive value logs a warning
+and falls back to the default rather than failing the boot.
+
+The claim-code cap bounds how many enrollment secrets can be live at once. It
+is not a product limit: codes are stored only as hashes, so an outstanding one
+can never be shown to the user again, and refusing at the cap would lock an
+account out for a full TTL over codes nobody could use. Reaching the cap
+therefore recycles the account's oldest never-used single-use code instead of
+erroring. Multi-use codes — the ones behind SD-card images, which may already
+be flashed to hardware — are never recycled, so an account whose cap is
+entirely SD-image codes does still get `claim_token_quota_exceeded`.
+
+Raising `FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT` also raises the budget of a
+multi-use SD-image code, which is capped at the frame limit.
+
 ## DNS and Reverse Proxy
 
 Create DNS records and TLS certificates for all three hostnames, then send them to

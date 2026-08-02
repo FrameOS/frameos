@@ -30,6 +30,7 @@ import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/set
 import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
 import {
   allowedFrameSettings,
+  maxClaimTokensPerAccount,
   maxFramesPerAccount,
   maxScenesPayloadBytes,
   verifyFrameSignature,
@@ -374,6 +375,66 @@ describe("cloud-managed frame enrollment", () => {
       postJson("/api/frames/claim-tokens", { max_uses: 0 }, { origin: baseUrl }),
     );
     expect(badMint.status).toBe(400);
+  });
+
+  it("recycles the oldest unused claim code at the cap instead of locking the account out", async () => {
+    const accountId = await signIn();
+    // Codes are stored hashed, so an outstanding one can never be shown again.
+    // Filling the cap with unused single-use codes must not block minting.
+    const minted: string[] = [];
+    for (let index = 0; index < maxClaimTokensPerAccount; index += 1) {
+      minted.push(await mintToken(`code ${index}`));
+    }
+    const before = await db
+      .select()
+      .from(frameEnrollmentTokens)
+      .where(eq(frameEnrollmentTokens.accountId, accountId));
+    expect(before).toHaveLength(maxClaimTokensPerAccount);
+
+    const next = await mintToken("one more");
+    expect(next.startsWith("FRCT_")).toBe(true);
+
+    // Still bounded, and it is the OLDEST code that gave way.
+    const after = await db
+      .select()
+      .from(frameEnrollmentTokens)
+      .where(eq(frameEnrollmentTokens.accountId, accountId));
+    expect(after).toHaveLength(maxClaimTokensPerAccount);
+    const survivingHashes = new Set(after.map((row) => row.tokenHash));
+    expect(survivingHashes.has(hashSecret(minted[0]!))).toBe(false);
+    expect(survivingHashes.has(hashSecret(minted[1]!))).toBe(true);
+    expect(survivingHashes.has(hashSecret(next))).toBe(true);
+
+    // The recycled code is genuinely dead.
+    const stale = await enroll(minted[0]!, deviceKeypair().publicKeyBase64);
+    expect(stale.status).toBe(400);
+    expect(((await stale.json()) as { error: string }).error).toBe(
+      "invalid_claim_token",
+    );
+  });
+
+  it("never recycles a multi-use SD-image code, and says so when the cap is all images", async () => {
+    await signIn();
+    // A flashed card may still be waiting to enrol; those codes are the
+    // enrollment path, so they are held even at the cap.
+    for (let index = 0; index < maxClaimTokensPerAccount; index += 1) {
+      const response = await mintClaimToken(
+        postJson(
+          "/api/frames/claim-tokens",
+          { max_uses: 2, name: `image ${index}` },
+          { origin: baseUrl },
+        ),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const refused = await mintClaimToken(
+      postJson("/api/frames/claim-tokens", {}, { origin: baseUrl }),
+    );
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "claim_token_quota_exceeded",
+    );
   });
 
   it("rejects garbage public keys and unknown claim tokens", async () => {
