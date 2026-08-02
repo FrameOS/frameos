@@ -112,8 +112,31 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // The default 24h expiry suits a token consumed during one add-frame flow,
+  // but a multi-use code baked into an SD image is a long-lived artifact —
+  // cards get flashed weeks later. Numeric values are bounded at a year;
+  // "forever" mints a code that outlives any plausible deployment (100
+  // years — the expires_at column stays non-null so sweep/redeem logic is
+  // untouched). Expiry is what limits how long a leaked image keeps
+  // enrolling, but each enrollment still needs owner confirmation and the
+  // frame quota caps the blast radius, so opting out is a fair trade.
+  let ttlMs: number | undefined;
+  if (body.ttl_days === "forever") {
+    ttlMs = 100 * 365 * 24 * 60 * 60 * 1000;
+  } else if (body.ttl_days !== undefined) {
+    if (
+      typeof body.ttl_days !== "number" ||
+      !Number.isInteger(body.ttl_days) ||
+      body.ttl_days < 1 ||
+      body.ttl_days > 365
+    ) {
+      return jsonError("invalid_ttl_days", 400);
+    }
+    ttlMs = body.ttl_days * 24 * 60 * 60 * 1000;
+  }
+
   const token = createSecretToken(claimTokenPrefix, 24);
-  const expiresAt = claimTokenExpiry();
+  const expiresAt = ttlMs ? new Date(Date.now() + ttlMs) : claimTokenExpiry();
   const [row] = await db
     .insert(frameEnrollmentTokens)
     .values({

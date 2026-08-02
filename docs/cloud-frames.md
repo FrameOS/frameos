@@ -281,6 +281,12 @@ claim_token=FRCT_…
 name=Kitchen frame
 wifi_ssid=…            # optional; omitted by default
 wifi_password=…        # optional
+device=waveshare.EPD_13in3e   # optional display driver (frame.json device key)
+width=1600             # optional, with device
+height=1200            # optional, with device
+rotate=90              # optional: 0/90/180/270
+vcom=-1.48             # optional (IT8951-style panels)
+upload_url=https://…   # optional; required by device=http.upload
 ```
 
 Parsing is deliberately forgiving: `KEY=value` lines, `#` comments, blank
@@ -294,6 +300,19 @@ typo'd manual edit) is kept in place with a loud warning and no enrollment:
 `/boot` is mounted root-only (`umask=077`) so nothing leaks, and shredding
 would destroy the user's only copy of what they typed instead of letting
 them fix the key names and reboot.
+
+The display keys work because release images ship *every* compiled display
+driver as a shared library — selecting one is a `frame.json` edit, not a
+rebuild. When `device` is present, first boot patches `frame.json`
+(`device`, `width`, `height`, `rotate`, `deviceConfig.vcom`,
+`deviceConfig.uploadUrl`) and runs `frameos driver-setup
+--reboot-if-required` after the shred (driver setup may edit
+`/boot/config.txt` and reboot, and a reboot must not replay
+personalization). Invalid numbers refuse the whole display patch — the
+frame boots with its previous display config and the setup portal remains
+the fallback. Images from releases before these keys existed log
+"Ignoring unknown key" and enroll normally, so providers may always write
+them.
 
 **Placeholder + in-browser personalization.** Release images ship the file
 pre-created as an all-comments placeholder of exactly **4096 bytes**, first
@@ -372,17 +391,21 @@ WiFi) into the device's NVS config partition. Same enrollment flow A over the
 device's own network connection afterwards. The firmware binaries come from
 the release archive; the flasher never receives per-user builds.
 
-**"Generic" means credential-generic, not hardware-generic.** The ESP32
-component compiles exactly one display driver into an image (the panel is
-selected at configure time), so a published image is generic in that it
-carries no user, account or WiFi data — but it is built for one panel family
-and one flash-size profile. The release archive therefore publishes one
-artifact per (board, flash profile, panel) combination and the flasher page
-must let the user pick their panel, or offer only the panels it has images
-for; flashing an image built for another panel gives a device that boots,
-enrolls, and renders nothing usable. Artifact file names are an
-implementation detail of the release archive — read them from the release
-metadata rather than constructing them.
+**"Generic" means credential- and panel-generic.** A published image carries
+no user, account or WiFi data, and it compiles in every supported Waveshare
+panel driver: the active panel is selected at runtime from the device's
+config (`set panel <key>` over the serial console — the same allowlisted
+channel the flasher already drives — or the setup portal dropdown, which
+lists every compiled panel). The image is still built for one flash-size
+profile, so the release archive publishes one artifact per (board, flash
+profile) combination; the flasher page selects the flash profile and then
+provisions the panel key over serial instead of picking a per-panel binary.
+The generic image boots with `EPD_7in5_V2` as the default panel for backward
+compatibility. Artifact file names are an implementation detail of the
+release archive — read them from the release metadata rather than
+constructing them. (Transitional: the generic binary is published as
+`…-esp32-s3-generic.bin`, with an identical copy under the legacy
+`…-esp32-s3-epd7in5v2.bin` name for one release cycle.)
 
 Concretely, the firmware exposes these as allowlisted keys on the
 existing USB serial console (`set cloud_url …`, `set claim_token …`,

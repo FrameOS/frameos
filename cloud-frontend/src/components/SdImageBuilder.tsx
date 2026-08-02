@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudConfig } from '../lib/sd-image-patch'
+import { fetchReleaseListing } from '../lib/release-lookup'
 
 // "Download SD image" for cloud-managed Raspberry Pi frames
 // (docs/cloud-frames.md, "Placeholder + in-browser personalization"): the
@@ -28,6 +29,81 @@ const knownBoards = [
   { label: 'Raspberry Pi Zero 2 W', platform: 'raspberry-pi-zero-2-w' },
   { label: 'Raspberry Pi Zero W', platform: 'raspberry-pi-zero-w' },
 ] as const
+
+// The curated display list mirrors the install script's menu
+// (scripts/frameos-setup.sh, choose_device). The release image ships every
+// compiled driver, so this choice is written into the image's frameos-cloud.txt
+// and applied on first boot — "custom" accepts any device key the frame
+// understands. Empty device = decide later in the on-device setup portal.
+const displayChoices = [
+  { label: 'Pick the display later (FrameOS-Setup portal)', value: '' },
+  { height: 480, label: 'Web preview only (no display)', value: 'web_only', width: 800 },
+  { label: 'HDMI / Linux framebuffer', value: 'framebuffer' },
+  { height: 480, label: 'HTTP upload (POST rendered PNG)', value: 'http.upload', width: 800 },
+  { height: 480, label: 'Pimoroni Inky Impression 7.3" (2025)', value: 'pimoroni.inky_impression_7_2025', width: 800 },
+  {
+    height: 1200,
+    label: 'Pimoroni Inky Impression 13.3" (2025)',
+    value: 'pimoroni.inky_impression_13_2025',
+    width: 1600,
+  },
+  { height: 480, label: 'Waveshare 7.3" E (Spectra 6)', value: 'waveshare.EPD_7in3e', width: 800 },
+  { height: 1200, label: 'Waveshare 13.3" E (Spectra 6)', value: 'waveshare.EPD_13in3e', width: 1600 },
+  { height: 480, label: 'Waveshare 7.5" V2 (black/white)', value: 'waveshare.EPD_7in5_V2', width: 800 },
+  { height: 480, label: 'Waveshare PhotoPainter (7.3" E)', value: 'waveshare.rpi_zero_photopainter_7in3e', width: 800 },
+  { label: 'Custom device key…', value: 'custom' },
+] as const
+
+const rotationChoices = ['0', '90', '180', '270'] as const
+
+// How long the multi-use claim code embedded in the image accepts new frames.
+// Expiry only gates NEW enrollments — frames already confirmed stay connected.
+// 'forever' mints a code that never expires (every enrollment still needs
+// owner confirmation, and the frame quota bounds a leaked image).
+const claimValidityChoices = [
+  { label: '1 day', value: '1' },
+  { label: '1 week', value: '7' },
+  { label: '3 months (default)', value: '90' },
+  { label: '1 year', value: '365' },
+  { label: 'Forever', value: 'forever' },
+] as const
+const defaultClaimValidity = '90'
+
+// "Remember WiFi" keeps the credentials in this browser only (localStorage) —
+// they still never reach the server.
+const wifiStorageKey = 'frameos-sd-image-wifi'
+
+function loadRememberedWifi(): { password: string; ssid: string } | undefined {
+  try {
+    const raw = localStorage.getItem(wifiStorageKey)
+    if (!raw) {
+      return undefined
+    }
+    const parsed = JSON.parse(raw) as { password?: unknown; ssid?: unknown }
+    if (typeof parsed.ssid !== 'string' || typeof parsed.password !== 'string') {
+      return undefined
+    }
+    return { password: parsed.password, ssid: parsed.ssid }
+  } catch {
+    return undefined
+  }
+}
+
+function storeRememberedWifi(ssid: string, password: string): void {
+  try {
+    localStorage.setItem(wifiStorageKey, JSON.stringify({ password, ssid }))
+  } catch {
+    // Storage full or blocked — remembering is best-effort.
+  }
+}
+
+function clearRememberedWifi(): void {
+  try {
+    localStorage.removeItem(wifiStorageKey)
+  } catch {
+    // Ditto.
+  }
+}
 
 interface FirmwareAsset {
   name: string
@@ -109,13 +185,23 @@ export function SdImageBuilder({
   // browsing through (a tunnel, a LAN IP, 127.0.0.1 vs localhost). The panel
   // above resolves it from the shell config the server injects.
   cloudOrigin: string
-  mintClaimToken: (opts: { multiUse: boolean }) => Promise<string>
+  mintClaimToken: (opts: { multiUse: boolean; ttlDays?: number | 'forever' }) => Promise<string>
 }): ReactElement {
   const [release, setRelease] = useState<ReleaseState>({ status: 'loading' })
   const [platform, setPlatform] = useState('')
   const [frameName, setFrameName] = useState('')
-  const [wifiSsid, setWifiSsid] = useState('')
-  const [wifiPassword, setWifiPassword] = useState('')
+  const remembered = useRef(loadRememberedWifi()).current
+  const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
+  const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
+  const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
+  const [displayChoice, setDisplayChoice] = useState<string>('')
+  const [customDevice, setCustomDevice] = useState('')
+  const [width, setWidth] = useState('')
+  const [height, setHeight] = useState('')
+  const [rotate, setRotate] = useState('0')
+  const [vcom, setVcom] = useState('')
+  const [uploadUrl, setUploadUrl] = useState('')
+  const [claimValidity, setClaimValidity] = useState<string>(defaultClaimValidity)
   const [phase, setPhase] = useState<BuildPhase>('idle')
   const [status, setStatus] = useState('')
   const [progressBytes, setProgressBytes] = useState(0)
@@ -139,14 +225,10 @@ export function SdImageBuilder({
     let cancelled = false
     async function loadRelease(): Promise<void> {
       try {
-        const response = await fetch(firmwareApiUrl)
-        if (!response.ok) {
-          throw new Error(`Release lookup failed (${response.status})`)
-        }
-        const data = (await response.json()) as {
+        const data = await fetchReleaseListing<{
           assets?: FirmwareAsset[]
           release?: string
-        }
+        }>(firmwareApiUrl)
         if (cancelled) {
           return
         }
@@ -191,6 +273,51 @@ export function SdImageBuilder({
     setPhase('error')
   }
 
+  const device = displayChoice === 'custom' ? customDevice.trim() : displayChoice
+  const showCustomDevice = displayChoice === 'custom'
+  // vcom only matters for panels whose driver reads it (IT8951-style, e.g.
+  // waveshare.EPD_10in3) — none of the curated list does, so it only shows
+  // for custom keys instead of cluttering every Waveshare pick.
+  const showVcom = displayChoice === 'custom'
+  const showUploadUrl = displayChoice === 'custom' || device === 'http.upload'
+  const showDisplayDetails = displayChoice !== ''
+
+  function pickDisplay(value: string): void {
+    setDisplayChoice(value)
+    const choice = displayChoices.find((entry) => entry.value === value)
+    // Prefill the panel's native dimensions; clear them when they are
+    // unknown (framebuffer autodetects, custom is anyone's guess).
+    setWidth(choice && 'width' in choice && choice.width ? String(choice.width) : '')
+    setHeight(choice && 'height' in choice && choice.height ? String(choice.height) : '')
+  }
+
+  // Returns an error message, or undefined when the display inputs are sane.
+  // Validated before the save dialog opens: a half-built image is worse than
+  // refusing up front.
+  function displayInputError(): string | undefined {
+    if (!showDisplayDetails) {
+      return undefined
+    }
+    if (showCustomDevice && !device) {
+      return 'Enter the custom device key (e.g. waveshare.EPD_2in13_V4).'
+    }
+    for (const [value, label] of [
+      [width, 'Display width'],
+      [height, 'Display height'],
+    ] as const) {
+      if (value && !/^[1-9][0-9]{0,4}$/.test(value)) {
+        return `${label} must be a whole number of pixels.`
+      }
+    }
+    if (vcom && !/^-?[0-9]+(\.[0-9]+)?$/.test(vcom)) {
+      return 'VCOM must be a number like -1.48 (printed on the panel’s flex cable).'
+    }
+    if (device === 'http.upload' && !uploadUrl.trim()) {
+      return 'HTTP upload needs the URL to POST rendered images to.'
+    }
+    return undefined
+  }
+
   async function build(): Promise<void> {
     if (busyRef.current || release.status !== 'ready') {
       return
@@ -211,6 +338,19 @@ export function SdImageBuilder({
       sanitizeConfigValue(frameName, 'Frame name')
       sanitizeConfigValue(wifiSsid, 'WiFi network name')
       sanitizeConfigValue(wifiPassword, 'WiFi password')
+      sanitizeConfigValue(device, 'Display device')
+      sanitizeConfigValue(uploadUrl.trim(), 'Upload URL')
+      const displayError = displayInputError()
+      if (displayError) {
+        failWith(displayError)
+        busyRef.current = false
+        return
+      }
+      if (rememberWifi && wifiSsid) {
+        storeRememberedWifi(wifiSsid, wifiPassword)
+      } else {
+        clearRememberedWifi()
+      }
 
       // Gzipped output: Raspberry Pi Imager and balenaEtcher both read
       // .img.gz directly, it downloads ~10x smaller, and browsers don't flag
@@ -243,12 +383,21 @@ export function SdImageBuilder({
       let token = claimToken
       if (!token) {
         setStatus('Creating a multi-use claim code…')
-        token = await mintClaimToken({ multiUse: true })
+        token = await mintClaimToken({
+          multiUse: true,
+          ttlDays: claimValidity === 'forever' ? 'forever' : Number(claimValidity),
+        })
       }
       const configBytes = renderCloudConfig({
         claimToken: token,
         cloudUrl: origin,
+        device: device || undefined,
+        height: device && height ? Number(height) : undefined,
         name: frameName,
+        rotate: device ? Number(rotate) : undefined,
+        uploadUrl: device && showUploadUrl ? uploadUrl.trim() || undefined : undefined,
+        vcom: device && showVcom ? vcom || undefined : undefined,
+        width: device && width ? Number(width) : undefined,
         wifiPassword: wifiSsid ? wifiPassword : '',
         wifiSsid,
       })
@@ -397,7 +546,7 @@ export function SdImageBuilder({
       ) : null}
       {release.status === 'error' ? (
         <p className="frameos-warning-button rounded-xl border px-3 py-2 text-xs" role="alert">
-          Could not look up the latest FrameOS release ({release.message}). Try again in a moment.
+          {release.message}
         </p>
       ) : null}
       {release.status === 'ready' ? (
@@ -427,6 +576,89 @@ export function SdImageBuilder({
             placeholder="Frame name (optional)"
             value={frameName}
           />
+          <select
+            aria-label="Display"
+            className={controlClassName}
+            disabled={building}
+            onChange={(event) => pickDisplay(event.target.value)}
+            value={displayChoice}
+          >
+            {displayChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          {showCustomDevice ? (
+            <input
+              aria-label="Custom device key"
+              className={controlClassName}
+              disabled={building}
+              maxLength={128}
+              onChange={(event) => setCustomDevice(event.target.value)}
+              placeholder="Device key (e.g. waveshare.EPD_2in13_V4)"
+              value={customDevice}
+            />
+          ) : null}
+          {showDisplayDetails ? (
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                aria-label="Display width"
+                className={controlClassName}
+                disabled={building}
+                inputMode="numeric"
+                maxLength={5}
+                onChange={(event) => setWidth(event.target.value)}
+                placeholder="Width"
+                value={width}
+              />
+              <input
+                aria-label="Display height"
+                className={controlClassName}
+                disabled={building}
+                inputMode="numeric"
+                maxLength={5}
+                onChange={(event) => setHeight(event.target.value)}
+                placeholder="Height"
+                value={height}
+              />
+              <select
+                aria-label="Rotation"
+                className={controlClassName}
+                disabled={building}
+                onChange={(event) => setRotate(event.target.value)}
+                value={rotate}
+              >
+                {rotationChoices.map((value) => (
+                  <option key={value} value={value}>
+                    Rotate {value}°
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          {showDisplayDetails && showVcom ? (
+            <input
+              aria-label="VCOM (optional)"
+              className={controlClassName}
+              disabled={building}
+              maxLength={12}
+              onChange={(event) => setVcom(event.target.value)}
+              placeholder="VCOM (optional — e.g. -1.48, printed on the panel's flex cable)"
+              value={vcom}
+            />
+          ) : null}
+          {showDisplayDetails && showUploadUrl ? (
+            <input
+              aria-label="Upload URL"
+              className={controlClassName}
+              disabled={building}
+              maxLength={512}
+              onChange={(event) => setUploadUrl(event.target.value)}
+              placeholder={device === 'http.upload' ? 'Upload URL (required)' : 'Upload URL (optional)'}
+              value={uploadUrl}
+            />
+          ) : null}
           <input
             aria-label="WiFi network name (optional)"
             className={controlClassName}
@@ -446,6 +678,36 @@ export function SdImageBuilder({
             type="password"
             value={wifiPassword}
           />
+          <label className="frameos-muted flex items-center gap-2 text-xs">
+            <input
+              checked={rememberWifi}
+              disabled={building}
+              onChange={(event) => {
+                setRememberWifi(event.target.checked)
+                if (!event.target.checked) {
+                  clearRememberedWifi()
+                }
+              }}
+              type="checkbox"
+            />
+            Remember WiFi credentials in this browser (never sent to the cloud)
+          </label>
+          <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
+            <span>Claim code accepts new frames for</span>
+            <select
+              aria-label="Claim code validity"
+              className={`${controlClassName} w-auto`}
+              disabled={building}
+              onChange={(event) => setClaimValidity(event.target.value)}
+              value={claimValidity}
+            >
+              {claimValidityChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {!canStreamToDisk ? (
             <p className="frameos-muted flex items-start gap-1.5 text-xs">
               <CircleStackIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
@@ -479,7 +741,13 @@ export function SdImageBuilder({
           balenaEtcher, &ldquo;Use custom image&rdquo; — both read it compressed). Each frame appears in this workspace
           as <em>pending</em> when it first boots — confirm each one.
           {claimTokenExpiresAt
-            ? ` The embedded claim code is valid until ${new Date(claimTokenExpiresAt).toLocaleString()}.`
+            ? // A "forever" code carries a 100-year expiry; presenting the
+              // year 2126 as a deadline would only confuse.
+              new Date(claimTokenExpiresAt).getTime() - Date.now() > 50 * 365 * 24 * 60 * 60 * 1000
+              ? ' The embedded claim code never expires — every new frame still needs your confirmation here.'
+              : ` The embedded claim code accepts new frames until ${new Date(
+                  claimTokenExpiresAt
+                ).toLocaleString()} — frames added before then stay connected. After that, build a fresh image here to add more.`
             : ''}
         </div>
       ) : null}

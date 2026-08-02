@@ -377,6 +377,52 @@ describe("cloud-managed frame enrollment", () => {
     expect(badMint.status).toBe(400);
   });
 
+  it("ttl_days stretches the claim code expiry for SD images, within bounds", async () => {
+    await signIn();
+    const mintResponse = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { multi_use: true, ttl_days: 90 },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mintResponse.status).toBe(200);
+    const minted = (await mintResponse.json()) as { expires_at: string };
+    const days =
+      (new Date(minted.expires_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(89);
+    expect(days).toBeLessThanOrEqual(90);
+
+    // "forever" mints a code ~100 years out — effectively never expiring,
+    // without a nullable expires_at special case in sweep/redeem.
+    const foreverMint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { multi_use: true, ttl_days: "forever" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(foreverMint.status).toBe(200);
+    const forever = (await foreverMint.json()) as { expires_at: string };
+    expect(new Date(forever.expires_at).getFullYear()).toBeGreaterThan(
+      new Date().getFullYear() + 90,
+    );
+
+    for (const bad of [0, 366, 1.5, "90"]) {
+      const badMint = await mintClaimToken(
+        postJson(
+          "/api/frames/claim-tokens",
+          { multi_use: true, ttl_days: bad },
+          { origin: baseUrl },
+        ),
+      );
+      expect(badMint.status).toBe(400);
+      expect(((await badMint.json()) as { error: string }).error).toBe(
+        "invalid_ttl_days",
+      );
+    }
+  });
+
   it("recycles the oldest unused claim code at the cap instead of locking the account out", async () => {
     const accountId = await signIn();
     // Codes are stored hashed, so an outstanding one can never be shown again.

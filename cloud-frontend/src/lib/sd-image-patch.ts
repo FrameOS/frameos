@@ -75,7 +75,17 @@ export function sanitizeConfigValue(value: string, label: string): string {
 export interface CloudConfigInput {
   claimToken: string;
   cloudUrl: string;
+  // Display driver personalization (all optional): the release image ships
+  // every compiled driver, so the first-boot script only patches frame.json
+  // and runs driver-setup. Keys unknown to older images are logged and
+  // ignored there, so writing them is always safe.
+  device?: string | undefined;
+  height?: number | undefined;
   name?: string | undefined;
+  rotate?: number | undefined;
+  uploadUrl?: string | undefined;
+  vcom?: string | undefined;
+  width?: number | undefined;
   wifiPassword?: string | undefined;
   wifiSsid?: string | undefined;
 }
@@ -98,6 +108,28 @@ export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
   push("name", input.name, "Frame name");
   push("wifi_ssid", input.wifiSsid, "WiFi network name");
   push("wifi_password", input.wifiPassword, "WiFi password");
+  push("device", input.device, "Display device");
+  // Numbers are validated by the UI; undefined means "leave the image's
+  // default alone". The on-device patcher re-validates and refuses to
+  // half-apply a display config on a bad value.
+  push(
+    "width",
+    input.width === undefined ? undefined : String(input.width),
+    "Display width",
+  );
+  push(
+    "height",
+    input.height === undefined ? undefined : String(input.height),
+    "Display height",
+  );
+  push(
+    "rotate",
+    input.rotate === undefined ? undefined : String(input.rotate),
+    "Rotation",
+  );
+  // vcom stays a string so "-1.48" round-trips exactly as typed.
+  push("vcom", input.vcom, "VCOM");
+  push("upload_url", input.uploadUrl, "Upload URL");
 
   const content = new TextEncoder().encode(lines.join("\n") + "\n");
   if (content.length > CLOUD_CONFIG_REGION_SIZE) {

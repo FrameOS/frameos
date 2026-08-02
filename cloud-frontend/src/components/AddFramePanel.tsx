@@ -66,6 +66,9 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // per panel session, on the first build.
   const [multiUseToken, setMultiUseToken] = useState<string | undefined>()
   const [multiUseExpiresAt, setMultiUseExpiresAt] = useState<string | undefined>()
+  // The cached multi-use token is only reusable for the validity it was
+  // minted with; changing the validity in the SD builder mints a fresh one.
+  const [multiUseTtlDays, setMultiUseTtlDays] = useState<number | 'forever' | undefined>()
   const [minting, setMinting] = useState(false)
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
@@ -187,13 +190,20 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   }
 
   // Passed to SdImageBuilder; the multi_use flag is forwarded to the claim
-  // token endpoint so one token covers many enrollments.
-  async function mintClaimToken({ multiUse }: { multiUse: boolean }): Promise<string> {
-    if (multiUse && multiUseToken) {
+  // token endpoint so one token covers many enrollments, and ttlDays picks
+  // how long the code accepts new frames (the endpoint's ttl_days).
+  async function mintClaimToken({
+    multiUse,
+    ttlDays,
+  }: {
+    multiUse: boolean
+    ttlDays?: number | 'forever'
+  }): Promise<string> {
+    if (multiUse && multiUseToken && ttlDays === multiUseTtlDays) {
       return multiUseToken
     }
     const response = await fetch('/api/frames/claim-tokens', {
-      body: JSON.stringify(multiUse ? { multi_use: true } : {}),
+      body: JSON.stringify(multiUse ? { multi_use: true, ...(ttlDays ? { ttl_days: ttlDays } : {}) } : {}),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })
@@ -208,6 +218,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     if (multiUse) {
       setMultiUseToken(data.claim_token)
       setMultiUseExpiresAt(data.expires_at)
+      setMultiUseTtlDays(ttlDays)
     }
     return data.claim_token
   }

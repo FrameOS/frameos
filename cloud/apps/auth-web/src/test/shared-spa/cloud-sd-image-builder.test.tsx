@@ -254,7 +254,9 @@ describe("SdImageBuilder", () => {
 
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
-    expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true });
+    // ttlDays rides along so the SD image's embedded code outlives the 24h
+    // default that suits interactive flows.
+    expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 90 });
     expect(saved.suggestedName).toBe(
       "frameos-raspberry-pi-zero-2-w-kitchen-frame.img.gz",
     );
@@ -305,10 +307,138 @@ describe("SdImageBuilder", () => {
     expect(mint).not.toHaveBeenCalled();
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
     expect(regionText).toContain("claim_token=FRCT_existing\n");
-    // Success panel mentions the token expiry.
+    // Success panel explains the expiry semantics: it gates NEW enrollments
+    // only, and a fresh image is the re-claim path.
     expect(
       screen.getByTestId("sd-image-done").textContent,
-    ).toContain("valid until");
+    ).toContain("accepts new frames until");
+  });
+
+  it("writes the chosen display driver and its config into the image", async () => {
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display"), {
+      target: { value: "waveshare.EPD_13in3e" },
+    });
+    // Native panel dimensions are prefilled and editable.
+    expect((screen.getByLabelText("Display width") as HTMLInputElement).value).toBe("1600");
+    expect((screen.getByLabelText("Display height") as HTMLInputElement).value).toBe("1200");
+    fireEvent.change(screen.getByLabelText("Rotation"), { target: { value: "90" } });
+    // vcom is an IT8951 knob — no curated panel needs it, so it must not
+    // clutter a Waveshare pick.
+    expect(screen.queryByLabelText("VCOM (optional)")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).toContain("device=waveshare.EPD_13in3e\n");
+    expect(regionText).toContain("width=1600\n");
+    expect(regionText).toContain("height=1200\n");
+    expect(regionText).toContain("rotate=90\n");
+    expect(regionText).not.toContain("vcom=");
+  });
+
+  it("offers vcom for custom device keys and writes it into the image", async () => {
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display"), {
+      target: { value: "custom" },
+    });
+    fireEvent.change(screen.getByLabelText("Custom device key"), {
+      target: { value: "waveshare.EPD_10in3" },
+    });
+    fireEvent.change(screen.getByLabelText("VCOM (optional)"), {
+      target: { value: "-1.48" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).toContain("device=waveshare.EPD_10in3\n");
+    expect(regionText).toContain("vcom=-1.48\n");
+  });
+
+  it("requires the upload URL for http.upload before opening the save dialog", async () => {
+    mockReleaseAndImage();
+    const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display"), {
+      target: { value: "http.upload" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+
+    await screen.findByText(/HTTP upload needs the URL/);
+    expect(mint).not.toHaveBeenCalled();
+  });
+
+  it("remembers WiFi credentials in localStorage only when asked to", async () => {
+    mockReleaseAndImage();
+    stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/WiFi network \(optional/),
+      { target: { value: "MyNet" } },
+    );
+    fireEvent.change(screen.getByPlaceholderText("WiFi password"), {
+      target: { value: "hunter2" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+    // Unchecked by default: nothing is stored.
+    expect(localStorage.getItem("frameos-sd-image-wifi")).toBeNull();
+
+    fireEvent.click(
+      screen.getByLabelText(/Remember WiFi credentials/),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+    expect(localStorage.getItem("frameos-sd-image-wifi")).toBe(
+      JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
+    );
+    localStorage.removeItem("frameos-sd-image-wifi");
   });
 
   // Firefox and Safari have no File System Access API, so the whole image is
