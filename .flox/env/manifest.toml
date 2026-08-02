@@ -23,6 +23,7 @@ openssl.outputs = "all"
 pkg-config.pkg-path = "pkg-config"
 pkg-config.outputs = "all"
 pnpm.pkg-path = "pnpm"
+postgresql.pkg-path = "postgresql"
 python.pkg-path = "python312"
 redis.pkg-path = "redis"
 xz.pkg-path = "xz"
@@ -30,6 +31,7 @@ xz.outputs = "all"
 nimble.pkg-path = "nimble"
 
 [vars]
+NEXT_TELEMETRY_DISABLED = "1"
 PIP_DISABLE_PIP_VERSION_CHECK = "1"
 PIP_NO_COLOR = "1"
 PYTHONDONTWRITEBYTECODE = "1"
@@ -104,15 +106,20 @@ on-activate = '''
     printf '%s' "$python_requirements_hash" > "$python_stamp"
   fi
 
-  js_workspace_hash="$(
-    sha256sum \
-      package.json \
-      pnpm-lock.yaml \
-      pnpm-workspace.yaml \
-      frontend/package.json \
-      frameos/frontend/package.json \
-    | sha256sum | awk '{print $1}'
-  )"
+  js_workspace_files="package.json pnpm-lock.yaml pnpm-workspace.yaml"
+  for manifest in \
+    frontend/package.json \
+    frameos/frontend/package.json \
+    frameos/editor/package.json \
+    frameos/wasm/package.json \
+    cloud/package.json \
+    cloud/apps/*/package.json \
+    cloud/packages/*/package.json; do
+    if [ -f "$manifest" ]; then
+      js_workspace_files="$js_workspace_files $manifest"
+    fi
+  done
+  js_workspace_hash="$(sha256sum $js_workspace_files | sha256sum | awk '{print $1}')"
   js_stamp="$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256"
   if [ ! -f node_modules/.modules.yaml ] || [ ! -f "$js_stamp" ] || [ "$(cat "$js_stamp")" != "$js_workspace_hash" ]; then
     echo "Syncing pnpm workspace dependencies..."

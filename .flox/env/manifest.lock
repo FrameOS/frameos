@@ -52,6 +52,9 @@
       "pnpm": {
         "pkg-path": "pnpm"
       },
+      "postgresql": {
+        "pkg-path": "postgresql"
+      },
       "python": {
         "pkg-path": "python312"
       },
@@ -64,12 +67,13 @@
       }
     },
     "vars": {
+      "NEXT_TELEMETRY_DISABLED": "1",
       "PIP_DISABLE_PIP_VERSION_CHECK": "1",
       "PIP_NO_COLOR": "1",
       "PYTHONDONTWRITEBYTECODE": "1"
     },
     "hook": {
-      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  # Rebuild toolchain flags from this environment. Inherited values from\n  # another Flox/Nix shell can point compilers at the wrong project.\n  export CPATH=\"$FLOX_ENV/include\"\n  export CPPFLAGS=\"-I$FLOX_ENV/include\"\n  export LDFLAGS=\"-L$FLOX_ENV/lib\"\n  export LIBRARY_PATH=\"$FLOX_ENV/lib\"\n  export PKG_CONFIG_PATH=\"$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  # Flox installs the full development lock. Include the Docker runtime input\n  # in the stamp so production dependency changes also refresh the local venv.\n  python_requirements_hash=\"$(\n    sha256sum \\\n      backend/requirements.in \\\n      backend/requirements.txt \\\n      backend/requirements.docker.in \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    \"$VIRTUAL_ENV/bin/python\" -m pip install --upgrade pip setuptools wheel\n    \"$VIRTUAL_ENV/bin/python\" -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_hash=\"$(\n    sha256sum \\\n      package.json \\\n      pnpm-lock.yaml \\\n      pnpm-workspace.yaml \\\n      frontend/package.json \\\n      frameos/frontend/package.json \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  remote_nim_hash=\"$(sha256sum frameos/remote/frameos_remote.nimble | awk '{print $1}')\"\n  remote_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-remote-nim.sha256\"\n  if [ ! -f frameos/remote/nimble.paths ] || [ ! -f \"$remote_nim_stamp\" ] || [ \"$(cat \"$remote_nim_stamp\")\" != \"$remote_nim_hash\" ]; then\n    echo \"Syncing FrameOS Remote Nim dependencies...\"\n    (\n      cd frameos/remote\n      nimble install -dy\n    )\n    printf '%s' \"$remote_nim_hash\" > \"$remote_nim_stamp\"\n  fi\n"
+      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  # Rebuild toolchain flags from this environment. Inherited values from\n  # another Flox/Nix shell can point compilers at the wrong project.\n  export CPATH=\"$FLOX_ENV/include\"\n  export CPPFLAGS=\"-I$FLOX_ENV/include\"\n  export LDFLAGS=\"-L$FLOX_ENV/lib\"\n  export LIBRARY_PATH=\"$FLOX_ENV/lib\"\n  export PKG_CONFIG_PATH=\"$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  # Flox installs the full development lock. Include the Docker runtime input\n  # in the stamp so production dependency changes also refresh the local venv.\n  python_requirements_hash=\"$(\n    sha256sum \\\n      backend/requirements.in \\\n      backend/requirements.txt \\\n      backend/requirements.docker.in \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    \"$VIRTUAL_ENV/bin/python\" -m pip install --upgrade pip setuptools wheel\n    \"$VIRTUAL_ENV/bin/python\" -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_files=\"package.json pnpm-lock.yaml pnpm-workspace.yaml\"\n  for manifest in \\\n    frontend/package.json \\\n    frameos/frontend/package.json \\\n    frameos/editor/package.json \\\n    frameos/wasm/package.json \\\n    cloud/package.json \\\n    cloud/apps/*/package.json \\\n    cloud/packages/*/package.json; do\n    if [ -f \"$manifest\" ]; then\n      js_workspace_files=\"$js_workspace_files $manifest\"\n    fi\n  done\n  js_workspace_hash=\"$(sha256sum $js_workspace_files | sha256sum | awk '{print $1}')\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  remote_nim_hash=\"$(sha256sum frameos/remote/frameos_remote.nimble | awk '{print $1}')\"\n  remote_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-remote-nim.sha256\"\n  if [ ! -f frameos/remote/nimble.paths ] || [ ! -f \"$remote_nim_stamp\" ] || [ \"$(cat \"$remote_nim_stamp\")\" != \"$remote_nim_hash\" ]; then\n    echo \"Syncing FrameOS Remote Nim dependencies...\"\n    (\n      cd frameos/remote\n      nimble install -dy\n    )\n    printf '%s' \"$remote_nim_hash\" > \"$remote_nim_stamp\"\n  fi\n"
     },
     "profile": {
       "bash": "  # Rebuild PATH so the repo venv wins over Flox's base Python.\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$FLOX_ENV/sbin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}\"\n  hash -r 2>/dev/null || true\n",
@@ -99,11 +103,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:27.020197Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.121",
       "outputs_to_install": [
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -131,11 +138,15 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:17.230012Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.121",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -163,11 +174,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:32.178301Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.121",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -195,11 +208,17 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:57.027117Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.121",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -227,11 +246,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:27.339377Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "9.10",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -257,11 +281,15 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:17.607148Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "9.10",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -288,11 +316,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:32.471670Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "9.10",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -318,11 +348,19 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:57.443857Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "9.10",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -349,12 +387,15 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:27.385917Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "8.19.0",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {
@@ -383,12 +424,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:17.701126Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "8.19.0",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {
@@ -418,12 +463,15 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:32.519420Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "8.19.0",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {
@@ -452,12 +500,21 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:57.549953Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "8.19.0",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "bin",
+        "bin",
+        "man",
+        "man",
+        "man",
+        "man",
         "man"
       ],
       "outputs": {
@@ -487,6 +544,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:28.014252Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -519,12 +577,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:18.717434Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "15.2.0",
       "outputs_to_install": [
         "man",
+        "out",
         "out"
       ],
       "outputs": {
@@ -551,6 +611,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:33.147670Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -583,12 +644,18 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:58.593736Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "15.2.0",
       "outputs_to_install": [
         "man",
+        "man",
+        "man",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -615,11 +682,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:28.124796Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "2.53.0",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -645,11 +714,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:18.848991Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "2.53.0",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -676,11 +747,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:33.236519Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "2.53.0",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -706,11 +779,15 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:58.735141Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "2.53.0",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -737,6 +814,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:28.252749Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -770,12 +848,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:19.535743Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "4.4.1",
       "outputs_to_install": [
         "man",
+        "out",
         "out"
       ],
       "outputs": {
@@ -804,6 +884,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:33.379623Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -837,12 +918,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:09:59.442330Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "4.4.1",
       "outputs_to_install": [
         "man",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -871,12 +956,17 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:45.890125Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "40",
       "outputs_to_install": [
         "man",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -904,12 +994,19 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:41.586220Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.5.2",
       "outputs_to_install": [
         "man",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -937,12 +1034,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:50.848425Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "40",
       "outputs_to_install": [
         "man",
+        "out",
         "out"
       ],
       "outputs": {
@@ -970,12 +1069,23 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:22.928422Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.5.2",
       "outputs_to_install": [
         "man",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -1003,6 +1113,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:51.786140Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1032,6 +1143,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:53.529364Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1061,6 +1173,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:56.811821Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1090,6 +1203,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:36.881068Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1119,6 +1233,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:51.807235Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1148,6 +1263,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:53.554337Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1177,6 +1293,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:56.832635Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1206,6 +1323,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:36.908503Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1235,11 +1353,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:52.312828Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "22.22.2",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1264,11 +1384,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:42:54.209164Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "22.22.2",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1293,11 +1415,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:54:57.328896Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "22.22.2",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1322,11 +1446,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:37.614925Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "22.22.2",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1351,11 +1477,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:52:57.384016Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.6.1",
       "outputs_to_install": [
+        "bin",
+        "bin",
         "bin",
         "man"
       ],
@@ -1385,12 +1514,17 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:43:00.974857Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.6.1",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {
@@ -1420,11 +1554,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:55:02.693187Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.6.1",
       "outputs_to_install": [
+        "bin",
         "bin",
         "man"
       ],
@@ -1454,12 +1590,23 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:44.858858Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "3.6.1",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "bin",
+        "bin",
+        "bin",
+        "bin",
+        "bin",
+        "man",
+        "man",
+        "man",
         "man"
       ],
       "outputs": {
@@ -1489,6 +1636,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:53:06.246618Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1521,12 +1669,14 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:43:12.259212Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "0.29.2",
       "outputs_to_install": [
         "man",
+        "out",
         "out"
       ],
       "outputs": {
@@ -1553,6 +1703,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:55:11.766628Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1585,12 +1736,19 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:56.734750Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "0.29.2",
       "outputs_to_install": [
         "man",
+        "man",
+        "man",
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -1617,6 +1775,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:53:06.702322Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1646,6 +1805,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:43:12.966256Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1675,6 +1835,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:55:12.221905Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1704,6 +1865,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:10:57.571672Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1713,6 +1875,166 @@
       ],
       "outputs": {
         "out": "/nix/store/4yfpaak9jcmls1hzybqxb1yh8wipr4id-pnpm-10.33.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "postgresql",
+      "broken": false,
+      "derivation": "/nix/store/pqywnypyjaz17pmhlk2xm29b53nrd6gg-postgresql-17.9.drv",
+      "description": "Powerful, open source object-relational database system",
+      "install_id": "postgresql",
+      "license": "PostgreSQL",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "name": "postgresql-17.9",
+      "pname": "postgresql",
+      "rev": "1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "rev_count": 987561,
+      "rev_date": "2026-04-27T05:36:01Z",
+      "scrape_date": "2026-04-29T19:53:06.874011Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "17.9",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/1afbgybik6wcrjqfq23fq8w54vhi4ihc-postgresql-17.9-dev",
+        "doc": "/nix/store/17iq0clql4kdp0ifq7fflhw3lm3cbs20-postgresql-17.9-doc",
+        "jit": "/nix/store/rf3ywih5i4xj5a279rqkfcnl58zrpc52-postgresql-17.9-jit",
+        "lib": "/nix/store/b791vg5hl27mf4kykmk9f5dwlki9gagg-postgresql-17.9-lib",
+        "man": "/nix/store/nwy2304larzi3sdp80y58rvgfja87z4c-postgresql-17.9-man",
+        "out": "/nix/store/vp1q6bggwbzhzz6fkwsnzrnxn58n85n3-postgresql-17.9",
+        "plperl": "/nix/store/06hkzlwmq6m6045d8x6l2rlrsz0pa4fg-postgresql-17.9-plperl",
+        "plpython3": "/nix/store/qqfvcc7i22ngivk8f7ifpq0aiv8sk0p6-postgresql-17.9-plpython3",
+        "pltcl": "/nix/store/vcsr2nxhcr8f1gzjszyl4dsg0apyc3fb-postgresql-17.9-pltcl"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "postgresql",
+      "broken": false,
+      "derivation": "/nix/store/ppjxbapz15xxj7l2pkiislpkrmqf68bz-postgresql-17.9.drv",
+      "description": "Powerful, open source object-relational database system",
+      "install_id": "postgresql",
+      "license": "PostgreSQL",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "name": "postgresql-17.9",
+      "pname": "postgresql",
+      "rev": "1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "rev_count": 987561,
+      "rev_date": "2026-04-27T05:36:01Z",
+      "scrape_date": "2026-04-29T20:43:13.255471Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "17.9",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/ynjawsvdhbjkxwmqhk3sh2q9ni9wqki8-postgresql-17.9-debug",
+        "dev": "/nix/store/3qkapibwgkma857k7gq7lxparyn83grw-postgresql-17.9-dev",
+        "doc": "/nix/store/7f76g031vy5qiifhb4c251acys4b164p-postgresql-17.9-doc",
+        "jit": "/nix/store/mindc7gmjrjis5gvxazrzr4y229k3g1j-postgresql-17.9-jit",
+        "lib": "/nix/store/plyiia9h25pkhfsgl348qjfkda3fidfk-postgresql-17.9-lib",
+        "man": "/nix/store/5xp79bhiyirjgz53dxpfp94gp5cd9hzg-postgresql-17.9-man",
+        "out": "/nix/store/srvh5jplrdn4xdk9sn7wk1wxpjyfskx2-postgresql-17.9",
+        "plperl": "/nix/store/7v68acpwr9ss0q5pznq5g6js4ksy2z6m-postgresql-17.9-plperl",
+        "plpython3": "/nix/store/5ddvpkw48cfrk7kvja0xkgcywdnm59qc-postgresql-17.9-plpython3",
+        "pltcl": "/nix/store/4v8khkwnqlrzwyc2si7hn0yc7g0p0j2r-postgresql-17.9-pltcl"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "postgresql",
+      "broken": false,
+      "derivation": "/nix/store/06a1a57pgd954zczj35b7h7wxfdlkpgz-postgresql-17.9.drv",
+      "description": "Powerful, open source object-relational database system",
+      "install_id": "postgresql",
+      "license": "PostgreSQL",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "name": "postgresql-17.9",
+      "pname": "postgresql",
+      "rev": "1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "rev_count": 987561,
+      "rev_date": "2026-04-27T05:36:01Z",
+      "scrape_date": "2026-04-29T21:55:12.388419Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "17.9",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/c0hnva9h1a49n057s120rkwnqhvr95i2-postgresql-17.9-dev",
+        "doc": "/nix/store/3db6vzaljarhbki2swx05nr5idwpbyzv-postgresql-17.9-doc",
+        "jit": "/nix/store/kp7ihsxrp59kwibbc50i2r0izrgp5fif-postgresql-17.9-jit",
+        "lib": "/nix/store/6xjsg76dgkzffd8lp5lpb3xk0qm18pk6-postgresql-17.9-lib",
+        "man": "/nix/store/vjbfmdpzn3fzry91xrfkpw1x6a6qa86y-postgresql-17.9-man",
+        "out": "/nix/store/g7wpjqjpblhfgdmh0zsq9cmdd93ws9hc-postgresql-17.9",
+        "plperl": "/nix/store/lx37qri3w4i2g1iwx2glxhh7q2n6lr3n-postgresql-17.9-plperl",
+        "plpython3": "/nix/store/m88darhcjngcdgf9q5dq3qmidc2pw5wl-postgresql-17.9-plpython3",
+        "pltcl": "/nix/store/gw5l04rh8mz02jxwprxq3y0rmm2xrf1g-postgresql-17.9-pltcl"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "postgresql",
+      "broken": false,
+      "derivation": "/nix/store/4rnlryp5br3dyhsaqsndhzck1dj3y5j5-postgresql-17.9.drv",
+      "description": "Powerful, open source object-relational database system",
+      "install_id": "postgresql",
+      "license": "PostgreSQL",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "name": "postgresql-17.9",
+      "pname": "postgresql",
+      "rev": "1c3fe55ad329cbcb28471bb30f05c9827f724c76",
+      "rev_count": 987561,
+      "rev_date": "2026-04-27T05:36:01Z",
+      "scrape_date": "2026-04-29T23:10:57.877362Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "17.9",
+      "outputs_to_install": [
+        "man",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/wg9nz911327g0512j1lh98i2jycx162v-postgresql-17.9-debug",
+        "dev": "/nix/store/d43m4gyanrw9cjs7zbfij9xkw68dx782-postgresql-17.9-dev",
+        "doc": "/nix/store/5zwinfr69a3h6i7cczbglrlpsnlbg2ap-postgresql-17.9-doc",
+        "jit": "/nix/store/abi5xrm939yd7ymc6szyrzrbs1f13wv5-postgresql-17.9-jit",
+        "lib": "/nix/store/b9lrxza08xalvx9d6q46pr582ld5jdzj-postgresql-17.9-lib",
+        "man": "/nix/store/48gmbw8yp3km80s12pr5mdzbn2xi2drd-postgresql-17.9-man",
+        "out": "/nix/store/vly1mpb0rah7xr34ybcf3s339cjh22vh-postgresql-17.9",
+        "plperl": "/nix/store/kf9rw577lg5svh1hm0l8mjnl53zs9bni-postgresql-17.9-plperl",
+        "plpython3": "/nix/store/f1g597qn6888drvqwx3x7q47as4ca3m3-postgresql-17.9-plpython3",
+        "pltcl": "/nix/store/2xlls8n1jq5s2s3f0d29d25ljk0cnfgr-postgresql-17.9-pltcl"
       },
       "system": "x86_64-linux",
       "group": "toplevel",
@@ -1733,11 +2055,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:53:08.518542Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "python3-3.12.13",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1762,11 +2086,13 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:43:15.480398Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "python3-3.12.13",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -1792,6 +2118,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:55:14.021332Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1821,11 +2148,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:11:00.254314Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "python3-3.12.13",
       "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
         "out"
       ],
       "outputs": {
@@ -1851,6 +2183,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:53:55.176154Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1880,6 +2213,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:44:11.193827Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1909,6 +2243,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:56:00.081548Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1938,6 +2273,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:11:59.024207Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1967,6 +2303,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T19:55:16.619617Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2001,12 +2338,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T20:45:52.267076Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "5.8.3",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {
@@ -2035,6 +2376,7 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T21:57:20.447981Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2069,12 +2411,16 @@
       "rev_date": "2026-04-27T05:36:01Z",
       "scrape_date": "2026-04-29T23:13:46.065860Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
       "version": "5.8.3",
       "outputs_to_install": [
         "bin",
+        "bin",
+        "bin",
+        "man",
         "man"
       ],
       "outputs": {

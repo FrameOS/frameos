@@ -15,6 +15,9 @@ procs:
   frameos:
     shell: cd frameos && make
     autostart: false
+  cloud:
+    shell: sh -c 'cd cloud && scripts/db-setup.sh && exec pnpm run dev'
+    autostart: false
   backend-docker:
     shell: bash scripts/backend-docker.sh
     autostart: false
