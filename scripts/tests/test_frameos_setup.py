@@ -267,6 +267,11 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(frame_json["serverHost"], "")
         self.assertEqual(frame_json["serverSendLogs"], False)
 
+        # The state dir is 0700 and chowned to the in-container service user;
+        # on a Linux host the test user can't traverse it until ownership is
+        # restored. chown keeps the modes, so the assertions below still hold.
+        self._restore_tmp_permissions()
+
         releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
         self.assertEqual(len(releases), 1)
         state_dir = releases[0] / "state"
