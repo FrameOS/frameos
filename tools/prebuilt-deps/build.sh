@@ -128,7 +128,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
       "--build-arg" "CROSS_TOOLCHAIN_URL=${ARMV6_TOOLCHAIN_URL}"
       "--build-arg" "CROSS_TOOLCHAIN_SHA256=${ARMV6_TOOLCHAIN_SHA256}"
       "--build-arg" "CROSS_PREFIX=${ARMV6_CROSS_PREFIX}"
-      "--build-arg" "CROSS_EXPECTED_CPU_ARCH=v6"
+      "--build-arg" "CROSS_EXPECTED_CPU_ARCH=v6KZ"
     )
   fi
 
@@ -147,7 +147,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
         component_args=(
           "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
           "--build-arg" "QUICKJS_SHA256=${QUICKJS_SHA256}"
-          "${cross_args[@]}"
+          ${cross_args[@]+"${cross_args[@]}"}
         )
         ;;
       *)
@@ -189,6 +189,13 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     printf '%s' "${expected_marker}" > "${marker_file}"
   done
 
+  # The matrix platform column is the docker *build* platform; armv6 builds
+  # in an amd64 container but targets linux/arm/v6.
+  metadata_platform="${platform}"
+  if [[ "${arch}" == "armv6" ]]; then
+    metadata_platform="linux/arm/v6"
+  fi
+
   components_json=""
   version_lines=""
   for component in "${target_component_list[@]}"; do
@@ -206,7 +213,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   "distribution": "${distro}",
   "release": "${release}",
   "arch": "${arch}",
-  "platform": "${platform}",
+  "platform": "${metadata_platform}",
 ${version_lines}  "components": [${components_json}]
 }
 META

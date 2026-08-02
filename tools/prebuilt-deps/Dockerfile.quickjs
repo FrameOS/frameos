@@ -19,8 +19,9 @@ ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70a
 ARG CROSS_TOOLCHAIN_URL=
 ARG CROSS_TOOLCHAIN_SHA256=
 ARG CROSS_PREFIX=
-# readelf Tag_CPU_arch value the produced objects must report (e.g. "v6");
-# guards against silently shipping code for the wrong CPU generation.
+# readelf Tag_CPU_arch value the produced objects must report (e.g. "v6KZ"
+# for the ARM1176 in the Pi Zero W); guards against silently shipping code
+# for the wrong CPU generation.
 ARG CROSS_EXPECTED_CPU_ARCH=
 
 ENV DEBIAN_FRONTEND=noninteractive
