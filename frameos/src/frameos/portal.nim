@@ -1063,7 +1063,10 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
     startAp(frameOS)
 
 proc checkNetwork*(self: FrameOS): bool =
-  if not self.frameConfig.network.networkCheck or self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
+  # A "bootOnly" hotspot needs the connectivity probe even when networkCheck
+  # ("wait for network before rendering") is switched off.
+  if (not self.frameConfig.network.networkCheck and self.frameConfig.network.wifiHotspot != "bootOnly") or
+      self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
     return false
 
   let url = self.frameConfig.network.networkCheckUrl

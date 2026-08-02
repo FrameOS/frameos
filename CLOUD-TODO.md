@@ -34,11 +34,7 @@ Two sides are involved:
 4. **Upfront about money.** Services that cost real money to run (storage,
    relay bandwidth, log retention) will be paid. The UI must say so before the
    user enables them, never after.
-5. **Documented protocol boundary.** The protocol (endpoints, payloads, token
-   semantics) is documented in `docs/cloud-link.md`. Device and cloud stay
-   loosely coupled behind that contract, and independent implementations of
-   the documented protocol need no permission from us.
-6. **NO image proxies for frames. EVER.** Frames fetch and render images
+5. **NO image proxies for frames. EVER.** Frames fetch and render images
    directly from their sources — never through the backend or the cloud as a
    resizing/fetching middleman, and not via host-side resize params either.
    If a source serves images too large for a device, the fix is better
@@ -46,6 +42,10 @@ Two sides are involved:
    unfilter/scale into the render target). Proxies are acceptable for
    in-browser previews only. Do not re-implement proxying; it has been built
    and reverted before.
+   Why: we don't want to become critical infrastructure for image delivery.
+   Frames that keep working without the cloud are insurance against lock-in
+   on FrameOS Cloud, and staying out of every image request protects us
+   against rising bandwidth and compute costs as the fleet grows.
 
 ## Permission scopes
 

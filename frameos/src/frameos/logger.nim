@@ -62,6 +62,8 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, t
         filename
       if lastLogFilePath.len > 0 and lastLogFilePath != file:
         gzipLogFile(lastLogFilePath)
+      if lastLogFilePath != file:
+        ensureParentDir(file)
       lastLogFilePath = file
       appendTextLine(file, loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine)
   except Exception as e:

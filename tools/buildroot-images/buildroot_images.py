@@ -321,7 +321,7 @@ class ReleaseImageFrame:
     background_color: str | None = None
     debug: bool = False
     last_log_at: str | None = None
-    log_to_file: str | None = None
+    log_to_file: str | None = "/srv/frameos/logs/frameos-{date}.log"
     assets_path: str = "/srv/assets"
     save_assets: bool = True
     upload_fonts: str = ""

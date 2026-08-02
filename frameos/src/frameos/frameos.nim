@@ -181,9 +181,12 @@ proc start*(self: FrameOS) {.async.} =
   netportal.setLogger(self.logger)
 
   var firstSceneId: Option[SceneId] = none(SceneId)
-  if self.frameConfig.network.networkCheck:
+  # The boot hotspot needs a connectivity probe to decide whether to start,
+  # so it runs the network check even when "wait for network" is switched off.
+  let hotspotBootOnly = self.frameConfig.network.wifiHotspot == "bootOnly"
+  if self.frameConfig.network.networkCheck or hotspotBootOnly:
     let connected = checkNetwork(self)
-    if self.frameConfig.network.wifiHotspot == "bootOnly":
+    if hotspotBootOnly:
       if connected:
         netportal.stopAp(self)
       else:

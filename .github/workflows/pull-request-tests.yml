@@ -16,22 +16,12 @@ permissions:
 
 jobs:
   nim:
-    name: FrameOS Nim Tests (${{ matrix.shard_name }})
+    name: FrameOS Nim Tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - shard: 1
-            shard_name: shard 1
-          - shard: 2
-            shard_name: shard 2
-          - shard: 3
-            shard_name: shard 3
-          - shard: 4
-            shard_name: shard 4
-          - shard: 5
-            shard_name: shard 5
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -43,21 +33,6 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: '3.12'
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install -r requirements.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -75,6 +50,28 @@ jobs:
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      - name: Cache compiled assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'repo/**', 'pnpm-lock.yaml', 'versions.json') }}
 
       - name: FrameOS nim setup
         run: |
@@ -162,6 +159,20 @@ jobs:
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
       - name: FrameOS nim build
         run: |

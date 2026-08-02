@@ -605,7 +605,10 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     frame.assets_path = "/srv/assets"
-    frame.log_to_file = None
+    # Buildroot journald storage is volatile, so keep a persistent on-device
+    # log for debugging boot issues (hotspot, network check, driver setup).
+    if not getattr(frame, "log_to_file", None):
+        frame.log_to_file = "/srv/frameos/logs/frameos-{date}.log"
 
     https_proxy = dict(frame.https_proxy or {})
     https_proxy["enable"] = False
