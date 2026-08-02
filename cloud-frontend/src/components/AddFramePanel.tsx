@@ -75,11 +75,24 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   const mintStartedRef = useRef(false)
 
   const origin = cloudOrigin
+  // Downloaded to a file and then run — NOT `curl … | sudo sh`.
+  //
+  // The installer asks questions (display, timezone, admin password). Piping
+  // into `sudo sh` makes sudo's stdin a pipe, and on distributions that default
+  // to `Defaults use_pty` (Ubuntu among them) sudo then does not relay the
+  // terminal into the pty it created. The script's read from /dev/tty blocks
+  // forever: keystrokes echo on the real terminal and reach nobody, so the
+  // install looks frozen with no way out but Ctrl-C.
+  //
+  // Running a file keeps stdin on the terminal, so the prompts work. It is
+  // also the honest shape: the script is on disk before anything executes it.
+  //
   // No FRAMEOS_CLOUD_URL: /install.sh is served with this provider's origin
   // already stamped in (app/install.sh/route.ts), so the URL appears once and
   // the two copies can never disagree.
   const installCommandFor = (token: string): string =>
-    `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLAIM_TOKEN=${token} sh`
+    `curl -fsSL ${origin}/install.sh -o /tmp/frameos-install.sh && ` +
+    `sudo FRAMEOS_CLAIM_TOKEN=${token} sh /tmp/frameos-install.sh`
   const installCommand = claimToken ? installCommandFor(claimToken) : undefined
   // Shown before a code exists, so the command is not a mystery: same shape,
   // with the code itself masked until it is minted.

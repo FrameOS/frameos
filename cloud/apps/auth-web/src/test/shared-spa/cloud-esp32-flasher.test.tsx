@@ -338,7 +338,10 @@ describe("Esp32CloudFlasher", () => {
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
   });
 
-  it("releases the serial port when the flash itself throws", async () => {
+  it("recovers from a flash that drops part-way by retrying slower", async () => {
+    // Writing 3 MB over USB serial fails mid-way on a marginal cable or hub
+    // ("Failed to write compressed data to flash after seq N"). The firmware is
+    // fine, so a single hiccup must not end the install.
     mockCloudApi();
     esptool.calls.writeFlash.mockRejectedValueOnce(new Error("flash write failed"));
     stubSerial(createHealthyPort());
@@ -347,12 +350,33 @@ describe("Esp32CloudFlasher", () => {
 
     clickFlash();
 
-    expect(await screen.findByRole("alert")).toHaveProperty(
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+    expect(esptool.calls.writeFlash).toHaveBeenCalledTimes(2);
+    // One disconnect per attempt: the retry has to reopen the same port.
+    expect(esptool.calls.disconnects).toBe(2);
+  });
+
+  it("gives up with something actionable when every attempt fails", async () => {
+    mockCloudApi();
+    esptool.calls.writeFlash.mockRejectedValue(new Error("flash write failed"));
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+
+    clickFlash();
+
+    const alert = await screen.findByRole("alert", undefined, { timeout: 5000 });
+    expect(alert).toHaveProperty(
       "textContent",
       expect.stringMatching(/flash write failed/),
     );
-    // The port went back to the browser, so the offered retry can reopen it.
-    expect(esptool.calls.disconnects).toBe(1);
+    // "It failed" is useless on its own — the causes are physical.
+    expect(alert.textContent).toMatch(/USB cable/);
+    // The port went back to the browser after every attempt, so a manual retry
+    // can reopen it.
+    expect(esptool.calls.disconnects).toBe(3);
+    // Nothing enrolled: claim codes are single-use, so a failed flash must not
+    // spend one.
     expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
   });
 });

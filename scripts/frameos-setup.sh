@@ -899,6 +899,23 @@ default_wifi_password="$(json_get "$existing_config" network.wifiHotspotPassword
 default_log_to_file="$(json_get "$existing_config" logToFile "")"
 default_save_assets="$(json_get "$existing_config" saveAssets "true")"
 
+# `curl … | sudo sh` and interactive prompts do not mix on every distribution.
+# With sudo's stdin a pipe, a sudo built with `Defaults use_pty` (Ubuntu ships
+# it on) does not relay the terminal into the pty it creates for the command:
+# the read below blocks forever, keystrokes echo on the real terminal and reach
+# nobody, and the install looks frozen. Warn before the first question rather
+# than let someone sit there — we cannot detect sudo's pty setting reliably,
+# and on hosts without use_pty the pipe works fine.
+if [ -n "$TTY" ] && [ ! -t 0 ]; then
+  warn "Note: this script is being piped into a shell, so questions below may"
+  warn "not receive your typing on some systems (sudo's use_pty). If a prompt"
+  warn "does not respond, press Ctrl-C and run it from a file instead:"
+  warn "  curl -fsSL '${FRAMEOS_CLOUD_URL%/}/install.sh' -o /tmp/frameos-install.sh"
+  warn "  sudo sh /tmp/frameos-install.sh"
+  warn "Or set FRAMEOS_UNATTENDED=1 to accept every default without asking."
+  warn ""
+fi
+
 FRAMEOS_NAME="${FRAMEOS_NAME:-$(ask_required "Frame name" "$default_name")}"
 FRAMEOS_DEVICE="${FRAMEOS_DEVICE:-$(choose_device "$default_device")}"
 
