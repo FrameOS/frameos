@@ -1057,6 +1057,13 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
                 ws_note_auth_rejected("close 4401");
             }
             ws_backoff_advance();
+            /* DISCONNECTED/CLOSED is the last event of an attempt. Re-arm the
+             * per-attempt guard HERE, not only on CONNECTED: a transport-level
+             * failure never reaches CONNECTED, and with the guard stuck the
+             * backoff advanced exactly once and then hammered the provider at
+             * the minimum delay forever (observed: a dev frame redialing a
+             * dead port every ~3s for half an hour). */
+            s_ws_backoff_advanced = false;
             break;
         case WEBSOCKET_EVENT_DATA: {
             if (data->op_code != 0x01 && data->op_code != 0x00) break; /* text only */
@@ -1170,6 +1177,13 @@ static void ws_start(void)
         .buffer_size = 4096,
         .task_stack = 10240,
     };
+    /* The transport layers emit a two-line E-spam for every failed dial; our
+     * own "ws: dialing …" / "ws: reconnecting in … ms" lines carry the
+     * signal. Beyond noise, a misconfigured dev setup redialing forever
+     * floods the USB console — and interleaves into USB-API payloads being
+     * read over the same serial stream. */
+    esp_log_level_set("transport_ws", ESP_LOG_NONE);
+    esp_log_level_set("websocket_client", ESP_LOG_NONE);
     s_ws_client = esp_websocket_client_init(&config);
     if (!s_ws_client) {
         ESP_LOGE(TAG, "ws: client init failed");
