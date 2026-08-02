@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
+//
+// The SD image builder inside the workspace's "Add frame" panel. It lives in
+// cloud-frontend/, which has no test runner, so it is tested from auth-web's
+// vitest across the package boundary (see the other shared-spa tests).
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLOUD_CONFIG_MAGIC,
   CLOUD_CONFIG_REGION_SIZE,
-} from "../lib/sd-image-patch";
-import { SdImageBuilder } from "./SdImageBuilder";
+} from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
+import { SdImageBuilder } from "../../../../../../cloud-frontend/src/components/SdImageBuilder";
 
 const fetchMock = vi.fn<typeof fetch>();
 const encoder = new TextEncoder();

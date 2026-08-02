@@ -31,23 +31,29 @@ await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
 
-// cloud/apps/auth-web/app/frames/[[...path]]/route.ts injects the dev
-// websocket origin by string-replacing this exact literal in the shell. A
-// dropping it would make the replacement a silent no-op and break dev
-// websocket routing with no error anywhere, so fail the build loudly instead.
-const configInjectionAnchor = '//__FRAMEOS_CLOUD_WS_ORIGIN__'
+// cloud/apps/auth-web/app/frames/[[...path]]/route.ts injects server-side
+// configuration by replacing these exact lines in the shell. Dropping one
+// would make the replacement a silent no-op — a dev websocket pointed at the
+// wrong server, or an account header linking to the wrong origin — with no
+// error anywhere, so fail the build loudly instead.
+const configInjectionAnchors = {
+  '//__FRAMEOS_CLOUD_WS_ORIGIN__': 'cloud_ws_origin in dev',
+  '//__FRAMEOS_CLOUD_APP_CONFIG__': 'the account header URLs, enrollment origin and claim-code TTL',
+}
 const shellHtml = await fs.readFile(path.join(outputDir, 'index.html'), 'utf8')
 // A whole line, not just "appears somewhere": the comment above the config
-// object names the anchor too, so an `includes` check stays happy even if the
-// real line is gone — and the route would then serve a shell whose websocket
-// points at itself.
-const anchorLines = shellHtml.split('\n').filter((line) => line.trim() === configInjectionAnchor)
-if (anchorLines.length !== 1) {
-  throw new Error(
-    `cloud-frontend/src/index.html must contain exactly one line that is only ${JSON.stringify(configInjectionAnchor)} ` +
-      `(found ${anchorLines.length}): cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces that line ` +
-      'to inject cloud_ws_origin in dev.'
-  )
+// object names both anchors too, so an `includes` check stays happy even if
+// the real line is gone — and the route would then serve a shell whose
+// websocket points at itself.
+for (const [anchor, injects] of Object.entries(configInjectionAnchors)) {
+  const anchorLines = shellHtml.split('\n').filter((line) => line.trim() === anchor)
+  if (anchorLines.length !== 1) {
+    throw new Error(
+      `cloud-frontend/src/index.html must contain exactly one line that is only ${JSON.stringify(anchor)} ` +
+        `(found ${anchorLines.length}): cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces that line ` +
+        `to inject ${injects}.`
+    )
+  }
 }
 await fs.cp(publicDir, outputDir, {
   recursive: true,

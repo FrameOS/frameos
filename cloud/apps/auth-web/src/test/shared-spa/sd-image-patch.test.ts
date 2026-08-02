@@ -1,3 +1,6 @@
+// In-browser SD image personalization. The module lives in cloud-frontend/
+// (the /frames workspace bundle), which has no test runner of its own, so it
+// is exercised from here — the same arrangement as the other shared-spa tests.
 import { describe, expect, it } from "vitest";
 import {
   CLOUD_CONFIG_MAGIC,
@@ -7,7 +10,7 @@ import {
   sanitizeConfigValue,
   SdImagePatchError,
   verifyPlaceholderRegion,
-} from "./sd-image-patch";
+} from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

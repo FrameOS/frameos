@@ -11,6 +11,7 @@ import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
+import { CloudFirstRunAddFrame } from '../../components/CloudFirstRunAddFrame'
 
 interface CloudSceneProps {
   id?: string
@@ -43,10 +44,29 @@ function CloudGate({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+// An account with no frames gets the first-run screen instead of an empty
+// workspace: header, one centered enrollment card, nothing else.
+//
+// The condition is "the list has arrived AND it is empty", never "no frames"
+// on its own — during the first load `frames` is legitimately empty, and
+// rendering the first-run screen then would flash it at every visitor. (The
+// mirror image of that mistake — gating on `framesLoaded`, which actually
+// means "has at least one frame" — is what once left new accounts stuck on
+// "Loading..." forever; see CloudGate above.)
+function CloudFleet(): ReactNode {
+  const { frames, framesEverLoaded } = useValues(framesModel)
+
+  if (framesEverLoaded && Object.keys(frames).length === 0) {
+    return <CloudFirstRunAddFrame />
+  }
+
+  return <FramesHome />
+}
+
 export function CloudFramesHome() {
   return (
     <CloudGate>
-      <FramesHome />
+      <CloudFleet />
     </CloudGate>
   )
 }

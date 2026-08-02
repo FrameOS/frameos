@@ -5,11 +5,8 @@ import {
   cloudFrameUrl,
   cloudFramesUrl,
 } from "@frameos/cloud-frontend/src/routes";
-import { AddFramePanel } from "../../../src/components/AddFramePanel";
 import { FrameRowActions } from "../../../src/components/FrameRowActions";
 import { formatBytes, formatDateTime } from "../../../src/lib/format";
-import { getAccountBaseUrl } from "../../../src/lib/env";
-import { claimTokenTtlMs } from "../../../src/lib/frames";
 import { readSession } from "../../../src/lib/session";
 
 export const metadata = { title: "My frames" };
@@ -27,9 +24,16 @@ function hardwareLabel(hardware: unknown) {
   return [platform, size].filter(Boolean).join(" · ") || "—";
 }
 
-// The fleet table: enrollment state, liveness, per-frame log storage. The
-// full management UI (scenes, schedule, settings, live logs) is the shared
-// FrameOS workspace served at /frames.
+// The account's frame index: enrollment state, liveness, per-frame log
+// storage, plus the two account-level actions on a frame (confirm a pending
+// enrollment, revoke the link).
+//
+// Adding a frame does NOT live here. It used to — this page carried the whole
+// enrollment panel while /frames carried the workspace — so the two surfaces
+// duplicated each other and the workspace's own "Add frame" button posted to
+// an endpoint the cloud does not implement. The panel now lives once, in the
+// workspace (cloud-frontend/src/components/AddFramePanel.tsx), and this page
+// links to it.
 export default async function AccountFramesPage() {
   const session = await readSession();
   const accountId = session?.accountId;
@@ -69,15 +73,15 @@ export default async function AccountFramesPage() {
           <p className="copy">
             Frames enrolled directly with FrameOS Cloud. They run sandboxed
             interpreted scenes only — the cloud can never open a shell, write
-            files, or reach your network. Manage scenes and settings in the{" "}
-            <Link href={cloudFramesUrl()}>frames workspace</Link>.
+            files, or reach your network. Adding a frame, and everything else
+            about managing one (scenes, schedule, settings, live logs), happens
+            in the <Link href={cloudFramesUrl()}>frames workspace</Link>.
           </p>
         </div>
         <div className="inline-actions">
-          <AddFramePanel
-            claimTokenTtlHours={Math.round(claimTokenTtlMs / (60 * 60 * 1000))}
-            cloudOrigin={new URL(getAccountBaseUrl()).origin}
-          />
+          <Link className="button button--small" href={cloudFramesUrl()}>
+            Add a frame
+          </Link>
         </div>
       </div>
 
@@ -135,10 +139,11 @@ export default async function AccountFramesPage() {
         </table>
       ) : (
         <p className="copy">
-          No frames yet. Click “Add frame” to enroll your first one — a
-          one-line install script for any Raspberry Pi (or most Linux boxes),
-          an SD card image for the Pi Zero 2 W / W, or an ESP32 flashed from
-          this browser.
+          No frames yet. Open the{" "}
+          <Link href={cloudFramesUrl()}>frames workspace</Link> and click “Add
+          frame” to enroll your first one — a one-line install script for any
+          Raspberry Pi (or most Linux boxes), an SD card image for the Pi Zero
+          2 W / W, or an ESP32 flashed from this browser.
         </p>
       )}
     </section>

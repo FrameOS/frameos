@@ -302,6 +302,24 @@ bundle** of that SPA:
   …), so the live UI works unchanged.
 - On 401 the SPA redirects to cloud login; its own `login/` / `signup/`
   scenes never render in cloud mode — Next.js owns auth.
+- Enrollment lives in the workspace, once. The three "Add frame" flows above
+  are `cloud-frontend/src/components/AddFramePanel.tsx`; the workspace's own
+  Add-frame button opens it because `workspaceSurfaces.addFrameFlows` says
+  cloud mode uses `cloudPanel` (the self-hosted form posts to
+  `/api/frames/new`, which the cloud does not implement). `frontend/` must
+  never import `cloud-frontend/` — the same sources build the self-hosted and
+  on-device bundles — so the cloud bundle registers the panel at startup via
+  `frontend/src/scenes/workspace/addFramePanelRegistry.ts`. `/account/frames`
+  keeps only the frame index and the two account-level actions (confirm a
+  pending enrollment, revoke a frame).
+- Server-side config reaches the client-only bundle through named
+  whole-line anchors in `cloud-frontend/src/index.html`, replaced by
+  `app/frames/[[...path]]/route.ts`: `//__FRAMEOS_CLOUD_WS_ORIGIN__` (dev hub
+  origin) and `//__FRAMEOS_CLOUD_APP_CONFIG__` (account/scenes/logout URLs for
+  the account header, the enrollment origin written into SD images and ESP32
+  NVS, and the claim-code TTL). `build.mjs` fails the build if an anchor goes
+  missing, and the route 503s rather than serving a shell wired to the wrong
+  origins.
 
 Panel and scene availability in cloud mode, gated the same way
 `frameAdminMode` gates panels today:

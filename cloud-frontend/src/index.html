@@ -7,12 +7,17 @@
     <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
     <link rel="stylesheet" href="/frames-app/static/main.css" />
     <script>
-      // NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ line below is a named
-      // replacement anchor for cloud/apps/auth-web/app/frames/[[...path]]/route.ts,
-      // which swaps it for cloud_ws_origin in dev. Keep the token; the text
-      // around it is free to change. build.mjs fails the build if it goes
-      // missing, and the route fails loudly rather than serving a shell whose
-      // websocket points nowhere.
+      // NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ and //__FRAMEOS_CLOUD_APP_CONFIG__
+      // lines below are named replacement anchors for
+      // cloud/apps/auth-web/app/frames/[[...path]]/route.ts, which swaps the
+      // first for cloud_ws_origin in dev and the second for this deployment's
+      // account/scenes/logout URLs, enrollment origin and claim-code TTL —
+      // server-side configuration a client-only bundle cannot derive from
+      // window.location (see src/cloudConfig.ts). Keep the tokens; the text
+      // around them is free to change. build.mjs fails the build if either
+      // goes missing, and the route fails loudly rather than serving a shell
+      // whose websocket points nowhere or whose header links point at the
+      // wrong origin.
       // Base-path contract (see cloud-frontend/README.md):
       //   API           /api/frames/...  -> ingress_path ''
       //   SPA routes    /frames/**       -> route_base_path
@@ -21,6 +26,7 @@
         ...(window.FRAMEOS_APP_CONFIG || {}),
         cloudMode: true,
         //__FRAMEOS_CLOUD_WS_ORIGIN__
+        //__FRAMEOS_CLOUD_APP_CONFIG__
         ingress_path: '',
         route_base_path: '/frames',
         assets_base_path: '/frames-app',

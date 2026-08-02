@@ -1,37 +1,45 @@
 // @vitest-environment jsdom
-
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+//
+// The workspace's "Add frame" panel. It lives in cloud-frontend/, which has no
+// test runner, so it is tested from auth-web's vitest across the package
+// boundary (see the other shared-spa tests).
+//
+// The panel used to live in this app, at /account/frames, and kept its open
+// state in the URL (?add=frame). In the workspace the drawer around it owns
+// that — the panel is mounted only while it is open — so "opened" here means
+// "rendered" and "closed" means "unmounted".
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AddFramePanel } from "./AddFramePanel";
+import { AddFramePanel } from "../../../../../../cloud-frontend/src/components/AddFramePanel";
 
-// The panel keeps its open state in the URL so Back/Forward move in and out
-// of it; these tests pin that contract against the navigation hooks.
-const push = vi.fn();
-let currentParams = new URLSearchParams();
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/account/frames",
-  useRouter: () => ({ push }),
-  useSearchParams: () => currentParams,
-}));
-
-vi.mock("./SdImageBuilder", () => ({
-  SdImageBuilder: () => <div data-testid="sd-builder" />,
-}));
-vi.mock("./Esp32CloudFlasher", () => ({
-  Esp32CloudFlasher: () => <div data-testid="esp32-flasher" />,
-}));
+vi.mock(
+  "../../../../../../cloud-frontend/src/components/SdImageBuilder",
+  () => ({
+    SdImageBuilder: () => <div data-testid="sd-builder" />,
+  }),
+);
+vi.mock(
+  "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher",
+  () => ({
+    Esp32CloudFlasher: () => <div data-testid="esp32-flasher" />,
+  }),
+);
 
 const fetchMock = vi.fn<typeof fetch>();
+const onClose = vi.fn();
+
+function renderPanel() {
+  return render(
+    <AddFramePanel
+      claimTokenTtlHours={24}
+      cloudOrigin="https://account.frameos.net"
+      onClose={onClose}
+    />,
+  );
+}
 
 beforeEach(() => {
-  push.mockReset();
+  onClose.mockReset();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(
     Response.json({
@@ -40,7 +48,6 @@ beforeEach(() => {
     }),
   );
   vi.stubGlobal("fetch", fetchMock);
-  currentParams = new URLSearchParams();
 });
 
 afterEach(() => {
@@ -49,27 +56,12 @@ afterEach(() => {
 });
 
 describe("AddFramePanel", () => {
-  it("stays closed without the URL flag and opens by navigating", () => {
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
-
-    expect(screen.queryByText(/Add a frame/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /add frame/i }));
-
-    expect(push).toHaveBeenCalledWith("/account/frames?add=frame", {
-      scroll: false,
-    });
-    // Nothing opened locally: the URL is the single source of truth, so a
-    // Back that removes the param closes the panel without extra state.
-    expect(screen.queryByText(/Add a frame/)).toBeNull();
-  });
-
   // Regression: the panel used to mint a single-use code on every open.
   // Nothing revokes an unused code, the account holds only a few at a time,
-  // and Back/Forward reopens the panel — so ~20 open/close cycles burned the
-  // whole quota for 24 hours.
+  // and re-opening the drawer is one click — so a couple of dozen open/close
+  // cycles burned the whole quota for 24 hours.
   it("mints nothing when the panel opens", async () => {
-    currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    renderPanel();
 
     expect(screen.getByText("Add a frame")).toBeDefined();
     // The command is shown with the code masked, so it is clear what will run.
@@ -81,9 +73,20 @@ describe("AddFramePanel", () => {
     ).toHaveLength(0);
   });
 
+  // The origin is written into SD images, ESP32 NVS and this command, so it is
+  // the deployment's configured public URL — not window.location.origin, which
+  // is whatever host the admin browsed through.
+  it("builds the install command against the injected cloud origin", async () => {
+    renderPanel();
+
+    await screen.findByText(
+      /curl -fsSL https:\/\/account\.frameos\.net\/install\.sh/,
+    );
+    expect(window.location.origin).not.toBe("https://account.frameos.net");
+  });
+
   it("mints one code when the user asks for the install command", async () => {
-    currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -101,8 +104,7 @@ describe("AddFramePanel", () => {
     fetchMock.mockResolvedValue(
       Response.json({ error: "claim_token_quota_exceeded" }, { status: 403 }),
     );
-    currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -117,8 +119,7 @@ describe("AddFramePanel", () => {
     fetchMock.mockResolvedValue(
       Response.json({ error: "frame_quota_exceeded" }, { status: 403 }),
     );
-    currentParams = new URLSearchParams("add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
@@ -127,43 +128,53 @@ describe("AddFramePanel", () => {
   });
 
   // A code that arrives after the panel closed belongs to the closed panel:
-  // letting it land would overwrite whatever the reopened panel holds.
+  // letting it land would overwrite whatever the reopened panel holds, and the
+  // reopened panel would show a code the account may already have spent.
   it("drops a mint that was still in flight when the panel closed", async () => {
     let deliver: ((response: Response) => void) | undefined;
+    let signal: AbortSignal | undefined;
     fetchMock.mockImplementation(
-      () =>
+      (_input, init) =>
         new Promise<Response>((resolve) => {
+          signal = init?.signal ?? undefined;
           deliver = resolve;
         }),
     );
-    currentParams = new URLSearchParams("add=frame");
-    const view = render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    const view = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /generate command/i }));
 
-    // Back closes the panel, then Forward reopens it.
-    currentParams = new URLSearchParams();
-    view.rerender(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
-    currentParams = new URLSearchParams("add=frame");
-    view.rerender(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+    // Closing the drawer unmounts the panel; reopening mounts a fresh one.
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    renderPanel();
     await act(async () => {
       deliver?.(Response.json({ claim_token: "FRCT_stale" }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(screen.queryByText(/FRCT_stale/)).toBeNull();
-    expect(
-      screen.getByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/),
-    ).toBeDefined();
+    expect(screen.getByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/)).toBeDefined();
   });
 
-  it("closes by dropping the flag while keeping other query params", () => {
-    currentParams = new URLSearchParams("revoked=1&add=frame");
-    render(<AddFramePanel claimTokenTtlHours={24} cloudOrigin={window.location.origin} />);
+  // The first-run screen (an account with no frames) renders the same panel as
+  // the whole page, where there is nothing behind it to close back to.
+  it("offers no close button when nothing owns it", () => {
+    render(
+      <AddFramePanel
+        claimTokenTtlHours={24}
+        cloudOrigin="https://account.frameos.net"
+      />,
+    );
+
+    expect(screen.getByText("Add a frame")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
+  });
+
+  it("closes through the drawer that owns its open state", () => {
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
 
-    expect(push).toHaveBeenCalledWith("/account/frames?revoked=1", {
-      scroll: false,
-    });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

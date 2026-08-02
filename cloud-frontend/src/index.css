@@ -10,6 +10,142 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100dvh;
   max-width: none !important;
+  /* The app below is exactly one viewport tall and scrolls internally; a
+     page-level scrollbar here would let the account header slide away. */
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * Account chrome + workspace shell
+ *
+ * The account header is fixed-height chrome at the top; the shared workspace
+ * shell (frontend/src/scenes/workspace/FrameosShell.tsx) fills what is left.
+ *
+ * The shell positions all of its chrome — the rail, every drawer, the floating
+ * toolbars — with `position: fixed` against the viewport, from a dozen
+ * different components. Offsetting each of them by the header height would
+ * mean patching the shared SPA (which also builds the self-hosted and
+ * on-device bundles) and would still miss the next one somebody adds. Instead
+ * the wrapper takes a transform, which makes it the containing block for every
+ * fixed descendant: the shell keeps saying "top: 1.25rem" and lands 1.25rem
+ * below the header. Things that portal out to #popper or document.body
+ * (dropdowns, tooltips, modals) live outside this wrapper, so they still
+ * measure against the real viewport — which is what they want.
+ *
+ * What a transform does NOT rebase is vh/dvh, so the two viewport-height
+ * utilities the shell uses (min-h-screen on the app shell, h-screen on
+ * <main>) are re-anchored to the wrapper here. Both selectors are two classes
+ * deep, so they beat Tailwind's single-class utilities, max-lg: variants
+ * included.
+ * ------------------------------------------------------------------------ */
+.frameos-cloud-app {
+  --frameos-account-header-height: 3.25rem;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.frameos-cloud-app__shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  transform: translateZ(0);
+}
+
+.frameos-cloud-app__shell .frameos-app-shell,
+.frameos-cloud-app__shell .workspace-main {
+  height: 100%;
+  min-height: 0;
+}
+
+/* The shell hands mobile back to page scrolling (max-lg:h-auto,
+   max-lg:overflow-visible). Inside a fixed-height wrapper that would clip
+   whatever does not fit, so the scrolling stays inside <main>. */
+@media (max-width: 1023px) {
+  .frameos-cloud-app__shell .workspace-main {
+    overflow-y: auto;
+  }
+}
+
+.frameos-account-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: var(--frameos-account-header-height);
+  padding: 0 1.25rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+}
+
+.frameos-account-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.frameos-account-header__name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.frameos-account-header__logo--dark {
+  display: none;
+}
+
+.frameos-account-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.frameos-account-header__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.frameos-account-header__link:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.frameos-account-header__link:focus-visible {
+  outline: 2px solid var(--frameos-primary-ring);
+  outline-offset: 2px;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: rgba(24, 26, 31, 0.86);
+  color: #f3f4f6;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__logo--light {
+  display: none;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__logo--dark {
+  display: block;
 }

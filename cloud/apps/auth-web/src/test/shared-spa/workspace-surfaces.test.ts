@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addFrameFlows,
   allowedFrameMenuActions,
   allowedFrameSettingsSections,
   allowedFrameToolPanels,
@@ -149,5 +150,21 @@ describe("allow-list hygiene", () => {
         expect(new Set(entries).size).toBe(entries.length);
       }
     }
+  });
+});
+
+describe("Add frame opens the flow its control plane implements", () => {
+  // The cloud has no POST /api/frames/new — a frame gets there by enrolling
+  // itself with a claim code — so the workspace's "Add frame" button used to
+  // open the self-hosted creation form and 405 on submit. The cloud bundle
+  // registers its own enrollment panel instead (claim codes, SD images, ESP32
+  // flashing); everything else keeps the backend form.
+  it("sends cloud mode to the enrollment panel", () => {
+    expect(addFrameFlows.cloud).toBe("cloudPanel");
+  });
+
+  it("leaves the backend and the on-device panel on the creation form", () => {
+    expect(addFrameFlows.backend).toBe("backendForm");
+    expect(addFrameFlows.frameAdmin).toBe("backendForm");
   });
 });
