@@ -246,12 +246,17 @@ jobs:
           # Build a release image for every enabled platform that has a
           # cached Buildroot base image in the checked-in manifest.
           platforms=$(python3 - <<'PY'
+          import contextlib
           import json
           from pathlib import Path
           import sys
 
           sys.path.insert(0, "backend")
-          from app.tasks.buildroot_platforms import enabled_buildroot_platforms
+          # Importing app.tasks pulls in the whole backend, which may emit
+          # diagnostics at import time (e.g. SQLite warnings). Keep stdout
+          # clean: it is captured as the platform list below.
+          with contextlib.redirect_stdout(sys.stderr):
+              from app.tasks.buildroot_platforms import enabled_buildroot_platforms
 
           manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
           available = {entry.get("platform") for entry in manifest.get("entries", [])}

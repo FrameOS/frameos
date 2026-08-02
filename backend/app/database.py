@@ -1,3 +1,5 @@
+import sys
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import config
@@ -31,10 +33,13 @@ if is_sqlite:
         with engine.connect() as _conn:
             _journal_mode = _conn.exec_driver_sql("PRAGMA journal_mode").scalar()
         if _journal_mode != "wal":
+            # stderr: this module is imported by CLI tools whose stdout is
+            # captured (e.g. the release workflow's platform listing).
             print(f"🔴 SQLite journal_mode is {_journal_mode!r} (expected 'wal'); "
-                  "concurrent writes may fail with 'database is locked'")
+                  "concurrent writes may fail with 'database is locked'",
+                  file=sys.stderr)
     except Exception as e:
-        print(f"🔴 Could not verify SQLite journal mode: {e}")
+        print(f"🔴 Could not verify SQLite journal mode: {e}", file=sys.stderr)
 
 SessionLocal = sessionmaker(
     autocommit=False,
