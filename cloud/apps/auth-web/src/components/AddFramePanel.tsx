@@ -7,18 +7,28 @@ import {
   QrCode,
   TerminalSquare,
 } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Esp32CloudFlasher } from "./Esp32CloudFlasher";
 import { SdImageBuilder } from "./SdImageBuilder";
 
+// The panel's open state lives in the URL (?add=frame) rather than in React
+// state, so Back/Forward move in and out of it and a shared or reloaded link
+// lands where the user expects.
+const openParam = "add";
+const openValue = "frame";
+
 // "Add frame": four enrollment paths (install script, SD image, link code,
 // ESP32 USB flashing). Claim codes are plumbing, not UX: a single-use code
 // is minted automatically when the panel opens and embedded where it is
-// needed (the install command, the setup-portal paste); the SD builder and
-// the ESP32 flasher mint their own. The server stores only hashes; every
-// enrolled frame appears as pending until the owner confirms it.
+// needed (the install command); the SD builder and the ESP32 flasher mint
+// their own. The server stores only hashes; every enrolled frame appears as
+// pending until the owner confirms it.
 export function AddFramePanel() {
-  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const open = searchParams.get(openParam) === openValue;
   const [name, setName] = useState("");
   const [claimToken, setClaimToken] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -40,11 +50,30 @@ export function AddFramePanel() {
     ? `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${claimToken} sh`
     : undefined;
 
+  function setOpen(next: boolean) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) {
+      params.set(openParam, openValue);
+    } else {
+      params.delete(openParam);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
   // Mint the panel's single-use code as soon as it opens, so every command
-  // shown below just works without the user handling codes. The ref guards
-  // React strict-mode double effects from minting twice.
+  // shown below just works without the user handling codes. Closing discards
+  // it (it may have been spent by an install), so reopening — including via
+  // Back/Forward — mints a fresh one. The ref guards React strict-mode
+  // double effects from minting twice.
   useEffect(() => {
-    if (!open || mintedRef.current) {
+    if (!open) {
+      mintedRef.current = false;
+      setClaimToken(undefined);
+      setError(undefined);
+      return;
+    }
+    if (mintedRef.current) {
       return;
     }
     mintedRef.current = true;
@@ -141,15 +170,7 @@ export function AddFramePanel() {
           />
           <button
             className="button button--subtle button--small"
-            onClick={() => {
-              // The session code is single-use and may have been spent by an
-              // install; reopening mints a fresh one. The SD builder's
-              // multi-use token is kept — it lives inside downloaded images.
-              setOpen(false);
-              setClaimToken(undefined);
-              setError(undefined);
-              mintedRef.current = false;
-            }}
+            onClick={() => setOpen(false)}
             type="button"
           >
             Close
