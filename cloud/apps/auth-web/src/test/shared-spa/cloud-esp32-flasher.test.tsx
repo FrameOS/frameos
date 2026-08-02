@@ -330,8 +330,8 @@ describe("Esp32CloudFlasher", () => {
     stubSerial(port);
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
 
-    fireEvent.change(await screen.findByLabelText("E-paper panel"), {
-      target: { value: "EPD_13in3e" },
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "panel:EPD_13in3e" },
     });
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
@@ -344,6 +344,24 @@ describe("Esp32CloudFlasher", () => {
     ]);
   });
 
+  it("provisions integrated boards as hardware bundles, not bare panels", async () => {
+    // A PhotoPainter needs its PMIC handling, EPD wiring, buttons and SD
+    // pins — `set hardware` makes the firmware apply the whole bundle.
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "hw:waveshare_esp32_s3_photopainter" },
+    });
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(port.writes).toContain('set hardware "waveshare_esp32_s3_photopainter"');
+    expect(port.writes.some((line) => line.startsWith("set panel"))).toBe(false);
+  });
+
   it("hides the panel picker for releases without the all-panels firmware", async () => {
     // Old single-panel firmware hard-fails display init on any other panel,
     // so offering a choice there would brick the render loop.
@@ -353,7 +371,7 @@ describe("Esp32CloudFlasher", () => {
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
-    expect(screen.queryByLabelText("E-paper panel")).toBeNull();
+    expect(screen.queryByLabelText("Frame hardware")).toBeNull();
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
     expect(fetchedUrls()).toContain(

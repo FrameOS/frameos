@@ -31,13 +31,19 @@ const genericPlatform = 'esp32-s3-generic'
 const legacyPlatform = 'esp32-s3-epd7in5v2'
 const genericFirmwareSuffix = '-esp32-s3-generic.bin'
 
-// Curated panels for the picker; the default (empty) keeps the firmware's
-// baked-in EPD_7in5_V2, and "custom" accepts any panel key the firmware's
-// driver table knows (`set panel` rejects unknown names at the console).
+// Curated hardware for the picker. Integrated boards are BUNDLES: `set
+// hardware <preset>` makes the firmware apply the panel, EPD wiring, GPIO
+// buttons and TF-card pins in one shot (the preset table in fos_console.c,
+// mirroring EMBEDDED_HARDWARE_PRESETS in the backend). Bare panels on a XIAO
+// only need `set panel`; the default (empty) keeps the firmware's baked-in
+// EPD_7in5_V2, and "custom" accepts any panel key the firmware's driver
+// table knows (`set panel` rejects unknown names at the console).
 const panelChoices = [
-  { label: 'Waveshare 7.5" V2 — 800×480 black/white (default)', value: '' },
-  { label: 'Waveshare 7.3" E — 800×480 Spectra 6', value: 'EPD_7in3e' },
-  { label: 'Waveshare 13.3" E — 1600×1200 Spectra 6', value: 'EPD_13in3e' },
+  { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.5" V2 (default)', value: '' },
+  { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.3" E — Spectra 6', value: 'panel:EPD_7in3e' },
+  { label: 'Seeed XIAO ESP32-S3 + Waveshare 13.3" E — Spectra 6', value: 'panel:EPD_13in3e' },
+  { label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)', value: 'hw:waveshare_esp32_s3_photopainter' },
+  { label: 'Waveshare 13.3" E frame (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
   { label: 'Custom panel key…', value: 'custom' },
 ] as const
 const flashBaudrate = 460800
@@ -430,7 +436,10 @@ export function Esp32CloudFlasher({
     }
   }, [])
 
-  const panelKey = panelChoice === 'custom' ? customPanel.trim() : panelChoice
+  // What to provision for the chosen hardware: a whole-board preset via
+  // `set hardware`, or a bare panel via `set panel`.
+  const provisionKey = panelChoice === 'custom' ? customPanel.trim() : panelChoice.replace(/^(hw|panel):/, '')
+  const provisionCommand = panelChoice.startsWith('hw:') ? 'hardware' : 'panel'
 
   // WebSerial support cannot change while the page is open, so probe it once.
   // (The Next.js version deferred this to an effect purely to keep SSR and
@@ -473,11 +482,11 @@ export function Esp32CloudFlasher({
       setPhase('error')
       return
     }
-    if (panelSelectable && panelChoice === 'custom' && !/^[A-Za-z0-9_.-]+$/.test(panelKey)) {
+    if (panelSelectable && panelChoice === 'custom' && !/^[A-Za-z0-9_.-]+$/.test(provisionKey)) {
       setError(
-        panelKey
+        provisionKey
           ? 'Panel keys are plain identifiers like EPD_2in13_V4 — no spaces or quotes.'
-          : 'Enter the custom panel key (e.g. EPD_2in13_V4), or pick a panel from the list.'
+          : 'Enter the custom panel key (e.g. EPD_2in13_V4), or pick your hardware from the list.'
       )
       setPhase('error')
       return
@@ -607,15 +616,17 @@ export function Esp32CloudFlasher({
           text: `set claim_token ${quoteConsoleArgument(token)}`,
         },
       ]
-      if (panelSelectable && panelKey) {
-        // The all-panels firmware resolves the driver from NVS at boot; the
-        // console rejects keys its table does not know, which fails the flash
-        // loudly instead of leaving a frame that renders to nothing.
+      if (panelSelectable && provisionKey) {
+        // The all-panels firmware resolves the driver from NVS at boot, and
+        // `set hardware` applies a whole board bundle (panel, pins, buttons,
+        // SD card). The console rejects panel keys its table does not know,
+        // which fails the flash loudly instead of leaving a frame that
+        // renders to nothing.
         commands.push({
-          display: `set panel ${panelKey}`,
+          display: `set ${provisionCommand} ${provisionKey}`,
           expect: consolePrompt,
           required: true,
-          text: `set panel ${quoteConsoleArgument(panelKey)}`,
+          text: `set ${provisionCommand} ${quoteConsoleArgument(provisionKey)}`,
         })
       }
       if (wifiSsid) {
@@ -687,7 +698,7 @@ export function Esp32CloudFlasher({
         {panelSelectable ? (
           <>
             <select
-              aria-label="E-paper panel"
+              aria-label="Frame hardware"
               className={controlClassName}
               disabled={busy}
               onChange={(event) => setPanelChoice(event.target.value)}
@@ -757,7 +768,7 @@ export function Esp32CloudFlasher({
       {phase === 'done' ? <div data-testid="esp32-flash-done" /> : null}
       {lines.length > 0 ? (
         <pre
-          className="frameos-inset max-h-48 overflow-auto rounded-xl px-3 py-2 text-[11px] leading-relaxed"
+          className="frameos-inset max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-[11px] leading-relaxed"
           role="status"
         >
           {lines.join('\n')}

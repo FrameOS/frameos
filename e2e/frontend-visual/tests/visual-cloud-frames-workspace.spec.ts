@@ -24,7 +24,7 @@ import { attachFrontendErrorCollector, settleForScreenshot } from './visual-help
  *     surfaces agree on (cloud-frontend/src/cloudThemeSync.ts);
  *   - the Add-frame panel: the SD image builder's Display picker (with
  *     width/height prefills, rotation, VCOM, upload URL, "Remember WiFi",
- *     claim-validity select) and the ESP32 flasher's E-paper panel picker
+ *     claim-validity select) and the ESP32 flasher's hardware picker
  *     that only appears when the release publishes esp32-s3-generic.
  */
 
@@ -50,7 +50,7 @@ const contentTypes: Record<string, string> = {
 
 /** A deterministic /api/frames/firmware listing: both Pi SD images plus the
  * all-panels ESP32 build, so the SD board picker fills in and the flasher's
- * E-paper panel picker shows. */
+ * hardware picker shows. */
 const firmwareListing = {
   release: '2026.7.6',
   assets: [
@@ -423,7 +423,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     expectNoCloudFrontendErrors(readErrors)
   })
 
-  test('ESP32 flasher: E-paper panel picker follows the esp32-s3-generic asset', async ({ page }) => {
+  test('ESP32 flasher: hardware picker follows the esp32-s3-generic asset', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)
     await page.setViewportSize({ width: 1440, height: 1400 })
     await prepareCloudPage(page, 'light')
@@ -435,11 +435,11 @@ test.describe('cloud /frames workspace @e2e', () => {
 
     // The release publishes the all-panels build, so the picker shows —
     // defaulting to the firmware's baked-in 7.5" V2.
-    const panelPicker = drawer.getByLabel('E-paper panel')
+    const panelPicker = drawer.getByLabel('Frame hardware')
     await expect(panelPicker).toBeVisible()
     await expect(panelPicker).toHaveValue('')
     await expect(
-      panelPicker.locator('option', { hasText: 'Waveshare 13.3" E — 1600×1200 Spectra 6' })
+      panelPicker.locator('option', { hasText: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)' })
     ).toHaveCount(1)
 
     // "Custom panel key…" reveals the free-form key input.
@@ -449,7 +449,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     expectNoCloudFrontendErrors(readErrors)
   })
 
-  test('ESP32 flasher: no panel picker when the release lacks esp32-s3-generic', async ({ page }) => {
+  test('ESP32 flasher: no hardware picker when the release lacks esp32-s3-generic', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)
     await page.setViewportSize({ width: 1440, height: 1400 })
     await prepareCloudPage(page, 'light')
@@ -462,7 +462,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     // Older releases only ship the single-panel 7.5" V2 build; offering a
     // panel choice would brick the display init, so the picker stays hidden.
     await expect(drawer.getByText('Flash an ESP32 from this browser')).toBeVisible()
-    await expect(drawer.getByLabel('E-paper panel')).toHaveCount(0)
+    await expect(drawer.getByLabel('Frame hardware')).toHaveCount(0)
 
     expectNoCloudFrontendErrors(readErrors)
   })
