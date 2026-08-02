@@ -222,12 +222,12 @@ Two repos:
       AGPL `frameos-editor` bundle (built from frameos' `frameos/editor` +
       `frontend/src/embed/`; app catalog and sources embedded, Monaco for JS
       app source viewing/editing) is served as-is from /frameos-editor
-      (copied by `scripts/copy-editor-assets.mjs`, gitignored) and embedded
-      in a full-screen iframe; the modal implements the documented postMessage
-      protocol. (This began as an AGPL arms-length boundary; since the
-      2026-07 monorepo merge the iframe stays because it is the editor's
-      designed embedding and isolates its global styles and bundled
-      runtime.) Saving posts the edited scenes to the content endpoint.
+      (copied by `scripts/copy-editor-assets.mjs`, gitignored) and mounted
+      directly into the page via `frameos-editor/mount` (no iframe since
+      2026-08; the original iframe was an AGPL arms-length boundary that
+      the monorepo merge made unnecessary). The mount module owns the
+      editor's global stylesheet while open and removes it on close.
+      Saving posts the edited scenes to the content endpoint.
       The editor is the `frameos-editor` workspace package, built by turbo
       (frontend build → `frameos/editor/dist`) and copied into public/ by
       the prebuild step.

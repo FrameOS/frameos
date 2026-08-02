@@ -23,7 +23,7 @@
     },
     "frameos-editor#build": {
       "dependsOn": ["@frameos/frontend#build"],
-      "inputs": ["scripts/**", "embed.js", "embed.d.ts", "package.json"],
+      "inputs": ["scripts/**", "embed.js", "embed.d.ts", "mount.d.ts", "react.d.ts", "package.json"],
       "outputs": ["dist/**"]
     },
     "frameos-wasm#build": {

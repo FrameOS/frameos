@@ -1,9 +1,8 @@
 // The frameos-editor bundle is the workspace package frameos/editor (built
 // from frontend/dist-editor by `turbo build`), served as-is from public/
-// (gitignored) and embedded in an iframe — the iframe keeps the editor's
-// global stylesheet and bundled runtime isolated from this app. The modal
-// talks to it over the documented postMessage protocol. See
-// src/components/SceneEditorModal.tsx.
+// (gitignored) and mounted directly into the page — no iframe — via its
+// static/mount.js entry, which owns the editor's global stylesheet while
+// open. See src/components/SceneEditorModal.tsx.
 //
 // When the package's dist is absent (e.g. the production server, where the
 // deploy ships prebuilt assets), existing assets in public/ are kept and

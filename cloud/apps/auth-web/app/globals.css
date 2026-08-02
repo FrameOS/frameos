@@ -1461,6 +1461,12 @@ a.tag-pill:hover {
   flex: 1;
   width: 100%;
   border: 0;
+  min-height: 0;
+  position: relative;
+  /* The directly-mounted editor positions its drawers with `fixed`; the
+     transform makes this element their containing block, keeping them
+     inside the frame area (below the modal bar) instead of the viewport. */
+  transform: translateZ(0);
 }
 
 /* Scrollable body for full-screen modals whose content is regular page flow

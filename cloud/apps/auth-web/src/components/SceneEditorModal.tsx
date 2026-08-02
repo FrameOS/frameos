@@ -1,8 +1,17 @@
 "use client";
 
 import { GitFork, Pencil, Save, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+// The FrameOS scene editor as a plain React component in this app's tree
+// (react/react-dom are externalized in its bundle — one React). It is
+// browser-only (kea, Monaco, wasm), hence the ssr: false dynamic import.
+const EmbeddedSceneEditor = dynamic(
+  () => import("frameos-editor/react").then((module) => module.EmbeddedSceneEditor),
+  { ssr: false },
+);
 
 type SceneEditorModalProps = {
   sceneId: string;
@@ -23,12 +32,45 @@ type SceneEditorModalProps = {
 
 type SceneJson = { id: string } & Record<string, unknown>;
 
-// Owner scene editing via the embedded FrameOS editor: the editor bundle
-// (copied to /frameos-editor by scripts/copy-editor-assets.mjs) runs in an
-// iframe — isolating its global stylesheet and bundled runtime from this
-// app — and this modal talks to it over its documented postMessage protocol
-// (see the frameos-editor package README). Saving publishes the edited
-// scenes as a new immutable version.
+// The editor's assets (Monaco workers, wasm preview runtime, stylesheet) are
+// copied to /frameos-editor by scripts/copy-editor-assets.mjs; the bundle
+// resolves them against this path.
+const EDITOR_ASSET_PATH = "/frameos-editor";
+
+if (typeof window !== "undefined") {
+  const anyWindow = window as unknown as Record<string, unknown>;
+  const config = (anyWindow.FRAMEOS_APP_CONFIG = anyWindow.FRAMEOS_APP_CONFIG || {}) as Record<string, unknown>;
+  config.ingress_path = EDITOR_ASSET_PATH;
+}
+
+// The editor's stylesheet is global (tailwind preflight included), so it is
+// only linked while the full-screen editor is open and removed on close.
+function useEditorStylesheet(open: boolean) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `${EDITOR_ASSET_PATH}/static/lib.css`;
+    document.head.appendChild(link);
+    const html = document.documentElement;
+    const previousTheme = html.dataset.frameosTheme;
+    html.dataset.frameosTheme = html.classList.contains("theme-dark") ? "dark" : "light";
+    return () => {
+      link.remove();
+      if (previousTheme === undefined) {
+        delete html.dataset.frameosTheme;
+      } else {
+        html.dataset.frameosTheme = previousTheme;
+      }
+    };
+  }, [open]);
+}
+
+// Owner scene editing via the FrameOS editor rendered as a component in this
+// page's React tree. Saving publishes the edited scenes as a new immutable
+// version.
 export function SceneEditorModal({ sceneId, width, height, description, canSave = false, canFork = false, share }: SceneEditorModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -36,107 +78,19 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   const [saving, setSaving] = useState(false);
   const [forking, setForking] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [scenes, setScenes] = useState<SceneJson[] | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const latestScenesRef = useRef<SceneJson[] | null>(null);
   const initialJsonRef = useRef<string>("");
+  useEditorStylesheet(open);
 
   useEffect(() => {
     if (!open) {
       return;
     }
+    setTheme(document.documentElement.classList.contains("theme-dark") ? "dark" : "light");
     let cancelled = false;
-    let scenes: SceneJson[] | null = null;
-
-    const post = (message: Record<string, unknown>) => {
-      iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
-    };
-
-    const initMessage = (initScenes: SceneJson[]) => ({
-      type: "frameos-editor:init",
-      scenes: initScenes,
-      width: width || 800,
-      height: height || 480,
-      mode: "rpios",
-      // Match the page's theme (see ThemeToggle).
-      theme: document.documentElement.classList.contains("theme-dark")
-        ? "dark"
-        : "light",
-      // The editor's built-in wasm Preview panel routes CORS-blocked fetches
-      // through this endpoint (same one SceneLivePreview uses).
-      previewProxyUrl: "/api/store/preview-proxy",
-      description: description || undefined,
-    });
-
-    const onMessage = (event: MessageEvent) => {
-      if (
-        event.origin !== window.location.origin ||
-        event.source !== iframeRef.current?.contentWindow
-      ) {
-        return;
-      }
-      const message = event.data;
-      if (!message || typeof message !== "object") {
-        return;
-      }
-      if (message.type === "frameos-editor:ready" && scenes) {
-        post(initMessage(scenes));
-      } else if (message.type === "frameos-editor:scenes" && Array.isArray(message.scenes)) {
-        latestScenesRef.current = message.scenes as SceneJson[];
-        setDirty(JSON.stringify(message.scenes) !== initialJsonRef.current);
-      } else if (
-        message.type === "frameos-editor:save-screenshot" &&
-        typeof message.dataUrl === "string" &&
-        message.dataUrl.startsWith("data:image/png;base64,")
-      ) {
-        // The editor's Preview panel captured a frame. Owners get it saved
-        // to the scene's image gallery; everyone else gets ok:false and the
-        // editor falls back to downloading the PNG locally.
-        void (async () => {
-          if (!canSave) {
-            post({
-              type: "frameos-editor:screenshot-saved",
-              ok: false,
-              error: "Only the scene owner can save to its images",
-            });
-            return;
-          }
-          try {
-            const response = await fetch(`/api/account/scenes/${sceneId}/images`, {
-              body: JSON.stringify({
-                content_base64: message.dataUrl.slice("data:image/png;base64,".length),
-              }),
-              headers: { "content-type": "application/json" },
-              method: "POST",
-            });
-            const payload = await response.json().catch(() => ({}));
-            post({
-              type: "frameos-editor:screenshot-saved",
-              ok: response.ok,
-              // The gallery upload failed for a real reason (quota,
-              // moderation, ...): tell the user instead of silently
-              // downloading a file they wanted stored.
-              fallbackDownload: false,
-              error: response.ok
-                ? undefined
-                : `Saving failed: ${payload.error ?? response.status}`,
-            });
-            if (response.ok) {
-              router.refresh();
-            }
-          } catch {
-            post({
-              type: "frameos-editor:screenshot-saved",
-              ok: false,
-              fallbackDownload: false,
-              error: "Saving failed",
-            });
-          }
-        })();
-      }
-    };
-    window.addEventListener("message", onMessage);
-
-    (async () => {
+    void (async () => {
       try {
         const response = await fetch(
           `/api/store/scenes/${sceneId}/scenes.json${share ? `?share=${encodeURIComponent(share)}` : ""}`,
@@ -148,24 +102,54 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
         if (cancelled) {
           return;
         }
-        scenes = loaded;
         latestScenesRef.current = loaded;
         initialJsonRef.current = JSON.stringify(loaded);
-        // The iframe may have signalled ready before the fetch finished;
-        // send init now that we have the scenes.
-        post(initMessage(scenes));
+        setScenes(loaded);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
         }
       }
     })();
-
     return () => {
       cancelled = true;
-      window.removeEventListener("message", onMessage);
     };
-  }, [open, sceneId, width, height, description]);
+  }, [open, sceneId, share]);
+
+  // The editor's Preview panel captured a frame. Owners get it saved to the
+  // scene's image gallery; everyone else gets ok:false and the editor falls
+  // back to downloading the PNG locally.
+  async function saveScreenshot(dataUrl: string) {
+    if (!canSave) {
+      return { ok: false, error: "Only the scene owner can save to its images" };
+    }
+    if (!dataUrl.startsWith("data:image/png;base64,")) {
+      return { ok: false, fallbackDownload: false, error: "Unexpected screenshot format" };
+    }
+    try {
+      const upload = await fetch(`/api/account/scenes/${sceneId}/images`, {
+        body: JSON.stringify({
+          content_base64: dataUrl.slice("data:image/png;base64,".length),
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const payload = await upload.json().catch(() => ({}));
+      if (upload.ok) {
+        router.refresh();
+      }
+      return {
+        ok: upload.ok,
+        // The gallery upload failed for a real reason (quota, moderation,
+        // ...): tell the user instead of silently downloading a file they
+        // wanted stored.
+        fallbackDownload: false,
+        error: upload.ok ? undefined : `Saving failed: ${payload.error ?? upload.status}`,
+      };
+    } catch {
+      return { ok: false, fallbackDownload: false, error: "Saving failed" };
+    }
+  }
 
   const editorHash = "#scene-editor";
   const openRef = useRef(false);
@@ -175,6 +159,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setOpen(false);
     setDirty(false);
     setError(null);
+    setScenes(null);
     latestScenesRef.current = null;
   }
 
@@ -219,8 +204,8 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   }
 
   async function forkAndSave() {
-    const scenes = latestScenesRef.current;
-    if (!scenes || scenes.length === 0) {
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
       setError("Nothing to fork yet.");
       return;
     }
@@ -235,7 +220,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setError(null);
     try {
       const response = await fetch(`/api/account/scenes/${sceneId}/fork`, {
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({ scenes: latest }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -256,8 +241,8 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   }
 
   async function save() {
-    const scenes = latestScenesRef.current;
-    if (!scenes || scenes.length === 0) {
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
       setError("Nothing to save yet.");
       return;
     }
@@ -272,7 +257,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
     setError(null);
     try {
       const response = await fetch(`/api/account/scenes/${sceneId}/content`, {
-        body: JSON.stringify({ scenes }),
+        body: JSON.stringify({ scenes: latest }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -282,7 +267,7 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
         return;
       }
       setDirty(false);
-      initialJsonRef.current = JSON.stringify(scenes);
+      initialJsonRef.current = JSON.stringify(latest);
       close();
       router.refresh();
     } finally {
@@ -353,12 +338,26 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
           </button>
         </div>
       </div>
-      <iframe
-        className="editor-modal__frame"
-        ref={iframeRef}
-        src="/frameos-editor/index.html"
-        title="FrameOS scene editor"
-      />
+      <div className="editor-modal__frame">
+        {scenes ? (
+          <EmbeddedSceneEditor
+            scenes={scenes}
+            width={width || 800}
+            height={height || 480}
+            mode="rpios"
+            theme={theme}
+            // The editor's built-in wasm Preview panel routes CORS-blocked
+            // fetches through this endpoint (same one SceneLivePreview uses).
+            previewProxyUrl="/api/store/preview-proxy"
+            description={description || undefined}
+            onScenesChanged={(nextScenes) => {
+              latestScenesRef.current = nextScenes as SceneJson[];
+              setDirty(JSON.stringify(nextScenes) !== initialJsonRef.current);
+            }}
+            onSaveScreenshot={saveScreenshot}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
