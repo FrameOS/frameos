@@ -408,7 +408,7 @@ FrameOS release the runtime was built from).
 A backend with a connected link seeds `{provider}/api/store/repository.json`
 as a normal repository once per project (deleting it is respected).
 
-**My cloud drive** — the account's own scenes, private ones included — is the
+**Private cloud scenes** — the account's own scenes, private ones included — is the
 same repository format behind the link token:
 
 ```http
@@ -495,8 +495,8 @@ POST /api/cloud/backups/frames    # {"frame_id"} — push one frame
 POST /api/cloud/backups/restore   # {"backup_id", "project_id"}
 GET  /api/backup/export           # local tar.gz of everything (no cloud needed)
 POST /api/cloud/store/publish     # {"template_id"} or {"name", "scenes", "from_frame_id"?,
-                                  #  "image_scene_id"?}; "visibility"? — save a scene to the cloud drive
-GET  /api/cloud/store/drive       # "My cloud drive" listing (proxied, image URLs rewritten)
+                                  #  "image_scene_id"?}; "visibility"? — save a scene to the private cloud
+GET  /api/cloud/store/drive       # "Private cloud scenes" listing (proxied, image URLs rewritten)
 GET  /api/cloud/store/drive/image/{sceneId}   # preview image proxy (attaches the link token)
 ```
 
