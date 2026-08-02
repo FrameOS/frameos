@@ -80,6 +80,12 @@ export const signupCloudLogic = kea<signupCloudLogicType>([
       }
       const response = await setupFetch('/api/cloud/setup/poll', { method: 'POST' })
       if (!response.ok) {
+        if (response.status === 409) {
+          // Another browser claimed the setup flow: stop polling and say so,
+          // rather than spinning forever against a link we cannot advance.
+          const payload = await response.json().catch(() => ({}))
+          actions.setSetupCloudError(payload.detail || 'Another browser is setting this install up')
+        }
         return
       }
       actions.loadSetupCloudStatusSuccess((await response.json()) as CloudStatus)

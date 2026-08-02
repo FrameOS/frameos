@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 from typing import Any
 from urllib.parse import urlparse
@@ -35,8 +36,30 @@ DEFAULT_LINK_SCOPES = [
 REQUEST_TIMEOUT_SECONDS = 15.0
 
 
+def _is_local_host(hostname: str) -> bool:
+    """Hosts where plain HTTP cannot be intercepted by a third party in any
+    meaningful sense: the machine itself, the local network, or mDNS names."""
+    host = (hostname or "").strip().lower().strip("[]")
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
 def normalize_cloud_provider_url(value: str | None) -> str | None:
-    """Return a normalized origin URL, None when disabled, raise on garbage."""
+    """Return a normalized origin URL, None when disabled, raise on garbage.
+
+    Plain HTTP is refused for anything but a local host. Everything that
+    matters rides this connection — the link bearer token, grant state, and the
+    identity claims a cloud login is minted from — so on http:// an on-path
+    attacker can forge a revocation, or forge the claims that decide who gets
+    logged in. Self-hosted providers on the LAN or on loopback keep working.
+    """
     normalized = (value or "").strip()
     if normalized.lower() == "disabled":
         return None
@@ -45,8 +68,20 @@ def normalize_cloud_provider_url(value: str | None) -> str | None:
     parsed = urlparse(normalized)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("The FrameOS Cloud server must be an http(s) URL")
+    if parsed.scheme == "http" and not _is_local_host(parsed.hostname or ""):
+        raise ValueError(
+            "The FrameOS Cloud server must use https (http is allowed only for "
+            "localhost and local network addresses)"
+        )
     path = parsed.path.rstrip("/")
     return parsed._replace(path=path, params="", query="", fragment="").geturl().rstrip("/")
+
+
+def hash_setup_claim(claim: str) -> str:
+    """First-run setup claim cookies are stored hashed: the row is readable by
+    anything that can read the database, and the cookie value is what proves
+    ownership of a pending link."""
+    return hashlib.sha256(claim.encode()).hexdigest()
 
 
 def default_cloud_provider_url() -> str | None:

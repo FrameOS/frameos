@@ -12,10 +12,15 @@ from app.database import get_db
 from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.schemas.auth import Token, UserSignup
+from app.models.user_session import (
+    create_user_session,
+    revoke_user_session,
+    session_is_active,
+)
 from app.utils.session_cookie import (
     SESSION_COOKIE_NAME,
     create_session_cookie_value,
-    decode_session_cookie_value,
+    decode_session_cookie_claims,
 )
 
 from . import api_open, api_user
@@ -43,12 +48,33 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def _decode_jwt_email(token: str) -> str:
+def _decode_jwt_claims(token: str) -> tuple[str, str]:
+    """Returns (email, session_id). Tokens minted before sessions were recorded
+    have no jti and are rejected — there is no row to validate them against."""
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     email: str = payload.get("sub")
+    session_id: str = payload.get("jti")
     if email is None:
         raise JWTError("Missing subject")
-    return email
+    if not session_id:
+        raise JWTError("Missing session id")
+    return email, session_id
+
+
+def issue_credentials(
+    db: Session, user: User, expires_delta: datetime.timedelta
+) -> tuple[str, str, int]:
+    """One session row per sign-in, referenced by both the bearer token and the
+    cookie, so revoking it ends every credential handed out at that moment."""
+    expires_at = datetime.datetime.utcnow() + expires_delta
+    session_id = create_user_session(db, user_id=user.id, expires_at=expires_at)
+    access_token = create_access_token(
+        data={"sub": user.email, "jti": session_id}, expires_delta=expires_delta
+    )
+    session_value, max_age = create_session_cookie_value(
+        email=user.email, session_id=session_id, expires_delta=expires_delta
+    )
+    return access_token, session_value, max_age
 
 
 async def get_current_user_from_jwt(token: str, db: Session) -> User:
@@ -58,14 +84,28 @@ async def get_current_user_from_jwt(token: str, db: Session) -> User:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        email = _decode_jwt_email(token)
+        email, session_id = _decode_jwt_claims(token)
     except JWTError:
+        raise credentials_exception
+    if not session_is_active(db, session_id):
         raise credentials_exception
 
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
     return user
+
+
+def current_session_id(request: Request) -> str | None:
+    """The session behind whichever credential authenticated this request."""
+    authorization = request.headers.get("authorization") or ""
+    if authorization.startswith("Bearer "):
+        try:
+            return _decode_jwt_claims(authorization.split(" ", 1)[1])[1]
+        except JWTError:
+            return None
+    claims = decode_session_cookie_claims(request.cookies.get(SESSION_COOKIE_NAME))
+    return claims[1] if claims else None
 
 
 async def get_current_user_from_request(
@@ -82,8 +122,11 @@ async def get_current_user_from_request(
         except HTTPException:
             return None
 
-    email = decode_session_cookie_value(request.cookies.get(SESSION_COOKIE_NAME))
-    if email is None:
+    claims = decode_session_cookie_claims(request.cookies.get(SESSION_COOKIE_NAME))
+    if claims is None:
+        return None
+    email, session_id = claims
+    if not session_is_active(db, session_id):
         return None
     return db.query(User).filter(User.email == email).first()
 
@@ -95,18 +138,23 @@ def get_current_user_from_websocket(
     token = websocket.query_params.get("token")
     if token:
         try:
-            email = _decode_jwt_email(token)
+            email, session_id = _decode_jwt_claims(token)
         except JWTError:
             return None, "Invalid token"
+        if not session_is_active(db, session_id):
+            return None, "Session revoked"
         user = db.query(User).filter(User.email == email).first()
         if user is None:
             return None, "User not found"
         return user, None
 
     cookie_value = websocket.cookies.get(SESSION_COOKIE_NAME)
-    email = decode_session_cookie_value(cookie_value)
-    if email is None:
+    claims = decode_session_cookie_claims(cookie_value)
+    if claims is None:
         return None, "Missing token"
+    email, session_id = claims
+    if not session_is_active(db, session_id):
+        return None, "Session revoked"
 
     user = db.query(User).filter(User.email == email).first()
     if user is None:
@@ -129,12 +177,16 @@ async def get_current_user(
     )
     try:
         if token:
-            email = _decode_jwt_email(token)
+            email, session_id = _decode_jwt_claims(token)
         else:
-            email = decode_session_cookie_value(request.cookies.get(SESSION_COOKIE_NAME))
-            if email is None:
+            claims = decode_session_cookie_claims(request.cookies.get(SESSION_COOKIE_NAME))
+            if claims is None:
                 raise credentials_exception
+            email, session_id = claims
     except JWTError:
+        raise credentials_exception
+
+    if not session_is_active(db, session_id):
         raise credentials_exception
 
     user = db.query(User).filter(User.email == email).first()
@@ -192,8 +244,7 @@ async def login(
 
     await redis.delete(key)
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
-    session_value, max_age = create_session_cookie_value(email=user.email, expires_delta=access_token_expires)
+    access_token, session_value, max_age = issue_credentials(db, user, access_token_expires)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_value,
@@ -247,8 +298,7 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
 
     # Auto-login after signup:
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
-    session_value, max_age = create_session_cookie_value(email=user.email, expires_delta=access_token_expires)
+    access_token, session_value, max_age = issue_credentials(db, user, access_token_expires)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_value,
@@ -269,6 +319,20 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     # to our login page.
     cloud_logout_url = None
     user = await get_current_user_from_request(request, db, request.headers.get("authorization"))
+
+    # End the session server-side, not just in this browser: the cookie may
+    # have been copied, and the bearer token issued alongside it is a second
+    # credential the browser never held.
+    authorization = request.headers.get("authorization") or ""
+    if authorization.startswith("Bearer "):
+        try:
+            _, bearer_session_id = _decode_jwt_claims(authorization.split(" ", 1)[1])
+            revoke_user_session(db, bearer_session_id)
+        except JWTError:
+            pass
+    cookie_claims = decode_session_cookie_claims(request.cookies.get(SESSION_COOKIE_NAME))
+    if cookie_claims is not None:
+        revoke_user_session(db, cookie_claims[1])
     if user is not None:
         from urllib.parse import quote
 

@@ -59,6 +59,16 @@ class Config:
     # any http(s) URL = a compatible self-hosted provider, 'disabled' = hide
     # the cloud link entirely. See docs/cloud-link.md.
     FRAMEOS_CLOUD_URL = os.environ.get('FRAMEOS_CLOUD_URL') or os.environ.get('FRAMEOS_AUTH_PROVIDER_URL') or ''
+    # The origin this install is reached at, e.g. https://frameos.example. Set
+    # this when a reverse proxy fronts FrameOS: it governs the cloud login
+    # redirect_uri and the logout return_to, and without it those are derived
+    # from request headers the caller controls. See docs/cloud-link.md.
+    FRAMEOS_PUBLIC_URL = os.environ.get('FRAMEOS_PUBLIC_URL') or ''
+    # Comma-separated proxy addresses whose X-Forwarded-* headers may be
+    # trusted. Empty = trust loopback and private-range peers only, which
+    # covers the usual docker/reverse-proxy setups without letting a client
+    # off the local network claim any origin it likes.
+    FRAMEOS_TRUSTED_PROXIES = os.environ.get('FRAMEOS_TRUSTED_PROXIES') or ''
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

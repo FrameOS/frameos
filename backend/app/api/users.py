@@ -3,10 +3,19 @@ import datetime
 from fastapi import Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from app import config as app_config
-from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, _should_use_secure_cookie, get_current_user_from_request
+from app.api.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    _should_use_secure_cookie,
+    current_session_id,
+    get_current_user_from_request,
+)
 from app.database import get_db
 from app.models.user import User
 from app.schemas.users import HasFirstUserResponse, UserEmailUpdate, UserPasswordUpdate, UserResponse
+from app.models.user_session import (
+    create_user_session,
+    revoke_sessions_for_user,
+)
 from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
 from . import api_open, api_user
 
@@ -56,7 +65,14 @@ def api_user_update_email(
     db.commit()
 
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    session_value, max_age = create_session_cookie_value(email=current_user.email, expires_delta=access_token_expires)
+    session_id = create_user_session(
+        db,
+        user_id=current_user.id,
+        expires_at=datetime.datetime.utcnow() + access_token_expires,
+    )
+    session_value, max_age = create_session_cookie_value(
+        email=current_user.email, session_id=session_id, expires_delta=access_token_expires
+    )
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_value,
@@ -72,6 +88,7 @@ def api_user_update_email(
 @api_user.post("/user/password", response_model=UserResponse)
 def api_user_update_password(
     data: UserPasswordUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_local_user),
 ):
@@ -95,5 +112,10 @@ def api_user_update_password(
     current_user.set_password(data.password)
     db.add(current_user)
     db.commit()
+
+    # A password change is also how someone reacts to a stolen laptop or a
+    # leaked cookie, so every other session ends here. The browser doing the
+    # changing keeps its own.
+    revoke_sessions_for_user(db, current_user.id, keep_session_id=current_session_id(request))
 
     return {"email": current_user.email}

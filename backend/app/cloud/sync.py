@@ -234,10 +234,14 @@ class CloudSync:
             link = db.get(CloudBackendLink, link_id)
             if link is None or link.status != "connected":
                 return
-            from app.api.cloud import _reset_link
+            from app.api.cloud import _reset_link, revoke_cloud_login_sessions
 
             _reset_link(link, poll_error="revoked")
             db.commit()
+            # Sessions minted through the cloud handoff go with the link,
+            # otherwise a revocation on the cloud side takes up to seven days
+            # to reach this install.
+            revoke_cloud_login_sessions(db)
             print("🟠 FrameOS Cloud sync: the provider revoked this link; local login re-enabled")
         finally:
             db.close()
