@@ -21,8 +21,8 @@ implementation), `frameos/src/frameos/server/routes/cloud_api_routes.nim`
   browser, and sees exactly which permission scopes are requested. The
   resulting bearer token carries only those scopes.
 - **Local-first.** Local login and local data always keep working. Disabling
-  local password login (a later phase) will require a verified working cloud
-  session first.
+  local password login requires a verified working cloud session first, and
+  losing the link always re-enables it.
 
 ## Configuration
 
@@ -196,16 +196,16 @@ POST {provider}/api/backends/unlink        # self-revoke on disconnect
 `{"scopes": ["backend:link", "backend:read", "auth:login", …]}` — the full
 desired set. Removing scopes is applied immediately (`{"status": "updated",
 "scope": "…"}`): the token holder reducing its own privileges needs no
-consent, and the base link scope can never be dropped. Adding a scope that
-comes with every cloud account (`backup:scenes`, `backup:frames`,
-`store:publish`) is also applied immediately. Adding a security-sensitive
-scope (`auth:login`, `remote:access`, …) returns
+consent, and the base link scope can never be dropped. Adding any scope
+returns
 `{"status": "approval_required", "device_code", "user_code",
 "verification_uri(_complete)", "expires_in", "interval"}`: the owner approves
 the change on the provider's device screen (only the account that owns the
 link may approve it), and the FrameOS side polls `POST /api/device/poll` as
 usual. The approved poll response carries the new `scope` and **no**
-`access_token` — the link credential never changes.
+`access_token` — the link credential never changes. No scope is ever added
+without this owner approval: a linked client must not be able to escalate
+its own privileges silently.
 
 `grants` response shape:
 
@@ -224,7 +224,7 @@ as it can reconnect (an unlinked token gets `401 invalid_link_token`). The
 backend runs a periodic grants sync (`backend/app/cloud/sync.py`); a 401
 resets the local link and re-enables local password login.
 
-## Login handoff (Phase 1, scope `auth:login`)
+## Login handoff (scope `auth:login`)
 
 Signs a browser user in to a FrameOS install with their provider account. The
 provider only completes a handoff for the account that owns the link, so a
@@ -280,7 +280,7 @@ FrameOS-side behavior (`backend/app/api/cloud.py`, frame:
   client origins (loopback hosts are allowed for development) and bounces
   back to the install's login page.
 
-## Config backups (Phase 3, scopes `backup:scenes` / `backup:frames`)
+## Config backups (scopes `backup:scenes` / `backup:frames`)
 
 Small replace-in-place blobs owned by the provider **account** (not the linked
 client), so a reinstalled backend that relinks to the same account can restore
@@ -358,7 +358,7 @@ The do-it-yourself alternative that needs no provider: `GET /api/backup/export`
 on the backend returns everything (full fidelity, secrets included — it stays
 local) as a plain `.tar.gz`.
 
-## Scene store (Phase 2, scope `store:publish`)
+## Scene store (scope `store:publish`)
 
 The provider may host an npm-style registry of scenes. Distribution reuses the
 formats FrameOS already speaks, so **browsing and installing needs no new
@@ -476,8 +476,9 @@ POST /api/cloud/poll        # one poll step; the UI calls this on the advertised
 POST /api/cloud/disconnect  # best-effort cloud unlink + local reset
 ```
 
-Phase 1/3 additions (login endpoints are open — the user is not logged in yet;
-the rest are login-gated; `/setup/*` only answer while no local user exists):
+Login, backup, and store endpoints (login endpoints are open — the user is not
+logged in yet; the rest are login-gated; `/setup/*` only answer while no local
+user exists):
 
 ```http
 GET  /api/cloud/login/options     # {"available", "provider_url", "local_login_enabled", "setup_mode"}
@@ -533,5 +534,5 @@ inventory/grants/rotate-token/unlink) with these behaviors:
 - scopes: enforce on every request; drop unknown requested scopes.
 
 Then point `FRAMEOS_CLOUD_URL` (or the settings UI) at your origin. Later
-phases (login handoff, store, backups, relay) will extend this document as
-they are implemented; the scope table above reserves their names.
+services (asset backup, remote access relay, telemetry) will extend this
+document as they are implemented; the scope table above reserves their names.

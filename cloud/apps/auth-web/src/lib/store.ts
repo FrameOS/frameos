@@ -17,7 +17,7 @@ export const maxStoreBytesPerAccount = 100 * 1024 * 1024;
 // scene and prune older ones on publish (documented deviation, STORE-TODO).
 export const maxVersionsPerScene = 20;
 
-// Abuse limits for a public registry (STORE-TODO Phase 3): per-account, on
+// Abuse limits for a public registry: per-account, on
 // top of the per-IP limits in rate-limit.ts.
 export const maxPublishesPerHour = 30;
 // Editor saves are expected to be much more frequent than uploads or linked

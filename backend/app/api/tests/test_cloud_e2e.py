@@ -1,16 +1,15 @@
-"""End-to-end happy path against a real FrameOS Cloud dev server (Phase 0).
+"""End-to-end happy path against a real FrameOS Cloud dev server.
 
 Skipped unless a local provider is running and the env vars below are set.
-The private frameos-cloud repo ships `scripts/e2e-frameos.sh`, which boots the
-dev server, creates a verified account with a browser session, and runs this
-file with:
+`cloud/scripts/e2e-frameos.sh` boots the dev server, creates a verified
+account with a browser session, and runs this file with:
 
     FRAMEOS_CLOUD_E2E_URL     e.g. http://localhost:3000
     FRAMEOS_CLOUD_E2E_COOKIE  the account's session cookie ("name=value")
     FRAMEOS_CLOUD_E2E_EMAIL   the account's email (for assertions)
 
 Everything here goes over real HTTP: the device-authorization link, grants
-sync, the login handoff (Phase 1), and config backups (Phase 3).
+sync, the login handoff, and config backups.
 """
 import os
 
@@ -48,7 +47,7 @@ def cloud_client() -> httpx.AsyncClient:
 
 @pytest.mark.asyncio
 async def test_cloud_link_login_and_backups_happy_path(async_client, db):
-    # ---- Phase 0: link through the device authorization flow ----------------
+    # ---- link through the device authorization flow ----------------
     response = await async_client.post("/api/cloud/provider", json={"provider_url": E2E_URL})
     assert response.status_code == 200, response.text
 
@@ -94,7 +93,7 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     assert data.get("upgrade") is None
     assert sorted(data["link"]["scopes"]) == sorted(ALL_SCOPES)
 
-    # ---- Phase 1: login handoff over real HTTP -------------------------------
+    # ---- login handoff over real HTTP -------------------------------
     response = await async_client.post("/api/cloud/identity/link", json={})
     assert response.status_code == 200, response.text
     authorization_url = response.json()["authorization_url"]
@@ -130,7 +129,7 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     assert response.headers["location"] == "/frames"
     assert "frameos_session" in response.headers.get("set-cookie", "")
 
-    # ---- Phase 3: config backups over real HTTP ------------------------------
+    # ---- config backups over real HTTP ------------------------------
     frame = Frame(
         project_id=async_client.project_id,
         name="E2E frame",

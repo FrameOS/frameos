@@ -64,7 +64,7 @@ def frameos_zip_url_from_html(content: bytes, page_url: str) -> str | None:
 
 def template_zip_bytes(template: Template) -> bytes:
     """The template interchange zip: {name}/template.json + scenes.json + image.jpg.
-    Also the payload format for cloud template backups (CLOUD-TODO Phase 3)."""
+    Also the payload format for cloud template backups."""
     template_name = safe_template_name(template)
     template_dict = template.to_dict()
     template_dict.pop('id', None)

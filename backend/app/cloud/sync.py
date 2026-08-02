@@ -1,4 +1,4 @@
-"""FrameOS Cloud sync service (CLOUD-TODO Phases 1 and 3).
+"""FrameOS Cloud sync service.
 
 Runs as a single asyncio task inside the arq worker (same singleton slot as
 the Home Assistant sync). Responsibilities:

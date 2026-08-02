@@ -457,7 +457,7 @@ proc addCloudApiRoutes*(router: var Router) =
         jsonResponse(request, Http200, cloudStatusPayload(state))
   )
 
-  # ---- cloud login for the on-device admin (Phase 1) -------------------------
+  # ---- cloud login for the on-device admin -----------------------------------
   # Open endpoints: the user is not logged in yet. The provider only mints a
   # login code for the cloud account that owns this frame's link, so a
   # completed handoff is proof of ownership.

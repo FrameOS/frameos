@@ -45,7 +45,7 @@ export const accounts = pgTable("accounts", {
   isSuperadmin: boolean("is_superadmin").default(false).notNull(),
   // Null for accounts that only sign in through an external provider.
   passwordHash: text("password_hash"),
-  // Store publish ban (STORE-TODO Phase 3): the account keeps working, but
+  // Store publish ban: the account keeps working, but
   // any new store publish is rejected until a superadmin lifts the ban.
   storeBanReason: text("store_ban_reason"),
   storeBannedAt: timestamp("store_banned_at", { withTimezone: true }),
@@ -489,7 +489,7 @@ export const storeSceneImages = pgTable(
   }),
 );
 
-// User reports against store scenes (STORE-TODO Phase 3). A partial unique
+// User reports against store scenes. A partial unique
 // index in the migration allows one open report per (scene, reporter);
 // superadmins resolve reports from the admin queue.
 export const storeSceneReports = pgTable(

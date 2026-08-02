@@ -92,7 +92,7 @@ proxies, ever" rule in `AGENTS.md` at the repo root:
 ```
 
 - The device dials out (WSS), reusing the pattern of the existing remote
-  agent (`frameos/remote/`) and the Phase 4 `remote:access` slot
+  agent (`frameos/remote/`) and the `remote:access` slot
   already reserved in `docs/cloud-link.md`. There is no inbound
   connectivity requirement and no port forwarding.
 - The cloud side is a new, small control plane inside `apps/auth-web` (or a
@@ -386,8 +386,8 @@ Shared-frontend work:
 10. Extend `embeddedCompatibility`-style app/template gating to cloud
     frames (interpreted-only, no shell-flagged apps).
 
-`docs/cloud-link.md` there should gain the frame-link protocol as the
-successor to its Phase 4 placeholder; the wire protocol spec stays public
+`docs/cloud-link.md` there should gain the frame-link protocol, filling in
+its reserved `remote:access` placeholder; the wire protocol spec stays public
 documentation (see Licensing) so third-party clouds can implement it.
 
 ## Licensing
@@ -449,27 +449,27 @@ enforcement) is ever paywalled.
 
 ## Phasing
 
+The relicense + monorepo merge that this plan once sequenced is done
+(2026-08): AGPL switch, history audit, moved as `cloud/` into the frameos
+repo, workspaces unified into one root lockfile with Turborepo builds, the
+vendored editor tgz and wasm patch replaced by `workspace:` packages. Still
+remaining from it: the standalone-bundle production deploy
+(`docs/deployment.md`, "Monorepo cutover"). What's left, in order:
+
 1. **Protocol + profile (foundations)** — cloud agent profile in
    the device runtime, keypair enrollment, claim tokens, WS hub + `frames` table
    here, "Add frame" flow 2 (link code). No scene pushing yet; a frame can
-   enroll, appear in the account, show status, and be revoked. Can proceed
-   in the current two-repo layout.
-2. **Relicense + monorepo merge — done (2026-08).** AGPL switch, history
-   audit, move as `cloud/` into the frameos repo, workspaces unified into
-   one root lockfile with Turborepo builds. The vendored editor tgz and
-   wasm patch are gone — both are `workspace:` packages now. Remaining
-   from this phase: the standalone-bundle production deploy
-   (`docs/deployment.md`, "Monorepo cutover").
-3. **Scene management** — `set_scenes` push of interpreted scenes, the
+   enroll, appear in the account, show status, and be revoked.
+2. **Scene management** — `set_scenes` push of interpreted scenes, the
    `cloud-frontend` wrapper bundle (fleet grid, scene assignment, wasm
    previews, declarative settings + schedule). Requires the JS capability
    audit and RFC1918 blocking to land first.
-4. **Provisioning** — SD image tile (personalization file + archive-served
+3. **Provisioning** — SD image tile (personalization file + archive-served
    images), portal claim handoff. ESP32 web flashing when embedded is ready.
-5. **Fleet extras** — telemetry scopes, alerting, backups integration,
+4. **Fleet extras** — telemetry scopes, alerting, backups integration,
    paid-tier gating.
 
-Signed OTA (device-side) should land before or alongside phase 4, since
+Signed OTA (device-side) should land before or alongside provisioning, since
 widely distributed images make the unsigned update channel the weakest link.
 
 ## Open questions
@@ -477,14 +477,14 @@ widely distributed images make the unsigned update channel the weakest link.
 - **WS hub placement**: inside the Next.js process (custom server) vs. a
   small sibling service sharing the DB. Next.js route handlers are awkward
   hosts for long-lived sockets; a sibling `apps/frame-hub` may be cleaner.
-  Decide in phase 1.
+  Decide when the foundations work starts.
 - **Fleet previews doctrine**: is browser-side wasm rendering the permanent
   answer (extending the no-image-proxy rule to previews), or is an opt-in,
   end-to-end-encrypted screenshot path ever acceptable?
 - **Promotion/demotion UX**: exact local ceremony for moving a frame between
   backend-managed and cloud-managed without resetting it.
 - **Free-tier quotas**: frame count, backup size, private scene count —
-  pick numbers when phase 4 starts, not before.
+  pick numbers when provisioning starts, not before.
 - **QuickJS hardening budget**: memory/CPU/time limits per scene are partly
   device-stability features and partly sandbox features; scope during the
   capability audit.

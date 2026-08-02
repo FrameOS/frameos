@@ -1,4 +1,4 @@
-"""Cloud config backups (Phase 3): push, restore, encryption, tarball export."""
+"""Cloud config backups: push, restore, encryption, tarball export."""
 import base64
 import io
 import json

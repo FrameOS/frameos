@@ -153,7 +153,7 @@ async def login(
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_RUN_MODE")
 
-    # Cloud login (Phase 1) can disable local passwords; the flag lives on the
+    # Cloud login can disable local passwords; the flag lives on the
     # cloud link and flips back to True whenever the link is lost, so this can
     # never lock an install out entirely.
     from app.models.cloud import current_cloud_backend_link

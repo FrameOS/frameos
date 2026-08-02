@@ -1,4 +1,4 @@
-"""Cloud login (Phase 1): login handoff, identity linking, first-run setup,
+"""Cloud login: login handoff, identity linking, first-run setup,
 and the local password fallback guard."""
 import json
 

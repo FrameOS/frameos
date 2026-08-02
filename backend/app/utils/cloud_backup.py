@@ -1,6 +1,6 @@
-"""Config backups to a FrameOS Cloud provider (CLOUD-TODO Phase 3).
+"""Config backups to a FrameOS Cloud provider.
 
-Two kinds ship in this phase, mirrored by the provider's /api/backends/backups
+Two kinds exist, mirrored by the provider's /api/backends/backups
 endpoints (docs/cloud-link.md):
 
 - ``templates`` (scope ``backup:scenes``): the scene/template interchange zip.

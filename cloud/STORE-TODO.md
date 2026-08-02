@@ -4,14 +4,13 @@ An npm-style registry for FrameOS scenes (template zips), later apps. Users
 publish scenes from their own FrameOS install, keep them private or make them
 public, and browse/install public scenes from any FrameOS install or the web.
 
-Two repos:
+Two sides of this monorepo:
 
-- **frameos-cloud** (`cloud/` in this monorepo) — registry storage, publish API, public
-  repository index, web store front, moderation tooling.
-- **frameos** (the rest of this monorepo) — "publish
-  to cloud" from the templates UI, and the store surfaced through the existing
-  repositories system. The public protocol lives in `docs/cloud-link.md` at the
-  repo root.
+- **`cloud/`** — registry storage, publish API, public repository index, web
+  store front, moderation tooling.
+- **the rest** — "publish to cloud" from the templates UI, and the store
+  surfaced through the existing repositories system. The public protocol
+  lives in `docs/cloud-link.md` at the repo root.
 
 ## Decisions (made, with rationale — revisit criteria noted)
 
@@ -44,7 +43,7 @@ Two repos:
 6. **Postgres bytea storage with hard caps** (8 MB/zip, structural validation,
    per-account quotas) rather than object storage. Right-sized for launch;
    the schema keeps sha256 + sizes so migrating blobs out later is mechanical.
-7. **Pre-publish moderation via OpenAI omni-moderation** (Phase 3). Every
+7. **Pre-publish moderation via OpenAI omni-moderation.** Every
    publish — also private ones, illegal content must never be hosted —
    classifies name + description + preview image in one free API call before
    anything is stored; the same gate runs when a scene is made public or its
@@ -70,33 +69,33 @@ Two repos:
 
 | Source | Idea | Status |
 |---|---|---|
-| npm | Immutable versions; publish = append-only | adopted (v1) |
-| npm | Provenance/attestation of what built the package | later (apps phase) |
-| crates.io | Yank: soft-hide, never rewrite history | adopted (v1) |
-| PyPI | Quarantine state for suspect packages (admin pull ≈ quarantine) | adopted (v1, as `pulled`) |
+| npm | Immutable versions; publish = append-only | adopted |
+| npm | Provenance/attestation of what built the package | later (with apps) |
+| crates.io | Yank: soft-hide, never rewrite history | adopted |
+| PyPI | Quarantine state for suspect packages (admin pull ≈ quarantine) | adopted (as `pulled`) |
 | PyPI | Trusted publishing / scoped tokens | already have: linked-client tokens with `store:publish` scope |
-| WordPress.org | Web-first identity, no CLI usernames | adopted (v1) |
+| WordPress.org | Web-first identity, no CLI usernames | adopted |
 | WordPress.org | Human review before public listing | not adopted (post-moderation + kill switch instead); revisit if abuse appears |
-| F-Droid | Server-side structural validation of every artifact | adopted (v1: zip parsed, manifest + scenes required, bomb guards) |
-| Docker Hub | Curated "featured/official" shelf distinct from "all" | adopted (v1) |
-| Steam Workshop | One-click user reporting | adopted (Phase 3) |
-| App stores (Apple/Google) | Automated content scanning before listing | adopted (Phase 3: omni-moderation gate) |
-| Homebrew | Analytics: install counts inform curation | adopted (v1: download counts) |
+| F-Droid | Server-side structural validation of every artifact | adopted (zip parsed, manifest + scenes required, bomb guards) |
+| Docker Hub | Curated "featured/official" shelf distinct from "all" | adopted |
+| Steam Workshop | One-click user reporting | adopted |
+| App stores (Apple/Google) | Automated content scanning before listing | adopted (omni-moderation gate) |
+| Homebrew | Analytics: install counts inform curation | adopted (download counts) |
 
 ## Threat model / abuse notes
 
 - **Malicious scene content.** Scenes are data, but FrameOS apps they configure
-  can run shell commands on frames. Mitigations now: structural validation at
+  can run shell commands on frames. Mitigations: structural validation at
   publish (must be a real template zip), private-by-default, admin pull with
   410 on downloads, immutable versions (no byte-swapping under a trusted
   version), audit events for every publish/visibility change, rate limits and
-  quotas. Planned: scan scenes JSON for shell/exec app usage and badge those
-  scenes on the store page and in the app before install ("this scene runs
-  shell commands"), user reporting, account-level publish bans.
+  quotas, shell-command detection with store badges and confirm-before-install,
+  user reporting, and account-level publish bans.
 - **Zip bombs / resource abuse.** Compressed ≤ 8 MB, uncompressed ≤ 32 MB,
   ≤ 200 entries, preview image ≤ 4 MB, entries inflated only after size check;
   ≤ 200 scenes/account, ≤ 100 MB total stored bytes/account; publish rate
-  limit per token.
+  limit per token; 30 publishes/hour and 20 *new* scenes/day per account;
+  10 reports/day; per-IP limits on every store route.
 - **Name confusion.** Global slug namespace with auto-suffix; display name is
   free-form but the publisher account is always shown. Typosquatting is low
   value while installs go through browsing (not by typing names) — revisit if
@@ -104,149 +103,39 @@ Two repos:
 - **Moderation replay.** Publishing to a pulled scene is rejected; pulling is
   superadmin-only, audited, reversible.
 
-## Phases
+## What exists
 
-### Phase 1 — cloud registry core (done)
+The registry core, the frameos integration, and the hardening/growth round
+are all live (details in `docs/cloud-link.md`, schema in
+`packages/db/src/schema.ts`, store logic in `apps/auth-web/src/lib/store.ts`):
 
-- [x] Schema: `store_scenes` (identity, visibility `private|public`, status
-      `active|pulled`, `featured_at`, download count, preview image) +
-      `store_scene_versions` (immutable payloads, yank), migration
-      `0011_store_scenes.sql`.
-- [x] Publish API for linked clients: `POST /api/store/publish`
-      (`store:publish` scope): validates the template zip (fflate; manifest +
-      scenes.json required, bomb guards), extracts the preview image,
-      same-name republish by the same account appends a version, new names
-      get a globally unique slug; quotas + rate limits; audit event.
-- [x] Public store API (no auth): `GET /api/store/repository.json` (frameos
-      repository format, public+active scenes, featured first),
-      `GET /api/store/scenes/{id}/download` (`?version=N` optional; counts
-      downloads; 410 when pulled; owner may fetch their private scenes with a
-      web session), `GET /api/store/scenes/{id}/image` (preview).
-- [x] Web store front: `/` lists featured and all public scenes (cards with
-      preview, publisher, downloads); `/scenes/{slug}` detail page with
-      description, version history, download, install instructions; pulled
-      and private scenes render only for admins/owners.
-- [x] Owner management: account page "My published scenes" (visibility
-      toggle, delete), `PATCH/DELETE /api/account/scenes/{id}` (session +
-      CSRF), version yank/unyank on the scene page for owners.
-- [x] Moderation: `/admin/scenes` (superadmin) — list everything, pull with a
-      reason / restore, feature/unfeature; `PATCH /api/admin/scenes/{id}`;
-      audit events for every action; backups/activity visibility already on
-      the account/admin pages.
-- [x] Integration tests: publish → repository.json → download → count;
-      scope enforcement; validation rejects junk; visibility + pull behavior;
-      owner management routes; admin moderation routes.
+- Schema and publish API for linked clients (`POST /api/store/publish`,
+  `store:publish` scope): template zip validation with bomb guards, preview
+  extraction, immutable versions, globally unique slugs, quotas, audit events.
+- Public store API and web front: `repository.json` in the standard frameos
+  repository format, download/image/scenes.json endpoints, scene pages with
+  version history, search + pagination + tags + LLM-auto-assigned categories.
+- Owner management (visibility, delete, yank/unyank, category/tags, minimum
+  FrameOS version override) and superadmin moderation (pull/restore,
+  feature, publisher bans, user-report queue).
+- FrameOS-side integration: "Save to private cloud" in the Templates panel and
+  scene menus, the public store auto-added as a repository per project,
+  the "Private cloud scenes" private listing with proxied images, risk badges with
+  install confirmation, FrameOS version stamping and upgrade nudges.
+- In-browser live previews via the `frameos-wasm` workspace package and
+  visual scene editing via `frameos-editor` mounted directly into the page
+  (no iframe); both versioned to the FrameOS release.
+- Integration tests across publish, browse, download, scope enforcement,
+  validation, visibility, moderation, and owner/admin routes.
 
-### Phase 2 — frameos integration (done)
+## Remaining work
 
-- [x] Backend: `POST /api/cloud/store/publish` (`store:publish` scope,
-      login-gated) exports the template zip and publishes it; returns the
-      cloud URL. Wrapper `store_publish` in `app/utils/cloud_link.py`.
-- [x] Feature toggle: `store:publish` in `CLOUD_FEATURES` (Settings →
-      FrameOS Cloud → Enabled features).
-- [x] Templates UI: per-template dropdown action "Publish to FrameOS Cloud"
-      (visible when linked with `store:publish`), success toast links to the
-      scene page on the cloud.
-- [x] Browse: the public store is auto-added once per project as a normal
-      repository (`{provider}/api/store/repository.json`) when a cloud link
-      exists — the existing repositories UI handles browsing/installing;
-      deleting the repository row is respected (a settings flag remembers).
-- [x] Protocol documented in `docs/cloud-link.md` (store section).
-
-### Phase 3 — hardening and growth (done except apps/object storage)
-
-- [x] Content moderation before publish (decision 7): images (CSAM, porn,
-      gore) and text (vulgar abuse, hate) via `omni-moderation-latest`;
-      fail-closed when configured; also gates make-public and description
-      edits; audit event `store.publish_rejected`. Migration 0012.
-- [x] Abuse limits on top of the Phase-1 quotas: 30 publishes/hour and 20
-      *new* scenes/day per account (re-publishing an existing scene only hits
-      the hourly cap), 10 reports/day, per-IP limits on every store route.
-- [x] Shell-command detection: scenes JSON scanned at publish (shell-out app
-      keywords like data/chromiumScreenshot + process APIs in code nodes),
-      stored as `risk_flags` per version + denormalized on the scene, badge on
-      the store card/page, `flags` field in repository.json, red "shell" tag
-      and confirm-before-install in the frameos Templates panel. Heuristic,
-      not a sandbox — code nodes are arbitrary Nim (threat model above).
-- [x] User reporting: report button on public scene pages (signed-in, one
-      open report per scene+reporter), superadmin queue at /admin/reports,
-      resolve + jump-to-moderate; open-report badges on /admin/scenes.
-- [x] Account-level publish ban (`accounts.store_banned_at`): publish answers
-      403 store_banned; ban/unban per publisher from /admin/scenes; audited.
-- [x] In-app private scenes: "My cloud drive" — authenticated
-      `GET /api/store/account/repository.json` (link token, store:publish);
-      the frameos backend proxies the listing + preview images and attaches
-      the link token when installing zips from the provider host.
-- [x] Search (name/description/publisher) + pagination on the store front.
-      repository.json stays unpaginated (capped at 500) so old installs keep
-      working; revisit past a few hundred public scenes.
-- [x] Choose visibility at publish time: the publish API takes `visibility`
-      from the app; in-app saving is deliberately private-first ("Save to
-      cloud drive"), making public stays a web action (decision 3).
-- [x] Publisher pages (decision 8): /publishers/{accountId}, linked from the
-      scene page; `author` field in repository.json renders "by {name}" in
-      the frameos Templates panel.
 - [ ] Move blobs to object storage + CDN when size demands it; drop the
       20-version prune. (Deliberately deferred: ~100 MB/account caps make
       Postgres fine for launch; sha256 + size_bytes make the move mechanical.)
 - [ ] Apps (not just scenes): needs a real code review story — signing,
       provenance, maybe human review before public listing. (Explicitly out
       of scope for now.)
-- [x] Ratings/comments — decided against for now (decision 9).
-- [x] Minimum FrameOS version per scene/version (`frameos_version`, migration
-      0013): read from the zip's `template.json` (`frameosVersion`,
-      conservatively stamped to the exporting FrameOS release; sanitized —
-      short version-shaped tokens only). Owners can override it on the scene
-      page, which publishes a new ZIP version so the manifest and listing stay
-      aligned. Shown on scene cards/pages and as `frameosVersion` in both
-      repository JSONs; frameos can show "newer than this install" as an
-      upgrade nudge.
-- [x] In-browser live preview on scene pages via the `frameos-wasm` npm
-      package (built from frameos' `frameos/wasm`; version = FrameOS
-      release). `GET /api/store/scenes/{id}/scenes.json` serves the extracted
-      scenes with download access rules; the runtime assets are copied to
-      /frameos-wasm by `apps/auth-web/scripts/copy-wasm-assets.mjs`
-      (prebuild/predev). Scene HTTP requests run client-side first;
-      CORS-blocked hosts fall back to `POST /api/store/preview-proxy`
-      (anonymous but rate-limited, SSRF-guarded like frameos'
-      scene_preview_proxy, 10 MB response cap). The dependency is the
-      published npm package (`frameos-wasm@^2026.7.6`; version always equals
-      the FrameOS release the runtime was built from).
-      The preview shows the scene's FrameOS version on the button, has a
-      resizable viewport, a restart button (full wasm reload), and asks for
-      the credentials a scene's apps need (browser-only, never stored).
-      Owners can publish edited scenes JSON as a new immutable version via
-      `POST /api/account/scenes/{id}/content` (manifest/image carry over,
-      risk flags recomputed, publish rate limits apply).
-- [x] Visual scene editing on the web ("Edit scene" on owned scenes): the
-      AGPL `frameos-editor` bundle (built from frameos' `frameos/editor` +
-      `frontend/src/embed/`; app catalog and sources embedded, Monaco for JS
-      app source viewing/editing) is served as-is from /frameos-editor
-      (copied by `scripts/copy-editor-assets.mjs`, gitignored) and mounted
-      directly into the page via `frameos-editor/mount` (no iframe since
-      2026-08; the original iframe was an AGPL arms-length boundary that
-      the monorepo merge made unnecessary). The mount module owns the
-      editor's global stylesheet while open and removes it on close.
-      Saving posts the edited scenes to the content endpoint.
-      The editor is the `frameos-editor` workspace package, built by turbo
-      (frontend build → `frameos/editor/dist`) and copied into public/ by
-      the prebuild step.
-- [x] Tags (migration 0014): up to 5 publisher-assigned lowercase slugs per
-      scene, edited on the scene page (moderated like descriptions), shown on
-      cards/pages, filterable via `/?tag=x`, matched by search, and exposed
-      as `tags` in both repository JSONs.
-- [x] Categories (migration 0017): fixed taxonomy in `src/lib/categories.ts`,
-      one category per scene driving the curated homepage shelves (replaces
-      the old hard-coded service/gallery/pi-only tag shelves and the
-      "Misc / demos" catch-all). Auto-assigned on publish by an LLM
-      classifier (`store-classify.ts`, reuses OPENAI_API_KEY; fail-open —
-      no key or an outage just leaves the scene uncategorized). Suggested
-      tags are filled in only when the owner set none. Owners edit the
-      category on the scene page; superadmins per-scene or in bulk
-      ("Categorize missing" / "Redo all") from /admin/scenes. Filterable via
-      `/?category=x`, exposed as `category` in repository.json.
-- [x] /account split into subpages: overview cards plus installs, scenes,
-      backups, and activity sections.
 
 ## Protocol summary (details in docs/cloud-link.md at the repo root)
 
@@ -259,7 +148,7 @@ POST {provider}/api/store/publish                  (Bearer, store:publish)
 GET  {provider}/api/store/repository.json          (public) frameos repository format
      entries carry extra fields old installs ignore: author, flags, frameosVersion
 GET  {provider}/api/store/account/repository.json  (Bearer, store:publish)
-     "My cloud drive": own scenes incl. private; absolute URLs + sceneId
+     "Private cloud scenes": own scenes incl. private; absolute URLs + sceneId
 GET  {provider}/api/store/scenes/{id}/download     (public; ?version=N; 410 if pulled;
      private scenes: owner session or owner link token)
 GET  {provider}/api/store/scenes/{id}/image        (same visibility rules) preview image
