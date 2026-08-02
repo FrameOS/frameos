@@ -12,7 +12,7 @@ on:
           - raspberry-pi-zero-2-w
           - raspberry-pi-zero-w
       runner_label:
-        description: "Runner label override; empty uses the platform default (16-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
+        description: "Runner label override; empty uses the platform default (32-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
         required: false
         default: ""
         type: string
@@ -60,15 +60,15 @@ jobs:
           if [ -n "${RUNNER_OVERRIDE}" ]; then
             runner="${RUNNER_OVERRIDE}"
           else
-            # 16-core Depot runners: a Buildroot build is compile-bound and
+            # 32-core Depot runners: a Buildroot build is compile-bound and
             # scales nearly linearly, and Depot serves actions/cache from its
             # own storage (faster restores, no 10GB repo quota squeezing the
             # ccache). Keep the arch split in sync with default_runner_label
             # in backend/app/tasks/buildroot_platforms.py: 32-bit ARM targets
             # build on x86_64 so the prebuilt Bootlin toolchains apply.
             case "${PLATFORM}" in
-              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-16" ;;
-              *) runner="depot-ubuntu-24.04-arm-16" ;;
+              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-32" ;;
+              *) runner="depot-ubuntu-24.04-arm-32" ;;
             esac
           fi
           echo "runner_label=${runner}" >> "$GITHUB_OUTPUT"
@@ -118,6 +118,17 @@ jobs:
       # the same increasingly stale snapshot. With a per-run key each run
       # restores the newest cache via restore-keys and saves its own warmer
       # one.
+      #
+      # The wiring is verified: buildroot_images.py bind-mounts this dir at
+      # /cache and the generated config sets BR2_DL_DIR=/cache/dl and
+      # BR2_CCACHE_DIR=/cache/ccache, so post-job saves are ~1.5-1.8GB.
+      # Historical "restored 0 bytes" runs were NOT a path bug: saves on
+      # GitHub-hosted runners went to the repo's 10GB GitHub cache where
+      # turbo/buildx caches evicted them within hours, and Depot runners use
+      # Depot's own cache store, which started cold. Cache continuity
+      # therefore requires staying on Depot runners: a runner_label override
+      # onto a GitHub-hosted runner reads/writes the other, quota-squeezed
+      # store.
       - name: Restore Buildroot download + compiler cache
         uses: actions/cache@v4
         with:
