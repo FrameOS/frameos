@@ -5,8 +5,14 @@
 ## flaky network park the calling thread — often the render thread — for the
 ## full TCP retransmission window. The `bounded*` procs below speak HTTP/1.1
 ## over a raw socket with a connect timeout and SO_RCVTIMEO/SO_SNDTIMEO set
-## before the TLS handshake, so every phase is bounded. (DNS resolution inside
-## connect() remains bounded only by the system resolver.)
+## before the TLS handshake, so every phase is bounded.
+##
+## DNS is the one phase the socket API will not let us bound: `getAddrInfo`
+## runs inside `connect` before its timeout is armed. Instead of resolving per
+## connect (once per redirect hop), requests resolve once up front through a
+## short-lived cache that also remembers failures, so an unreachable resolver
+## stalls one request per TTL window rather than every request on every worker
+## thread.
 ##
 ## The embedded (ESP32) build has no std/net; requests go through
 ## esp_http_client + mbedTLS on the firmware's C side instead, via the
@@ -16,6 +22,7 @@ const
   DefaultFetchTimeoutMs* = 30000
   DefaultFetchMaxBytes* = 10 * 1024 * 1024
   DefaultFetchMaxSeconds* = 35.0
+  DefaultFetchMaxRedirects* = 5
 
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
@@ -244,17 +251,99 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       headers: seq[SimpleHttpHeader] = @[],
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
+    ## maxRedirects is accepted for signature parity with the native build; the
+    ## C glue caps redirects itself.
+    discard maxRedirects
     boundedRequest(url, httpMethod = httpMethod, body = body, timeoutMs = timeoutMs,
                    maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers)
 
 else:
-  import std/[httpclient, net, posix, strformat, strutils, times, uri]
+  import std/[httpclient, locks, nativesockets, net, posix, strformat, strutils,
+              tables, times, uri]
 
   const
-    MaxFetchRedirects = 5
     RecvChunkBytes = 65536
+    DnsSuccessTtlSeconds = 60.0
+    DnsFailureTtlSeconds = 10.0
+    DnsCacheMaxEntries = 64
+
+  type DnsCacheEntry = object
+    address: string ## empty when the last resolution failed
+    expiresAt: float
+
+  var
+    dnsCacheLock: Lock
+    dnsCache: Table[string, DnsCacheEntry]
+
+  initLock(dnsCacheLock)
+
+  proc cachedAddress(host: string): tuple[hit: bool, address: string] {.gcsafe.} =
+    let now = epochTime()
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        if dnsCache.hasKey(host):
+          let entry = dnsCache[host]
+          if entry.expiresAt > now:
+            return (true, entry.address)
+          dnsCache.del(host)
+    (false, "")
+
+  proc rememberAddress(host, address: string, ttl: float) {.gcsafe.} =
+    let expiresAt = epochTime() + ttl
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        if dnsCache.len >= DnsCacheMaxEntries and not dnsCache.hasKey(host):
+          # Crude bound instead of an LRU: the cache only exists to absorb
+          # bursts, so a full reset costs one resolution per live host.
+          dnsCache.clear()
+        dnsCache[host] = DnsCacheEntry(address: address, expiresAt: expiresAt)
+
+  proc forgetResolvedHosts*() {.gcsafe.} =
+    ## Test seam, and worth calling if the resolver config ever changes.
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        dnsCache.clear()
+
+  proc resolveHostBounded(host: string): string {.gcsafe.} =
+    ## Resolve `host` to an IPv4 literal once per request instead of once per
+    ## connect. `getAddrInfo` is bounded only by the system resolver, and
+    ## `Socket.connect` runs it *before* arming its own timeout, so a blackholed
+    ## resolver parks the calling thread — with 1-4 HTTP workers that is the
+    ## whole server. Results are cached, failures included: a dead resolver then
+    ## costs one stalled request per TTL window rather than one per request.
+    ##
+    ## AF_INET only, matching `newSocket()`'s domain — resolving anything the
+    ## socket cannot connect to would only turn a DNS answer into a connect
+    ## error.
+    if host.len == 0:
+      raise newException(ValueError, "Invalid HTTP URL: empty host")
+    if host.isIpAddress():
+      return host
+    let cached = cachedAddress(host)
+    if cached.hit:
+      if cached.address.len == 0:
+        raise newException(IOError, &"Could not resolve {host} (cached failure)")
+      return cached.address
+
+    var info: ptr AddrInfo = nil
+    try:
+      info = getAddrInfo(host, Port(0), AF_INET)
+    except OSError as err:
+      rememberAddress(host, "", DnsFailureTtlSeconds)
+      raise newException(IOError, &"Could not resolve {host}: {err.msg}")
+    try:
+      if info != nil and info.ai_addr != nil:
+        result = getAddrString(info.ai_addr)
+    finally:
+      if info != nil:
+        freeAddrInfo(info)
+    if result.len == 0:
+      rememberAddress(host, "", DnsFailureTtlSeconds)
+      raise newException(IOError, &"Could not resolve {host}")
+    rememberAddress(host, result, DnsSuccessTtlSeconds)
 
   proc fetchHeaders(headers: HttpHeaders): HttpHeaders =
     result = newHttpHeaders()
@@ -372,10 +461,16 @@ else:
       elif isSsl: Port(443)
       else: Port(80)
 
+    # Resolve before opening the socket: resolution can block, and the deadline
+    # check below then aborts a request whose DNS already ate the budget
+    # instead of starting a connect that cannot finish in time.
+    let address = resolveHostBounded(parsed.hostname)
+
     var sslContext: SslContext = nil
     var socket = newSocket()
     try:
-      socket.connect(parsed.hostname, port, timeout = ioTimeoutMs(timeoutMs, deadline))
+      # Connect by address, but keep the hostname for SNI and the Host header.
+      socket.connect(address, port, timeout = ioTimeoutMs(timeoutMs, deadline))
       socket.setSocketSendRecvTimeouts(ioTimeoutMs(timeoutMs, deadline))
       if isSsl:
         sslContext = newContext()
@@ -433,15 +528,18 @@ else:
       headers: HttpHeaders = nil,
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
-    ## HTTP request with every phase bounded; follows up to 5 redirects.
+    ## HTTP request with every phase bounded. Each redirect is a fresh connect
+    ## (and a fresh resolution for a new host), so callers that talk to a known
+    ## endpoint should keep `maxRedirects` low.
     validateHttpUrl(url)
     let deadline = if maxSeconds > 0: epochTime() + maxSeconds else: 0.0
     var currentUrl = url
     var currentMethod = httpMethod
     var currentBody = body
-    for _ in 0 .. MaxFetchRedirects:
+    for _ in 0 .. max(maxRedirects, 0):
       result = singleBoundedRequest(currentUrl, currentMethod, currentBody, headers,
                                     timeoutMs, maxBytes, deadline)
       if result.code notin [301, 302, 303, 307, 308]:
@@ -454,6 +552,9 @@ else:
       if result.code in [301, 302, 303] and currentMethod notin {HttpGet, HttpHead}:
         currentMethod = HttpGet
         currentBody = ""
+      # A redirect chain is also a chain of resolutions and connects; make sure
+      # what is left of the budget can still cover one.
+      discard ioTimeoutMs(timeoutMs, deadline)
     raise newException(HttpRequestError, &"Too many HTTP redirects fetching {url}")
 
   proc boundedHeadMetadata*(
@@ -481,9 +582,11 @@ else:
       headers: HttpHeaders = nil,
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): string =
-    let response = boundedRequest(url, httpMethod, body, headers, timeoutMs, maxBytes, maxSeconds)
+    let response = boundedRequest(url, httpMethod, body, headers, timeoutMs, maxBytes,
+                                  maxSeconds, maxRedirects)
     if response.code >= 400:
       raise newException(HttpRequestError, response.status)
     result = response.body
@@ -545,7 +648,8 @@ else:
       headers: seq[SimpleHttpHeader] = @[],
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
     boundedRequest(
       url,
@@ -554,5 +658,6 @@ else:
       headers = simpleHeaders(headers),
       timeoutMs = timeoutMs,
       maxBytes = maxBytes,
-      maxSeconds = maxSeconds
+      maxSeconds = maxSeconds,
+      maxRedirects = maxRedirects
     )

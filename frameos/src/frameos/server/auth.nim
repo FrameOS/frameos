@@ -1,6 +1,6 @@
 import checksums/sha2
 import json
-import std/[os, random, strutils, tables]
+import std/[locks, os, random, strutils, tables]
 import times
 import mummy
 import frameos/types
@@ -67,15 +67,60 @@ proc getCookieValue*(request: Request, name: string): string =
       return parts[1]
   return ""
 
+var
+  adminAuthCacheLock: Lock
+  cachedAdminAuthPath: string
+  cachedAdminAuthMtime: float
+  cachedAdminAuthSize: BiggestInt
+  cachedAdminAuth: JsonNode
+  cachedAdminAuthValid: bool
+
+initLock(adminAuthCacheLock)
+
+proc invalidateFrameAdminAuthCache*() {.gcsafe.} =
+  {.gcsafe.}:
+    withLock adminAuthCacheLock:
+      cachedAdminAuthValid = false
+      cachedAdminAuth = nil
+
 proc persistedFrameAdminAuth(): JsonNode {.gcsafe.} =
+  ## Reads `frameAdminAuth` out of frame.json, memoized on the file's mtime and
+  ## size. One admin auth check asks for this three times (panel enabled, user,
+  ## pass), and it runs before the 401 on every request — so an unauthenticated
+  ## flood used to cost three full JSON parses per request. The stat keeps the
+  ## on-disk copy authoritative, so settings edits still apply without a restart.
+  let path = getConfigFilename()
+  var info: FileInfo
   try:
-    let data = parseFile(getConfigFilename())
+    info = getFileInfo(path)
+  except CatchableError:
+    invalidateFrameAdminAuthCache()
+    return nil
+  let mtime = info.lastWriteTime.toUnixFloat()
+
+  {.gcsafe.}:
+    withLock adminAuthCacheLock:
+      if cachedAdminAuthValid and cachedAdminAuthPath == path and
+          cachedAdminAuthMtime == mtime and cachedAdminAuthSize == info.size:
+        return cachedAdminAuth
+
+  var parsed: JsonNode = nil
+  try:
+    let data = parseFile(path)
     if data != nil and data.kind == JObject and data{"frameAdminAuth"} != nil and
         data{"frameAdminAuth"}.kind == JObject:
-      return data["frameAdminAuth"]
+      parsed = data["frameAdminAuth"]
   except CatchableError:
-    discard
-  nil
+    parsed = nil
+
+  {.gcsafe.}:
+    withLock adminAuthCacheLock:
+      cachedAdminAuthPath = path
+      cachedAdminAuthMtime = mtime
+      cachedAdminAuthSize = info.size
+      cachedAdminAuth = parsed
+      cachedAdminAuthValid = true
+  parsed
 
 proc frameAdminAuthSnapshot*(): JsonNode {.gcsafe.} =
   let persistedAuth = persistedFrameAdminAuth()
@@ -284,4 +329,10 @@ proc clearAdminSessionCookieHeader*(request: Request): string {.gcsafe.} =
     (if shouldUseSecureCookie(request): "; Secure" else: "")
 
 proc validateAdminCredentials*(username: string, password: string): bool {.gcsafe.} =
-  username == adminAuthUser() and password == adminAuthPass() and username.len > 0
+  ## Both comparisons are constant-time: `==` on strings returns as soon as it
+  ## finds a differing byte, which leaks the length of a correct prefix to a
+  ## caller that can time it.
+  let expectedUser = adminAuthUser()
+  let userMatches = constantTimeEquals(username, expectedUser)
+  let passMatches = constantTimeEquals(password, adminAuthPass())
+  userMatches and passMatches and expectedUser.len > 0

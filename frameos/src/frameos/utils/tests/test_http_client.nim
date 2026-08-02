@@ -122,6 +122,26 @@ suite "bounded http client":
     expect ValueError:
       discard boundedGetContent("ftp://example.com/x")
 
+  test "an unresolvable host fails fast the second time":
+    # The first attempt pays the resolver's own timeout; the failure is then
+    # cached, which is what stops a blackholed resolver from parking every
+    # worker thread on every request.
+    forgetResolvedHosts()
+    let host = "no-such-host.frameos-tests.invalid"
+    expect CatchableError:
+      discard boundedGetContent("http://" & host & "/x", timeoutMs = 2000, maxSeconds = 5.0)
+    let startedAt = epochTime()
+    expect CatchableError:
+      discard boundedGetContent("http://" & host & "/x", timeoutMs = 2000, maxSeconds = 5.0)
+    check epochTime() - startedAt < 0.2
+
+  test "honours a redirect cap below the default":
+    # /redirect bounces once, so a cap of zero must refuse to follow it.
+    expect HttpRequestError:
+      discard boundedRequest(baseUrl() & "/redirect", maxRedirects = 0)
+    check boundedRequestContent(baseUrl() & "/redirect", maxRedirects = 1) == "hello world"
+
+
   test "stops test server":
     try:
       discard boundedGetContent(baseUrl() & "/quit", timeoutMs = 1000, maxSeconds = 2.0)
