@@ -56,6 +56,13 @@ const
   ENROLL_REQUEST_TIMEOUT_MS = 15000
   ENROLL_REQUEST_MAX_SECONDS = 20.0
   PENDING_ENROLL_DEFAULT_TTL_SECONDS = 24 * 60 * 60
+  # RTC-less boards (Pi Zero) boot with the clock in the past until NTP
+  # syncs. Any wall-clock deadline read or stamped before that moment is
+  # garbage — a real device stamped "now + 24h" seconds after boot, NTP then
+  # jumped the clock a year forward, and the very next pass declared the
+  # claim token expired and deleted the pending enrollment without a single
+  # request ever leaving the frame.
+  PENDING_ENROLL_CLOCK_SANITY_EPOCH* = 1735689600'i64 # 2025-01-01
 
 type
   EnrollOutcome* = object
@@ -311,17 +318,24 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
       return (resolved: pendingGone(), attempted: false, outcome: EnrollOutcome())
 
     let now = int64(epochTime())
+    let clockSynced = now >= PENDING_ENROLL_CLOCK_SANITY_EPOCH
     var expiresEpoch = int64(pending{"expires_epoch"}.getInt(0))
-    if expiresEpoch <= 0:
+    if expiresEpoch > 0 and expiresEpoch < PENDING_ENROLL_CLOCK_SANITY_EPOCH:
+      # Stamped by a pre-NTP clock: discard the bogus deadline instead of
+      # abandoning a perfectly good claim token when the clock corrects.
+      expiresEpoch = 0
+    if expiresEpoch <= 0 and clockSynced:
       # Claim tokens are short-lived (cloud.frameos.net: 24 h); without an
-      # explicit expiry, stop retrying 24h after the first attempt.
+      # explicit expiry, stop retrying 24h after the first attempt. Never
+      # stamped from an unsynced clock — the enrollment simply keeps
+      # retrying until NTP gives us a real "now" to count from.
       expiresEpoch = now + PENDING_ENROLL_DEFAULT_TTL_SECONDS
       pending["expires_epoch"] = %expiresEpoch
       try:
         savePendingEnrollment(pending)
       except CatchableError:
         discard
-    if expiresEpoch <= now:
+    if expiresEpoch > 0 and expiresEpoch <= now:
       discard clearPendingEnrollment()
       return (resolved: pendingGone(), attempted: false,
               outcome: EnrollOutcome(ok: false, error: "claim_token_expired"))
