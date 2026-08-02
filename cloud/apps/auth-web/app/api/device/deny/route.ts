@@ -17,7 +17,7 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
-import { hashSecret } from "../../../../src/lib/secrets";
+import { hashUserCode } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   const [deviceRequest] = await db
     .select()
     .from(deviceAuthorizationRequests)
-    .where(eq(deviceAuthorizationRequests.userCodeHash, hashSecret(userCode)))
+    .where(eq(deviceAuthorizationRequests.userCodeHash, hashUserCode(userCode)))
     .limit(1);
 
   if (!deviceRequest) {

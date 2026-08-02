@@ -13,7 +13,7 @@ import {
   safeLocalOrigin,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
-import { createSecretToken, hashSecret } from "../../../../src/lib/secrets";
+import { createSecretToken, hashSecret, hashUserCode } from "../../../../src/lib/secrets";
 
 export const runtime = "nodejs";
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     publicDisplayName,
     requestedScopes,
     userCodeDisplay: maskUserCode(userCode),
-    userCodeHash: hashSecret(userCode.replace("-", "")),
+    userCodeHash: hashUserCode(userCode.replace("-", "")),
   });
 
   return NextResponse.json({

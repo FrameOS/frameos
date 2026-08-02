@@ -1,7 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { frameosLoginCodes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateLinkedClient } from "../../../../../src/lib/backend-auth";
+import {
+  authenticateLinkedClient,
+  linkedClientHasScope,
+} from "../../../../../src/lib/backend-auth";
 import {
   jsonError,
   readJsonObject,
@@ -35,6 +38,12 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_link_token", 401);
   }
 
+  // Checked at /start too, but a code minted minutes ago must not still be
+  // redeemable after the owner turns cloud login off.
+  if (!linkedClientHasScope(linkedClient, "auth:login")) {
+    return jsonError("insufficient_scope", 403);
+  }
+
   const body = await readJsonObject(request);
   const code = typeof body.code === "string" ? body.code.trim() : "";
   if (!code) {
@@ -66,6 +75,15 @@ export async function POST(request: NextRequest) {
   if (!profile) {
     return jsonError("invalid_code", 400);
   }
+
+  // The claims have now been released to their one legitimate reader. All the
+  // row still has to do is prove the code was used, so drop the copy of the
+  // account's email, name and subject rather than leaving it for the cleanup
+  // script to reach a week later.
+  await db
+    .update(frameosLoginCodes)
+    .set({ profile: {} })
+    .where(eq(frameosLoginCodes.codeHash, hashSecret(code)));
 
   return NextResponse.json({
     claims: {

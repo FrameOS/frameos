@@ -2,9 +2,11 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
 } from "node:crypto";
 import { getEncryptionKey } from "./env";
+import { derivedSigningKey } from "./keys";
 
 const encryptionVersion = "v1";
 
@@ -14,6 +16,19 @@ export function createSecretToken(prefix: string, byteLength = 32) {
 
 export function hashSecret(secret: string) {
   return createHash("sha256").update(secret).digest("base64url");
+}
+
+// User codes are 8 characters from a 32-symbol alphabet — about 2^40 — and the
+// first four are stored in the clear next to the hash so the account page can
+// show which request is which. A plain SHA-256 of that leaves roughly a
+// million candidates for the rest, which anyone who can read the database can
+// exhaust instantly and then approve a pending request before its owner does.
+// Keying the hash with a secret the database does not contain removes that
+// path entirely.
+export function hashUserCode(userCode: string) {
+  return createHmac("sha256", derivedSigningKey("device-user-code"))
+    .update(userCode)
+    .digest("base64url");
 }
 
 export function encryptSecret(secret: string, key = getEncryptionKey()) {

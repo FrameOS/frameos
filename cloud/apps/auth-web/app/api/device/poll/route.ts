@@ -6,20 +6,22 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { identityRateLimitResponse } from "../../../../src/lib/rate-limit";
 import { decryptSecret, hashSecret } from "../../../../src/lib/secrets";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "device:poll", {
-    limit: 120,
-    windowMs: 15 * 60 * 1000,
-  });
-  if (limited) {
-    return limited;
-  }
-
+  // Deliberately not IP-keyed. The protocol tells a client to poll every 5s
+  // for up to 10 minutes — 120 requests, exactly the old per-IP budget — so a
+  // single install sat on the limit and a second one behind the same NAT
+  // starved the first. Both sides treat a 429 here as fatal and tear the link
+  // down, which turned "two backends in one house" into a broken link.
+  //
+  // The device code is a 40-byte secret the caller must already hold, so
+  // keying on it bounds each flow independently while still stopping a client
+  // from hammering faster than the advertised interval. Guessing device codes
+  // is not what this limit is for; the code space is.
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
@@ -30,6 +32,17 @@ export async function POST(request: NextRequest) {
     typeof body.device_code === "string" ? body.device_code : "";
   if (!deviceCode) {
     return jsonError("invalid_device_code", 400);
+  }
+
+  // A generous multiple of the advertised 5s interval, so a client that polls
+  // as told never trips it, and one polling in a tight loop does.
+  const limited = identityRateLimitResponse(
+    hashSecret(deviceCode),
+    "device:poll",
+    { limit: 240, windowMs: 10 * 60 * 1000 },
+  );
+  if (limited) {
+    return limited;
   }
 
   const [deviceRequest] = await db

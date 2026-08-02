@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { frameosLoginCodes, linkedClients } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
 import { requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   loginCodeExpiresInSeconds,
@@ -36,7 +37,10 @@ export async function GET(request: NextRequest) {
   }
 
   const [linkedClient] = await db
-    .select({ id: linkedClients.id })
+    .select({
+      id: linkedClients.id,
+      providerClientMetadata: linkedClients.providerClientMetadata,
+    })
     .from(linkedClients)
     .where(
       and(
@@ -49,6 +53,13 @@ export async function GET(request: NextRequest) {
 
   if (!linkedClient) {
     return redirectWithError(loginRequest, "linked_client_required");
+  }
+
+  // Re-check the scope rather than trusting the request token minted at
+  // /start: that token lives for 10 minutes, so without this a scope removed
+  // in the meantime still yields a login code for the rest of its life.
+  if (!linkedClientHasScope(linkedClient, "auth:login")) {
+    return redirectWithError(loginRequest, "insufficient_scope");
   }
 
   // The code in the redirect URL is an opaque single-use token. The profile

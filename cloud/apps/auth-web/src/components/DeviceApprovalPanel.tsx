@@ -169,6 +169,16 @@ export function DeviceApprovalPanel({
     }
   }, [initialUserCode]);
 
+  // Approving is what hands a device a token on this account, and the whole
+  // request — display name, reported address — is written by whoever called
+  // device/start. Following verification_uri_complete used to put the approve
+  // button one click away with nothing in between, so a link was enough to
+  // get an unwitting owner to connect an attacker's client. When the code
+  // arrived in the URL rather than being typed, the user has to confirm they
+  // started it.
+  const codeCameFromLink = Boolean(initialUserCode);
+  const [confirmedOwnRequest, setConfirmedOwnRequest] = useState(false);
+  const needsConfirmation = codeCameFromLink && !confirmedOwnRequest;
   const canDecide =
     deviceRequest?.status === "pending" && deviceRequest.signed_in;
   // Linking scopes are implied by connecting at all; only list the features
@@ -243,7 +253,7 @@ export function DeviceApprovalPanel({
               <p className="device-code">{deviceRequest.user_code}</p>
             </div>
             <div>
-              <p className="detail-label">Request from</p>
+              <p className="detail-label">Request from (reported)</p>
               <p>
                 {deviceRequest.local_origin ??
                   "The backend did not report a local address"}
@@ -302,10 +312,31 @@ export function DeviceApprovalPanel({
             </div>
           ) : null}
 
+          {canDecide && needsConfirmation ? (
+            <div className="device-auth-callout">
+              <p>
+                You opened this from a link. The name and address above are
+                reported by the device itself and are not verified — only
+                continue if you just started this connection yourself.
+              </p>
+              <label className="checkbox">
+                <input
+                  checked={confirmedOwnRequest}
+                  onChange={(event) =>
+                    setConfirmedOwnRequest(event.target.checked)
+                  }
+                  type="checkbox"
+                />{" "}
+                I started this connection on my own {clientKindLabel(deviceRequest)}
+              </label>
+            </div>
+          ) : null}
+
           {canDecide ? (
             <div className="inline-actions">
               <button
                 className="button button-primary"
+                disabled={needsConfirmation}
                 onClick={() => void decide("authorize")}
                 type="button"
               >

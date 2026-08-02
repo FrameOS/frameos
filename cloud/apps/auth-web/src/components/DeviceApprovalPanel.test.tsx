@@ -150,6 +150,37 @@ describe("DeviceApprovalPanel", () => {
     expect(screen.queryByRole("button", { name: /find device/i })).toBe(null);
   });
 
+  it("requires confirmation before approving a request opened from a link", async () => {
+    // device/start is unauthenticated and everything shown on this screen is
+    // written by the caller, so a link must not put approval one click away.
+    fetchMock.mockResolvedValueOnce(Response.json(deviceRequestPayload()));
+
+    render(<DeviceApprovalPanel initialUserCode="H7LU-JLWN" />);
+    await screen.findByText("Kitchen frame backend");
+
+    const connect = screen.getByRole("button", { name: /connect backend/i });
+    expect((connect as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(
+      screen.getByLabelText(/I started this connection on my own/i),
+    );
+    expect((connect as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("approves without a confirmation step when the code was typed in", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json(deviceRequestPayload()));
+
+    render(<DeviceApprovalPanel />);
+    fireEvent.change(screen.getByLabelText("Code from backend or frame"), {
+      target: { value: "H7LU-JLWN" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /find device/i }));
+    await screen.findByText("Kitchen frame backend");
+
+    const connect = screen.getByRole("button", { name: /connect backend/i });
+    expect((connect as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("shows the code form again when the URL code lookup fails", async () => {
     fetchMock.mockResolvedValueOnce(
       Response.json({ error: "invalid_user_code" }, { status: 404 }),
