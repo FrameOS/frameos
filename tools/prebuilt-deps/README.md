@@ -8,6 +8,14 @@ matching one of the following releases and architectures:
 - Ubuntu **24.04** LTS (Noble Numbat)
 - Ubuntu **26.04** LTS
 - **armhf** (32‑bit ARMv7), **arm64** (AArch64) and **amd64** (x86_64)
+- **armv6** (32‑bit ARMv6 hard-float, Raspberry Pi Zero W / 1): no distro
+  publishes `linux/arm/v6` containers, so `debian-bookworm-armv6` builds in an
+  amd64 container with the Bootlin `armv6-eabihf` toolchain (pinned in
+  `build.sh`, keep in sync with `backend/app/utils/cross_toolchain_packages.py`)
+  and verifies the produced objects are `Tag_CPU_arch: v6` hard-float. This
+  target ships **quickjs only** — nim tarballs bootstrap CI runners and dev
+  hosts (always amd64/arm64); frames compile pre-generated C sources with the
+  device gcc and never run nim.
 
 ## Requirements
 

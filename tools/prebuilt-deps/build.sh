@@ -10,10 +10,14 @@ QUICKJS_SHA256="${QUICKJS_SHA256:-b376e839b322978313d929fd20663b11ba58b75df5a46c
 
 declare -a COMPONENTS=("nim" "quickjs")
 
-# TODO(armv6): the debian-bookworm-armv6 cross target (Pi Zero W Buildroot
-# images) has no matching container platform, so it is absent here; quickjs is
-# rebuilt in-container by the cross compiler instead. Publishing armv6
-# prebuilts needs a Bootlin-toolchain build path in this script.
+# ARMv6 hard-float (Raspberry Pi Zero W / 1). No distro publishes
+# linux/arm/v6 containers, so this target builds in an amd64 container with
+# the Bootlin armv6-eabihf toolchain. Keep the tarball pin in sync with
+# backend/app/utils/cross_toolchain_packages.py.
+ARMV6_TOOLCHAIN_URL="${ARMV6_TOOLCHAIN_URL:-https://toolchains.bootlin.com/downloads/releases/toolchains/armv6-eabihf/tarballs/armv6-eabihf--glibc--stable-2024.05-1.tar.xz}"
+ARMV6_TOOLCHAIN_SHA256="${ARMV6_TOOLCHAIN_SHA256:-2924afaa0d47e046339fe70bf526db5a19edaa58d87c6758a861ef41e2781368}"
+ARMV6_CROSS_PREFIX="arm-buildroot-linux-gnueabihf-"
+
 TARGET_MATRIX=(
   "debian|bullseye|armhf|linux/arm/v7|debian:bullseye"
   "debian|bullseye|arm64|linux/arm64|debian:bullseye"
@@ -21,6 +25,7 @@ TARGET_MATRIX=(
   "debian|bookworm|armhf|linux/arm/v7|debian:bookworm"
   "debian|bookworm|arm64|linux/arm64|debian:bookworm"
   "debian|bookworm|amd64|linux/amd64|debian:bookworm"
+  "debian|bookworm|armv6|linux/amd64|debian:bookworm"
   "debian|trixie|armhf|linux/arm/v7|debian:trixie"
   "debian|trixie|arm64|linux/arm64|debian:trixie"
   "debian|trixie|amd64|linux/amd64|debian:trixie"
@@ -29,6 +34,18 @@ TARGET_MATRIX=(
   "ubuntu|26.04|arm64|linux/arm64|ubuntu:26.04"
   "ubuntu|26.04|amd64|linux/amd64|ubuntu:26.04"
 )
+
+# nim tarballs only bootstrap CI runners and dev hosts (amd64/arm64); frames
+# compile pre-generated C sources with the device gcc and never run nim.
+# armv6 targets therefore ship quickjs only.
+target_components() {
+  local arch="$1"
+  if [[ "${arch}" == "armv6" ]]; then
+    printf '%s' "quickjs"
+  else
+    printf '%s' "${COMPONENTS[*]}"
+  fi
+}
 
 get_target_entry() {
   local search_target="$1"
@@ -74,13 +91,17 @@ command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 mkdir -p "${OUTPUT_BASE}"
 
 component_marker() {
-  local component="$1" target="$2" release="$3" platform="$4"
+  local component="$1" target="$2" release="$3" platform="$4" arch="$5"
+  local cross_suffix=""
+  if [[ "${arch}" == "armv6" ]]; then
+    cross_suffix="|${ARMV6_TOOLCHAIN_URL}|${ARMV6_TOOLCHAIN_SHA256}"
+  fi
   case "${component}" in
     nim)
-      printf '%s|%s|%s|%s|%s' "${target}" "${component}" "${release}" "${platform}" "${NIM_VERSION}"
+      printf '%s|%s|%s|%s|%s%s' "${target}" "${component}" "${release}" "${platform}" "${NIM_VERSION}" "${cross_suffix}"
       ;;
     quickjs)
-      printf '%s|%s|%s|%s|%s|%s' "${target}" "${component}" "${release}" "${platform}" "${QUICKJS_VERSION}" "${QUICKJS_SHA256}"
+      printf '%s|%s|%s|%s|%s|%s%s' "${target}" "${component}" "${release}" "${platform}" "${QUICKJS_VERSION}" "${QUICKJS_SHA256}" "${cross_suffix}"
       ;;
     *)
       echo "Unknown component '${component}'" >&2
@@ -99,9 +120,20 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   dest="${OUTPUT_BASE}/${target}"
   mkdir -p "${dest}"
 
-  echo "\n=== Target ${target} (${distro} ${release}, platform ${platform}) ===" >&2
+  echo "\n=== Target ${target} (${distro} ${release}, arch ${arch}, platform ${platform}) ===" >&2
 
-  for component in "${COMPONENTS[@]}"; do
+  cross_args=()
+  if [[ "${arch}" == "armv6" ]]; then
+    cross_args=(
+      "--build-arg" "CROSS_TOOLCHAIN_URL=${ARMV6_TOOLCHAIN_URL}"
+      "--build-arg" "CROSS_TOOLCHAIN_SHA256=${ARMV6_TOOLCHAIN_SHA256}"
+      "--build-arg" "CROSS_PREFIX=${ARMV6_CROSS_PREFIX}"
+      "--build-arg" "CROSS_EXPECTED_CPU_ARCH=v6"
+    )
+  fi
+
+  read -r -a target_component_list <<<"$(target_components "${arch}")"
+  for component in "${target_component_list[@]}"; do
     component_args=()
     case "${component}" in
       nim)
@@ -115,6 +147,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
         component_args=(
           "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
           "--build-arg" "QUICKJS_SHA256=${QUICKJS_SHA256}"
+          "${cross_args[@]}"
         )
         ;;
       *)
@@ -124,7 +157,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     esac
     comp_dest="${dest}/${subdir}"
     marker_file="${comp_dest}/.build-info"
-    expected_marker="$(component_marker "${component}" "${target}" "${release}" "${platform}")"
+    expected_marker="$(component_marker "${component}" "${target}" "${release}" "${platform}" "${arch}")"
 
     if [[ -f "${marker_file}" ]]; then
       existing_marker="$(<"${marker_file}")"
@@ -156,6 +189,17 @@ for target in "${REQUESTED_TARGETS[@]}"; do
     printf '%s' "${expected_marker}" > "${marker_file}"
   done
 
+  components_json=""
+  version_lines=""
+  for component in "${target_component_list[@]}"; do
+    [[ -n "${components_json}" ]] && components_json+=", "
+    components_json+="\"${component}\""
+    case "${component}" in
+      nim) version_lines+="  \"nim_version\": \"${NIM_VERSION}\","$'\n' ;;
+      quickjs) version_lines+="  \"quickjs_version\": \"${QUICKJS_VERSION}\","$'\n' ;;
+    esac
+  done
+
   cat >"${dest}/metadata.json" <<META
 {
   "target": "${target}",
@@ -163,8 +207,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   "release": "${release}",
   "arch": "${arch}",
   "platform": "${platform}",
-  "nim_version": "${NIM_VERSION}",
-  "quickjs_version": "${QUICKJS_VERSION}"
+${version_lines}  "components": [${components_json}]
 }
 META
 done
