@@ -85,6 +85,9 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "@frameos-cloud/auth-web#typecheck": {
+      "dependsOn": ["^build", "@frameos-cloud/auth-web#build"]
+    },
     "test": {
       "dependsOn": ["^build"]
     }
