@@ -22,6 +22,9 @@ export interface FrameType {
   project_id: number
   name: string
   mode?: 'rpios' | 'buildroot' | 'embedded'
+  /** Which control plane manages this frame. Cloud-managed frames are
+   * interpreted-only: no SSH, no compiled scenes, no shell-flagged apps. */
+  managed_by?: 'backend' | 'cloud'
   frame_host: string
   frame_port: number
   frame_access_key: string

@@ -398,6 +398,7 @@ proc frameNetworkJson(network: NetworkConfig): JsonNode =
     "wifiHotspotSsid": network.wifiHotspotSsid,
     "wifiHotspotPassword": network.wifiHotspotPassword,
     "wifiHotspotTimeoutSeconds": network.wifiHotspotTimeoutSeconds,
+    "allowLocalNetworkAccess": network.allowLocalNetworkAccess,
   }
 
 proc frameAgentJson(agent: AgentConfig): JsonNode =

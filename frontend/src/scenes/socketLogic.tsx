@@ -5,6 +5,21 @@ import type { socketLogicType } from './socketLogicType'
 import { getBasePath } from '../utils/getBasePath'
 import { getFrameControlFrameId, isFrameControlMode } from '../utils/frameControlMode'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
+import { isCloudMode } from '../utils/cloudMode'
+
+// Cloud mode: one account-wide socket carrying events for every enrolled
+// frame (update_frame / new_log / new_metrics / frame_rendered ...). The
+// frame hub must expose this alongside the per-frame
+// /api/frames/{id}/updates sockets — see docs/cloud-frames.md.
+const CLOUD_UPDATES_PATH = '/api/frames/updates'
+
+function cloudWebSocketUrl(): string {
+  const origin = (window as any).FRAMEOS_APP_CONFIG?.cloud_ws_origin
+  if (typeof origin === 'string' && origin.startsWith('http')) {
+    return origin.replace(/^http/, 'ws') + CLOUD_UPDATES_PATH
+  }
+  return (typeof origin === 'string' ? origin : '') + CLOUD_UPDATES_PATH
+}
 
 export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
@@ -40,8 +55,8 @@ export const socketLogic = kea<socketLogicType>([
     cache.unmounted = false
 
     function openConnection() {
-      const wsPath = isFrameOSAdmin ? '/ws/admin' : '/ws'
-      cache.ws = new WebSocket(`${getBasePath()}${wsPath}`)
+      const wsUrl = isCloudMode() ? cloudWebSocketUrl() : `${getBasePath()}${isFrameOSAdmin ? '/ws/admin' : '/ws'}`
+      cache.ws = new WebSocket(wsUrl)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
         cache.openedAt = Date.now()

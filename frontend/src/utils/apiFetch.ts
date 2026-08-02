@@ -4,6 +4,7 @@ import { getBasePath } from './getBasePath'
 import { urls } from '../urls'
 import { isFrameControlMode } from './frameControlMode'
 import { isInFrameAdminMode } from './frameAdmin'
+import { isCloudMode } from './cloudMode'
 import { clearCachedProjectId, projectApiPath } from './projectApi'
 
 export interface ApiFetchOptions extends RequestInit {}
@@ -13,6 +14,11 @@ export type FirstUserStatus = 'exists' | 'missing' | 'unknown'
 export async function firstUserStatus(): Promise<FirstUserStatus> {
   if (isFrameControlMode()) {
     return 'missing'
+  }
+  if (isCloudMode()) {
+    // The cloud has no /api/has_first_user; its Next.js auth pages own
+    // signup, so the SPA's own signup flow must never engage.
+    return 'exists'
   }
   try {
     const resp = await fetch(`${getBasePath()}/api/has_first_user`, {
@@ -60,10 +66,14 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   }
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
+  const cloudMode = isCloudMode()
   const headers: HeadersInit = options.headers || {}
 
   if (typeof input === 'string') {
-    if (!frameControlMode) {
+    // Cloud mode: paths are already canonical (/api/frames/...) at the
+    // account origin — no project scoping. Frame-control mode: the local
+    // frame serves unscoped /api paths directly.
+    if (!frameControlMode && !cloudMode) {
       try {
         input = await projectApiPath(input)
       } catch (error) {
@@ -82,6 +92,14 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
 
   if (!inHassioIngress() && response.status === 401) {
+    if (cloudMode) {
+      // Next.js owns auth on the cloud: hand over to its login page and
+      // come back to where we were. Never resolve — mirrors the
+      // frame-admin redirect below.
+      window.location.href = '/login?return_to=' + encodeURIComponent(window.location.pathname)
+      return new Promise(() => {})
+    }
+
     if (frameControlMode && inFrameAdminMode) {
       window.location.replace('/login')
       return new Promise(() => {})

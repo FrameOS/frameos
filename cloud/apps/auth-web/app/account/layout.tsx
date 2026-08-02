@@ -5,6 +5,8 @@ import {
   accounts,
   clientBackups,
   createDb,
+  frameLogs,
+  frames,
   linkedClients,
   storeSceneImages,
   storeScenes,
@@ -43,12 +45,22 @@ export default async function AccountLayout({
   let backupCount = 0;
   let backupBytes = 0;
   let sceneBytes = 0;
+  let frameCount = 0;
+  let frameLogBytes = 0;
 
   if (session.accountId) {
     const accountId = session.accountId;
     const db = createDb();
-    const [[row], installs, scenes, backups, sceneVersionSizes, sceneImageSizes] =
-      await Promise.all([
+    const [
+      [row],
+      installs,
+      scenes,
+      backups,
+      sceneVersionSizes,
+      sceneImageSizes,
+      frameRows,
+      frameLogSizes,
+    ] = await Promise.all([
         db
           .select({ isSuperadmin: accounts.isSuperadmin })
           .from(accounts)
@@ -91,6 +103,22 @@ export default async function AccountLayout({
           .from(storeSceneImages)
           .innerJoin(storeScenes, eq(storeSceneImages.sceneId, storeScenes.id))
           .where(eq(storeScenes.accountId, accountId)),
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(frames)
+          .where(
+            and(
+              eq(frames.accountId, accountId),
+              sql`${frames.status} <> 'revoked'`,
+            ),
+          ),
+        db
+          .select({
+            bytes: sql<number>`coalesce(sum(${frameLogs.sizeBytes}), 0)::float8`,
+          })
+          .from(frameLogs)
+          .innerJoin(frames, eq(frameLogs.frameId, frames.id))
+          .where(eq(frames.accountId, accountId)),
       ]);
     isSuperadmin = row?.isSuperadmin ?? false;
     installCount = installs[0]?.count ?? 0;
@@ -101,9 +129,11 @@ export default async function AccountLayout({
       (sceneVersionSizes[0]?.bytes ?? 0) +
       (sceneImageSizes[0]?.bytes ?? 0) +
       (scenes[0]?.previewBytes ?? 0);
+    frameCount = frameRows[0]?.count ?? 0;
+    frameLogBytes = frameLogSizes[0]?.bytes ?? 0;
   }
 
-  const storageBytes = backupBytes + sceneBytes;
+  const storageBytes = backupBytes + sceneBytes + frameLogBytes;
 
   return (
     <AppShell isSuperadmin={isSuperadmin} title="FrameOS Account">
@@ -122,7 +152,7 @@ export default async function AccountLayout({
             <p className="copy">
               Storage used: {formatBytes(storageBytes)}
               {storageBytes > 0
-                ? ` — backups ${formatBytes(backupBytes)} · store scenes ${formatBytes(sceneBytes)}`
+                ? ` — backups ${formatBytes(backupBytes)} · store scenes ${formatBytes(sceneBytes)} · frame logs ${formatBytes(frameLogBytes)}`
                 : ""}
               . Per-account quotas are coming; today only per-item limits
               apply.
@@ -133,12 +163,14 @@ export default async function AccountLayout({
       <AccountNav
         counts={{
           backups: backupCount,
+          frames: frameCount,
           installs: installCount,
           scenes: sceneCount,
         }}
         hrefs={{
           activity: getAccountUrl("/account/activity"),
           backups: getAccountUrl("/account/backups"),
+          frames: getAccountUrl("/account/frames"),
           installs: getAccountUrl("/account/installs"),
           scenes: getAccountUrl("/account/scenes"),
           security: getAccountUrl("/account/security"),

@@ -14,7 +14,10 @@ const authPagePrefixes = [
   "/verify-email",
 ] as const;
 
-const accountPagePrefixes = ["/account", "/admin", "/device"] as const;
+// "/frames" is the cloud frames SPA (app/frames/[[...path]]), an account
+// surface; "/frames-app" holds its static assets and is treated as an
+// asset path below.
+const accountPagePrefixes = ["/account", "/admin", "/device", "/frames"] as const;
 const accountSectionRewrites = new Map([
   ["/", "/account/installs"],
   ["/scenes", "/account/scenes"],
@@ -36,6 +39,7 @@ function isApiOrAsset(pathname: string) {
     pathMatchesPrefix(pathname, "/_next") ||
     pathMatchesPrefix(pathname, "/frameos-editor") ||
     pathMatchesPrefix(pathname, "/frameos-wasm") ||
+    pathMatchesPrefix(pathname, "/frames-app") ||
     pathname === "/favicon.ico" ||
     pathname === "/logo-dark.svg" ||
     pathname === "/logo-light.svg" ||

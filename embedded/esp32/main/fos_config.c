@@ -103,6 +103,8 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "wifi_pass", s_config.wifi_pass, sizeof(s_config.wifi_pass));
     nvs_get_string(nvs, "backend_url", s_config.backend_url, sizeof(s_config.backend_url));
     nvs_get_string(nvs, "api_key", s_config.api_key, sizeof(s_config.api_key));
+    nvs_get_string(nvs, "cloud_url", s_config.cloud_url, sizeof(s_config.cloud_url));
+    nvs_get_string(nvs, "claim_token", s_config.claim_token, sizeof(s_config.claim_token));
     nvs_get_string(nvs, "hostname", s_config.hostname, sizeof(s_config.hostname));
     nvs_get_string(nvs, "hardware", s_config.hardware_preset, sizeof(s_config.hardware_preset));
     nvs_get_string(nvs, "panel", s_config.panel, sizeof(s_config.panel));
@@ -154,6 +156,12 @@ esp_err_t fos_config_init(void)
              (unsigned)s_config.gpio_button_count,
              s_config.wifi_ssid[0] ? s_config.wifi_ssid : "(unset)",
              s_config.backend_url[0] ? s_config.backend_url : "(unset)");
+    if (s_config.cloud_url[0] || s_config.claim_token[0]) {
+        /* never log the claim token itself */
+        ESP_LOGI(TAG, "cloud config: url=%s claim_token=%s",
+                 s_config.cloud_url[0] ? s_config.cloud_url : "(unset)",
+                 s_config.claim_token[0] ? "(set)" : "(none)");
+    }
     return ESP_OK;
 }
 
@@ -167,6 +175,14 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "wifi_pass", s_config.wifi_pass);
     nvs_set_str(nvs, "backend_url", s_config.backend_url);
     nvs_set_str(nvs, "api_key", s_config.api_key);
+    nvs_set_str(nvs, "cloud_url", s_config.cloud_url);
+    /* The claim token is single use: once enrollment consumes it the struct
+     * field is cleared and the NVS key must disappear, not persist as "". */
+    if (s_config.claim_token[0]) {
+        nvs_set_str(nvs, "claim_token", s_config.claim_token);
+    } else {
+        nvs_erase_key(nvs, "claim_token");
+    }
     nvs_set_str(nvs, "hostname", s_config.hostname);
     nvs_set_str(nvs, "hardware", s_config.hardware_preset);
     nvs_set_str(nvs, "panel", s_config.panel);

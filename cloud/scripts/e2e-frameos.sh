@@ -59,8 +59,12 @@ echo "Running the frameos backend e2e test"
 cd "$FRAMEOS_DIR/backend"
 # -u DATABASE_URL: that variable belongs to the cloud dev server; the frameos
 # backend must fall back to its own sqlite test database.
+# FRAMEOS_PUBLIC_URL must be a loopback origin: the provider rejects
+# non-local origins at link time (safeLocalOrigin), and the login handoff's
+# redirect_uri must live on it.
 env -u DATABASE_URL \
   FRAMEOS_CLOUD_E2E_URL="$CLOUD_URL" \
   FRAMEOS_CLOUD_E2E_COOKIE="$cookie" \
   FRAMEOS_CLOUD_E2E_EMAIL="$email" \
+  FRAMEOS_PUBLIC_URL="http://127.0.0.1:8999" \
   "$PYTHON" -m pytest app/api/tests/test_cloud_e2e.py -v

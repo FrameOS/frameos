@@ -122,6 +122,30 @@ first-boot setup service runs
 `/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`. Other
 per-frame boot files include WiFi credentials, hostname, and authorized SSH keys.
 
+Secret handling on the FAT boot partition:
+
+- After a successful first boot the consumed `frameos-setup.json` is
+  **overwritten with zeros and deleted** (best effort on FAT). It used to be
+  renamed to `setup-done-<timestamp>.json`, which left WiFi credentials and
+  access keys readable on the boot partition; that rename no longer happens.
+  The persistent `/boot/frameos-setup-reset.log` keeps the debugging trail.
+- `/boot` is mounted `umask=077` (root-only). Everything touching it at
+  runtime already runs as root.
+- The same first-boot service also watches `/boot/frameos-cloud.txt`, the
+  cloud-enrollment personalization file (see `docs/cloud-frames.md`,
+  "Provisioning"). When present, it installs the optional WiFi credentials as
+  a NetworkManager keyfile, writes
+  `/srv/frameos/current/state/cloud_enroll_pending.json` (0600) with
+  `{"claim_token", "provider_url", "name"?}` for the FrameOS runtime to
+  enroll with, and shreds the personalization file the same way. On images
+  without `python3` (busybox-only), double quotes, backslashes, and control
+  characters are stripped from `frameos-cloud.txt` values when writing that
+  JSON — avoid them in names and WiFi credentials there.
+
+SD image composition re-stamps the current first-boot script, service unit,
+and `/etc/fstab` into the root partition, so images composed from older cached
+base images pick up these behaviors without a base image rebuild.
+
 On first boot from a larger SD card, the base rootfs also runs
 `frameos-expand-sd-card.service` before `/srv/frameos` and `/srv/assets` are
 mounted. It keeps the root partition unchanged, resizes the ext4 `FRAMEOS`
@@ -131,11 +155,20 @@ for `FRAMEOS`. The shipped `ASSETS` partition is expected to be empty or
 disposable.
 
 Release images are composed after all precompiled release binaries have been
-built. They use the cached base image plus the Debian Bookworm ARM64 precompiled
+built. They use the cached base image plus the platform's precompiled
 FrameOS/Remote artifacts, ship without WiFi credentials, and keep
-`wifiHotspot=bootOnly` so a Pi Zero 2 W starts the setup hotspot when it cannot
-reach the network. The first-boot setup service is present but dormant until a
-future SD card builder copies `frameos-setup.json` to the BOOT partition.
+`wifiHotspot=bootOnly` so the board starts the `FrameOS-Setup` hotspot when it
+cannot reach the network. The first-boot setup service is present but dormant:
+it fires when either `frameos-setup.json` (self-hosted personalization) or
+`frameos-cloud.txt` (cloud enrollment, see above) shows up on the BOOT
+partition — written by the user after flashing or patched into the download by
+a provider.
+
+Release images exist only for platforms that have a published base image in
+the manifest. To enable `raspberry-pi-zero-w` release images, first run the
+manual base-image workflow for it once
+(`gh workflow run buildroot-base-image.yml --ref <branch> -f platform=raspberry-pi-zero-w`);
+release composition picks the platform up from the manifest after that.
 
 Add future hardware targets by adding a `BuildrootPlatform` entry in
 `backend/app/tasks/buildroot_platforms.py` (plus, for a new CPU target, a

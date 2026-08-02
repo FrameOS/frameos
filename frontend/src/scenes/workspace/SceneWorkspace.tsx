@@ -51,6 +51,7 @@ import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -82,7 +83,11 @@ function sceneIsCompiled(scene: FrameScene | null, frameMode?: FrameType['mode']
 }
 
 function sceneUtilityDefinitions(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): UtilityDefinition[] {
-  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+  return utilityDefinitions.filter(
+    // SceneSource shows generated Nim — compiled scenes only, and never on
+    // the cloud, where frames are interpreted-only.
+    (definition) => definition.panel !== 'source' || (sceneIsCompiled(scene, frameMode) && !isCloudMode())
+  )
 }
 
 function sceneUtilityDefinition(

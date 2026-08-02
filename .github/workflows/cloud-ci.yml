@@ -93,3 +93,10 @@ jobs:
       - run: pnpm --filter @frameos-cloud/auth-web test:integration
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_test
+
+      # Frame hub: device/browser WebSocket protocol against real Postgres
+      # (its global-setup creates its own database so the suites can share
+      # the service container).
+      - run: pnpm --filter @frameos-cloud/frame-hub test:integration
+        env:
+          TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_frame_hub_test

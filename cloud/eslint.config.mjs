@@ -8,9 +8,11 @@ export default tseslint.config(
       "**/coverage/**",
       "**/dist/**",
       "**/node_modules/**",
-      // Copied frameos-wasm/frameos-editor assets (see copy-*-assets.mjs).
+      // Copied frameos-wasm/frameos-editor/cloud-frontend assets
+      // (see copy-*-assets.mjs).
       "**/public/frameos-wasm/**",
       "**/public/frameos-editor/**",
+      "**/public/frames-app/**",
       "pnpm-lock.yaml",
     ],
   },

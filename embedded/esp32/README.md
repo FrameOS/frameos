@@ -22,6 +22,7 @@ main/                     boot orchestration + platform modules
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
+  fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_console.c           USB-serial REPL: status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them
@@ -115,6 +116,53 @@ frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
+
+## Cloud enrollment (cloud-managed frames)
+
+Generic firmware can enroll directly with a cloud provider (enrollment flow A
+in `docs/cloud-frames.md`) instead of — or before — being paired with a
+self-hosted backend. The browser flasher provisions `cloud_url` and
+`claim_token` into NVS over the USB serial API after flashing; by hand it is:
+
+```
+frameos> set cloud_url https://cloud.frameos.net
+frameos> set claim_token FRCT_...        # single use, never echoed back
+frameos> wifi MySSID MyPassword          # saves and reboots
+frameos> status                          # cloud: pending → enrolled
+```
+
+Once Wi-Fi is up, the device generates an Ed25519 keypair (vendored
+Monocypher; the 32-byte seed lives in NVS key `cloud_sk` and is never
+printed), POSTs `{cloud_url}/api/frames/enroll`, and on success persists the
+access token / frame id / WS path (NVS `cloud_token` / `cloud_fid` /
+`cloud_ws`) and erases the claim token. A `400` response (invalid, expired,
+or already-used token) also erases the claim token — it is dead after one
+use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
+until a fresh token is set. Transient failures retry with exponential backoff
+(10 s → 15 min).
+
+Expected `status` line while waiting for enrollment:
+
+```
+cloud:       pending url=https://cloud.frameos.net claim_token=(set) ws=off
+```
+
+and after enrollment (`GET /status` carries the same data under `"cloud"`):
+
+```
+cloud:       enrolled url=https://cloud.frameos.net claim_token=(none) frame=… ws=connected
+```
+
+When enrolled, the firmware dials the management WebSocket
+(`esp_websocket_client` managed component) and runs the
+hello/challenge/auth/ready handshake, signing the provider's nonce with the
+device key. Implemented verbs: `get_state`, `render`, `reboot`,
+`restart_runtime` (same as reboot on ESP32), `set_current_scene`, and
+`set_scenes` (routed through the same interpreted-scene upload path as
+`usb_api upload-scenes`). Everything else — including `set_settings`,
+`set_schedule`, `get_logs`, `get_metrics` — is refused with `unknown_verb`
+and logged; log shipping and declarative settings are TODO. `factory-reset`
+erases all cloud state, including the device key.
 
 ## Power management (M4)
 

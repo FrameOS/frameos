@@ -21,6 +21,7 @@ requires "mummy >= 0.4.7"
 requires "linuxfb >= 0.1.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
+requires "ws >= 0.5.0"
 
 before build:
   exec "nimble assets"

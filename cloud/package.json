@@ -6,14 +6,15 @@
   "scripts": {
     "admin:grant": "scripts/grant-superadmin.sh",
     "dev": "pnpm --filter @frameos-cloud/auth-web dev",
-    "build": "turbo run build --filter=@frameos-cloud/auth-web",
+    "dev:hub": "pnpm --filter @frameos-cloud/frame-hub dev",
+    "build": "turbo run build --filter=@frameos-cloud/auth-web --filter=@frameos-cloud/frame-hub",
     "db:cleanup": "scripts/db-cleanup.sh",
     "db:migrate": "scripts/db-migrate.sh",
     "db:setup": "scripts/db-setup.sh",
     "deploy:prod": "scripts/deploy.sh",
     "lint": "turbo run lint --filter='@frameos-cloud/*'",
     "test": "turbo run test --filter='@frameos-cloud/*'",
-    "test:integration": "pnpm --filter @frameos-cloud/auth-web test:integration",
+    "test:integration": "pnpm --filter @frameos-cloud/auth-web test:integration && pnpm --filter @frameos-cloud/frame-hub test:integration",
     "typecheck": "turbo run typecheck --filter='@frameos-cloud/*'",
     "verify": "turbo run lint typecheck test build --filter='@frameos-cloud/*'"
   },

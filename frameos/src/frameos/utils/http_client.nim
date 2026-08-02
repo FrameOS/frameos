@@ -307,6 +307,92 @@ else:
       withLock dnsCacheLock:
         dnsCache.clear()
 
+  # ---- private-network policy (cloud-managed frames) ------------------------
+  # docs/cloud-frames.md: scenes installed by a cloud provider run *inside the
+  # owner's LAN*, so on a managed frame HTTP to private/link-local addresses is
+  # denied by default — otherwise a compromised account becomes an SSRF pivot
+  # onto routers and IoT devices. The check sits on the one address every
+  # request funnels through (literal or resolved, redirects included). The
+  # policy is flipped by frameos/cloud/hub_client.nim from the cloud link
+  # state; the only override is the local-admin-settable
+  # `network.allowLocalNetworkAccess` in frame.json.
+
+  var
+    localNetworkPolicyLock: Lock
+    localNetworkPolicyBlock = false
+    localNetworkPolicyExempt: seq[string] ## lowercase "host:port" entries
+
+  initLock(localNetworkPolicyLock)
+
+  proc isPrivateNetworkAddress*(address: string): bool {.gcsafe.} =
+    ## True for addresses a cloud-installed scene must not reach: loopback,
+    ## RFC1918, link-local, CGNAT, 0.0.0.0/8, broadcast — and their IPv6
+    ## equivalents (loopback/unspecified, ULA, link-local, mapped IPv4).
+    ## Unparseable input classifies as private: the caller is about to hand
+    ## the string to connect(), so failing closed is the only safe answer.
+    var ip: IpAddress
+    try:
+      ip = parseIpAddress(address)
+    except ValueError:
+      return true
+    case ip.family
+    of IpAddressFamily.IPv4:
+      let b = ip.address_v4
+      if b[0] == 0: return true                               # 0.0.0.0/8 incl. unspecified
+      if b[0] == 10: return true                              # 10/8
+      if b[0] == 100 and (b[1] and 0b1100_0000'u8) == 64: return true # 100.64/10 CGNAT
+      if b[0] == 127: return true                             # loopback
+      if b[0] == 169 and b[1] == 254: return true             # link-local
+      if b[0] == 172 and (b[1] and 0b1111_0000'u8) == 16: return true # 172.16/12
+      if b[0] == 192 and b[1] == 168: return true             # 192.168/16
+      if b == [255'u8, 255, 255, 255]: return true            # broadcast
+      false
+    of IpAddressFamily.IPv6:
+      let b = ip.address_v6
+      # IPv4-mapped (::ffff:a.b.c.d): classify the embedded IPv4.
+      var mapped = true
+      for i in 0 .. 9:
+        if b[i] != 0: mapped = false
+      if mapped and b[10] == 0xff and b[11] == 0xff:
+        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
+      # :: and ::1
+      var allZero = true
+      for i in 0 .. 14:
+        if b[i] != 0: allZero = false
+      if allZero and b[15] <= 1: return true
+      if (b[0] and 0xfe) == 0xfc: return true                 # fc00::/7 ULA
+      if b[0] == 0xfe and (b[1] and 0xc0) == 0x80: return true # fe80::/10 link-local
+      false
+
+  proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
+    ## Activates/deactivates the private-network deny and replaces the exempt
+    ## "host:port" list (the cloud provider's own API endpoint, which the local
+    ## admin linked deliberately — possibly a dev provider on the LAN).
+    {.gcsafe.}:
+      withLock localNetworkPolicyLock:
+        localNetworkPolicyBlock = blockLocal
+        localNetworkPolicyExempt = @[]
+        for entry in exemptHostPorts:
+          localNetworkPolicyExempt.add(entry.toLowerAscii())
+
+  proc localNetworkPolicySnapshot*(): tuple[active: bool, exemptHostPorts: seq[string]] {.gcsafe.} =
+    {.gcsafe.}:
+      withLock localNetworkPolicyLock:
+        result = (localNetworkPolicyBlock, localNetworkPolicyExempt)
+
+  proc enforceLocalNetworkPolicy(hostname: string, port: Port, address: string) {.gcsafe.} =
+    {.gcsafe.}:
+      var blocked = false
+      withLock localNetworkPolicyLock:
+        if localNetworkPolicyBlock:
+          let key = hostname.toLowerAscii() & ":" & $int(port)
+          if key notin localNetworkPolicyExempt and isPrivateNetworkAddress(address):
+            blocked = true
+      if blocked:
+        raise newException(IOError,
+          "local network access is blocked on cloud-managed frames (" &
+          hostname & " resolves to " & address & ")")
+
   proc resolveHostBounded(host: string): string {.gcsafe.} =
     ## Resolve `host` to an IPv4 literal once per request instead of once per
     ## connect. `getAddrInfo` is bounded only by the system resolver, and
@@ -465,6 +551,9 @@ else:
     # check below then aborts a request whose DNS already ate the budget
     # instead of starting a connect that cannot finish in time.
     let address = resolveHostBounded(parsed.hostname)
+    # Every request — literal IP or DNS name, redirects included — passes its
+    # connect address through the managed-frame private-network policy.
+    enforceLocalNetworkPolicy(parsed.hostname, port, address)
 
     var sslContext: SslContext = nil
     var socket = newSocket()

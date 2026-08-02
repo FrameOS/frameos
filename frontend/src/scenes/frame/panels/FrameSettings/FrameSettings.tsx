@@ -55,6 +55,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { isCloudMode } from '../../../../utils/cloudMode'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
@@ -792,6 +793,9 @@ export function FrameSettings({
   const { savedSettings } = useValues(settingsLogic)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()
+  // Cloud-managed frames have no SSH, deploys, or builds — those verbs do
+  // not exist in the cloud protocol, so their settings are never rendered.
+  const hideForCloud = isCloudMode()
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
   )
@@ -978,7 +982,7 @@ export function FrameSettings({
       className="w-fit"
       buttonColor="tertiary"
       items={[
-        ...(mode === 'rpios' && !inFrameAdminMode
+        ...(mode === 'rpios' && !inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Clear build cache on frame',
@@ -991,7 +995,7 @@ export function FrameSettings({
               },
             ]
           : []),
-        ...(mode === 'buildroot' && !inFrameAdminMode
+        ...(mode === 'buildroot' && !inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Download SD card image',
@@ -1051,7 +1055,7 @@ export function FrameSettings({
           icon: <ArrowUpTrayIcon className="w-5 h-5" />,
           loading: false,
         },
-        ...(!inFrameAdminMode
+        ...(!inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Download Nim build .zip',
@@ -1690,7 +1694,8 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null} */}
-          {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
+          {!hideForCloud &&
+          ((!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode)) ? (
             <Group name="rpios">
               <Field
                 name="compilationMode"
@@ -1736,7 +1741,7 @@ export function FrameSettings({
           ) : null}
         </div>
 
-        {!inFrameAdminMode ? (
+        {!inFrameAdminMode && !hideForCloud ? (
           <>
             <H6 id="frame-settings-ssh" className="mt-2">
               {isEmbeddedMode ? (
@@ -2868,7 +2873,7 @@ export function FrameSettings({
                   </div>
                 </>
               </Field>
-              {!inFrameAdminMode ? (
+              {!inFrameAdminMode && !hideForCloud ? (
                 <Field
                   name="upload_fonts"
                   label="Upload fonts"

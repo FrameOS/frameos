@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FrameOS Cloud</title>
+    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <link rel="stylesheet" href="/frames-app/static/main.css" />
+    <script>
+      // Base-path contract (see cloud-frontend/README.md):
+      //   API           /api/frames/...  -> ingress_path ''
+      //   SPA routes    /frames/**       -> route_base_path
+      //   Public assets /frames-app/**   -> assets_base_path
+      window.FRAMEOS_APP_CONFIG = {
+        ...(window.FRAMEOS_APP_CONFIG || {}),
+        cloudMode: true,
+        ingress_path: '',
+        route_base_path: '/frames',
+        assets_base_path: '/frames-app',
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="popper" style="position: absolute; z-index: 80"></div>
+    <script type="module" src="/frames-app/static/main.js"></script>
+  </body>
+</html>

@@ -112,6 +112,14 @@ else:
   var logBroadcastChannel*: Channel[SerializedLog]
   logBroadcastChannel.open(5000)
 
+  # Bounded feed for the cloud hub client (frameos/cloud/hub_client.nim).
+  # Only written while a managed-mode session with the telemetry:logs scope is
+  # live — gated by the flag below so an idle channel never accumulates stale
+  # lines that would all be replayed on the next connect.
+  var cloudLogChannel*: Channel[SerializedLog]
+  cloudLogChannel.open(1000)
+  var cloudLogForwardingEnabled*: Atomic[bool]
+
   # Count of logs dropped because logChannel was full; the logger thread
   # resets it and reports the total when it catches up.
   var logsDroppedCounter*: Atomic[int]
@@ -122,6 +130,8 @@ else:
     if not logChannel.trySend(payload):
       atomicInc(logsDroppedCounter)
     discard logBroadcastChannel.trySend(payload)
+    if cloudLogForwardingEnabled.load(moRelaxed):
+      discard cloudLogChannel.trySend(payload)
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})

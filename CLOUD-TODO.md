@@ -114,6 +114,15 @@ implementation entry points in parentheses.
   npm on release.
 - **E2E coverage**: `backend/app/api/tests/test_cloud_e2e.py` against a real
   local cloud dev server, booted by `cloud/scripts/e2e-frameos.sh`.
+- **Cloud-managed frames** (first cut): direct enrollment (claim tokens +
+  device flow), the `frames` control plane and durable command queue, the
+  `apps/frame-hub` WebSocket hub, the restricted on-device cloud client
+  (`frameos/src/frameos/cloud/`, interpreted-only, closed verb set,
+  device-held Ed25519 identity), the shared-SPA `cloud-frontend` wrapper at
+  `account.frameos.net/frames`, log shipping with retention counted into
+  storage usage, buildroot `frameos-cloud.txt` personalization, and ESP32
+  browser flashing. Wire contract: `docs/cloud-frames.md`; design:
+  `cloud/docs/cloud-frames.md`.
 
 ## Remaining work
 
@@ -131,9 +140,12 @@ implementation entry points in parentheses.
 - Observability: log shipping + retention (`telemetry:logs`), metrics +
   dashboards (`telemetry:metrics`), uptime/health alerts ("your frame has
   been offline for 2 days").
-- Cloud-managed frames — the concrete design lives in
-  `cloud/docs/cloud-frames.md` (enrollment, restricted device profile,
-  interpreted-only scene pushes, fleet UI).
+- Cloud-managed frames, remaining after the first cut: signed OTA
+  (`upgrade.nim` still verifies URL shape only — must land before widely
+  distributing SD images), the full JS-runtime capability audit
+  (per-scene asset sandboxes, CPU/time limits), account 2FA/passkeys +
+  re-auth for sensitive actions, panel-displayed link codes, wasm fleet
+  previews in the cloud UI, and free-tier quota tuning.
 
 ## Ideas parking lot (unscheduled)
 

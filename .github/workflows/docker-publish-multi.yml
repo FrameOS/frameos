@@ -285,6 +285,48 @@ jobs:
             release-assets/*.metadata.json
           if-no-files-found: error
 
+  # Generic ESP32 firmware (no baked credentials): provisioned after flashing
+  # via the captive portal, the serial console, or the cloud browser flasher
+  # (cloud_url + claim_token over the USB API — docs/cloud-frames.md).
+  build-esp32-generic-firmware:
+    name: Build generic ESP32 firmware
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Build ESP32 CI Docker image
+        run: docker build --target esp32-ci -t frameos-esp32-ci .
+
+      - name: Build generic firmware
+        timeout-minutes: 60
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          docker run --rm \
+            -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -v "$PWD/release-assets:/release-assets" \
+            frameos-esp32-ci \
+            bash -lc '
+              set -euo pipefail
+              bash embedded/esp32/ci_build_image.sh
+              cp embedded/esp32/build-ci/merged-binary.bin \
+                "/release-assets/frameos-'"$DOCKER_VERSION"'-esp32-s3-generic.bin"
+            '
+          ls -lh release-assets/
+
+      - name: Upload generic ESP32 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
+          path: release-assets/*-esp32-s3-generic.bin
+          if-no-files-found: error
+
   build:
     needs: update-versions
     runs-on: ubuntu-latest
@@ -493,7 +535,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, update-addon-repo, release-notes]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release commit

@@ -24,6 +24,7 @@
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console.h"
 #include "fos_http.h"
@@ -196,6 +197,13 @@ void app_main(void)
     }
 
     fos_console_start();
+
+    /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
+     * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,
+     * then enrolls and, when enrolled, runs the management WebSocket. */
+    if (fos_cloud_start() != ESP_OK) {
+        ESP_LOGW(TAG, "cloud client unavailable");
+    }
 
     if (online) {
         frameos_nim_set_log_upload_enabled(true);

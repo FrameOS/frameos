@@ -34,6 +34,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
+    BUILDROOT_FSTAB_CONTENT,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
@@ -471,13 +472,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
-    (overlay / "etc" / "fstab").write_text(
-        "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0\n"
-        "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
-        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n"
-        f"{BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE}\n",
-        encoding="utf-8",
-    )
+    (overlay / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
     (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "profile.d" / "frameos.sh").write_text(
         "export FRAMEOS_HOME=/srv/frameos/current\n",
@@ -824,6 +819,11 @@ async def build_release_image(args: argparse.Namespace) -> None:
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)
+        # Generic release images carry no per-frame setup payload. The
+        # first-boot service and script staged above stay in place, dormant
+        # until a user (or the cloud provider) drops /boot/frameos-setup.json
+        # or the cloud personalization file /boot/frameos-cloud.txt onto the
+        # FAT boot partition.
         (overlay_dir / "boot" / "frameos-setup.json").unlink(missing_ok=True)
 
         base_entry = await resolve_buildroot_base_entry(platform)

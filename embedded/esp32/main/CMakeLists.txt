@@ -6,6 +6,7 @@ idf_component_register(
         "fos_wifi.c"
         "fos_http.c"
         "fos_client.c"
+        "fos_cloud.c"
         "fos_ota.c"
         "fos_status_screen.c"
         "fos_console.c"
@@ -35,4 +36,5 @@ idf_component_register(
         sdmmc
         frameos_display
         frameos_nim
+        monocypher
 )

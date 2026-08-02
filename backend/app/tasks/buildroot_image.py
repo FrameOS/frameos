@@ -43,6 +43,7 @@ from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
+    BOOT_CLOUD_CONFIG_FILE,
     BOOT_HOSTNAME_FILE,
     BOOT_ROOT_PASSWORD_FILE,
     BOOT_WIFI_CONNECTION_FILE,
@@ -179,6 +180,23 @@ BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR = "/srv/frameos/state/NetworkMan
 BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
     f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
     "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
+)
+# /boot carries one-time provisioning secrets (frameos-setup.json until the
+# first boot consumes it, frameos-cloud.txt claim tokens), so it is mounted
+# root-only (umask=077). Everything that touches /boot at runtime already runs
+# as root: frameos.service, frameos-remote.service, the first-boot setup
+# service, and portal.nim's sudo tee of /boot/frameos-hostname.
+BUILDROOT_BOOT_FSTAB_LINE = "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0"
+BUILDROOT_FSTAB_CONTENT = (
+    "\n".join(
+        [
+            BUILDROOT_BOOT_FSTAB_LINE,
+            "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2",
+            "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0",
+            BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
+        ]
+    )
+    + "\n"
 )
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
@@ -2137,6 +2155,20 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         compose_dir.mkdir(parents=True, exist_ok=True)
         stage_buildroot_frameos_service(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+        # Refresh the first-boot setup script/unit and fstab on the root
+        # partition so images composed from older cached base images pick up
+        # the current behavior (frameos-cloud.txt handling, shred-not-rename,
+        # root-only /boot) without a base image rebuild.
+        setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
+        firstboot_script = service_root / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
+        firstboot_script.parent.mkdir(parents=True, exist_ok=True)
+        firstboot_script.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
+        os.chmod(firstboot_script, 0o755)
+        (service_root / "etc" / "systemd" / "system" / SETUP_JSON_RESET_SERVICE_NAME).write_text(
+            render_setup_json_reset_service(setup_file_path, script_path=SETUP_JSON_RESET_SCRIPT_PATH),
+            encoding="utf-8",
+        )
+        (service_root / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
 
         # The Zero 2 W's BCM43436 firmware only exists in the RPi-Distro
         # firmware-nonfree repo; older base images may lack it.
@@ -2266,6 +2298,18 @@ rm /etc/systemd/system/multi-user.target.wants/frameos.service
 symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
 rm /etc/hostname
 write $service_root/etc/hostname /etc/hostname
+mkdir /usr
+mkdir /usr/local
+mkdir /usr/local/bin
+rm {SETUP_JSON_RESET_SCRIPT_PATH}
+write $service_root{SETUP_JSON_RESET_SCRIPT_PATH} {SETUP_JSON_RESET_SCRIPT_PATH}
+sif {SETUP_JSON_RESET_SCRIPT_PATH} mode 0100755
+rm /etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME}
+write $service_root/etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME} /etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME}
+rm /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME}
+symlink /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME} ../{SETUP_JSON_RESET_SERVICE_NAME}
+rm /etc/fstab
+write $service_root/etc/fstab /etc/fstab
 EOF
 {zero_2_w_wifi_firmware_section}debugfs -w -f "$cmds" "$rootfs"
 python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
@@ -2348,6 +2392,9 @@ PY
                 Path(BOOT_HOSTNAME_FILE).name,
                 Path(BOOT_WIFI_CONNECTION_FILE).name,
                 Path(BOOT_AUTHORIZED_KEYS_FILE).name,
+                # Backend-personalized images are self-hosted; never ship a
+                # (stale) cloud-enrollment personalization file on them.
+                Path(BOOT_CLOUD_CONFIG_FILE).name,
                 setup_relpath,
             }
         )
@@ -2897,13 +2944,9 @@ tmp_fstab="${fstab}.frameos"
 touch "$fstab"
 grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
-LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
-LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
-LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
-/srv/frameos/state/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0
-EOF
+__FRAMEOS_FSTAB_CONTENT__EOF
 mv "$tmp_fstab" "$fstab"
-"""
+""".replace("__FRAMEOS_FSTAB_CONTENT__", BUILDROOT_FSTAB_CONTENT)
 
 
 def render_post_image_script(platform: BuildrootPlatform) -> str:

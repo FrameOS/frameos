@@ -1,2 +1,6 @@
 dependencies:
   idf: ">=5.0"
+  # Management WebSocket for cloud-managed frames (fos_cloud.c). Fetched by
+  # the IDF component manager at configure time; fos_cloud.c degrades to an
+  # enrollment-only build via __has_include if the component is absent.
+  espressif/esp_websocket_client: "^1.2.0"

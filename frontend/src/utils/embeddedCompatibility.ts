@@ -1,5 +1,6 @@
 import { AppConfig, AppNodeData, CodeNodeData, FrameScene, FrameType, SceneApp, TemplateType } from '../types'
 import { hasCompiledAppSource, hasJavaScriptAppSource, isJavaScriptCatalogApp, sceneAppToAppConfig } from './sceneApps'
+import { isCloudMode } from './cloudMode'
 
 export interface CompatibilityResult {
   supported: boolean
@@ -21,6 +22,44 @@ function unsupported(reason: string): CompatibilityResult {
 
 function isEmbeddedMode(mode?: FrameType['mode'] | null): boolean {
   return mode === 'embedded'
+}
+
+// Cloud-managed frames run interpreted scenes only: the device's cloud
+// profile refuses shell-flagged apps and compiled payloads, and the cloud
+// never installs apt packages — so the UI filters them up front, the same
+// way it filters for embedded frames. See cloud/docs/cloud-frames.md.
+export function isCloudManagedFrame(frame?: Partial<FrameType> | null): boolean {
+  return frame?.managed_by === 'cloud' || isCloudMode()
+}
+
+function appHasShellFlag(app?: (Partial<AppConfig> & { flags?: string[] }) | null): boolean {
+  return Boolean(app?.flags?.includes('shell'))
+}
+
+function cloudAppCompatibility(
+  keyword: string,
+  app?: (Partial<AppConfig> & { flags?: string[] }) | null,
+  sources?: Record<string, string> | null
+): CompatibilityResult {
+  if (appHasShellFlag(app)) {
+    return unsupported('Runs shell commands, which cloud-managed frames refuse by design.')
+  }
+
+  if (sources && hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)) {
+    return unsupported(
+      'Compiled (Nim-only) scene apps require a self-hosted backend deploy; cloud frames run interpreted JavaScript apps only.'
+    )
+  }
+
+  if (app?.apt?.length) {
+    return unsupported('Requires Linux packages, which the cloud cannot install on managed frames.')
+  }
+
+  if (app?.category === 'legacy') {
+    return unsupported('Legacy apps are not available in the interpreted runtime.')
+  }
+
+  return supported
 }
 
 function hasEmbeddedSdCardAssets(frame?: Partial<FrameType> | null): boolean {
@@ -47,6 +86,13 @@ export function appCompatibilityForFrame(
   sources?: Record<string, string> | null,
   frame?: Partial<FrameType> | null
 ): CompatibilityResult {
+  if (isCloudManagedFrame(frame)) {
+    const cloudCompatibility = cloudAppCompatibility(keyword, app, sources)
+    if (!cloudCompatibility.supported) {
+      return cloudCompatibility
+    }
+  }
+
   if (!isEmbeddedMode(mode)) {
     return supported
   }
@@ -111,11 +157,18 @@ export function templateCompatibilityForFrame(
   apps: Record<string, AppConfig>,
   frame?: Partial<FrameType> | null
 ): CompatibilityResult {
-  if (!isEmbeddedMode(mode)) {
+  const embedded = isEmbeddedMode(mode)
+  const cloudManaged = isCloudManagedFrame(frame)
+
+  if (!embedded && !cloudManaged) {
     return supported
   }
 
-  if (template.embedded === false) {
+  if (cloudManaged && template.flags?.includes('shell')) {
+    return unsupported('This scene runs shell commands, which cloud-managed frames refuse by design.')
+  }
+
+  if (embedded && template.embedded === false) {
     return unsupported('This scene is marked as not supported on ESP32 frames.')
   }
 
@@ -127,13 +180,23 @@ export function templateCompatibilityForFrame(
   for (const scene of scenes) {
     for (const node of scene.nodes ?? []) {
       if (node.type === 'source') {
-        return unsupported(`"${scene.name || 'Untitled scene'}" uses a source node, which ESP32 cannot interpret yet.`)
+        return unsupported(
+          embedded
+            ? `"${scene.name || 'Untitled scene'}" uses a source node, which ESP32 cannot interpret yet.`
+            : `"${
+                scene.name || 'Untitled scene'
+              }" uses a source node, which requires a compiled deploy from a self-hosted backend.`
+        )
       }
 
       if (node.type === 'code') {
         const codeData = node.data as CodeNodeData | undefined
         if (codeData?.code?.trim() && !codeData?.codeJS?.trim()) {
-          return unsupported(`"${scene.name || 'Untitled scene'}" uses Nim inline code, which ESP32 cannot interpret.`)
+          return unsupported(
+            embedded
+              ? `"${scene.name || 'Untitled scene'}" uses Nim inline code, which ESP32 cannot interpret.`
+              : `"${scene.name || 'Untitled scene'}" uses Nim inline code, which the interpreted runtime cannot run.`
+          )
         }
       }
 
@@ -153,7 +216,7 @@ export function templateCompatibilityForFrame(
       const app = appFromSceneSources(keyword, nodeSources) ?? sceneAppConfig ?? apps[keyword]
       const sources = nodeSources ?? sceneApp?.sources
 
-      if (!app && !isJavaScriptCatalogApp(keyword)) {
+      if (embedded && !app && !isJavaScriptCatalogApp(keyword)) {
         return unsupported(`"${scene.name || 'Untitled scene'}" uses unknown app "${keyword}".`)
       }
 

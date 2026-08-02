@@ -84,6 +84,32 @@ describe("surface routing", () => {
     }
   });
 
+  it("keeps the frames SPA on the account domain", () => {
+    configureSplitOrigins();
+
+    expectRoute("https://cloud.frameos.net/frames", {
+      kind: "redirect",
+      url: "https://account.frameos.net/frames",
+    });
+    expectRoute("https://cloud.frameos.net/frames/frames/5?tool=logs", {
+      kind: "redirect",
+      url: "https://account.frameos.net/frames/frames/5?tool=logs",
+    });
+    expect(
+      resolveSurfaceRoute(new URL("https://account.frameos.net/frames")),
+    ).toBeUndefined();
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://account.frameos.net/frames/scenes/5"),
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://account.frameos.net/frames-app/static/main.js"),
+      ),
+    ).toBeUndefined();
+  });
+
   it("keeps public scenes on the scenes domain", () => {
     configureSplitOrigins();
 

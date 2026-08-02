@@ -14,6 +14,7 @@ import frameos/timezone_updater
 import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
+import frameos/cloud/hub_client
 import frameos/tls_proxy
 import frameos/setup_proxy
 import frameos/boot_guard
@@ -206,6 +207,12 @@ proc start*(self: FrameOS) {.async.} =
       "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
 
   self.runner.start(firstSceneId)
+
+  # Cloud-managed frames (docs/cloud-frames.md): a background thread completes
+  # any pending claim-token enrollment from provisioning and, once the frame is
+  # enrolled, dials the provider's management WebSocket. Idles cheaply when the
+  # frame is standalone or backend-managed.
+  startCloudManagement(self.frameConfig)
 
   startTlsProxy(self.frameConfig, self.logger)
 

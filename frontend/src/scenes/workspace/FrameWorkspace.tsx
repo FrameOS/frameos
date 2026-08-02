@@ -58,6 +58,7 @@ import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -250,11 +251,19 @@ const frameToolDefinitions: FrameToolDefinition[] = [
 ]
 
 const frameAdminUnsupportedToolPanels = new Set<WorkspaceUtilityPanel>(['terminal', 'ping'])
+// Cloud-managed frames: the protocol has no shell/file verbs, so the panels
+// backed by them are never rendered (see cloud/docs/cloud-frames.md).
+const cloudUnsupportedToolPanels = new Set<WorkspaceUtilityPanel>(['terminal', 'assets', 'ping', 'debug'])
 
 function frameToolDefinitionsForMode(inFrameAdminMode: boolean): FrameToolDefinition[] {
-  return inFrameAdminMode
-    ? frameToolDefinitions.filter((definition) => !frameAdminUnsupportedToolPanels.has(definition.panel))
-    : frameToolDefinitions
+  let definitions = frameToolDefinitions
+  if (inFrameAdminMode) {
+    definitions = definitions.filter((definition) => !frameAdminUnsupportedToolPanels.has(definition.panel))
+  }
+  if (isCloudMode()) {
+    definitions = definitions.filter((definition) => !cloudUnsupportedToolPanels.has(definition.panel))
+  }
+  return definitions
 }
 
 function frameToolPanelFromSearchParams(
@@ -1284,7 +1293,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const frameLogicProps = { frameId }
   const inFrameAdminMode = isInFrameAdminMode()
   const availableToolDefinitions = frameToolDefinitionsForMode(inFrameAdminMode)
-  useMountedLogic(terminalLogic(frameLogicProps))
+  if (!isCloudMode()) {
+    // The cloud protocol has no shell, so terminalLogic must never mount
+    // there. isCloudMode() is constant for the app's lifetime, so this
+    // conditional hook is stable across renders.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useMountedLogic(terminalLogic(frameLogicProps))
+  }
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
 

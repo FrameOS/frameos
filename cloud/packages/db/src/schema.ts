@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   customType,
   index,
@@ -568,3 +569,160 @@ export const rateLimitBuckets = pgTable("rate_limit_buckets", {
   count: integer("count").notNull(),
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
+
+// Cloud-managed frames (wire contract: docs/cloud-frames.md at the repo
+// root; design: cloud/docs/cloud-frames.md). A frame is 1:1 with a
+// linked_clients row (client_kind = "frame"). We store only the device's
+// Ed25519 public key — the control plane can never impersonate a device.
+export const frames = pgTable(
+  "frames",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    linkedClientId: uuid("linked_client_id")
+      .notNull()
+      .references(() => linkedClients.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // base64 raw Ed25519 public key, verify-only. Never a private key.
+    publicKey: text("public_key").notNull(),
+    hardware: jsonb("hardware"),
+    frameosVersion: text("frameos_version"),
+    // pending (claim-token enrollment awaiting owner confirmation) | active
+    // | revoked. No scene push is accepted while pending.
+    status: text("status").default("pending").notNull(),
+    // Hub liveness, DB-keyed so a second instance stays possible.
+    connected: boolean("connected").default(false).notNull(),
+    hubSessionId: text("hub_session_id"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    lastState: jsonb("last_state"),
+    lastMetrics: jsonb("last_metrics"),
+    // Desired vs device-acked interpreted-scene payload checksums.
+    assignedChecksum: text("assigned_checksum"),
+    scenesChecksum: text("scenes_checksum"),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("frames_account_idx").on(table.accountId),
+    linkedClientUnique: uniqueIndex("frames_linked_client_unique").on(
+      table.linkedClientId,
+    ),
+  }),
+);
+
+// Single-use claim tokens minted by "Add frame" (FRCT-…), hashed at rest.
+// Dead after one redemption attempt, success or failure.
+export const frameEnrollmentTokens = pgTable(
+  "frame_enrollment_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    name: text("name"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    frameId: uuid("frame_id").references(() => frames.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex(
+      "frame_enrollment_tokens_token_hash_unique",
+    ).on(table.tokenHash),
+    accountIdx: index("frame_enrollment_tokens_account_idx").on(
+      table.accountId,
+    ),
+  }),
+);
+
+// Which store/account scenes a frame renders. scene_version NULL tracks the
+// latest non-yanked version. Assignment writes enqueue a set_scenes command.
+export const frameSceneAssignments = pgTable(
+  "frame_scene_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    sceneId: uuid("scene_id")
+      .notNull()
+      .references(() => storeScenes.id, { onDelete: "cascade" }),
+    sceneVersion: integer("scene_version"),
+    position: integer("position").default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    frameSceneUnique: uniqueIndex(
+      "frame_scene_assignments_frame_scene_unique",
+    ).on(table.frameId, table.sceneId),
+    frameIdx: index("frame_scene_assignments_frame_idx").on(
+      table.frameId,
+      table.position,
+    ),
+  }),
+);
+
+// Durable per-frame command queue: survives restarts, drained in creation
+// order on (re)connect. The hub marks sent/acked/failed; expired rows are
+// swept by db-cleanup.sh.
+export const frameCommands = pgTable(
+  "frame_commands",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    payload: jsonb("payload"),
+    // pending | sent | acked | failed | expired
+    status: text("status").default("pending").notNull(),
+    error: text("error"),
+    createdByAccountId: uuid("created_by_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    ackedAt: timestamp("acked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    frameStatusIdx: index("frame_commands_frame_status_idx").on(
+      table.frameId,
+      table.status,
+      table.createdAt,
+    ),
+  }),
+);
+
+// Retained device logs (scope telemetry:logs). size_bytes is precomputed so
+// storage-usage sums stay cheap; retention is capped per frame on insert and
+// in db-cleanup.sh. Retained bytes count toward the account's storage usage.
+export const frameLogs = pgTable(
+  "frame_logs",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    insertedAt: timestamp("inserted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    frameIdx: index("frame_logs_frame_idx").on(table.frameId, table.id),
+  }),
+);

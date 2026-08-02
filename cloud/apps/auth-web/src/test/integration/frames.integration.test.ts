@@ -1,0 +1,607 @@
+import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
+import { zipSync } from "fflate";
+import { NextRequest } from "next/server";
+import {
+  createDb,
+  frameCommands,
+  frameLogs,
+  frames,
+  linkedClients,
+  storeScenes,
+  storeSceneVersions,
+  upsertAccountFromIdentity,
+} from "@frameos-cloud/db";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/route";
+import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
+import { GET as listFrames } from "../../../app/api/frames/route";
+import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
+import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
+import { GET as getFrameLogs } from "../../../app/api/frames/[frameId]/logs/route";
+import { POST as revokeFrameRoute } from "../../../app/api/frames/[frameId]/revoke/route";
+import {
+  GET as getFrameScenes,
+  POST as assignFrameScenes,
+} from "../../../app/api/frames/[frameId]/scenes/route";
+import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
+import { verifyFrameSignature } from "../../lib/frames";
+import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { createSession, sessionCookieName } from "../../lib/session";
+
+const cookieJar = vi.hoisted(() => new Map<string, string>());
+
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => {
+      const value = cookieJar.get(name);
+      return value === undefined ? undefined : { name, value };
+    },
+  }),
+  headers: async () => new Headers(),
+}));
+
+const baseUrl = "http://localhost:3000";
+const issuer = "https://accounts.google.com";
+const db = createDb();
+let userCounter = 0;
+
+afterAll(async () => {
+  await db.$client.end({ timeout: 5 });
+});
+
+beforeEach(async () => {
+  resetRateLimitForTests();
+  cookieJar.clear();
+  const tables = await db.execute<{ tablename: string }>(
+    sql`select tablename from pg_tables where schemaname = 'public'`,
+  );
+  const names = tables
+    .map((row) => row.tablename)
+    .filter((name) => name !== "schema_migrations")
+    .map((name) => `"${name}"`);
+  if (names.length > 0) {
+    await db.execute(sql.raw(`TRUNCATE TABLE ${names.join(", ")} CASCADE`));
+  }
+});
+
+function postJson(
+  path: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+) {
+  return new NextRequest(new URL(path, baseUrl), {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", ...headers },
+    method: "POST",
+  });
+}
+
+function getRequest(path: string, headers: Record<string, string> = {}) {
+  return new NextRequest(new URL(path, baseUrl), { headers, method: "GET" });
+}
+
+const routeParams = (frameId: string) => ({
+  params: Promise.resolve({ frameId }),
+});
+
+async function signIn() {
+  userCounter += 1;
+  const providerSubject = `frame-user-${userCounter}`;
+  const { accountId } = await upsertAccountFromIdentity(db, {
+    displayName: `Frames User ${userCounter}`,
+    email: `frames-${userCounter}@example.com`,
+    emailVerified: true,
+    providerIssuer: issuer,
+    providerKey: "google",
+    providerSubject,
+  });
+  const token = await createSession(db, {
+    accountId,
+    providerIssuer: issuer,
+    providerSubject,
+  });
+  cookieJar.set(sessionCookieName, token);
+  return accountId;
+}
+
+function deviceKeypair() {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const spki = publicKey.export({ format: "der", type: "spki" });
+  // Raw key = last 32 bytes of the SPKI structure.
+  const rawPublic = Buffer.from(spki.subarray(spki.length - 32));
+  return {
+    privateKey,
+    publicKeyBase64: rawPublic.toString("base64"),
+    sign: (message: Buffer) =>
+      cryptoSign(null, message, privateKey).toString("base64"),
+  };
+}
+
+async function mintToken(name?: string) {
+  const response = await mintClaimToken(
+    postJson("/api/frames/claim-tokens", name ? { name } : {}, {
+      origin: baseUrl,
+    }),
+  );
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as { claim_token: string };
+  return payload.claim_token;
+}
+
+async function enroll(
+  claimToken: string,
+  publicKeyBase64: string,
+  extra: Record<string, unknown> = {},
+) {
+  return enrollFrame(
+    postJson("/api/frames/enroll", {
+      claim_token: claimToken,
+      frameos_version: "2026.8.1",
+      hardware: { height: 480, platform: "pi-zero2w", width: 800 },
+      public_key: publicKeyBase64,
+      ...extra,
+    }),
+  );
+}
+
+async function enrolledFrame() {
+  const accountId = await signIn();
+  const keys = deviceKeypair();
+  const claimToken = await mintToken("Kitchen frame");
+  const response = await enroll(claimToken, keys.publicKeyBase64);
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as {
+    access_token: string;
+    frame_id: string;
+    status: string;
+  };
+  return { accountId, keys, ...payload };
+}
+
+function sceneZip(sceneId: string) {
+  const scenes = [
+    {
+      edges: [],
+      id: sceneId,
+      name: `Scene ${sceneId}`,
+      nodes: [],
+    },
+  ];
+  return Buffer.from(
+    zipSync({
+      "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)),
+      "scene/template.json": new TextEncoder().encode(
+        JSON.stringify({ name: `Scene ${sceneId}` }),
+      ),
+    }),
+  );
+}
+
+async function createStoreScene(
+  accountId: string,
+  options: {
+    name: string;
+    riskFlags?: string[];
+    visibility?: "private" | "public";
+  },
+) {
+  const [scene] = await db
+    .insert(storeScenes)
+    .values({
+      accountId,
+      latestVersion: 1,
+      name: options.name,
+      riskFlags: options.riskFlags ?? [],
+      slug: options.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      status: "active",
+      visibility: options.visibility ?? "private",
+    })
+    .returning();
+  if (!scene) {
+    throw new Error("scene insert failed");
+  }
+  await db.insert(storeSceneVersions).values({
+    content: sceneZip(scene.id),
+    contentType: "application/zip",
+    sceneId: scene.id,
+    sha256: "test",
+    sizeBytes: 1000,
+    version: 1,
+  });
+  return scene;
+}
+
+describe("cloud-managed frame enrollment", () => {
+  it("enrolls with a claim token, single-use, pending until confirmed", async () => {
+    const accountId = await signIn();
+    const keys = deviceKeypair();
+    const claimToken = await mintToken("Kitchen frame");
+    expect(claimToken.startsWith("FRCT_")).toBe(true);
+
+    const response = await enroll(claimToken, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.status).toBe("pending");
+    expect(payload.token_type).toBe("Bearer");
+    expect(payload.scope).toBe("frame:managed");
+    expect(payload.ws_path).toBe("/api/frames/ws");
+    expect(typeof payload.access_token).toBe("string");
+
+    // The linked client is real and carries only the managed scope.
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, accountId));
+    expect(frame?.name).toBe("Kitchen frame");
+    expect(frame?.publicKey).toBe(keys.publicKeyBase64);
+    const [client] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, frame!.linkedClientId));
+    expect(client?.clientKind).toBe("frame");
+
+    // Single use: replaying the claim token fails.
+    const replay = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as { error: string }).error).toBe(
+      "invalid_claim_token",
+    );
+
+    // Confirm: pending → active.
+    const confirm = await confirmFrame(
+      postJson(`/api/frames/${frame!.id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame!.id),
+    );
+    expect(confirm.status).toBe(200);
+    const [confirmed] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame!.id));
+    expect(confirmed?.status).toBe("active");
+  });
+
+  it("rejects garbage public keys and unknown claim tokens", async () => {
+    await signIn();
+    const claimToken = await mintToken();
+    const badKey = await enroll(claimToken, "not-a-key");
+    expect(badKey.status).toBe(400);
+    expect(((await badKey.json()) as { error: string }).error).toBe(
+      "invalid_public_key",
+    );
+    // The bad-key attempt must NOT have burned the token… but per the wire
+    // contract the token dies on any redemption *attempt* that reaches
+    // redemption; key validation happens first, so the token survives.
+    const good = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(good.status).toBe(200);
+
+    const unknown = await enroll(
+      "FRCT_doesnotexist",
+      deviceKeypair().publicKeyBase64,
+    );
+    expect(unknown.status).toBe(400);
+  });
+
+  it("keeps the device the only holder of the private key (signature roundtrip)", async () => {
+    const { keys } = await enrolledFrame();
+    const nonce = Buffer.from("nonce-bytes-for-challenge-response!!");
+    const signature = keys.sign(nonce);
+    expect(verifyFrameSignature(keys.publicKeyBase64, nonce, signature)).toBe(
+      true,
+    );
+    expect(
+      verifyFrameSignature(
+        deviceKeypair().publicKeyBase64,
+        nonce,
+        signature,
+      ),
+    ).toBe(false);
+  });
+
+  it("registers a device-flow linked frame as active (flow B) and pins the key", async () => {
+    const accountId = await signIn();
+    const keys = deviceKeypair();
+    const token = `fc_link_${"a".repeat(40)}`;
+    const { hashSecret } = await import("../../lib/secrets");
+    await db.insert(linkedClients).values({
+      accountId,
+      clientKind: "frame",
+      providerClientMetadata: {
+        requestedScopes: ["frame:link", "frame:managed"],
+      },
+      publicDisplayName: "Hallway frame",
+      tokenReference: hashSecret(token),
+    });
+
+    const response = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        {
+          hardware: { platform: "pi-zero2w" },
+          public_key: keys.publicKeyBase64,
+        },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.status).toBe("active");
+    expect(payload.access_token).toBeUndefined();
+
+    // Re-registering with a different key is refused — a stolen bearer token
+    // must not be able to swap the device identity.
+    const swap = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { public_key: deviceKeypair().publicKeyBase64 },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(swap.status).toBe(409);
+  });
+
+  it("refuses flow B without the frame:managed scope", async () => {
+    const accountId = await signIn();
+    const token = `fc_link_${"b".repeat(40)}`;
+    const { hashSecret } = await import("../../lib/secrets");
+    await db.insert(linkedClients).values({
+      accountId,
+      clientKind: "frame",
+      providerClientMetadata: { requestedScopes: ["frame:link"] },
+      publicDisplayName: "Unmanaged frame",
+      tokenReference: hashSecret(token),
+    });
+    const response = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { public_key: deviceKeypair().publicKeyBase64 },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("frame management API", () => {
+  it("assigns scenes, enqueues set_scenes, and blocks shell-flagged scenes", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Clock" });
+
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    const assignPayload = (await assign.json()) as Record<string, unknown>;
+    expect(assignPayload.status).toBe("queued");
+    expect(typeof assignPayload.assigned_checksum).toBe("string");
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe("set_scenes");
+    const commandPayload = commands[0]?.payload as {
+      checksum: string;
+      scenes: unknown[];
+    };
+    expect(commandPayload.checksum).toBe(assignPayload.assigned_checksum);
+    expect(commandPayload.scenes).toHaveLength(1);
+
+    const listed = await getFrameScenes(
+      getRequest(`/api/frames/${frame_id}/scenes`),
+      routeParams(frame_id),
+    );
+    expect(listed.status).toBe(200);
+    const listedPayload = (await listed.json()) as { scenes: unknown[] };
+    expect(listedPayload.scenes).toHaveLength(1);
+
+    // Shell-flagged scenes are refused outright.
+    const shellScene = await createStoreScene(accountId, {
+      name: "Shell scene",
+      riskFlags: ["shell"],
+    });
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: shellScene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "scene_not_allowed",
+    );
+
+    // Someone else's private scene is invisible.
+    const ownerCookie = cookieJar.get(sessionCookieName);
+    const otherAccount = await signIn();
+    const otherScene = await createStoreScene(otherAccount, {
+      name: "Private scene",
+    });
+    cookieJar.set(sessionCookieName, ownerCookie!);
+    const invisible = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: otherScene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(invisible.status).toBe(400);
+  });
+
+  it("refuses scene pushes while the frame is pending", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    const scene = await createStoreScene(accountId, { name: "Early" });
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(409);
+  });
+
+  it("enforces the settings allowlist and command types", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const ok = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { interval: 300, rotate: 90 } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(ok.status).toBe(200);
+
+    const badKey = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { rotate: 90, ssh_user: "root" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(badKey.status).toBe(400);
+    expect(((await badKey.json()) as { error: string }).error).toBe(
+      "setting_not_allowed",
+    );
+
+    const render = await sendCommand(
+      postJson(
+        `/api/frames/${frame_id}/command`,
+        { type: "render" },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(render.status).toBe(200);
+
+    const shell = await sendCommand(
+      postJson(
+        `/api/frames/${frame_id}/command`,
+        { cmd: "rm -rf /", type: "shell" },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(shell.status).toBe(400);
+    expect(((await shell.json()) as { error: string }).error).toBe(
+      "invalid_command",
+    );
+  });
+
+  it("serves retained logs incrementally and lists frames", async () => {
+    const { frame_id } = await enrolledFrame();
+    await db.insert(frameLogs).values(
+      Array.from({ length: 3 }, (_, index) => ({
+        frameId: frame_id,
+        payload: { event: "render", line: `line ${index}` },
+        sizeBytes: 40,
+        timestamp: new Date(),
+      })),
+    );
+
+    const all = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs`),
+      routeParams(frame_id),
+    );
+    expect(all.status).toBe(200);
+    const allPayload = (await all.json()) as {
+      logs: { id: number; line: string; type: string }[];
+    };
+    expect(allPayload.logs).toHaveLength(3);
+    expect(allPayload.logs[0]?.type).toBe("render");
+
+    const after = await getFrameLogs(
+      getRequest(
+        `/api/frames/${frame_id}/logs?after_id=${allPayload.logs[1]!.id}`,
+      ),
+      routeParams(frame_id),
+    );
+    const afterPayload = (await after.json()) as { logs: unknown[] };
+    expect(afterPayload.logs).toHaveLength(1);
+
+    const list = await listFrames(getRequest("/api/frames"));
+    expect(list.status).toBe(200);
+    const listPayload = (await list.json()) as { frames: unknown[] };
+    expect(listPayload.frames).toHaveLength(1);
+  });
+
+  it("revokes a frame: linked client dies, queue drains, bearer stops working", async () => {
+    const { access_token, frame_id } = await enrolledFrame();
+    const revoke = await revokeFrameRoute(
+      postJson(`/api/frames/${frame_id}/revoke`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(revoke.status).toBe(200);
+
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.status).toBe("revoked");
+    const [client] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, frame!.linkedClientId));
+    expect(client?.revokedAt).not.toBeNull();
+
+    // The device's bearer token is dead (flow-B style re-registration 401s).
+    const dead = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { public_key: deviceKeypair().publicKeyBase64 },
+        { authorization: `Bearer ${access_token}` },
+      ),
+    );
+    expect(dead.status).toBe(401);
+  });
+
+  it("requires a session and an app origin for mutations", async () => {
+    const { frame_id } = await enrolledFrame();
+    // CSRF: wrong origin refused.
+    const badOrigin = await sendCommand(
+      postJson(
+        `/api/frames/${frame_id}/command`,
+        { type: "render" },
+        { origin: "https://evil.example" },
+      ),
+      routeParams(frame_id),
+    );
+    expect(badOrigin.status).toBe(403);
+
+    // No session: 401.
+    cookieJar.clear();
+    const noSession = await listFrames(getRequest("/api/frames"));
+    expect(noSession.status).toBe(401);
+  });
+
+  it("cross-account access is invisible, not forbidden", async () => {
+    const { frame_id } = await enrolledFrame();
+    await signIn(); // a different account
+    const detail = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs`),
+      routeParams(frame_id),
+    );
+    expect(detail.status).toBe(404);
+  });
+});

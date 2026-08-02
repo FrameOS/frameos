@@ -21,6 +21,7 @@ import { frameHost } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 import { workspaceLogic } from './workspaceLogic'
 
 interface FrameActionsMenuProps {
@@ -51,6 +52,9 @@ export function FrameActionsMenu({
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
   const inFrameAdminMode = isInFrameAdminMode()
+  // Deploys, SSH power actions, and backend bookkeeping have no cloud
+  // verbs; the deploy drawer is never rendered in cloud mode.
+  const hideBackendActions = inFrameAdminMode || isCloudMode()
 
   return (
     <DropdownMenu
@@ -70,7 +74,7 @@ export function FrameActionsMenu({
           onClick: () => renderFrame(frame.id),
           icon: <PlayIcon className="h-5 w-5" />,
         },
-        ...(!inFrameAdminMode && frame.status === 'deploying'
+        ...(!hideBackendActions && frame.status === 'deploying'
           ? [
               {
                 label: 'Cancel deploy',
@@ -81,7 +85,7 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        ...(!inFrameAdminMode
+        ...(!hideBackendActions
           ? [
               {
                 label: 'Deploy',
@@ -133,11 +137,7 @@ export function FrameActionsMenu({
                 label: archived ? 'Restore' : 'Archive',
                 title: archived ? 'Restore frame' : 'Archive frame',
                 onClick: () => setFrameArchived(frame.id, !archived),
-                icon: archived ? (
-                  <ArrowUturnLeftIcon className="h-5 w-5" />
-                ) : (
-                  <ArchiveBoxIcon className="h-5 w-5" />
-                ),
+                icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
               },
               {
                 label: 'Delete',

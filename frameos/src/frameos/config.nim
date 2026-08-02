@@ -92,6 +92,7 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       wifiHotspotSsid: data{"wifiHotspotSsid"}.getStr("FrameOS-Setup"),
       wifiHotspotPassword: data{"wifiHotspotPassword"}.getStr("frame1234"),
       wifiHotspotTimeoutSeconds: data{"wifiHotspotTimeoutSeconds"}.getFloat(300),
+      allowLocalNetworkAccess: data{"allowLocalNetworkAccess"}.getBool(false),
     )
 
 proc loadDeviceConfig*(data: JsonNode): DeviceConfig =

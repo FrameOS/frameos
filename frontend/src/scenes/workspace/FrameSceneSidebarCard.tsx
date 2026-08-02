@@ -4,6 +4,7 @@ import { ArrowsRightLeftIcon } from '@heroicons/react/24/outline'
 
 import type { FrameType } from '../../types'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 import { frameLogic } from '../frame/frameLogic'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
@@ -42,10 +43,13 @@ export function FrameSceneSidebarCard({
     openFrameChangeDrawer(frame.id, 'deploy')
   }
 
+  // Cloud-managed frames deploy on save — there is no deploy drawer.
+  const cloudMode = isCloudMode()
+
   return (
-    <div className={clsx('grid grid-cols-2 gap-2', className)}>
+    <div className={clsx('grid gap-2', cloudMode ? 'grid-cols-1' : 'grid-cols-2', className)}>
       <SaveFrameButton onSave={saveFrame} unsavedChanges={unsavedChanges} />
-      {inFrameAdminMode ? (
+      {cloudMode ? null : inFrameAdminMode ? (
         <FrameLocalDeployMenu
           frameId={frame.id}
           buttonTitle="Frame actions"
@@ -68,13 +72,7 @@ export function FrameSceneSidebarCard({
   )
 }
 
-function SaveFrameButton({
-  onSave,
-  unsavedChanges,
-}: {
-  onSave: () => void
-  unsavedChanges: boolean
-}): JSX.Element {
+function SaveFrameButton({ onSave, unsavedChanges }: { onSave: () => void; unsavedChanges: boolean }): JSX.Element {
   return (
     <button
       type="button"

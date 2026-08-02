@@ -18,6 +18,9 @@ procs:
   cloud:
     shell: sh -c 'cd cloud && scripts/db-setup.sh && exec pnpm run dev'
     autostart: false
+  cloud-hub:
+    shell: sh -c 'cd cloud && scripts/db-setup.sh && exec pnpm run dev:hub'
+    autostart: false
   backend-docker:
     shell: bash scripts/backend-docker.sh
     autostart: false

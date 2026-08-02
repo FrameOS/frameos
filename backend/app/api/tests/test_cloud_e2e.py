@@ -22,6 +22,11 @@ from app.models.frame import Frame
 E2E_URL = os.environ.get("FRAMEOS_CLOUD_E2E_URL")
 E2E_COOKIE = os.environ.get("FRAMEOS_CLOUD_E2E_COOKIE")
 E2E_EMAIL = os.environ.get("FRAMEOS_CLOUD_E2E_EMAIL")
+# The origin this backend claims to be reachable at. Since the cloud security
+# review, the provider only accepts loopback/RFC1918/.local origins at link
+# time, so the test client's default "http://test" is rejected — the e2e
+# runner sets FRAMEOS_PUBLIC_URL to a loopback origin instead.
+E2E_PUBLIC_URL = (os.environ.get("FRAMEOS_PUBLIC_URL") or "http://test").rstrip("/")
 
 pytestmark = pytest.mark.skipif(
     not E2E_URL or not E2E_COOKIE,
@@ -68,11 +73,23 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     if E2E_EMAIL:
         assert data["link"]["account_email"] == E2E_EMAIL
 
-    # ---- enabled features: included scopes are auto-granted ------------------
-    # /api/cloud/features always sends the included feature scopes along;
-    # adding only safe scopes needs no approval on the provider.
+    # ---- enabled features: every addition needs the owner's approval ---------
+    # /api/cloud/features always sends the included feature scopes along. Since
+    # the cloud security review, autoGrantedDeviceScopes is deliberately empty:
+    # adding ANY scope — the included ones too — creates an approval request
+    # the owner confirms on the /device screen (the link token never changes).
     response = await async_client.post("/api/cloud/features", json={"scopes": []})
     assert response.status_code == 200, response.text
+    data = response.json()
+    upgrade = data.get("upgrade")
+    assert upgrade and upgrade["user_code"], data
+
+    async with cloud_client() as cloud:
+        approve = await cloud.post("/api/device/authorize", json={"user_code": upgrade["user_code"]})
+        assert approve.status_code == 200, approve.text
+
+    response = await async_client.post("/api/cloud/poll")
+    assert response.status_code == 200
     data = response.json()
     assert data.get("upgrade") is None, data
     assert sorted(data["link"]["scopes"]) == sorted(SCOPES + INCLUDED_SCOPES)
@@ -103,10 +120,10 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
         authorize = await cloud.get(authorization_url)
         assert authorize.status_code in (302, 303, 307), authorize.text
         callback_url = authorize.headers["location"]
-    assert callback_url.startswith("http://test/api/cloud/login/callback"), callback_url
+    assert callback_url.startswith(f"{E2E_PUBLIC_URL}/api/cloud/login/callback"), callback_url
     assert "code=" in callback_url and "state=" in callback_url
 
-    response = await async_client.get(callback_url[len("http://test"):])
+    response = await async_client.get(callback_url[len(E2E_PUBLIC_URL):])
     assert response.status_code == 303, response.text
     assert response.headers["location"] == "/settings"
 
@@ -124,7 +141,7 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     async with cloud_client() as cloud:
         authorize = await cloud.get(response.json()["authorization_url"])
         callback_url = authorize.headers["location"]
-    response = await async_client.get(callback_url[len("http://test"):])
+    response = await async_client.get(callback_url[len(E2E_PUBLIC_URL):])
     assert response.status_code == 303
     assert response.headers["location"] == "/frames"
     assert "frameos_session" in response.headers.get("set-cookie", "")
@@ -187,3 +204,104 @@ async def test_cloud_link_login_and_backups_happy_path(async_client, db):
     response = await async_client.post("/api/cloud/disconnect")
     assert response.status_code == 200
     assert response.json()["status"] == "disconnected"
+
+
+@pytest.mark.asyncio
+async def test_cloud_managed_frame_enrollment_happy_path():
+    """A fake device walks the cloud-managed-frame protocol over real HTTP:
+    claim token → enroll (pending) → owner confirm → settings/command queue →
+    revoke → dead bearer. The WebSocket half lives in the frame hub's own
+    integration tests; this covers the provider HTTP contract in
+    docs/cloud-frames.md end to end."""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    private_key = Ed25519PrivateKey.generate()
+    public_key_b64 = base64.b64encode(
+        private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode()
+
+    async with cloud_client() as cloud:
+        # ---- owner mints a claim token ------------------------------------
+        response = await cloud.post("/api/frames/claim-tokens", json={"name": "E2E cloud frame"})
+        assert response.status_code == 200, response.text
+        claim_token = response.json()["claim_token"]
+        assert claim_token.startswith("FRCT_")
+
+        # ---- the device enrolls, unauthenticated --------------------------
+        enroll = await cloud.post(
+            "/api/frames/enroll",
+            headers={"cookie": "", "origin": ""},
+            json={
+                "claim_token": claim_token,
+                "public_key": public_key_b64,
+                "hardware": {"platform": "pi-zero2w", "width": 800, "height": 480},
+                "frameos_version": "e2e",
+            },
+        )
+        assert enroll.status_code == 200, enroll.text
+        enrollment = enroll.json()
+        access_token = enrollment["access_token"]
+        frame_id = enrollment["frame_id"]
+        assert enrollment["status"] == "pending"
+        assert enrollment["ws_path"] == "/api/frames/ws"
+
+        # Claim tokens are single-use.
+        replay = await cloud.post(
+            "/api/frames/enroll",
+            headers={"cookie": "", "origin": ""},
+            json={"claim_token": claim_token, "public_key": public_key_b64},
+        )
+        assert replay.status_code == 400
+
+        # ---- pending frames refuse pushes ---------------------------------
+        refused = await cloud.post(f"/api/frames/{frame_id}/command", json={"type": "render"})
+        assert refused.status_code == 409
+
+        # ---- owner confirms ----------------------------------------------
+        confirm = await cloud.post(f"/api/frames/{frame_id}/confirm", json={})
+        assert confirm.status_code == 200, confirm.text
+
+        listing = await cloud.get("/api/frames")
+        assert listing.status_code == 200
+        frames = listing.json()["frames"]
+        match = next(f for f in frames if f["id"] == frame_id)
+        assert match["status"] == "active"
+        assert match["name"] == "E2E cloud frame"
+
+        # ---- declarative settings: allowlist enforced ---------------------
+        ok = await cloud.post(
+            f"/api/frames/{frame_id}/settings",
+            json={"settings": {"rotate": 90, "interval": 300}},
+        )
+        assert ok.status_code == 200, ok.text
+        bad = await cloud.post(
+            f"/api/frames/{frame_id}/settings",
+            json={"settings": {"ssh_user": "root"}},
+        )
+        assert bad.status_code == 400
+        assert bad.json()["error"] == "setting_not_allowed"
+
+        # Command types are a closed set.
+        shell = await cloud.post(
+            f"/api/frames/{frame_id}/command",
+            json={"type": "shell", "cmd": "id"},
+        )
+        assert shell.status_code == 400
+
+        # ---- logs endpoint exists (empty until the device ships some) -----
+        logs = await cloud.get(f"/api/frames/{frame_id}/logs")
+        assert logs.status_code == 200
+        assert logs.json()["logs"] == []
+
+        # ---- revoke: the device's bearer token dies -----------------------
+        revoke = await cloud.post(f"/api/frames/{frame_id}/revoke", json={})
+        assert revoke.status_code == 200
+        dead = await cloud.post(
+            "/api/frames/enroll",
+            headers={"cookie": "", "origin": "", "authorization": f"Bearer {access_token}"},
+            json={"public_key": public_key_b64},
+        )
+        assert dead.status_code == 401

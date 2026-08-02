@@ -1,7 +1,7 @@
-import { getBasePath } from './getBasePath'
+import { getAssetsBasePath } from './getBasePath'
 
 export function assetUrl(path: string): string {
-  const basePath = getBasePath()
+  const basePath = getAssetsBasePath()
   if (!basePath || typeof window === 'undefined') {
     return path
   }

@@ -34,6 +34,27 @@ DELETE FROM sessions
 WHERE expires_at < now() - make_interval(days => :'retention_days'::int)
    OR (revoked_at IS NOT NULL
        AND revoked_at < now() - make_interval(days => :'retention_days'::int));
+
+-- Cloud-managed frames: spent/expired claim tokens, finished/expired queue
+-- entries, and aged log retention (the per-frame row cap is enforced at
+-- insert; this bounds retention by age as well — retained bytes count
+-- toward the account's storage usage).
+DELETE FROM frame_enrollment_tokens
+WHERE (used_at IS NOT NULL AND used_at < now() - make_interval(days => :'retention_days'::int))
+   OR expires_at < now() - make_interval(days => :'retention_days'::int);
+
+DELETE FROM frame_commands
+WHERE status IN ('acked', 'failed', 'expired')
+  AND created_at < now() - make_interval(days => :'retention_days'::int);
+
+UPDATE frame_commands
+SET status = 'expired', error = 'expired'
+WHERE status = 'pending'
+  AND expires_at IS NOT NULL
+  AND expires_at < now();
+
+DELETE FROM frame_logs
+WHERE inserted_at < now() - make_interval(days => :'retention_days'::int);
 SQL
 
 echo "Cleanup complete (retention: ${retention_days} days)"
