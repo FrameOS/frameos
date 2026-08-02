@@ -344,6 +344,29 @@ describe("Esp32CloudFlasher", () => {
     ]);
   });
 
+  it("remembers WiFi credentials in localStorage only when asked to", async () => {
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+
+    fireEvent.change(screen.getByLabelText("WiFi network"), {
+      target: { value: "MyNet" },
+    });
+    fireEvent.change(screen.getByLabelText("WiFi password"), {
+      target: { value: "hunter2" },
+    });
+    fireEvent.click(screen.getByLabelText(/Remember WiFi credentials/));
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    // Shared with the SD image builder: one stored network for the panel.
+    expect(localStorage.getItem("frameos-sd-image-wifi")).toBe(
+      JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
+    );
+    localStorage.removeItem("frameos-sd-image-wifi");
+  });
+
   it("provisions integrated boards as hardware bundles, not bare panels", async () => {
     // A PhotoPainter needs its PMIC handling, EPD wiring, buttons and SD
     // pins — `set hardware` makes the firmware apply the whole bundle.

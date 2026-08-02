@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorMessage } from '../lib/release-lookup'
+import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -408,8 +409,10 @@ export function Esp32CloudFlasher({
   const [lines, setLines] = useState<string[]>([])
   const [progress, setProgress] = useState(0)
   const cloudUrl = cloudOrigin
-  const [wifiSsid, setWifiSsid] = useState('')
-  const [wifiPassword, setWifiPassword] = useState('')
+  const remembered = useRef(loadRememberedWifi()).current
+  const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
+  const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
+  const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
   const [error, setError] = useState<string | undefined>()
   // Panel selection needs the all-panels firmware; the picker only shows when
   // the latest release actually publishes it (older releases hard-fail the
@@ -490,6 +493,11 @@ export function Esp32CloudFlasher({
       )
       setPhase('error')
       return
+    }
+    if (rememberWifi && wifiSsid) {
+      storeRememberedWifi(wifiSsid, wifiPassword)
+    } else {
+      clearRememberedWifi()
     }
     busyRef.current = true
     setLines([])
@@ -742,6 +750,20 @@ export function Esp32CloudFlasher({
           type="password"
           value={wifiPassword}
         />
+        <label className="frameos-muted flex items-center gap-2 text-xs">
+          <input
+            checked={rememberWifi}
+            disabled={busy}
+            onChange={(event) => {
+              setRememberWifi(event.target.checked)
+              if (!event.target.checked) {
+                clearRememberedWifi()
+              }
+            }}
+            type="checkbox"
+          />
+          Remember WiFi credentials in this browser (never sent to the cloud)
+        </label>
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"

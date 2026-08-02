@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudConfig } from '../lib/sd-image-patch'
 import { fetchReleaseListing } from '../lib/release-lookup'
+import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 
 // "Download SD image" for cloud-managed Raspberry Pi frames
 // (docs/cloud-frames.md, "Placeholder + in-browser personalization"): the
@@ -69,41 +70,8 @@ const claimValidityChoices = [
 ] as const
 const defaultClaimValidity = '90'
 
-// "Remember WiFi" keeps the credentials in this browser only (localStorage) —
-// they still never reach the server.
-const wifiStorageKey = 'frameos-sd-image-wifi'
-
-function loadRememberedWifi(): { password: string; ssid: string } | undefined {
-  try {
-    const raw = localStorage.getItem(wifiStorageKey)
-    if (!raw) {
-      return undefined
-    }
-    const parsed = JSON.parse(raw) as { password?: unknown; ssid?: unknown }
-    if (typeof parsed.ssid !== 'string' || typeof parsed.password !== 'string') {
-      return undefined
-    }
-    return { password: parsed.password, ssid: parsed.ssid }
-  } catch {
-    return undefined
-  }
-}
-
-function storeRememberedWifi(ssid: string, password: string): void {
-  try {
-    localStorage.setItem(wifiStorageKey, JSON.stringify({ password, ssid }))
-  } catch {
-    // Storage full or blocked — remembering is best-effort.
-  }
-}
-
-function clearRememberedWifi(): void {
-  try {
-    localStorage.removeItem(wifiStorageKey)
-  } catch {
-    // Ditto.
-  }
-}
+// "Remember WiFi" is shared with the ESP32 flasher — one stored network for
+// the whole add-frame panel (../lib/remembered-wifi).
 
 interface FirmwareAsset {
   name: string

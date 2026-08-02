@@ -1,3 +1,5 @@
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -54,6 +56,29 @@ const provisioningAssets = [
 
 // Only the ESP32 firmware (a few MB) is streamed from here.
 const streamablePlatforms = new Set(["esp32-s3-generic", "esp32-s3-epd7in5v2"]);
+
+// Development / self-hosted escape hatch: until a release publishes the
+// all-panels build, FRAMEOS_ESP32_GENERIC_FIRMWARE can point at a locally
+// built merged binary (embedded/esp32/build*/merged-binary.bin). It is
+// advertised and served ONLY when the release itself has no generic asset,
+// so a published release always wins. Unset in production deployments.
+async function localGenericFirmware(): Promise<
+  { name: string; path: string; size: number } | undefined
+> {
+  const path = process.env.FRAMEOS_ESP32_GENERIC_FIRMWARE?.trim();
+  if (!path) {
+    return undefined;
+  }
+  try {
+    const info = await stat(path);
+    if (!info.isFile()) {
+      return undefined;
+    }
+    return { name: basename(path), path, size: info.size };
+  } catch {
+    return undefined;
+  }
+}
 
 interface ReleaseAsset {
   browser_download_url: string;
@@ -115,6 +140,16 @@ export async function GET(request: NextRequest) {
         ? [{ name: asset.name, platform: entry.platform, size: asset.size }]
         : [];
     });
+    if (!assets.some((asset) => asset.platform === "esp32-s3-generic")) {
+      const local = await localGenericFirmware();
+      if (local) {
+        assets.unshift({
+          name: local.name,
+          platform: "esp32-s3-generic",
+          size: local.size,
+        });
+      }
+    }
     return NextResponse.json(
       { assets, release: release.tag_name ?? "" },
       { headers: { "cache-control": "private, max-age=300" } },
@@ -125,6 +160,22 @@ export async function GET(request: NextRequest) {
     (entry) => entry.platform === platform,
   );
   const asset = requested ? findAsset(release, requested.suffix) : undefined;
+  if (!asset && platform === "esp32-s3-generic") {
+    const local = await localGenericFirmware();
+    if (local) {
+      const bytes = await readFile(local.path);
+      return new NextResponse(new Uint8Array(bytes), {
+        headers: {
+          "cache-control": "no-store",
+          "content-length": String(bytes.length),
+          "content-type": "application/octet-stream",
+          "x-frameos-image-name": local.name,
+          "x-frameos-release": "local-dev",
+        },
+        status: 200,
+      });
+    }
+  }
   if (!asset) {
     return jsonError("firmware_not_published", 404, {
       platform,

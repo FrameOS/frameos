@@ -392,7 +392,9 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(drawer.getByLabel('Upload URL')).toBeVisible()
 
     // The rest of the SD builder's new controls.
-    await expect(drawer.getByText('Remember WiFi credentials in this browser')).toBeVisible()
+    // Both add-frame flows offer it (SD builder and ESP32 flasher, sharing
+    // one stored network), so the drawer has two of these.
+    await expect(drawer.getByText('Remember WiFi credentials in this browser').first()).toBeVisible()
     await expect(drawer.getByLabel('Claim code validity')).toHaveValue('90')
     await expect(
       drawer.getByLabel('Claim code validity').locator('option', { hasText: '3 months (default)' })
