@@ -26,6 +26,39 @@ export const runtime = "nodejs";
 
 const wsPath = "/api/frames/ws";
 
+// Same set the frames-app shell route uses to decide "is this a dev server".
+const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+// Where the device should dial its management WebSocket, when that differs
+// from `{cloud_url}{ws_path}`. In production nginx proxies /api/frames/ws to
+// the frame hub on the same origin, so this returns undefined and the field
+// stays off the wire. In development the hub is a second process on its own
+// port (getHubPort in apps/frame-hub, default 3100) that this Next server
+// knows about and the device cannot guess — the exact analogue of the
+// cloud_ws_origin injection app/frames/[[...path]]/route.ts does for the
+// browser SPA. FRAME_HUB_PUBLIC_URL wins wherever it is set (empty counts as
+// unset, same trap as there); otherwise only a loopback request host gets the
+// :3100 default, because behind a real hostname we never guess.
+//
+// The returned URL is a full ws:// or wss:// URL. Devices accept it under the
+// same transport rule as cloud_url: wss:// anywhere, plain ws:// only for
+// localhost/.local/private-network hosts (docs/cloud-frames.md).
+function frameWsUrl(request: NextRequest): string | undefined {
+  const configuredHub = process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(
+    /\/$/,
+    "",
+  );
+  const hostname = new URL(request.url).hostname;
+  const hubOrigin =
+    configuredHub ||
+    (localHosts.has(hostname) ? `http://${hostname}:3100` : undefined);
+  if (!hubOrigin) {
+    return undefined;
+  }
+  // http → ws, https → wss (already-ws origins pass through unchanged).
+  return `${hubOrigin.replace(/^http/, "ws")}${wsPath}`;
+}
+
 function parseHardware(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -73,9 +106,10 @@ export async function POST(request: NextRequest) {
 
   const claimToken = parseOptionalString(body.claim_token);
   const authorizationHeader = request.headers.get("authorization");
+  const wsUrl = frameWsUrl(request);
 
   if (claimToken) {
-    return enrollWithClaimToken(db, {
+    return enrollWithClaimToken(db, wsUrl, {
       claimToken,
       frameosVersion,
       hardware,
@@ -84,7 +118,7 @@ export async function POST(request: NextRequest) {
     });
   }
   if (authorizationHeader) {
-    return enrollLinkedFrame(db, authorizationHeader, {
+    return enrollLinkedFrame(db, authorizationHeader, wsUrl, {
       frameosVersion,
       hardware,
       name,
@@ -111,6 +145,7 @@ class QuotaExceededError extends Error {}
 
 async function enrollWithClaimToken(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
+  wsUrl: string | undefined,
   input: EnrollInput & { claimToken: string },
 ) {
   let accessToken: ReturnType<typeof createEncryptedSecretToken>;
@@ -130,7 +165,7 @@ async function enrollWithClaimToken(
   // 400 invalid_claim_token plus an orphan pending frame. Only while the
   // frame is still pending: once the owner has confirmed it, the enrollment
   // is finished and a replay is just a replay.
-  const replay = await replayEnrollment(db, input, accessToken);
+  const replay = await replayEnrollment(db, wsUrl, input, accessToken);
   if (replay) {
     return replay;
   }
@@ -240,6 +275,7 @@ async function enrollWithClaimToken(
     status: result.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
+    ...(wsUrl ? { ws_url: wsUrl } : {}),
   });
 }
 
@@ -249,6 +285,7 @@ async function enrollWithClaimToken(
 // enrollment would not have granted.
 async function replayEnrollment(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
+  wsUrl: string | undefined,
   input: EnrollInput & { claimToken: string },
   accessToken: ReturnType<typeof createEncryptedSecretToken>,
 ) {
@@ -301,12 +338,14 @@ async function replayEnrollment(
     status: existing.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
+    ...(wsUrl ? { ws_url: wsUrl } : {}),
   });
 }
 
 async function enrollLinkedFrame(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   authorizationHeader: string,
+  wsUrl: string | undefined,
   input: EnrollInput,
 ) {
   const linkedClient = await authenticateLinkedClient(db, authorizationHeader);
@@ -349,6 +388,7 @@ async function enrollLinkedFrame(
       scope: frameManagedScope,
       status: existing.status,
       ws_path: wsPath,
+      ...(wsUrl ? { ws_url: wsUrl } : {}),
     });
   }
 
@@ -391,5 +431,6 @@ async function enrollLinkedFrame(
     scope: frameManagedScope,
     status: frame.status,
     ws_path: wsPath,
+    ...(wsUrl ? { ws_url: wsUrl } : {}),
   });
 }
