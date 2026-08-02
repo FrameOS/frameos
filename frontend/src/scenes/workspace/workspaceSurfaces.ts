@@ -212,24 +212,113 @@ export const addFrameFlows: Record<WorkspaceMode, AddFrameFlow> = {
   cloud: 'cloudPanel',
 }
 
+/**
+ * Device-profile capabilities, layered UNDER the per-mode allow-lists above.
+ *
+ * The mode lists say what a control plane implements; this says what the
+ * device on the other end implements. Cloud-managed frames report their
+ * `hardware` object at enrollment, and a `platform: "esp32"` frame speaks
+ * only a subset of the management verbs — it answers `unsupported_verb` for
+ * `set_schedule`, `set_settings`, `get_logs`, `get_metrics` and
+ * `notify_update_available` (docs/cloud-frames.md, "Device profiles";
+ * device-side allowlist in embedded/esp32/main/fos_cloud.c). The UI hides
+ * those controls instead of enqueueing commands that come back refused.
+ *
+ * Scene management, current scene, render, reboot, restart and state stay:
+ * the ESP32 profile implements all of them.
+ */
+export type FrameCapability = 'schedule' | 'settings' | 'logs' | 'metrics' | 'updateNotify'
+
+/**
+ * The one frame field capability gating reads. Structurally a subset of
+ * FrameType, declared locally so this module keeps importing nothing beyond
+ * the two mode probes.
+ */
+export interface FrameCapabilityInput {
+  hardware?: { platform?: string | null } | null
+}
+
+const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings', 'logs', 'metrics', 'updateNotify']
+
+/** `platform: "esp32"` today; prefix-matched so "esp32-s3" variants gate too. */
+function isEsp32Platform(platform: unknown): boolean {
+  return typeof platform === 'string' && platform.toLowerCase().startsWith('esp32')
+}
+
+/**
+ * The management verbs this frame's device profile supports. Only the cloud
+ * control plane carries the profile distinction: backend- and admin-managed
+ * ESP32 frames get their logs, schedule and settings through channels of
+ * their own (serial, the on-device admin), not through the cloud WS verbs.
+ * A frame that has not loaded yet (or predates the hardware report) keeps
+ * the full set — the allow-lists above still bound what the mode offers.
+ */
+export function frameCapabilities(
+  frame?: FrameCapabilityInput | null,
+  mode: WorkspaceMode = workspaceMode()
+): ReadonlySet<FrameCapability> {
+  if (mode === 'cloud' && isEsp32Platform(frame?.hardware?.platform)) {
+    // The ESP32 cloud profile: scenes, current scene, state, render, reboot,
+    // restart_runtime — none of which are capability-gated surfaces. Every
+    // gated capability rides a verb it answers `unsupported_verb` for.
+    return new Set<FrameCapability>()
+  }
+  return new Set(allFrameCapabilities)
+}
+
+/** Which capability a gated frame-tool (and scene-tool shortcut) panel rides on. */
+const panelCapabilities: Partial<Record<WorkspaceUtilityPanel, FrameCapability>> = {
+  schedule: 'schedule', // set_schedule
+  settings: 'settings', // set_settings
+  logs: 'logs', // get_logs / telemetry:logs
+  metrics: 'metrics', // get_metrics / telemetry:metrics
+}
+
+/** Which capability a gated "…" menu action rides on. */
+const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {
+  // Renaming a cloud frame is a `set_settings` push of `name` (framesModel
+  // renameFrame → pushCloudFrameSettings), so it follows that verb's profile.
+  rename: 'settings',
+}
+
 function allows<T extends string>(list: Record<WorkspaceMode, readonly T[]>, mode: WorkspaceMode, value: T): boolean {
   return list[mode].includes(value)
 }
 
-export function frameToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
-  return allows(allowedFrameToolPanels, mode, panel)
+function capabilityAllows(
+  capability: FrameCapability | undefined,
+  mode: WorkspaceMode,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  return !capability || frameCapabilities(frame, mode).has(capability)
 }
 
-export function sceneToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
-  return allows(allowedSceneToolPanels, mode, panel)
+export function frameToolPanelIsAllowed(
+  mode: WorkspaceMode,
+  panel: WorkspaceUtilityPanel,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  return allows(allowedFrameToolPanels, mode, panel) && capabilityAllows(panelCapabilities[panel], mode, frame)
+}
+
+export function sceneToolPanelIsAllowed(
+  mode: WorkspaceMode,
+  panel: WorkspaceUtilityPanel,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  return allows(allowedSceneToolPanels, mode, panel) && capabilityAllows(panelCapabilities[panel], mode, frame)
 }
 
 export function sceneUtilityPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
   return allows(allowedSceneUtilityPanels, mode, panel)
 }
 
-export function frameMenuActionIsAllowed(mode: WorkspaceMode, action: FrameMenuAction): boolean {
-  return allows(allowedFrameMenuActions, mode, action)
+export function frameMenuActionIsAllowed(
+  mode: WorkspaceMode,
+  action: FrameMenuAction,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  return allows(allowedFrameMenuActions, mode, action) && capabilityAllows(menuActionCapabilities[action], mode, frame)
 }
 
 export function frameSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {

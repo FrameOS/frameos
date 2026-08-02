@@ -6,6 +6,7 @@ import {
   allowedFrameToolPanels,
   allowedSceneToolPanels,
   allowedSceneUtilityPanels,
+  frameCapabilities,
   frameMenuActionIsAllowed,
   frameSettingsSectionIsAllowed,
   frameToolPanelIsAllowed,
@@ -93,6 +94,78 @@ describe("cloud mode keeps what the protocol does implement", () => {
     ] as const) {
       expect(frameToolPanelIsAllowed("cloud", panel)).toBe(true);
     }
+  });
+});
+
+// The mode allow-lists say what a control plane implements; the device
+// profile says what the frame on the other end implements. A cloud-managed
+// frame whose enrollment-reported hardware.platform is "esp32" answers
+// `unsupported_verb` for set_schedule, set_settings, get_logs, get_metrics
+// and notify_update_available (docs/cloud-frames.md "Device profiles";
+// embedded/esp32/main/fos_cloud.c), so the UI must not offer those controls.
+describe("the esp32 cloud device profile", () => {
+  const esp32Frame = { hardware: { platform: "esp32" } };
+  const piFrame = { hardware: { platform: "pi-zero2w" } };
+
+  it("hides the schedule, settings, logs and metrics frame tools", () => {
+    for (const panel of ["schedule", "settings", "logs", "metrics"] as const) {
+      expect(frameToolPanelIsAllowed("cloud", panel, esp32Frame)).toBe(false);
+      expect(sceneToolPanelIsAllowed("cloud", panel, esp32Frame)).toBe(false);
+    }
+  });
+
+  it("keeps the overview, preview and scene surfaces", () => {
+    for (const panel of ["overview", "preview"] as const) {
+      expect(frameToolPanelIsAllowed("cloud", panel, esp32Frame)).toBe(true);
+    }
+  });
+
+  it("hides rename (it rides set_settings) but keeps render, reboot, restart", () => {
+    expect(frameMenuActionIsAllowed("cloud", "rename", esp32Frame)).toBe(false);
+    for (const action of ["reboot", "render", "restart"] as const) {
+      expect(frameMenuActionIsAllowed("cloud", action, esp32Frame)).toBe(true);
+    }
+  });
+
+  it("gates esp32 variants by prefix", () => {
+    expect(
+      frameToolPanelIsAllowed("cloud", "logs", {
+        hardware: { platform: "esp32-s3" },
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves Pi/Linux cloud frames the full cloud surface", () => {
+    for (const panel of ["schedule", "settings", "logs", "metrics"] as const) {
+      expect(frameToolPanelIsAllowed("cloud", panel, piFrame)).toBe(true);
+      expect(sceneToolPanelIsAllowed("cloud", panel, piFrame)).toBe(true);
+    }
+    expect(frameMenuActionIsAllowed("cloud", "rename", piFrame)).toBe(true);
+  });
+
+  it("treats a frame without a hardware report as full-profile", () => {
+    // Backend frames have no hardware column, and the frame row may not have
+    // loaded yet — the mode allow-list alone must keep gating then.
+    for (const frame of [undefined, null, {}, { hardware: null }]) {
+      expect(frameToolPanelIsAllowed("cloud", "logs", frame)).toBe(true);
+    }
+  });
+
+  it("only applies on the cloud control plane", () => {
+    // A backend- or admin-managed ESP32 frame gets schedule/logs/settings
+    // through its own channels (serial, on-device admin), not the cloud WS.
+    for (const mode of ["backend", "frameAdmin"] as const) {
+      expect(frameToolPanelIsAllowed(mode, "logs", esp32Frame)).toBe(true);
+      expect(frameToolPanelIsAllowed(mode, "schedule", esp32Frame)).toBe(true);
+      expect(frameMenuActionIsAllowed(mode, "rename", esp32Frame)).toBe(true);
+    }
+  });
+
+  it("derives an empty capability set for esp32 and a full one otherwise", () => {
+    expect(frameCapabilities(esp32Frame, "cloud").size).toBe(0);
+    expect(frameCapabilities(piFrame, "cloud")).toEqual(
+      new Set(["schedule", "settings", "logs", "metrics", "updateNotify"]),
+    );
   });
 });
 

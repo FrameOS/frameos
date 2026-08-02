@@ -257,9 +257,14 @@ const frameToolDefinitions: FrameToolDefinition[] = [
 ]
 
 // Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
-// invisible in every mode until it is listed there.
-function frameToolDefinitionsForMode(mode: WorkspaceMode = workspaceMode()): FrameToolDefinition[] {
-  return frameToolDefinitions.filter((definition) => frameToolPanelIsAllowed(mode, definition.panel))
+// invisible in every mode until it is listed there. The frame narrows it
+// further by device profile — a cloud-managed ESP32 frame has no schedule,
+// settings, logs or metrics verbs (docs/cloud-frames.md, "Device profiles").
+function frameToolDefinitionsForMode(
+  mode: WorkspaceMode = workspaceMode(),
+  frame?: FrameType | null
+): FrameToolDefinition[] {
+  return frameToolDefinitions.filter((definition) => frameToolPanelIsAllowed(mode, definition.panel, frame))
 }
 
 function frameToolPanelFromSearchParams(
@@ -1290,7 +1295,6 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const frameLogicProps = { frameId }
   const inFrameAdminMode = isInFrameAdminMode()
   const mode = workspaceMode()
-  const availableToolDefinitions = frameToolDefinitionsForMode(mode)
   if (frameToolPanelIsAllowed(mode, 'terminal')) {
     // The cloud protocol has no shell, so terminalLogic must never mount
     // there. The mode is constant for the app's lifetime, so this
@@ -1307,6 +1311,10 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
+  // Computed with the frame in hand: the device profile can hide panels the
+  // mode alone would allow (an esp32 cloud frame has no schedule/settings/
+  // logs/metrics verbs), and the ?tool= fallback below must not land on one.
+  const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
   const requestedPanel = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions)
   const fallbackPanel = availableToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel

@@ -30,6 +30,18 @@ export interface FrameType {
   /** Which control plane manages this frame. Cloud-managed frames are
    * interpreted-only: no SSH, no compiled scenes, no shell-flagged apps. */
   managed_by?: 'backend' | 'cloud'
+  /** The hardware object the device reported at cloud enrollment (frames.hardware
+   * jsonb on the cloud; absent on backend-managed frames). `platform` drives the
+   * device-profile capability gating in workspaceSurfaces.ts: an "esp32" frame
+   * implements only a subset of the management verbs (docs/cloud-frames.md). */
+  hardware?: {
+    platform?: string | null
+    device?: string | null
+    panel?: string | null
+    width?: number | null
+    height?: number | null
+    color?: string | null
+  } | null
   frame_host: string
   frame_port: number
   frame_access_key: string

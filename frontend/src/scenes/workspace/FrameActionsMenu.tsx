@@ -50,12 +50,14 @@ export function FrameActionsMenu({
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
-  // Which verbs exist is a property of the control plane, not of this menu —
-  // see workspaceSurfaces.ts. Reboot and restart DO exist on the cloud (they
-  // are two of its four command verbs); deploys, SSH power actions and
-  // backend bookkeeping do not.
+  // Which verbs exist is a property of the control plane and of the device's
+  // profile, not of this menu — see workspaceSurfaces.ts. Reboot and restart
+  // DO exist on the cloud (they are two of its four command verbs); deploys,
+  // SSH power actions and backend bookkeeping do not, and an esp32 cloud
+  // frame additionally loses rename (it rides the set_settings verb, which
+  // that profile answers `unsupported_verb`).
   const mode = workspaceMode()
-  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action)
+  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
 
   return (
     <DropdownMenu
