@@ -13,6 +13,16 @@ ARG BUILDPLATFORM
 ARG QUICKJS_VERSION=2026-06-04
 ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
 
+# Optional standalone cross toolchain (e.g. Bootlin armv6-eabihf for the
+# Raspberry Pi Zero W, which has no matching container platform). When set,
+# the container runs on its native platform and cross-compiles instead.
+ARG CROSS_TOOLCHAIN_URL=
+ARG CROSS_TOOLCHAIN_SHA256=
+ARG CROSS_PREFIX=
+# readelf Tag_CPU_arch value the produced objects must report (e.g. "v6");
+# guards against silently shipping code for the wrong CPU generation.
+ARG CROSS_EXPECTED_CPU_ARCH=
+
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -26,16 +36,39 @@ RUN apt-get update \
       openssl \
     && rm -rf /var/lib/apt/lists/*
 
+RUN set -euxo pipefail \
+    && if [ -n "${CROSS_TOOLCHAIN_URL}" ]; then \
+      curl -fsSL -o /tmp/toolchain.tar.xz "${CROSS_TOOLCHAIN_URL}" \
+      && echo "${CROSS_TOOLCHAIN_SHA256}  /tmp/toolchain.tar.xz" | sha256sum -c - \
+      && mkdir -p /opt/toolchains \
+      && tar -C /opt/toolchains -xf /tmp/toolchain.tar.xz \
+      && rm /tmp/toolchain.tar.xz \
+      && toolchain_dir="$(find /opt/toolchains -mindepth 1 -maxdepth 1 -type d)" \
+      && if [ -x "${toolchain_dir}/relocate-sdk.sh" ]; then "${toolchain_dir}/relocate-sdk.sh"; fi \
+      && ln -s "${toolchain_dir}" /opt/cross \
+      && "/opt/cross/bin/${CROSS_PREFIX}gcc" --version; \
+    fi
+
 WORKDIR /build
 RUN mkdir -p /artifacts
 
 RUN set -euxo pipefail \
+    && export PATH="/opt/cross/bin:${PATH}" \
     && curl -fsSL -o quickjs.tar.xz "https://bellard.org/quickjs/quickjs-${QUICKJS_VERSION}.tar.xz" \
     && echo "${QUICKJS_SHA256}  quickjs.tar.xz" | sha256sum -c - \
     && tar -xf quickjs.tar.xz \
     && rm quickjs.tar.xz \
     && cd quickjs-${QUICKJS_VERSION} \
-    && make libquickjs.a \
+    && make ${CROSS_PREFIX:+CROSS_PREFIX=${CROSS_PREFIX}} libquickjs.a \
+    && if [ -n "${CROSS_EXPECTED_CPU_ARCH}" ]; then \
+      mkdir /tmp/qjs-verify \
+      && (cd /tmp/qjs-verify && "${CROSS_PREFIX}ar" x "/build/quickjs-${QUICKJS_VERSION}/libquickjs.a") \
+      && obj="$(find /tmp/qjs-verify -name '*.o' | head -1)" \
+      && readelf -A "${obj}" \
+      && readelf -A "${obj}" | grep -q "Tag_CPU_arch: ${CROSS_EXPECTED_CPU_ARCH}\$" \
+      && readelf -A "${obj}" | grep -q "Tag_ABI_VFP_args: VFP registers" \
+      && rm -rf /tmp/qjs-verify; \
+    fi \
     && mkdir -p /artifacts/lib /artifacts/include/quickjs \
     && cp libquickjs.a /artifacts/lib/ \
     && cp quickjs.h quickjs-libc.h /artifacts/include/quickjs/ \
