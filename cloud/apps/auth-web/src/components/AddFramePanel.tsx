@@ -23,7 +23,6 @@ export function AddFramePanel() {
   const [claimToken, setClaimToken] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [installCopied, setInstallCopied] = useState(false);
-  const [portalCopied, setPortalCopied] = useState(false);
   // Multi-use token for the SD image builder: one personalized image can be
   // flashed to many cards, each boot enrolling a distinct frame. Minted once
   // per panel session, on the first build.
@@ -205,31 +204,17 @@ export function AddFramePanel() {
         </div>
         <div className="card">
           <h4>
-            <QrCode aria-hidden size={18} /> Link an existing frame
+            <QrCode aria-hidden size={18} /> Link a frame that already runs
           </h4>
           <p className="copy">
-            On the frame&apos;s admin page (Settings → FrameOS Cloud), choose
-            Connect and approve the code it shows on the{" "}
-            <a href="/device">device page</a>. Or, in the frame&apos;s
-            <code> FrameOS-Setup</code> portal, paste this one-time code:
+            Already have FrameOS running and on your network? Open its admin
+            page (Settings → FrameOS Cloud → Connect). The frame shows a short
+            code; type it on the <a href="/device">device page</a> to approve
+            it.
           </p>
-          <p>
-            <code style={{ userSelect: "all" }}>
-              {claimToken ?? "preparing…"}
-            </code>{" "}
-            <button
-              className="button button--subtle button--small"
-              disabled={!claimToken}
-              onClick={() =>
-                claimToken
-                  ? void copyText(claimToken, setPortalCopied)
-                  : undefined
-              }
-              type="button"
-            >
-              <Copy aria-hidden size={16} />
-              {portalCopied ? "Copied" : "Copy"}
-            </button>
+          <p className="copy">
+            The frame asks and you approve — nothing to copy from here, and
+            the code proves you can see the device.
           </p>
         </div>
         <Esp32CloudFlasher frameName={name || undefined} />

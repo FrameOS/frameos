@@ -102,7 +102,6 @@ export function SdImageBuilder({
   const [status, setStatus] = useState("");
   const [progressBytes, setProgressBytes] = useState(0);
   const [error, setError] = useState<string | undefined>();
-  const [manualOpen, setManualOpen] = useState(false);
   const busyRef = useRef(false);
 
   const origin =
@@ -168,9 +167,8 @@ export function SdImageBuilder({
     };
   }, []);
 
-  function failToFallback(message: string) {
+  function failWith(message: string) {
     setError(message);
-    setManualOpen(true);
     setPhase("error");
   }
 
@@ -195,7 +193,10 @@ export function SdImageBuilder({
       sanitizeConfigValue(wifiSsid, "WiFi network name");
       sanitizeConfigValue(wifiPassword, "WiFi password");
 
-      const suggestedName = `frameos-${board.platform}-${slugify(frameName) || "cloud"}.img`;
+      // Gzipped output: Raspberry Pi Imager and balenaEtcher both read
+      // .img.gz directly, it downloads ~10x smaller, and browsers don't flag
+      // an archive as a dangerous file the way they do a bare .img.
+      const suggestedName = `frameos-${board.platform}-${slugify(frameName) || "cloud"}.img.gz`;
       // Ask for the save location first, while the click's user activation is
       // still fresh (Chrome/Edge; other browsers fall back to a Blob).
       if (canStreamToDisk) {
@@ -207,8 +208,8 @@ export function SdImageBuilder({
             suggestedName,
             types: [
               {
-                accept: { "application/octet-stream": [".img"] },
-                description: "Disk image",
+                accept: { "application/gzip": [".img.gz", ".gz"] },
+                description: "Compressed disk image",
               },
             ],
           });
@@ -239,40 +240,64 @@ export function SdImageBuilder({
       });
 
       setStatus(`Downloading ${board.asset.name}…`);
-      const response = await fetch(board.asset.browser_download_url);
+      // Same-origin: GitHub's release redirect sends no CORS headers, so the
+      // bytes stream through the provider (see app/api/frames/sd-image).
+      const response = await fetch(
+        `/api/frames/sd-image?platform=${encodeURIComponent(board.platform)}`,
+      );
       if (!response.ok || !response.body) {
-        throw new Error(`Image download failed (${response.status})`);
+        const detail = (await response
+          .json()
+          .catch(() => ({}))) as { error?: string };
+        throw new Error(
+          detail.error === "image_not_published"
+            ? "No image published for this board in the latest release yet."
+            : `Image download failed (${detail.error ?? response.status})`,
+        );
       }
       const decompressed = response.body.pipeThrough(
         new DecompressionStream("gzip"),
       );
 
-      setStatus("Personalizing and writing the image…");
+      setStatus("Personalizing and compressing the image…");
+      // Re-gzip the patched stream so what lands on disk is a compressed
+      // image: smaller, and flashers read it directly.
+      const recompressed = new CompressionStream("gzip");
+      const recompressedWriter = recompressed.writable.getWriter();
       const blobParts: Uint8Array[] = [];
       let written = 0;
       let lastShown = 0;
+
+      const drain = (async () => {
+        for await (const chunk of streamChunks(recompressed.readable)) {
+          if (writable) {
+            await writable.write(chunk);
+          } else {
+            blobParts.push(chunk);
+          }
+        }
+      })();
+
       for await (const chunk of patchCloudConfig(
         streamChunks(decompressed),
         configBytes,
       )) {
-        if (writable) {
-          await writable.write(chunk);
-        } else {
-          blobParts.push(chunk);
-        }
+        await recompressedWriter.write(chunk as BufferSource);
         written += chunk.length;
         if (written - lastShown >= 8 * 1024 * 1024) {
           lastShown = written;
           setProgressBytes(written);
         }
       }
+      await recompressedWriter.close();
+      await drain;
       setProgressBytes(written);
       if (writable) {
         await writable.close();
         writable = undefined;
       } else {
         const blob = new Blob(blobParts as BlobPart[], {
-          type: "application/octet-stream",
+          type: "application/gzip",
         });
         blobParts.length = 0;
         const url = URL.createObjectURL(blob);
@@ -297,8 +322,8 @@ export function SdImageBuilder({
           buildError.code === "placeholder_invalid" ||
           buildError.code === "truncated_image")
       ) {
-        failToFallback(
-          "This release image doesn't support in-browser personalization yet — flash the generic image and create the file manually (instructions below).",
+        failWith(
+          "This release image predates in-browser personalization — update to a newer FrameOS release, or use the install-script flow instead.",
         );
       } else {
         setError(
@@ -328,9 +353,9 @@ export function SdImageBuilder({
             <p className="copy">Looking up the latest FrameOS release…</p>
           ) : null}
           {release.status === "error" ? (
-            <p className="copy">
-              Could not reach GitHub for the latest release ({release.message}).
-              Use the manual instructions below.
+            <p className="copy" role="alert" style={{ color: "var(--warning)" }}>
+              Could not look up the latest FrameOS release ({release.message}).
+              Try again in a moment.
             </p>
           ) : null}
           {release.status === "ready" ? (
@@ -414,11 +439,11 @@ export function SdImageBuilder({
           {phase === "done" ? (
             <div className="card" data-testid="sd-image-done">
               <p className="copy">
-                Image saved ({progressMb} MB). Flash this <code>.img</code> to
-                as many SD cards as you like (Raspberry Pi Imager or
-                balenaEtcher, &ldquo;Use custom image&rdquo;). Each frame
-                appears below as <em>pending</em> when it first boots — confirm
-                each one.
+                Image saved. Flash this <code>.img.gz</code> to as many SD
+                cards as you like (Raspberry Pi Imager or balenaEtcher,
+                &ldquo;Use custom image&rdquo; — both read it compressed).
+                Each frame appears below as <em>pending</em> when it first
+                boots — confirm each one.
                 {claimTokenExpiresAt
                   ? ` The embedded claim code is valid until ${new Date(claimTokenExpiresAt).toLocaleString()}.`
                   : ""}
@@ -433,45 +458,10 @@ export function SdImageBuilder({
         </>
       ) : (
         <p className="copy">
-          This browser can&apos;t decompress the image locally — use the manual
-          instructions below.
+          This browser can&apos;t build the image locally (it needs
+          DecompressionStream — use Chrome, Edge, Firefox or Safari 16.4+).
         </p>
       )}
-
-      <details
-        onToggle={(event) => setManualOpen(event.currentTarget.open)}
-        open={manualOpen}
-        style={{ marginTop: "0.5rem" }}
-      >
-        <summary className="copy" style={{ cursor: "pointer" }}>
-          Manual setup (flash the generic image yourself)
-        </summary>
-        <p className="copy">
-          Download the generic FrameOS image for your board from the{" "}
-          <a
-            href="https://github.com/FrameOS/frameos/releases/latest"
-            rel="noreferrer noopener"
-            target="_blank"
-          >
-            latest release
-          </a>
-          , flash it, then create a file named <code>frameos-cloud.txt</code>{" "}
-          on the SD card&apos;s boot partition:
-        </p>
-        <pre className="copy">
-          {`cloud_url=${origin}
-claim_token=${claimToken ?? "<your claim code>"}
-# optional:
-# name=Kitchen frame
-# wifi_ssid=MyNetwork
-# wifi_password=…`}
-        </pre>
-        <p className="copy">
-          The file is read once on first boot and destroyed. Without WiFi
-          credentials the frame opens the <code>FrameOS-Setup</code> hotspot so
-          you can connect it to your network first.
-        </p>
-      </details>
     </div>
   );
 }

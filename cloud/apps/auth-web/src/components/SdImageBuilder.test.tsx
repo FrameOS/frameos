@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLOUD_CONFIG_MAGIC,
@@ -46,21 +46,30 @@ const releasePayload = {
   tag_name: "v1.2.3",
 };
 
+// The image itself comes from the provider's same-origin route (GitHub's
+// release redirect sends no CORS headers), so that is what the build path
+// fetches; only the board listing still hits the GitHub API.
 function mockReleaseAndImage() {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
     if (url.startsWith("https://api.github.com/")) {
       return Promise.resolve(Response.json(releasePayload));
     }
-    if (url.endsWith(".img.gz")) {
+    if (url.startsWith("/api/frames/sd-image")) {
       return Promise.resolve(
         new Response(gzippedImage.slice(), {
-          headers: { "content-type": "application/octet-stream" },
+          headers: { "content-type": "application/gzip" },
         }),
       );
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`));
   });
+}
+
+// The builder re-gzips its output, so tests decompress before asserting on
+// image bytes.
+function gunzip(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(gunzipSync(Buffer.from(bytes)));
 }
 
 interface SavedFile {
@@ -137,16 +146,13 @@ describe("SdImageBuilder", () => {
     expect((missing as HTMLOptionElement).disabled).toBe(true);
   });
 
-  it("falls back to manual instructions when the release lookup fails", async () => {
+  it("reports a failed release lookup instead of silently offering nothing", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("{}", { status: 500 }),
     );
     render(<SdImageBuilder mintClaimToken={() => Promise.resolve("FRCT_x")} />);
 
-    await screen.findByText(/Could not reach GitHub/);
-    expect(
-      screen.getByText(/Manual setup \(flash the generic image yourself\)/),
-    ).toBeDefined();
+    await screen.findByText(/Could not look up the latest FrameOS release/);
   });
 
   it("refuses WiFi values with double quotes before downloading anything", async () => {
@@ -170,7 +176,7 @@ describe("SdImageBuilder", () => {
     // Only the release lookup hit the network — never the image download.
     expect(
       fetchMock.mock.calls.filter(([input]) =>
-        String(input).endsWith(".img.gz"),
+        String(input).startsWith("/api/frames/sd-image"),
       ),
     ).toHaveLength(0);
   });
@@ -202,12 +208,13 @@ describe("SdImageBuilder", () => {
 
     expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true });
     expect(saved.suggestedName).toBe(
-      "frameos-raspberry-pi-zero-2-w-kitchen-frame.img",
+      "frameos-raspberry-pi-zero-2-w-kitchen-frame.img.gz",
     );
     expect(saved.closed).toBe(true);
     expect(saved.aborted).toBe(false);
 
-    const output = savedBytes(saved);
+    // The saved file is gzipped; decompress before comparing image bytes.
+    const output = gunzip(savedBytes(saved));
     expect(output.length).toBe(image.length);
     // Bytes outside the placeholder region are untouched.
     expect(output.slice(0, 1000)).toEqual(image.slice(0, 1000));
@@ -247,7 +254,7 @@ describe("SdImageBuilder", () => {
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     expect(mint).not.toHaveBeenCalled();
-    const regionText = new TextDecoder().decode(savedBytes(saved));
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
     expect(regionText).toContain("claim_token=FRCT_existing\n");
     // Success panel mentions the token expiry.
     expect(
@@ -255,7 +262,7 @@ describe("SdImageBuilder", () => {
     ).toContain("valid until");
   });
 
-  it("shows the manual fallback when the image has no placeholder", async () => {
+  it("refuses an image without the placeholder instead of shipping a broken card", async () => {
     const noPlaceholder = new Uint8Array(64 * 1024).fill(0xaa);
     const gzipped = new Uint8Array(gzipSync(noPlaceholder));
     fetchMock.mockImplementation((input) => {
@@ -278,12 +285,9 @@ describe("SdImageBuilder", () => {
     );
 
     await screen.findByText(
-      /doesn't support in-browser personalization yet/,
+      /predates in-browser personalization/,
       undefined,
       { timeout: 5000 },
     );
-    // The manual instructions opened as the fallback.
-    const details = document.querySelector("details");
-    expect(details?.open).toBe(true);
   });
 });

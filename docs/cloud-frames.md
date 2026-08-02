@@ -214,14 +214,23 @@ file stays editable. Image composition copies the placeholder onto the
 freshly built BOOT FAT before any other write, so its clusters are
 contiguous and the 4096-byte region can be rewritten in the raw image
 without touching FAT metadata. The provider's
-"Download SD image" flow personalizes **client-side**: the browser fetches
-the generic `.img.gz` release asset, stream-decompresses it, locates the
-magic line within the boot-partition region, verifies the 4096-byte
-placeholder tail, and overwrites the region in place with the real
-`KEY=value` content (starting with the same magic line, padded back to 4096
-bytes) — same length, so no FAT metadata changes and no rebuild. WiFi
-credentials therefore never leave the browser. If verification fails the UI
-falls back to the manual instructions above.
+"Download SD image" flow personalizes **client-side**: the browser streams
+the generic `.img.gz`, decompresses it, locates the magic line within the
+boot-partition region, verifies the 4096-byte placeholder, overwrites the
+region in place with the real `KEY=value` content (same magic line, padded
+back to 4096 bytes — same length, so no FAT metadata changes and no
+rebuild), then re-gzips so what lands on disk is a `.img.gz` the flashing
+tools read directly. WiFi credentials therefore never leave the browser. If
+verification fails the build is refused rather than producing a card that
+would silently fail to enroll.
+
+The image bytes must come from the provider's own origin: GitHub's release
+download issues a cross-origin redirect carrying no
+`access-control-allow-origin`, so a browser cannot fetch release assets
+directly. Providers serve a session-gated streaming pass-through
+(cloud.frameos.net: `GET /api/frames/sd-image?platform=…`) that pipes the
+public release asset through without buffering it. Personalization stays in
+the browser, so no user data passes through it.
 
 **Multi-use claim tokens.** A provider may mint claim tokens with a use
 budget (`max_uses` > 1) so one personalized image can be flashed to many
