@@ -1927,3 +1927,43 @@ def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):
     flags = " ".join(compiler._cpu_feature_cflags())
     assert "-march=armv6zk" in flags
     assert "-mfloat-abi=hard" in flags
+
+
+def test_resolve_base_entry_falls_back_to_remote_manifest_for_missing_platform(tmp_path, monkeypatch):
+    # A checked-in manifest that predates the first pi-zero-w base publish:
+    # the platform must resolve via the archive manifest instead of erroring.
+    local_manifest = tmp_path / "manifest.json"
+    local_manifest.write_text(
+        json.dumps({"entries": [{"platform": "raspberry-pi-zero-2-w", "object_key": "a", "sha256": "b"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_BASE_MANIFEST_FILE", str(local_manifest))
+
+    remote_entry = {
+        "platform": "raspberry-pi-zero-w",
+        "frameos_version": "2026.7.6",
+        "object_key": "buildroot-images/raspberry-pi-zero-w/x.img.gz",
+        "sha256": "deadbeef",
+    }
+
+    async def fake_remote_manifest():
+        return {"entries": [remote_entry]}
+
+    monkeypatch.setattr(buildroot_image_module, "_remote_buildroot_base_manifest", fake_remote_manifest)
+
+    entry = asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-zero-w"))
+    assert entry == remote_entry
+
+
+def test_resolve_base_entry_reports_missing_platform_when_remote_also_lacks_it(tmp_path, monkeypatch):
+    local_manifest = tmp_path / "manifest.json"
+    local_manifest.write_text(json.dumps({"entries": []}), encoding="utf-8")
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_BASE_MANIFEST_FILE", str(local_manifest))
+
+    async def fake_remote_manifest():
+        return {"entries": []}
+
+    monkeypatch.setattr(buildroot_image_module, "_remote_buildroot_base_manifest", fake_remote_manifest)
+
+    with pytest.raises(RuntimeError, match="No Buildroot base image is available for raspberry-pi-zero-w"):
+        asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-zero-w"))

@@ -985,6 +985,14 @@ export const framesModel = kea<framesModelType>([
         } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
           pendingSdCardImageDownloads.delete(frame.id)
           stopSdCardImageProgress(frame.id)
+          // A build can fail within a second of starting; this broadcast then
+          // races the first status poll (which bails once the pending flag is
+          // gone), so the failure must be surfaced here or nothing shows it.
+          longRunningTasksModel.actions.taskFailed({
+            frameId: frame.id,
+            kind: 'buildrootImage',
+            detail: sdImage.error || 'SD card image generation failed',
+          })
         }
       }
       const firmware = frame.embedded?.firmware
