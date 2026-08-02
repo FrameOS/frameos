@@ -10,7 +10,7 @@ import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
 import { CalendarDaysIcon } from '@heroicons/react/24/outline'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
-import { FrameScene, ScheduledEvent, StateField } from '../../../../types'
+import { FrameScene, ScheduledEvent, StateField, FrameId } from '../../../../types'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
@@ -68,7 +68,7 @@ function entryCountLabel(count: number): string {
 }
 
 interface SceneScheduleCardProps {
-  frameId: number
+  frameId: FrameId
   scene: FrameScene
   eventCount: number
   layout: 'strip' | 'grid' | 'responsive'
@@ -159,7 +159,7 @@ function SceneScheduleCard({
 }
 
 interface ScheduleEntryCardProps {
-  frameId: number
+  frameId: FrameId
   event: ScheduledEvent
   scene: FrameScene | null
   className?: string
@@ -315,7 +315,7 @@ function ScheduleEntryCard({ frameId, event, scene, className }: ScheduleEntryCa
 }
 
 interface EditRowProps {
-  frameId: number
+  frameId: FrameId
   event: ScheduledEvent
   scene: FrameScene | null
   eventFields: StateField[]

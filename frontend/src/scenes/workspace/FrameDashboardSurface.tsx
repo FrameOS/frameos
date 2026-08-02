@@ -53,7 +53,7 @@ import {
 } from './workspaceLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { isCloudMode } from '../../utils/cloudMode'
+import { frameMenuActionIsAllowed, sceneToolPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
 import {
   buildSceneDependencyEntries,
   buildSceneDependencyGraph,
@@ -77,9 +77,6 @@ const sceneToolButtons = [
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const
-const frameAdminUnsupportedSceneToolPanels = new Set(['terminal', 'ping'])
-// Cloud protocol has no shell or file verbs; mirror cloudUnsupportedToolPanels.
-const cloudUnsupportedSceneToolPanels = new Set(['terminal', 'assets', 'ping'])
 
 interface FrameDashboardSurfaceProps {
   frame: FrameType
@@ -314,7 +311,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             buttonClassName="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 !px-0 !py-0 text-slate-700 shadow-sm transition"
             buttonContent={<DeployToFrameIcon className="h-7 w-7" />}
           />
-        ) : isCloudMode() ? null : ( // cloud frames deploy on save — no deploy drawer trigger
+        ) : !frameMenuActionIsAllowed(workspaceMode(), 'deploy') ? null : (
           <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
         )}
         <div className="min-w-0">
@@ -667,10 +664,9 @@ function FrameScenesBlock({
         scenes: allScenes,
       })
     : flatSceneDependencyEntries(scenes)
-  const visibleSceneToolButtons = sceneToolButtons.filter(
-    ({ panel }) =>
-      (!isInFrameAdminMode() || !frameAdminUnsupportedSceneToolPanels.has(panel)) &&
-      (!isCloudMode() || !cloudUnsupportedSceneToolPanels.has(panel))
+  // Allow-list per control plane — see workspaceSurfaces.ts.
+  const visibleSceneToolButtons = sceneToolButtons.filter(({ panel }) =>
+    sceneToolPanelIsAllowed(workspaceMode(), panel)
   )
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {

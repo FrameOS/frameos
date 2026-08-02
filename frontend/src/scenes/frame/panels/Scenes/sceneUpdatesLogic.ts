@@ -1,6 +1,6 @@
 import { actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { loadRepositoryTemplateScenes } from '../Templates/templatesLogic'
@@ -15,7 +15,7 @@ import { remapSceneIds } from '../../../../utils/duplicateScenes'
 import type { sceneUpdatesLogicType } from './sceneUpdatesLogicType'
 
 export interface SceneUpdatesLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 /**

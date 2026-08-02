@@ -2,7 +2,7 @@ import { actions, kea, reducers, path, key, props, connect, listeners, selectors
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { FrameScene, RepositoryType, TemplateForm, TemplateType } from '../../../../types'
+import { FrameScene, RepositoryType, TemplateForm, TemplateType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
@@ -16,7 +16,7 @@ import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFav
 import { cloudDriveLogic } from './cloudDriveLogic'
 
 export interface TemplateLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 /** Repository listings only carry template metadata; fetch the scenes separately when needed. */

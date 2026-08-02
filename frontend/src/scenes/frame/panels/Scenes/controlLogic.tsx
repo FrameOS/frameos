@@ -2,7 +2,7 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 
 import { frameLogic } from '../../frameLogic'
 
-import { FrameScene, FrameStateRecord, FrameType } from '../../../../types'
+import { FrameScene, FrameStateRecord, FrameType, FrameId } from '../../../../types'
 
 import { loaders } from 'kea-loaders'
 
@@ -13,7 +13,7 @@ import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 
 export interface ControlLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 const UPLOADED_SCENE_PREFIX = 'uploaded/'

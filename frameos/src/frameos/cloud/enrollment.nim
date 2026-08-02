@@ -189,7 +189,12 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
         if state{"status"}.getStr("") != "connected":
           return EnrollOutcome(ok: false, status: 409, error: "not_connected", retryable: false)
         if response{"scope"}.getStr("") != "":
-          state["scope"] = response["scope"]
+          # The enroll response only ever reports the managed scope, so it is
+          # additive: replacing the link's scope string here would silently
+          # drop everything else the device-flow grant carried (auth:login,
+          # telemetry:logs, backup:assets …).
+          state["scope"] = %unionScopeString(state{"scope"}.getStr(""),
+                                             response{"scope"}.getStr(""))
       state["mode"] = %"managed"
       if frameId != nil and frameId.kind != JNull:
         state["frame_id"] = frameId
@@ -208,6 +213,40 @@ proc enrollWithClaimTokenFromBoot*(claimToken, providerUrl, name: string,
   ## values.
   enrollManagedFrame(providerUrl, claimToken, "", name, frameConfig)
 
+proc shredFile(path: string) =
+  ## Overwrite a secret-bearing file in place. Boot personalization files land
+  ## on SD cards whose freed blocks are trivially recoverable, and a claim
+  ## token stays usable until the provider expires it — so every path that
+  ## retires one overwrites the bytes first, matching how the rest of this
+  ## branch (and setup_json_reset.sh) treats boot secrets. Best effort by
+  ## nature: a copy-on-write or wear-levelling filesystem may still keep the
+  ## old blocks.
+  if not fileExists(path):
+    return
+  let size = int(getFileSize(path))
+  if size <= 0:
+    return
+  let handle = open(path, fmReadWriteExisting)
+  try:
+    handle.setFilePos(0)
+    handle.write(repeat('\0', size))
+    handle.flushFile()
+  finally:
+    handle.close()
+
+proc clearPendingEnrollment*(): bool {.gcsafe, discardable.} =
+  ## Shreds and removes the pending enrollment file. Returns whether it is gone
+  ## — a failed removal must not be reported as "resolved" (see below).
+  let path = pendingEnrollmentPath()
+  try:
+    if not fileExists(path):
+      return true
+    shredFile(path)
+    removeFile(path)
+  except CatchableError:
+    discard
+  not fileExists(path)
+
 proc loadPendingEnrollment*(): JsonNode {.gcsafe.} =
   ## nil when there is no pending boot enrollment.
   let path = pendingEnrollmentPath()
@@ -219,11 +258,9 @@ proc loadPendingEnrollment*(): JsonNode {.gcsafe.} =
       return parsed
   except CatchableError:
     discard
-  # Unreadable/invalid pending file: drop it so boot never loops on junk.
-  try:
-    removeFile(path)
-  except CatchableError:
-    discard
+  # Unreadable/invalid pending file: drop it so boot never loops on junk. It
+  # may still hold a readable claim token, so shred rather than unlink.
+  discard clearPendingEnrollment()
   nil
 
 proc savePendingEnrollment(pending: JsonNode) =
@@ -231,6 +268,13 @@ proc savePendingEnrollment(pending: JsonNode) =
   let dir = splitFile(path).dir
   if dir.len > 0 and not dirExists(dir):
     createDir(dir)
+  if dir.len > 0:
+    # Same discipline as identity.nim/link_state.nim: this file holds a live
+    # claim token, so the directory must not be traversable by other accounts.
+    try:
+      setFilePermissions(dir, {fpUserRead, fpUserWrite, fpUserExec})
+    except CatchableError:
+      discard
   let tempPath = path & ".tmp"
   let handle = open(tempPath, fmWrite)
   try:
@@ -238,15 +282,16 @@ proc savePendingEnrollment(pending: JsonNode) =
     handle.write($pending & "\n")
   finally:
     handle.close()
-  moveFile(tempPath, path)
-
-proc clearPendingEnrollment*() {.gcsafe.} =
-  let path = pendingEnrollmentPath()
+  # The rename below orphans the previous file's blocks with the claim token
+  # still in them; overwrite them first. This trades a sliver of the rename's
+  # atomicity (a crash in between leaves a zeroed file, and the next boot drops
+  # the enrollment instead of retrying it) for not leaving a live token in
+  # unlinked SD-card blocks — the same call this branch makes everywhere else.
   try:
-    if fileExists(path):
-      removeFile(path)
+    shredFile(path)
   except CatchableError:
     discard
+  moveFile(tempPath, path)
 
 proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
     tuple[resolved: bool, attempted: bool, outcome: EnrollOutcome] {.gcsafe.} =
@@ -255,9 +300,15 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
   ## permanent rejection, or expiry) and has been deleted; resolved=false
   ## means "retry later with backoff" (network errors, 429/5xx).
   {.gcsafe.}:
+    # "Resolved" must mean the file is really gone. Reporting resolved while it
+    # is still on disk makes the hub thread reset its enrollment backoff and
+    # come straight back (hub_client.nim), which on a full or read-only state
+    # directory is a ~2s hot loop for the life of the process.
+    let pendingGone = proc(): bool = not fileExists(pendingEnrollmentPath())
+
     var pending = loadPendingEnrollment()
     if pending == nil:
-      return (resolved: true, attempted: false, outcome: EnrollOutcome())
+      return (resolved: pendingGone(), attempted: false, outcome: EnrollOutcome())
 
     let now = int64(epochTime())
     var expiresEpoch = int64(pending{"expires_epoch"}.getInt(0))
@@ -271,8 +322,8 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
       except CatchableError:
         discard
     if expiresEpoch <= now:
-      clearPendingEnrollment()
-      return (resolved: true, attempted: false,
+      discard clearPendingEnrollment()
+      return (resolved: pendingGone(), attempted: false,
               outcome: EnrollOutcome(ok: false, error: "claim_token_expired"))
 
     let outcome = enrollWithClaimTokenFromBoot(
@@ -284,6 +335,6 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
     if outcome.ok or not outcome.retryable:
       # Success — or the provider/config permanently rejected the token
       # (claim tokens die on first use either way, so retrying cannot help).
-      clearPendingEnrollment()
-      return (resolved: true, attempted: true, outcome: outcome)
+      discard clearPendingEnrollment()
+      return (resolved: pendingGone(), attempted: true, outcome: outcome)
     (resolved: false, attempted: true, outcome: outcome)

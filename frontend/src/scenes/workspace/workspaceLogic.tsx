@@ -2,7 +2,8 @@ import { actions, afterMount, connect, events, kea, listeners, path, reducers, s
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
-import { FrameScene, FrameType } from '../../types'
+import { FrameScene, FrameType, FrameId } from '../../types'
+import { parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -12,26 +13,11 @@ import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
-export type WorkspaceUtilityPanel =
-  | 'overview'
-  | 'info'
-  | 'state'
-  | 'stateVariables'
-  | 'apps'
-  | 'events'
-  | 'templates'
-  | 'scenes'
-  | 'schedule'
-  | 'logs'
-  | 'metrics'
-  | 'assets'
-  | 'terminal'
-  | 'settings'
-  | 'source'
-  | 'json'
-  | 'preview'
-  | 'ping'
-  | 'debug'
+import type { WorkspaceUtilityPanel } from './workspaceSurfaces'
+
+// Re-exported so the SPA's existing `from './workspaceLogic'` imports keep
+// working; the union itself lives with the allow-lists that gate it.
+export type { WorkspaceUtilityPanel }
 
 const frameToolPanels = [
   'overview',
@@ -84,15 +70,15 @@ function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDraw
   return view === 'sdCard' || view === 'script' || view === 'main' || view === 'embedded' ? view : undefined
 }
 
-export function frameToolScrollKey(frameId: number, panel: WorkspaceUtilityPanel): string {
+export function frameToolScrollKey(frameId: FrameId, panel: WorkspaceUtilityPanel): string {
   return `${frameId}:${panel}`
 }
 
-export function frameAssetFolderExpansionKey(frameId: number, path: string): string {
+export function frameAssetFolderExpansionKey(frameId: FrameId, path: string): string {
   return `${frameId}:${path}`
 }
 
-export function sceneChildExpansionKey(frameId: number, sceneId: string): string {
+export function sceneChildExpansionKey(frameId: FrameId, sceneId: string): string {
   return frameAssetFolderExpansionKey(frameId, sceneChildExpansionPath(sceneId))
 }
 
@@ -106,13 +92,13 @@ export function sceneDependencyGroupingDisabledPath(surface: SceneDependencyGrou
   return `scene-dependency-grouping-disabled:${surface}`
 }
 
-export function sceneDependencyGroupingDisabledKey(frameId: number, surface: SceneDependencyGroupingSurface): string {
+export function sceneDependencyGroupingDisabledKey(frameId: FrameId, surface: SceneDependencyGroupingSurface): string {
   return frameAssetFolderExpansionKey(frameId, sceneDependencyGroupingDisabledPath(surface))
 }
 
 export function sceneDependencyGroupingIsEnabled(
   expansion: Record<string, boolean>,
-  frameId: number,
+  frameId: FrameId,
   surface: SceneDependencyGroupingSurface
 ): boolean {
   return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
@@ -135,7 +121,7 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
 }
 
 function deployDrawerSearchForFrame(
-  frameId: number,
+  frameId: FrameId,
   baseSearch: Record<string, unknown>,
   sourcePathname: string = router.values.location.pathname,
   sourceSearch: Record<string, unknown> = router.values.searchParams
@@ -156,7 +142,7 @@ function deployDrawerSearchForFrame(
 }
 
 function deployDrawerSearchFromPreviousLocation(
-  frameId: number,
+  frameId: FrameId,
   search: Record<string, unknown>,
   previousLocation: { pathname?: string; searchParams?: Record<string, unknown> } | undefined
 ): Record<string, unknown> | null {
@@ -179,15 +165,19 @@ function isFramesRoutePath(pathname: string): boolean {
   return pathname === framesPath || pathname === `${framesPath}/`
 }
 
-function isFrameRoutePathForFrame(pathname: string, frameId: number): boolean {
+function isFrameRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   return pathname === urls.frame(frameId)
 }
 
-function isFrameOverviewRoutePathForFrame(pathname: string, search: Record<string, unknown>, frameId: number): boolean {
+function isFrameOverviewRoutePathForFrame(
+  pathname: string,
+  search: Record<string, unknown>,
+  frameId: FrameId
+): boolean {
   return isFrameRoutePathForFrame(pathname, frameId) && frameToolFromSearch(search) === 'overview'
 }
 
-function isWorkspaceRoutePathForFrame(pathname: string, frameId: number): boolean {
+function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
   const scenePath = urls.scenes(frameId)
   const appPath = urls.apps(frameId)
   return (
@@ -220,7 +210,7 @@ function frameIdFromWorkspacePath(pathname: string): number | null {
   )
 }
 
-function drawerPathForFrame(frameId: number): string {
+function drawerPathForFrame(frameId: FrameId): string {
   const pathname = router.values.location.pathname
   if (
     isFramesRoutePath(pathname) ||
@@ -232,7 +222,7 @@ function drawerPathForFrame(frameId: number): string {
   return urls.frame(frameId)
 }
 
-function shouldOpenScenePreviewInDrawer(frameId: number): boolean {
+function shouldOpenScenePreviewInDrawer(frameId: FrameId): boolean {
   const pathname = router.values.location.pathname
   const search = router.values.searchParams
   return (
@@ -242,8 +232,15 @@ function shouldOpenScenePreviewInDrawer(frameId: number): boolean {
   )
 }
 
+// Route payloads arrive as `Record<string, any>`, which loses the FrameId type.
+// Never Number() them: a cloud frame's uuid becomes NaN and the pushed URL
+// turns into /frames/NaN. Ids are opaque — pass them through untouched.
+function payloadFrameId(value: unknown): FrameId {
+  return typeof value === 'number' ? value : String(value)
+}
+
 function drawerUrlForFrame(
-  frameId: number,
+  frameId: FrameId,
   drawer: string,
   extraSearch: Record<string, unknown> = {}
 ): [string, Record<string, unknown>, Record<string, unknown>] {
@@ -268,26 +265,26 @@ function clearDrawerUrl(): [string, Record<string, unknown>, Record<string, unkn
 }
 
 export interface SceneSelection {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   source?: 'preview' | 'scene'
 }
 
 export interface ChatDrawerSelection {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
   nodeId?: string | null
 }
 
 export interface FrameRenameDialog {
-  frameId: number
+  frameId: FrameId
   name: string
 }
 
 export type FrameChangeDrawerKind = 'unsaved' | 'deploy'
 
 export interface FrameChangeDrawerSelection {
-  frameId: number
+  frameId: FrameId
   kind: FrameChangeDrawerKind
   deployDrawerView?: DeployDrawerView
 }
@@ -300,7 +297,7 @@ export interface OverviewFrameSection {
 }
 
 export interface WorkspaceSceneOption {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   frameName: string
   sceneName: string
@@ -467,7 +464,7 @@ function utilityDrawerHashPanel(hash: Record<string, unknown> = router.values.ha
   return sceneUtilityPanelFromHashValue(searchValue(hash, UTILITY_DRAWER_HASH_KEY))
 }
 
-function reloadFrameStates(frameId: number | null): void {
+function reloadFrameStates(frameId: FrameId | null): void {
   if (frameId) {
     controlLogic({ frameId }).actions.sync()
   }
@@ -480,7 +477,7 @@ function utilityDrawerOpenHash(
   return { ...hash, [UTILITY_DRAWER_HASH_KEY]: sceneUtilityPanelHashValues[panel] }
 }
 
-export function openWorkspaceSceneUtility(frameId: number, sceneId: string, panel: SceneUtilityPanel): void {
+export function openWorkspaceSceneUtility(frameId: FrameId, sceneId: string, panel: SceneUtilityPanel): void {
   router.actions.push(urls.scenes(frameId, sceneId), {}, utilityDrawerOpenHash(panel, workspaceContentNavigationHash()))
 }
 
@@ -542,7 +539,8 @@ function compareFramesForHome(first: FrameType, second: FrameType): number {
   return (
     secondActive - firstActive ||
     frameSortName(first).localeCompare(frameSortName(second), undefined, { numeric: true, sensitivity: 'base' }) ||
-    first.id - second.id
+    // Opaque ids (numeric on the backend, uuid on the cloud) — string tie-break.
+    String(first.id).localeCompare(String(second.id))
   )
 }
 
@@ -550,7 +548,7 @@ function rankFramesForSnapshot(frames: FrameType[]): FrameType[] {
   return [...frames].sort(compareFramesForHome)
 }
 
-function applyFrameOrderSnapshot(frames: FrameType[], frameOrderSnapshot: number[]): FrameType[] {
+function applyFrameOrderSnapshot(frames: FrameType[], frameOrderSnapshot: FrameId[]): FrameType[] {
   if (frameOrderSnapshot.length === 0) {
     return rankFramesForSnapshot(frames)
   }
@@ -581,7 +579,7 @@ function frameTitleElement(frameId: string): HTMLElement | null {
   )
 }
 
-function sceneTileElement(frameId: number | string, sceneId: string): HTMLElement | null {
+function sceneTileElement(frameId: FrameId | string, sceneId: string): HTMLElement | null {
   if (typeof document === 'undefined') {
     return null
   }
@@ -593,7 +591,7 @@ function sceneTileElement(frameId: number | string, sceneId: string): HTMLElemen
   return visibleWorkspaceTile(candidates)
 }
 
-function addSceneTileElement(frameId: number | string): HTMLElement | null {
+function addSceneTileElement(frameId: FrameId | string): HTMLElement | null {
   if (typeof document === 'undefined') {
     return null
   }
@@ -741,12 +739,12 @@ function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void
   })
 }
 
-function scrollSceneTileIntoView(frameId: number, sceneId: string): boolean {
+function scrollSceneTileIntoView(frameId: FrameId, sceneId: string): boolean {
   const tile = sceneTileElement(frameId, sceneId)
   return scrollWorkspaceTileIntoView(tile)
 }
 
-function scrollAddSceneTileIntoView(frameId: number): boolean {
+function scrollAddSceneTileIntoView(frameId: FrameId): boolean {
   const tile = addSceneTileElement(frameId)
   return scrollWorkspaceTileIntoView(tile)
 }
@@ -777,11 +775,11 @@ function scrollWorkspaceTileIntoView(tile: HTMLElement | null): boolean {
   return true
 }
 
-function ensureAddSceneTileVisibleAfterLayoutChange(frameId: number, cache: Record<string, any>): void {
+function ensureAddSceneTileVisibleAfterLayoutChange(frameId: FrameId, cache: Record<string, any>): void {
   ensureWorkspaceTileVisibleAfterLayoutChange(() => scrollAddSceneTileIntoView(frameId), cache)
 }
 
-function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: string, cache: Record<string, any>): void {
+function ensureSceneTileVisibleAfterLayoutChange(frameId: FrameId, sceneId: string, cache: Record<string, any>): void {
   ensureWorkspaceTileVisibleAfterLayoutChange(() => scrollSceneTileIntoView(frameId, sceneId), cache)
 }
 
@@ -829,39 +827,39 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openSecondarySidebar: true,
     closeSecondarySidebar: true,
     toggleSecondarySidebar: true,
-    selectFrame: (frameId: number | null) => ({ frameId }),
-    focusFrame: (frameId: number) => ({ frameId }),
-    setRouteSelection: (frameId: number | null, sceneId: string | null = null) => ({ frameId, sceneId }),
+    selectFrame: (frameId: FrameId | null) => ({ frameId }),
+    focusFrame: (frameId: FrameId) => ({ frameId }),
+    setRouteSelection: (frameId: FrameId | null, sceneId: string | null = null) => ({ frameId, sceneId }),
     rememberAppsHref: (href: string) => ({ href }),
-    navigateToFrame: (frameId: number) => ({ frameId }),
-    openFrameTool: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
-    openFrameToolBehindDrawer: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
-    navigateToSceneFrame: (frameId: number) => ({ frameId }),
-    navigateToScene: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
-    openScenePreview: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
-    openSceneControl: (frameId: number, sceneId: string) => ({
+    navigateToFrame: (frameId: FrameId) => ({ frameId }),
+    openFrameTool: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
+    openFrameToolBehindDrawer: (frameId: FrameId, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
+    navigateToSceneFrame: (frameId: FrameId) => ({ frameId }),
+    navigateToScene: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
+    openScenePreview: (frameId: FrameId, sceneId: string) => ({ frameId, sceneId }),
+    openSceneControl: (frameId: FrameId, sceneId: string) => ({
       frameId,
       sceneId,
       source: 'scene' as const,
     }),
-    openLiveSceneControl: (frameId: number, sceneId: string) => ({
+    openLiveSceneControl: (frameId: FrameId, sceneId: string) => ({
       frameId,
       sceneId,
       source: 'preview' as const,
     }),
     closeSceneControl: true,
-    openTemplateDrawer: (frameId: number) => ({ frameId }),
+    openTemplateDrawer: (frameId: FrameId) => ({ frameId }),
     closeTemplateDrawer: true,
-    openScheduleDrawer: (frameId: number) => ({ frameId }),
+    openScheduleDrawer: (frameId: FrameId) => ({ frameId }),
     closeScheduleDrawer: true,
-    openChatDrawer: (frameId: number, sceneId: string | null = null, nodeId: string | null = null) => ({
+    openChatDrawer: (frameId: FrameId, sceneId: string | null = null, nodeId: string | null = null) => ({
       frameId,
       nodeId,
       sceneId,
     }),
     closeChatDrawer: true,
     openFrameChangeDrawer: (
-      frameId: number,
+      frameId: FrameId,
       kind: FrameChangeDrawerKind,
       deployDrawerView?: DeployDrawerView,
       preferFrameRoute?: boolean
@@ -873,24 +871,24 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }),
     closeFrameChangeDrawer: true,
     retargetOpenFrameDrawers: (
-      frameId: number,
+      frameId: FrameId,
       previousFrameChangeDrawerSelection: FrameChangeDrawerSelection | null
     ) => ({ frameId, previousFrameChangeDrawerSelection }),
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
-    openRenameFrameDialog: (frameId: number, name: string) => ({ frameId, name }),
+    openRenameFrameDialog: (frameId: FrameId, name: string) => ({ frameId, name }),
     setRenameFrameName: (name: string) => ({ name }),
     closeRenameFrameDialog: true,
     snapshotFrameOrder: true,
-    setFrameOrderSnapshot: (frameIds: number[], activeFrameIds: number[]) => ({ frameIds, activeFrameIds }),
-    rememberFrameToolScroll: (frameId: number, panel: WorkspaceUtilityPanel, scrollTop: number) => ({
+    setFrameOrderSnapshot: (frameIds: FrameId[], activeFrameIds: FrameId[]) => ({ frameIds, activeFrameIds }),
+    rememberFrameToolScroll: (frameId: FrameId, panel: WorkspaceUtilityPanel, scrollTop: number) => ({
       frameId,
       panel,
       scrollTop,
     }),
-    rememberTerminalSessionFrame: (frameId: number) => ({ frameId }),
-    setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => ({
+    rememberTerminalSessionFrame: (frameId: FrameId) => ({ frameId }),
+    setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => ({
       frameId,
       path,
       expanded,
@@ -927,7 +925,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     selectedFrameId: [
-      null as number | null,
+      null as FrameId | null,
       {
         selectFrame: (_, { frameId }) => frameId,
         focusFrame: (_, { frameId }) => frameId,
@@ -937,7 +935,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     selectedSceneIdsByFrame: [
-      {} as Record<number, string>,
+      {} as Record<FrameId, string>,
       {
         setRouteSelection: (state, { frameId, sceneId }) =>
           frameId && sceneId ? { ...state, [frameId]: sceneId } : state,
@@ -965,7 +963,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     templateDrawerFrameId: [
-      null as number | null,
+      null as FrameId | null,
       {
         openTemplateDrawer: (_, { frameId }) => frameId,
         closeTemplateDrawer: () => null,
@@ -985,7 +983,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     scheduleDrawerFrameId: [
-      null as number | null,
+      null as FrameId | null,
       {
         openScheduleDrawer: () => null,
         closeScheduleDrawer: () => null,
@@ -1073,16 +1071,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     frameOrderSnapshot: [
-      [] as number[],
+      [] as FrameId[],
       {
         setFrameOrderSnapshot: (_, { frameIds }) => frameIds,
       },
     ],
     frameActiveSnapshot: [
-      {} as Record<number, boolean>,
+      {} as Record<FrameId, boolean>,
       {
         setFrameOrderSnapshot: (_, { activeFrameIds }) =>
-          Object.fromEntries(activeFrameIds.map((frameId: number) => [frameId, true])),
+          Object.fromEntries(activeFrameIds.map((frameId: FrameId) => [frameId, true])),
       },
     ],
     frameToolScrollPositions: [
@@ -1102,7 +1100,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     terminalSessionFrameIds: [
-      [] as number[],
+      [] as FrameId[],
       {
         rememberTerminalSessionFrame: (state, { frameId }) => (state.includes(frameId) ? state : [...state, frameId]),
       },
@@ -1259,7 +1257,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }
       preserveFramesScroll()
     }
-    const hideActiveDeployDrawer = (frameId?: number) => {
+    const hideActiveDeployDrawer = (frameId?: FrameId) => {
       if (frameId) {
         frameLogic({ frameId }).actions.hideDeployPlanModal()
       }
@@ -1497,7 +1495,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.closeFrameChangeDrawer()
       }
     }
-    const applyDrawerFromSearch = (frameId: number | null, search: Record<string, unknown>) => {
+    const applyDrawerFromSearch = (frameId: FrameId | null, search: Record<string, unknown>) => {
       const drawer = searchValue(search, 'drawer')
       const sceneId = searchValue(search, 'sceneId')
       const nodeId = searchValue(search, 'nodeId')
@@ -1557,11 +1555,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
       previousLocation: { hashParams?: Record<string, unknown> }
     ) => {
       syncSecondarySidebarFromHashForMobile(hash)
-      const validFrameId = Number(frameId)
+      const validFrameId = parseRouteFrameId(
+        typeof frameId === 'string' || typeof frameId === 'number' ? String(frameId) : null
+      )
       const validSceneId = typeof sceneId === 'string' ? sceneId : null
       const routeNodeId = searchValue(search, 'nodeId') ?? (typeof nodeId === 'string' ? nodeId : null)
 
-      if (Number.isFinite(validFrameId)) {
+      if (validFrameId !== null) {
         actions.setRouteSelection(validFrameId, validSceneId)
         if (routeNodeId) {
           actions.selectNode(routeNodeId)
@@ -1586,8 +1586,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       previousLocation: { pathname?: string; searchParams?: Record<string, unknown> }
     ) => {
       syncSecondarySidebarFromHashForMobile(hash)
-      const frameId = parseInt(String(id), 10)
-      const validFrameId = Number.isFinite(frameId) ? frameId : null
+      const validFrameId = parseRouteFrameId(typeof id === 'string' || typeof id === 'number' ? String(id) : null)
       const skipDeployDrawerPreserve = Boolean(cache.skipNextDeployDrawerPreserve)
       cache.skipNextDeployDrawerPreserve = false
       const preservedSearch =
@@ -1631,35 +1630,36 @@ export const workspaceLogic = kea<workspaceLogicType>([
   }),
   actionToUrl(() => ({
     openSceneControl: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), 'scene', {
+      drawerUrlForFrame(payloadFrameId(payload.frameId), 'scene', {
         sceneId: String(payload.sceneId),
       }),
     openLiveSceneControl: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), 'scene', {
+      drawerUrlForFrame(payloadFrameId(payload.frameId), 'scene', {
         drawerSource: 'preview',
         sceneId: String(payload.sceneId),
       }),
     closeSceneControl: clearDrawerUrl,
-    openTemplateDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'templates'),
+    openTemplateDrawer: (payload: Record<string, any>) =>
+      drawerUrlForFrame(payloadFrameId(payload.frameId), 'templates'),
     closeTemplateDrawer: clearDrawerUrl,
     openScheduleDrawer: (payload: Record<string, any>) => [
-      urls.frame(Number(payload.frameId)),
+      urls.frame(payloadFrameId(payload.frameId)),
       { ...clearDrawerSearchParams(router.values.searchParams), tool: 'schedule' },
       utilityDrawerClosedHash(),
     ],
     closeScheduleDrawer: clearDrawerUrl,
     openChatDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), 'chat', {
+      drawerUrlForFrame(payloadFrameId(payload.frameId), 'chat', {
         ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
         ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
       }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
       payload.kind === 'unsaved'
-        ? drawerUrlForFrame(Number(payload.frameId), 'unsavedChanges')
+        ? drawerUrlForFrame(payloadFrameId(payload.frameId), 'unsavedChanges')
         : payload.preferFrameRoute
         ? [
-            urls.frame(Number(payload.frameId)),
+            urls.frame(payloadFrameId(payload.frameId)),
             {
               ...clearDrawerSearchParams(router.values.searchParams),
               drawer: 'deployPlan',
@@ -1668,7 +1668,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
             },
             utilityDrawerClosedHash(),
           ]
-        : drawerUrlForFrame(Number(payload.frameId), 'deployPlan', {
+        : drawerUrlForFrame(payloadFrameId(payload.frameId), 'deployPlan', {
             ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
           }),
     closeFrameChangeDrawer: clearDrawerUrl,

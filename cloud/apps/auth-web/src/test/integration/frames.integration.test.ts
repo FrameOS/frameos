@@ -5,8 +5,10 @@ import { NextRequest } from "next/server";
 import {
   createDb,
   frameCommands,
+  frameEnrollmentTokens,
   frameLogs,
   frames,
+  frameSceneAssignments,
   linkedClients,
   storeScenes,
   storeSceneVersions,
@@ -25,8 +27,15 @@ import {
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
-import { verifyFrameSignature } from "../../lib/frames";
+import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
+import {
+  allowedFrameSettings,
+  maxFramesPerAccount,
+  maxScenesPayloadBytes,
+  verifyFrameSignature,
+} from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -159,6 +168,38 @@ async function enrolledFrame() {
   return { accountId, keys, ...payload };
 }
 
+// Fill an account up to `count` frames without going through enrollment, so
+// quota tests do not need `count` round trips through the route.
+async function seedFrames(accountId: string, count: number) {
+  for (let index = 0; index < count; index += 1) {
+    const [client] = await db
+      .insert(linkedClients)
+      .values({
+        accountId,
+        clientKind: "frame",
+        providerClientMetadata: { requestedScopes: ["frame:managed"] },
+        publicDisplayName: `Seeded frame ${index}`,
+        tokenReference: hashSecret(`fc_link_seed_${accountId}_${index}`),
+      })
+      .returning();
+    await db.insert(frames).values({
+      accountId,
+      linkedClientId: client!.id,
+      name: `Seeded frame ${index}`,
+      publicKey: deviceKeypair().publicKeyBase64,
+      status: "active",
+    });
+  }
+}
+
+async function claimTokenUseCount(claimToken: string) {
+  const [row] = await db
+    .select()
+    .from(frameEnrollmentTokens)
+    .where(eq(frameEnrollmentTokens.tokenHash, hashSecret(claimToken)));
+  return row?.useCount ?? -1;
+}
+
 function sceneZip(sceneId: string) {
   const scenes = [
     {
@@ -178,6 +219,8 @@ function sceneZip(sceneId: string) {
   );
 }
 
+// Mirrors what store-publish.ts writes: risk flags live on the version, and
+// store_scenes.risk_flags is only a denormalized copy of the LATEST version's.
 async function createStoreScene(
   accountId: string,
   options: {
@@ -204,12 +247,36 @@ async function createStoreScene(
   await db.insert(storeSceneVersions).values({
     content: sceneZip(scene.id),
     contentType: "application/zip",
+    riskFlags: options.riskFlags ?? [],
     sceneId: scene.id,
     sha256: "test",
     sizeBytes: 1000,
     version: 1,
   });
   return scene;
+}
+
+// Publish another version of an existing scene, exactly as store-publish
+// does: a new immutable version row plus store_scenes.risk_flags overwritten
+// with the new version's flags.
+async function publishSceneVersion(
+  sceneId: string,
+  version: number,
+  riskFlags: string[] = [],
+) {
+  await db.insert(storeSceneVersions).values({
+    content: sceneZip(`${sceneId}-v${version}`),
+    contentType: "application/zip",
+    riskFlags,
+    sceneId,
+    sha256: `test-v${version}`,
+    sizeBytes: 1000,
+    version,
+  });
+  await db
+    .update(storeScenes)
+    .set({ latestVersion: version, riskFlags })
+    .where(eq(storeScenes.id, sceneId));
 }
 
 describe("cloud-managed frame enrollment", () => {
@@ -317,9 +384,9 @@ describe("cloud-managed frame enrollment", () => {
     expect(((await badKey.json()) as { error: string }).error).toBe(
       "invalid_public_key",
     );
-    // The bad-key attempt must NOT have burned the token… but per the wire
-    // contract the token dies on any redemption *attempt* that reaches
-    // redemption; key validation happens first, so the token survives.
+    // The bad-key attempt must NOT have burned the token: key validation
+    // happens before redemption, and a use is spent only by an enrollment
+    // that actually commits.
     const good = await enroll(claimToken, deviceKeypair().publicKeyBase64);
     expect(good.status).toBe(200);
 
@@ -386,6 +453,139 @@ describe("cloud-managed frame enrollment", () => {
       ),
     );
     expect(swap.status).toBe(409);
+  });
+
+  it("does not spend a claim-token use when the account is over quota", async () => {
+    // A device treats the 4xx as permanent and erases its claim token, so an
+    // enrollment that never created a frame must leave the budget intact —
+    // otherwise the SD card is permanently unenrollable.
+    const accountId = await signIn();
+    // Minted first: "Add frame" refuses to mint at quota, but a token minted
+    // earlier (or an SD card flashed weeks ago) still shows up at the door.
+    const claimToken = await mintToken("Over quota");
+    await seedFrames(accountId, maxFramesPerAccount);
+
+    const refused = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "frame_quota_exceeded",
+    );
+    expect(await claimTokenUseCount(claimToken)).toBe(0);
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, accountId)),
+    ).toHaveLength(maxFramesPerAccount);
+
+    // Free a slot and the very same token still enrolls.
+    const [victim] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, accountId))
+      .limit(1);
+    await db.delete(frames).where(eq(frames.id, victim!.id));
+
+    const accepted = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(accepted.status).toBe(200);
+    expect(await claimTokenUseCount(claimToken)).toBe(1);
+  });
+
+  it("concurrent enrollments on a multi-use token cannot exceed the quota", async () => {
+    const accountId = await signIn();
+    await seedFrames(accountId, maxFramesPerAccount - 1);
+    const mintResponse = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { max_uses: 3, name: "Race" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mintResponse.status).toBe(200);
+    const { claim_token: claimToken } = (await mintResponse.json()) as {
+      claim_token: string;
+    };
+
+    const responses = await Promise.all([
+      enroll(claimToken, deviceKeypair().publicKeyBase64),
+      enroll(claimToken, deviceKeypair().publicKeyBase64),
+      enroll(claimToken, deviceKeypair().publicKeyBase64),
+    ]);
+    const statuses = responses.map((response) => response.status).sort();
+    expect(statuses).toEqual([200, 403, 403]);
+
+    const rows = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, accountId));
+    expect(rows).toHaveLength(maxFramesPerAccount);
+    // Only the enrollment that committed spent a use.
+    expect(await claimTokenUseCount(claimToken)).toBe(1);
+  });
+
+  it("is idempotent on (claim token, public key) when the response is lost", async () => {
+    const accountId = await signIn();
+    const keys = deviceKeypair();
+    const claimToken = await mintToken("Retry frame");
+
+    const first = await enroll(claimToken, keys.publicKeyBase64);
+    expect(first.status).toBe(200);
+    const firstPayload = (await first.json()) as {
+      access_token: string;
+      frame_id: string;
+    };
+
+    // The device never saw that response and retries the exact same call.
+    const retry = await enroll(claimToken, keys.publicKeyBase64);
+    expect(retry.status).toBe(200);
+    const retryPayload = (await retry.json()) as {
+      access_token: string;
+      frame_id: string;
+      status: string;
+    };
+    expect(retryPayload.frame_id).toBe(firstPayload.frame_id);
+    expect(retryPayload.status).toBe("pending");
+    // No orphan frame, no orphan linked client, no extra use spent.
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, accountId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(linkedClients)
+        .where(eq(linkedClients.accountId, accountId)),
+    ).toHaveLength(1);
+    expect(await claimTokenUseCount(claimToken)).toBe(1);
+
+    // The token handed back actually works…
+    const withRetryToken = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { public_key: keys.publicKeyBase64 },
+        { authorization: `Bearer ${retryPayload.access_token}` },
+      ),
+    );
+    expect(withRetryToken.status).toBe(200);
+    expect(
+      ((await withRetryToken.json()) as { frame_id: string }).frame_id,
+    ).toBe(firstPayload.frame_id);
+
+    // …and pinning still holds: a different key on the same bearer is 409.
+    const swap = await enrollFrame(
+      postJson(
+        "/api/frames/enroll",
+        { public_key: deviceKeypair().publicKeyBase64 },
+        { authorization: `Bearer ${retryPayload.access_token}` },
+      ),
+    );
+    expect(swap.status).toBe(409);
+
+    // A *different* device replaying a spent single-use token gets nothing.
+    const otherDevice = await enroll(
+      claimToken,
+      deviceKeypair().publicKeyBase64,
+    );
+    expect(otherDevice.status).toBe(400);
+    expect(((await otherDevice.json()) as { error: string }).error).toBe(
+      "invalid_claim_token",
+    );
   });
 
   it("refuses flow B without the frame:managed scope", async () => {
@@ -489,6 +689,178 @@ describe("frame management API", () => {
     expect(invisible.status).toBe(400);
   });
 
+  it("gates on the PINNED version's risk flags, not the latest version's", async () => {
+    // Publish shell-flagged v1, publish clean v2 (which overwrites
+    // store_scenes.risk_flags), then pin v1: the old gate read the scene row
+    // and happily pushed shell-flagged bytes.
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, {
+      name: "Two faced",
+      riskFlags: ["shell"],
+    });
+    await publishSceneVersion(scene.id, 2, []);
+
+    const [sceneRow] = await db
+      .select()
+      .from(storeScenes)
+      .where(eq(storeScenes.id, scene.id));
+    expect(sceneRow?.riskFlags).toEqual([]);
+
+    const pinnedOld = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, scene_version: 1 }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(pinnedOld.status).toBe(403);
+    expect(((await pinnedOld.json()) as { error: string }).error).toBe(
+      "scene_not_allowed",
+    );
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, frame_id)),
+    ).toHaveLength(0);
+
+    // The clean version is still pushable, pinned or tracking latest.
+    const pinnedNew = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, scene_version: 2 }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(pinnedNew.status).toBe(200);
+
+    const latest = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(latest.status).toBe(200);
+  });
+
+  it("rolls the assignment back when the pinned version does not exist", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const good = await createStoreScene(accountId, { name: "Good" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: good.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assigned.status).toBe(200);
+    const { assigned_checksum: originalChecksum } = (await assigned.json()) as {
+      assigned_checksum: string;
+    };
+
+    const missing = await createStoreScene(accountId, { name: "Missing" });
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: missing.id, scene_version: 999 }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "scene_version_missing",
+    );
+
+    // The previous assignment survives untouched and still matches the
+    // checksum the device was actually pushed.
+    const listed = await getFrameScenes(
+      getRequest(`/api/frames/${frame_id}/scenes`),
+      routeParams(frame_id),
+    );
+    const listedPayload = (await listed.json()) as {
+      assigned_checksum: string;
+      scenes: { scene_id: string }[];
+    };
+    expect(listedPayload.scenes.map((row) => row.scene_id)).toEqual([good.id]);
+    expect(listedPayload.assigned_checksum).toBe(originalChecksum);
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(1);
+  });
+
+  it("refuses an assembled set_scenes payload larger than the device can take", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Huge" });
+    // Replace the version payload with one whose scenes.json alone blows the
+    // cap: the hub pushes this in a single WebSocket frame to a Pi Zero.
+    const huge = [
+      {
+        edges: [],
+        id: scene.id,
+        name: "Huge",
+        nodes: [{ data: { blob: "x".repeat(maxScenesPayloadBytes + 1024) } }],
+      },
+    ];
+    await db
+      .update(storeSceneVersions)
+      .set({
+        content: Buffer.from(
+          zipSync({
+            "scene/scenes.json": new TextEncoder().encode(
+              JSON.stringify(huge),
+            ),
+          }),
+        ),
+      })
+      .where(eq(storeSceneVersions.sceneId, scene.id));
+
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "scenes_payload_too_large",
+    );
+    // Rolled back: nothing assigned, nothing queued.
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, frame_id)),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id)),
+    ).toHaveLength(0);
+  });
+
   it("refuses scene pushes while the frame is pending", async () => {
     const { accountId, frame_id } = await enrolledFrame();
     const scene = await createStoreScene(accountId, { name: "Early" });
@@ -557,6 +929,138 @@ describe("frame management API", () => {
     );
   });
 
+  it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
+    // Authoritative list: CLOUD_SETTINGS_ALLOWLIST in
+    // frameos/src/frameos/cloud/hub_client.nim, mirrored in
+    // docs/cloud-frames.md. The hub forwards keys verbatim and the device
+    // refuses the whole verb on one unknown key, so this must match exactly.
+    expect([...allowedFrameSettings.keys()].sort()).toEqual(
+      ["debug", "interval", "name", "rotate", "scaling_mode", "timezone"].sort(),
+    );
+
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const push = (settings: Record<string, unknown>) =>
+      pushFrameSettings(
+        postJson(
+          `/api/frames/${frame_id}/settings`,
+          { settings },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+
+    const snake = await push({ scaling_mode: "cover" });
+    expect(snake.status).toBe(200);
+
+    // The camelCase spelling the device has never heard of is refused here
+    // rather than silently voiding the whole push on the device.
+    const camel = await push({ scalingMode: "cover" });
+    expect(camel.status).toBe(400);
+    expect(((await camel.json()) as { error: string }).error).toBe(
+      "setting_not_allowed",
+    );
+
+    // brightness is deferred until the runtime grows the setting.
+    const brightness = await push({ brightness: 50 });
+    expect(brightness.status).toBe(400);
+  });
+
+  it("refuses JS prototype keys cleanly instead of crashing or passing them", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    // "toString" resolves through Object.prototype to a truthy callable that
+    // returns a truthy string; "__proto__"/"valueOf"/"hasOwnProperty" resolve
+    // to values that make the check throw. Both must be plain 4xx refusals.
+    for (const key of [
+      "toString",
+      "constructor",
+      "__proto__",
+      "valueOf",
+      "hasOwnProperty",
+      "isPrototypeOf",
+    ]) {
+      const response = await pushFrameSettings(
+        postJson(
+          `/api/frames/${frame_id}/settings`,
+          { settings: { [key]: 1 } },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect([key, response.status]).toEqual([key, 400]);
+      expect([key, ((await response.json()) as { error: string }).error]).toEqual(
+        [key, "setting_not_allowed"],
+      );
+    }
+
+    // Nothing was enqueued by any of them.
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(0);
+  });
+
+  it("answers 404, not 500, for frame ids that are not uuids", async () => {
+    await signIn();
+    const bogus = "not-a-uuid";
+    const responses = await Promise.all([
+      getFrameDetail(getRequest(`/api/frames/${bogus}`), routeParams(bogus)),
+      getFrameLogs(
+        getRequest(`/api/frames/${bogus}/logs`),
+        routeParams(bogus),
+      ),
+      getFrameScenes(
+        getRequest(`/api/frames/${bogus}/scenes`),
+        routeParams(bogus),
+      ),
+      confirmFrame(
+        postJson(`/api/frames/${bogus}/confirm`, {}, { origin: baseUrl }),
+        routeParams(bogus),
+      ),
+      revokeFrameRoute(
+        postJson(`/api/frames/${bogus}/revoke`, {}, { origin: baseUrl }),
+        routeParams(bogus),
+      ),
+      sendCommand(
+        postJson(
+          `/api/frames/${bogus}/command`,
+          { type: "render" },
+          { origin: baseUrl },
+        ),
+        routeParams(bogus),
+      ),
+      pushFrameSettings(
+        postJson(
+          `/api/frames/${bogus}/settings`,
+          { settings: { rotate: 90 } },
+          { origin: baseUrl },
+        ),
+        routeParams(bogus),
+      ),
+      assignFrameScenes(
+        postJson(
+          `/api/frames/${bogus}/scenes`,
+          { scenes: [] },
+          { origin: baseUrl },
+        ),
+        routeParams(bogus),
+      ),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual(
+      responses.map(() => 404),
+    );
+  });
+
   it("serves retained logs incrementally and lists frames", async () => {
     const { frame_id } = await enrolledFrame();
     await db.insert(frameLogs).values(
@@ -574,10 +1078,12 @@ describe("frame management API", () => {
     );
     expect(all.status).toBe(200);
     const allPayload = (await all.json()) as {
+      has_more: boolean;
       logs: { id: number; line: string; type: string }[];
     };
     expect(allPayload.logs).toHaveLength(3);
     expect(allPayload.logs[0]?.type).toBe("render");
+    expect(allPayload.has_more).toBe(false);
 
     const after = await getFrameLogs(
       getRequest(
@@ -587,6 +1093,14 @@ describe("frame management API", () => {
     );
     const afterPayload = (await after.json()) as { logs: unknown[] };
     expect(afterPayload.logs).toHaveLength(1);
+
+    // after_id=0 is a cursor meaning "from the beginning", not an absent one.
+    const fromZero = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs?after_id=0`),
+      routeParams(frame_id),
+    );
+    const fromZeroPayload = (await fromZero.json()) as { logs: unknown[] };
+    expect(fromZeroPayload.logs).toHaveLength(3);
 
     const list = await listFrames(getRequest("/api/frames"));
     expect(list.status).toBe(200);

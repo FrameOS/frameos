@@ -12,11 +12,11 @@ import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
 import { FieldDefinitionForm } from '../Fields/FieldDefinitionForm'
 import { frameLogic } from '../../frameLogic'
-import { AppConfigField } from '../../../../types'
+import { AppConfigField, FrameId } from '../../../../types'
 import { PlusIcon } from '@heroicons/react/24/outline'
 
 export interface EventsProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

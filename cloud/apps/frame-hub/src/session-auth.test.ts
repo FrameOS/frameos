@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseCookieHeader, sessionCookieCandidates } from "./session-auth";
 
@@ -28,11 +31,30 @@ describe("parseCookieHeader", () => {
 });
 
 describe("sessionCookieCandidates", () => {
-  it("covers the dev and both production cookie names from auth-web", () => {
-    expect(sessionCookieCandidates).toEqual([
-      "__Host-frameos_cloud_session",
-      "__Secure-frameos_cloud_session",
-      "frameos_cloud_session",
-    ]);
+  // Cross-check against the real source of truth. auth-web's session.ts
+  // imports next/headers and cannot be imported from this service, so the
+  // declaration is read from disk instead — an added, removed, or renamed
+  // cookie name in auth-web fails here rather than silently leaving the hub
+  // unable to authenticate browser sockets.
+  it("matches every cookie name auth-web's session.ts can mint", () => {
+    const sessionSource = readFileSync(
+      path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "../../auth-web/src/lib/session.ts",
+      ),
+      "utf8",
+    );
+    const declaration = /export const sessionCookieName =([\s\S]*?);\n/.exec(
+      sessionSource,
+    )?.[1];
+    expect(declaration).toBeDefined();
+    // Cookie names only — the declaration also branches on NODE_ENV. A rename
+    // to something that is not *_session empties this list, which the
+    // non-empty assertion below turns into a failure.
+    const minted = [...(declaration ?? "").matchAll(/"([^"]*session)"/gi)].map(
+      (match) => match[1],
+    );
+    expect(minted.length).toBeGreaterThan(0);
+    expect([...minted].sort()).toEqual([...sessionCookieCandidates].sort());
   });
 });

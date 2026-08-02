@@ -1,5 +1,5 @@
 import { actions, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { AppNodeData } from '../../types'
+import { AppNodeData, FrameId } from '../../types'
 
 import type { frameEditorsLogicType } from './frameEditorsLogicType'
 import { frameLogic } from './frameLogic'
@@ -11,7 +11,7 @@ import { sceneExecutionForFrame } from '../../utils/sceneExecution'
 // diagramLogic uses it to scope global keyboard shortcuts to the visible
 // scene. (This replaced the old four-area "panels" layout logic.)
 export interface FrameEditorsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface AnyBuiltLogic extends BuiltLogic {}

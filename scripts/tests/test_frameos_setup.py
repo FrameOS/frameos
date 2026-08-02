@@ -305,6 +305,61 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         # Nothing was installed.
         self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
 
+    def test_cloud_claim_token_refuses_alternative_truthy_backend_spellings(self) -> None:
+        # "True"/"on" used to be silently coerced to "false" instead of dying:
+        # the point of the check is to refuse two control planes loudly.
+        for truthy in ("True", "on", "YES"):
+            with self.subTest(truthy=truthy):
+                result = self._run_setup(
+                    {
+                        "FRAMEOS_NAME": "Conflicted Frame",
+                        "FRAMEOS_DEVICE": "web_only",
+                        "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                        "FRAMEOS_BACKEND_ENABLED": truthy,
+                    },
+                    expect_failure=True,
+                )
+                self.assertIn("exactly one control plane", result.stdout + result.stderr)
+                self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
+    def test_cloud_url_must_be_an_http_origin(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Bad URL Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "cloud.example",
+            },
+            expect_failure=True,
+        )
+        self.assertIn("FRAMEOS_CLOUD_URL must be an http(s) origin", result.stdout + result.stderr)
+        self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
+    def test_plain_http_cloud_url_warns_but_installs(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Local Cloud Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "http://localhost:3000",
+            }
+        )
+
+        self.assertIn("plain http", result.stdout + result.stderr)
+        self._restore_tmp_permissions()
+        releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
+        self.assertEqual(len(releases), 1)
+        pending = json.loads(
+            (releases[0] / "state" / "cloud_enroll_pending.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(pending["provider_url"], "http://localhost:3000")
+
     def test_device_menu_prints_real_newlines(self) -> None:
         menu = subprocess.run(
             [

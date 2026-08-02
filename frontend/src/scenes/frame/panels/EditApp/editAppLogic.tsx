@@ -5,7 +5,7 @@ import { loaders } from 'kea-loaders'
 import { Node } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
-import { AppNodeData } from '../../../../types'
+import { AppNodeData, FrameId } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
@@ -25,7 +25,7 @@ import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 export interface ModelMarker extends editor.IMarkerData {}
 
 export interface EditAppLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   nodeId: string
 }

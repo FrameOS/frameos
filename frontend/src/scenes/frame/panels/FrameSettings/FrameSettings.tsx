@@ -55,7 +55,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { isCloudMode } from '../../../../utils/cloudMode'
+import { frameSettingsSectionIsAllowed, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
@@ -795,7 +795,9 @@ export function FrameSettings({
   const inFrameAdminMode = isInFrameAdminMode()
   // Cloud-managed frames have no SSH, deploys, or builds — those verbs do
   // not exist in the cloud protocol, so their settings are never rendered.
-  const hideForCloud = isCloudMode()
+  const workspaceSurfaceMode = workspaceMode()
+  const hideForCloud = workspaceSurfaceMode === 'cloud'
+  const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
   )
@@ -1953,64 +1955,71 @@ export function FrameSettings({
           </>
         ) : null}
 
-        <H6 id="frame-settings-backend" className="mt-2">
-          Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="server_host"
-            label="Backend host"
-            tooltip={
-              <>
-                The public host of your FrameOS backend server (this webserver). This is what the frame uses to reach
-                the backend.
-              </>
-            }
-          >
-            <TextInput name="server_host" placeholder="localhost" required />
-          </Field>
-          <Field
-            name="server_port"
-            label="Backend port"
-            tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
-          >
-            <TextInput name="server_port" placeholder="8989" required />
-          </Field>
-          <Field
-            name="server_api_key"
-            label={<div>Backend API key</div>}
-            labelRight={
-              <Button
-                color="secondary"
-                size="small"
-                onClick={() => {
-                  setFrameFormValues({ server_api_key: secureToken(32) })
-                  touchFrameFormField('server_api_key')
-                }}
+        {/* "frame -> backend" reporting: a cloud frame talks only to the hub,
+            so the section is absent there (and so is its nav anchor — see
+            allowedFrameSettingsSections in workspaceSurfaces.ts). */}
+        {showBackendSection ? (
+          <>
+            <H6 id="frame-settings-backend" className="mt-2">
+              Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="server_host"
+                label="Backend host"
+                tooltip={
+                  <>
+                    The public host of your FrameOS backend server (this webserver). This is what the frame uses to
+                    reach the backend.
+                  </>
+                }
               >
-                Regenerate
-              </Button>
-            }
-            tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
-          >
-            <TextInput
-              name="server_api_key"
-              onClick={() => touchFrameFormField('server_api_key')}
-              type={frameFormTouches.server_api_key ? 'text' : 'password'}
-              placeholder=""
-              required
-            />
-          </Field>
-          <Field
-            name="server_send_logs"
-            label="Send logs to backend"
-            tooltip="When disabled, the frame will not upload logs to the backend API."
-          >
-            {({ value, onChange }) => (
-              <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
-            )}
-          </Field>
-        </div>
+                <TextInput name="server_host" placeholder="localhost" required />
+              </Field>
+              <Field
+                name="server_port"
+                label="Backend port"
+                tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
+              >
+                <TextInput name="server_port" placeholder="8989" required />
+              </Field>
+              <Field
+                name="server_api_key"
+                label={<div>Backend API key</div>}
+                labelRight={
+                  <Button
+                    color="secondary"
+                    size="small"
+                    onClick={() => {
+                      setFrameFormValues({ server_api_key: secureToken(32) })
+                      touchFrameFormField('server_api_key')
+                    }}
+                  >
+                    Regenerate
+                  </Button>
+                }
+                tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
+              >
+                <TextInput
+                  name="server_api_key"
+                  onClick={() => touchFrameFormField('server_api_key')}
+                  type={frameFormTouches.server_api_key ? 'text' : 'password'}
+                  placeholder=""
+                  required
+                />
+              </Field>
+              <Field
+                name="server_send_logs"
+                label="Send logs to backend"
+                tooltip="When disabled, the frame will not upload logs to the backend API."
+              >
+                {({ value, onChange }) => (
+                  <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
+                )}
+              </Field>
+            </div>
+          </>
+        ) : null}
 
         <H6 id="frame-http-api-section">
           HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>

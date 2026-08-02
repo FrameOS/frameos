@@ -953,8 +953,10 @@ esac
 if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
   # One control plane at a time: a cloud-managed frame never also connects
   # to a self-hosted backend. Refuse loudly instead of silently ignoring one.
-  case "${FRAMEOS_BACKEND_ENABLED:-}" in
-    y|Y|yes|YES|true|TRUE|1)
+  # Case-folded so every truthy spelling ("True", "ON", "Yes") dies here
+  # rather than being quietly coerced to "false" a few lines down.
+  case "$(printf '%s' "${FRAMEOS_BACKEND_ENABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+    y|yes|true|on|1)
       die "FRAMEOS_CLAIM_TOKEN and FRAMEOS_BACKEND_ENABLED=true are mutually exclusive: a frame has exactly one control plane. Drop one of them."
       ;;
   esac

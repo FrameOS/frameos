@@ -31,8 +31,10 @@ CREATE TABLE "frames" (
 CREATE INDEX frames_account_idx ON frames (account_id);
 CREATE UNIQUE INDEX frames_linked_client_unique ON frames (linked_client_id);
 
--- Single-use claim tokens minted by "Add frame" (FRCT-…), hashed at rest
--- like device codes. Dead after one redemption attempt, success or failure.
+-- Claim tokens minted by "Add frame" (FRCT_…), hashed at rest like device
+-- codes. Single-use here; 0021 adds max_uses/use_count so one SD image can
+-- enroll several cards. A use is spent only by an enrollment that commits —
+-- a failed attempt leaves the budget intact.
 CREATE TABLE "frame_enrollment_tokens" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" uuid NOT NULL REFERENCES "accounts"("id") ON DELETE cascade,
@@ -64,8 +66,9 @@ CREATE UNIQUE INDEX frame_scene_assignments_frame_scene_unique
 CREATE INDEX frame_scene_assignments_frame_idx
   ON frame_scene_assignments (frame_id, position);
 
--- Durable per-frame command queue: survives restarts, drained in id order on
--- (re)connect. The hub marks sent/acked/failed; expired rows are swept by
+-- Durable per-frame command queue: survives restarts, drained in
+-- (created_at, id) order on (re)connect — the id is a random uuid and orders
+-- nothing. The hub marks sent/acked/failed; expired rows are swept by
 -- db-cleanup.sh.
 CREATE TABLE "frame_commands" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

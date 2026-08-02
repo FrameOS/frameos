@@ -31,10 +31,18 @@ import {
 } from "../../../../auth-web/src/lib/frames";
 import { derivedSigningKey } from "../../../../auth-web/src/lib/keys";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
-import { startFrameHub, type FrameHub } from "../../hub";
+import {
+  maxPayloadBytes,
+  startFrameHub,
+  type FrameHub,
+  type FrameHubOptions,
+} from "../../hub";
+import { maxMetricsBytes, maxStateBytes } from "../../protocol";
 
 const db = createDb();
 let hub: FrameHub;
+// Hubs a single test starts with non-default options; closed in afterEach.
+const extraHubs: FrameHub[] = [];
 
 beforeEach(async () => {
   await truncateAllTables();
@@ -43,7 +51,16 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await hub.close();
+  while (extraHubs.length > 0) {
+    await extraHubs.pop()?.close();
+  }
 });
+
+async function startExtraHub(options: Partial<FrameHubOptions> = {}) {
+  const extra = await startFrameHub({ port: 0, ...options });
+  extraHubs.push(extra);
+  return extra;
+}
 
 afterAll(async () => {
   await db.$client.end({ timeout: 5 });
@@ -171,9 +188,10 @@ interface TestSocket {
 function openSocket(
   path: string,
   headers: Record<string, string>,
+  port = hub.port,
 ): Promise<TestSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}${path}`, { headers });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers });
     const buffered: Record<string, unknown>[] = [];
     const waiters: {
       match: (msg: Record<string, unknown>) => boolean;
@@ -243,9 +261,10 @@ function openSocket(
 function expectUpgradeRejected(
   path: string,
   headers: Record<string, string>,
+  port = hub.port,
 ): Promise<number> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}${path}`, { headers });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers });
     ws.on("unexpected-response", (_req, res) => {
       resolve(res.statusCode ?? 0);
       ws.terminate();
@@ -255,20 +274,28 @@ function expectUpgradeRejected(
   });
 }
 
-function openDevice(token: string) {
-  return openSocket("/api/frames/ws", { authorization: `Bearer ${token}` });
+function openDevice(token: string, port = hub.port) {
+  return openSocket(
+    "/api/frames/ws",
+    { authorization: `Bearer ${token}` },
+    port,
+  );
 }
 
-function openBrowser(frameId: string, sessionToken: string) {
-  return openSocket(`/api/frames/${frameId}/updates`, {
-    cookie: `frameos_cloud_session=${sessionToken}`,
-  });
+function openBrowser(frameId: string, sessionToken: string, port = hub.port) {
+  return openSocket(
+    `/api/frames/${frameId}/updates`,
+    { cookie: `frameos_cloud_session=${sessionToken}` },
+    port,
+  );
 }
 
-function openFleetBrowser(sessionToken: string) {
-  return openSocket("/api/frames/updates", {
-    cookie: `frameos_cloud_session=${sessionToken}`,
-  });
+function openFleetBrowser(sessionToken: string, port = hub.port) {
+  return openSocket(
+    "/api/frames/updates",
+    { cookie: `frameos_cloud_session=${sessionToken}` },
+    port,
+  );
 }
 
 async function handshake(
@@ -517,6 +544,172 @@ describe("device socket", () => {
   });
 });
 
+describe("command redelivery", () => {
+  it("redelivers a command whose socket died before the ack", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const first = await openDevice(token);
+    await handshake(first, privateKey);
+
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { scenes: [] },
+      type: "set_scenes",
+    });
+    await first.next(
+      (msg) => msg.id === command?.id,
+      "command on the first socket",
+    );
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(command?.id)));
+      return row?.status === "sent" ? row : undefined;
+    }, "command marked sent");
+
+    // Kill the TCP connection without a close frame and without acking: the
+    // command is now in "sent" with nobody to ack it.
+    first.ws.terminate();
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      return row && !row.connected ? row : undefined;
+    }, "frame marked disconnected");
+
+    const second = await openDevice(token);
+    const ready = await handshake(second, privateKey);
+    // The requeued command is counted in `ready` and delivered again.
+    expect(ready.pending_commands).toBe(1);
+    const redelivered = await second.next(
+      (msg) => msg.id === command?.id,
+      "redelivered command",
+    );
+    expect(redelivered.type).toBe("set_scenes");
+
+    // Acking on the new socket settles it for good.
+    second.send({ id: command?.id, ok: true, type: "ack" });
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(command?.id)));
+      return row?.status === "acked" ? row : undefined;
+    }, "redelivered command acked");
+    second.ws.close();
+  });
+
+  it("does not redeliver a sent command superseded by a newer one", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const first = await openDevice(token);
+    await handshake(first, privateKey);
+
+    const stale = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "old" },
+      type: "set_scenes",
+    });
+    await first.next((msg) => msg.id === stale?.id, "stale command");
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(stale?.id)));
+      return row?.status === "sent" ? row : undefined;
+    }, "stale command marked sent");
+    first.ws.terminate();
+
+    // A newer set_scenes is queued while the frame is offline. supersede in
+    // auth-web only rewrites "pending" rows, so the hub must not resurrect the
+    // older one on reconnect.
+    const fresh = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "new" },
+      type: "set_scenes",
+    });
+
+    const second = await openDevice(token);
+    await handshake(second, privateKey);
+    const delivered = await second.next(
+      (msg) => msg.type === "set_scenes",
+      "newest set_scenes",
+    );
+    expect(delivered.id).toBe(fresh?.id);
+    expect(delivered.checksum).toBe("new");
+    const [staleRow] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, String(stale?.id)));
+    expect(staleRow?.status).toBe("expired");
+    expect(staleRow?.error).toBe("superseded");
+    second.ws.close();
+  });
+
+  it("expires a sent command whose TTL passed instead of redelivering it", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    // Straight into the table as "sent": a five-minute-old reboot the device
+    // never acked must not fire on the next connect.
+    const [command] = await db
+      .insert(frameCommands)
+      .values({
+        expiresAt: new Date(Date.now() - 1000),
+        frameId: frame.id,
+        payload: null,
+        sentAt: new Date(Date.now() - 60_000),
+        status: "sent",
+        type: "reboot",
+      })
+      .returning();
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey);
+    expect(ready.pending_commands).toBe(0);
+    await expect(
+      device.next((msg) => msg.type === "reboot", "unexpected reboot", 500),
+    ).rejects.toThrow(/Timed out/);
+    const [row] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, String(command?.id)));
+    expect(row?.status).toBe("expired");
+    device.ws.close();
+  });
+
+  it("redelivers on a live socket once the unacked grace period passes", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const extra = await startExtraHub({ commandRedeliverAfterMs: 0 });
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      type: "render",
+      ttlMs: 60_000,
+    });
+    await device.next((msg) => msg.id === command?.id, "first delivery");
+    // The write happens before the row is marked sent, so wait for the mark
+    // (and for the clock to move past it — the grace period here is 0).
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.id, String(command?.id)));
+      return row?.status === "sent" ? row : undefined;
+    }, "command marked sent");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // The device stays silent (no ack). One sweep past the grace period
+    // requeues and sends it again on the same socket.
+    await extra.sweep();
+    await device.next(
+      (msg) => msg.id === command?.id,
+      "second delivery after the sweep",
+    );
+    device.ws.close();
+  });
+});
+
 describe("telemetry", () => {
   it("stores log batches, caps them, and pushes new_log to browsers", async () => {
     const { account, frame, privateKey, token } = await createFrameFixture();
@@ -615,6 +808,310 @@ describe("telemetry", () => {
     const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
     expect(row?.lastMetrics).toBeNull();
     device.ws.close();
+  });
+});
+
+describe("inbound size limits", () => {
+  it("closes a socket that sends a frame over maxPayload", async () => {
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.sendRaw(
+      JSON.stringify({
+        id: randomUUID(),
+        states: { blob: "x".repeat(maxPayloadBytes) },
+        type: "state",
+      }),
+    );
+    // 1009 = message too big; ws refuses it without buffering the payload.
+    expect(await device.closed).toBe(1009);
+  });
+
+  it("rejects an oversized state and keeps the last good one", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    device.send({
+      id: randomUUID(),
+      states: { blob: "x".repeat(maxStateBytes) },
+      type: "state",
+    });
+    // Followed by a well-formed state: once that lands, the oversized one has
+    // certainly been processed (messages are handled in order).
+    device.send({
+      id: randomUUID(),
+      states: { active_scene: "clock" },
+      type: "state",
+    });
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      const state = row?.lastState as Record<string, unknown> | null;
+      return state?.active_scene === "clock" ? row : undefined;
+    }, "recovered state");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.lastState).toEqual({ active_scene: "clock" });
+    device.ws.close();
+  });
+
+  it("rejects oversized metrics with an ack error", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    const msgId = randomUUID();
+    device.send({
+      id: msgId,
+      metrics: { blob: "x".repeat(maxMetricsBytes) },
+      type: "metrics",
+    });
+    const ack = await device.next(
+      (msg) => msg.type === "ack" && msg.id === msgId,
+      "metrics size error ack",
+    );
+    expect(ack.error).toBe("payload_too_large");
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.lastMetrics).toBeNull();
+    device.ws.close();
+  });
+
+  it("drops log lines over the 8 KB per-line cap and keeps the rest", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.send({
+      id: randomUUID(),
+      logs: [
+        { payload: { line: "x".repeat(9 * 1024) }, timestamp: Date.now() / 1000 },
+        { payload: { line: "kept" }, timestamp: Date.now() / 1000 },
+      ],
+      type: "log_batch",
+    });
+    await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(frameLogs)
+        .where(eq(frameLogs.frameId, frame.id));
+      return rows.length > 0 ? rows : undefined;
+    }, "log stored");
+    const rows = await db
+      .select()
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, frame.id));
+    expect(rows).toHaveLength(1);
+    expect((rows[0]?.payload as { line: string }).line).toBe("kept");
+    device.ws.close();
+  });
+
+  it("rate limits a device that floods log batches", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // The limit is 120 batches per minute per frame; message handling is
+    // serialized, so the 121st is answered after the first 120 landed.
+    let limitedAck: Record<string, unknown> | undefined;
+    for (let i = 0; i < 121; i += 1) {
+      const msgId = randomUUID();
+      device.send({
+        id: msgId,
+        logs: [{ payload: { line: `line ${i}` }, timestamp: Date.now() / 1000 }],
+        type: "log_batch",
+      });
+      if (i === 120) {
+        limitedAck = await device.next(
+          (msg) => msg.type === "ack" && msg.id === msgId,
+          "rate limited ack",
+        );
+      }
+    }
+    expect(limitedAck?.error).toBe("rate_limited");
+    const rows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, frame.id));
+    expect(rows[0]?.count).toBe(120);
+    device.ws.close();
+  });
+
+  // The scene from the wire contract's {"timestamp","scene","payload"} entry
+  // has no column of its own, so it must survive inside the stored payload.
+  it("keeps the optional per-entry scene", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.send({
+      id: randomUUID(),
+      logs: [
+        {
+          payload: { line: "rendered" },
+          scene: "kitchen-clock",
+          timestamp: Date.now() / 1000,
+        },
+      ],
+      type: "log_batch",
+    });
+    const stored = await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameLogs)
+        .where(eq(frameLogs.frameId, frame.id));
+      return row;
+    }, "log with scene stored");
+    expect(stored.payload).toEqual({ line: "rendered", scene: "kitchen-clock" });
+    device.ws.close();
+  });
+});
+
+describe("connection guards", () => {
+  it("refuses a browser upgrade from a foreign Origin", async () => {
+    const { account, frame } = await createFrameFixture();
+    const sessionToken = await createBrowserSession(account.id);
+    const cookie = `frameos_cloud_session=${sessionToken}`;
+    expect(
+      await expectUpgradeRejected(`/api/frames/${frame.id}/updates`, {
+        cookie,
+        origin: "https://evil.example",
+      }),
+    ).toBe(403);
+    expect(
+      await expectUpgradeRejected("/api/frames/updates", {
+        cookie,
+        origin: "https://evil.example",
+      }),
+    ).toBe(403);
+
+    // The configured app origin (localhost:3000 by default) is accepted, and
+    // so is a request with no Origin at all — those are never browsers.
+    const browser = await openSocket(`/api/frames/${frame.id}/updates`, {
+      cookie,
+      origin: "http://localhost:3000",
+    });
+    browser.ws.close();
+  });
+
+  it("closes a browser socket whose session was revoked after the upgrade", async () => {
+    const { account, frame } = await createFrameFixture();
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken);
+    const fleet = await openFleetBrowser(sessionToken);
+
+    await db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+    await hub.sweep();
+
+    expect(await browser.closed).toBe(4401);
+    expect(await fleet.closed).toBe(4401);
+  });
+
+  it("refuses upgrades past the connection cap", async () => {
+    const { account, frame } = await createFrameFixture();
+    const sessionToken = await createBrowserSession(account.id);
+    const previous = process.env.FRAME_HUB_MAX_CONNECTIONS;
+    process.env.FRAME_HUB_MAX_CONNECTIONS = "1";
+    try {
+      const extra = await startExtraHub();
+      const browser = await openBrowser(frame.id, sessionToken, extra.port);
+      expect(
+        await expectUpgradeRejected(
+          "/api/frames/updates",
+          { cookie: `frameos_cloud_session=${sessionToken}` },
+          extra.port,
+        ),
+      ).toBe(503);
+      browser.ws.close();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.FRAME_HUB_MAX_CONNECTIONS;
+      } else {
+        process.env.FRAME_HUB_MAX_CONNECTIONS = previous;
+      }
+    }
+  });
+
+  it("rate limits upgrade attempts per client IP", async () => {
+    // 120 attempts per minute; the 121st from the same forwarded IP is 429
+    // even though it never reaches authentication.
+    const headers = { "x-forwarded-for": "203.0.113.9" };
+    let last = 0;
+    for (let i = 0; i < 121; i += 1) {
+      last = await expectUpgradeRejected("/api/frames/ws", headers);
+    }
+    expect(last).toBe(429);
+    // A different client IP still gets through to the normal 401.
+    expect(
+      await expectUpgradeRejected("/api/frames/ws", {
+        "x-forwarded-for": "203.0.113.10",
+      }),
+    ).toBe(401);
+  });
+});
+
+describe("lifecycle", () => {
+  it("closes a device socket that never completes the challenge", async () => {
+    const { token } = await createFrameFixture();
+    const extra = await startExtraHub({ authTimeoutMs: 200 });
+    const device = await openDevice(token, extra.port);
+    await device.next((msg) => msg.type === "challenge", "challenge");
+    expect(await device.closed).toBe(4401);
+  });
+
+  it("terminates a device socket that stops answering pings", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const extra = await startExtraHub({ heartbeatIntervalMs: 150 });
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      return row?.connected ? row : undefined;
+    }, "frame connected");
+
+    // Pausing the client socket stops ws from answering the protocol ping,
+    // which is exactly what a wedged device looks like.
+    device.ws.pause();
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      return row && !row.connected ? row : undefined;
+    }, "frame terminated by the heartbeat");
+  });
+
+  it("clears stale connectivity rows at boot", async () => {
+    const { frame } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ connected: true, hubSessionId: "hub-from-a-previous-life" })
+      .where(eq(frames.id, frame.id));
+    await startExtraHub();
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.connected).toBe(false);
+    expect(row?.hubSessionId).toBeNull();
+  });
+
+  it("closes every socket with 1001 on graceful shutdown", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const extra = await startExtraHub();
+    const sessionToken = await createBrowserSession(account.id);
+    const device = await openDevice(token, extra.port);
+    await handshake(device, privateKey);
+    const browser = await openBrowser(frame.id, sessionToken, extra.port);
+    const fleet = await openFleetBrowser(sessionToken, extra.port);
+
+    await extra.close();
+    expect(await device.closed).toBe(1001);
+    expect(await browser.closed).toBe(1001);
+    expect(await fleet.closed).toBe(1001);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.connected).toBe(false);
   });
 });
 

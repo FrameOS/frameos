@@ -341,16 +341,25 @@ proc persistScenesPayload*(scenes: JsonNode) =
   let body = if target.compressed: compress(prettyScenes, dataFormat = dfGzip) else: prettyScenes
   writeTextFileAtomically(target.path, body)
 
+# frame.json now has two writers: the local admin API (mummy worker threads) and
+# the cloud hub client's own thread applying set_settings. Both read-modify-write
+# the whole file, so without this lock a concurrent admin save and cloud push
+# lose one of the two edits — the individual writes are atomic, the sequence is
+# not.
+var frameConfigWriteLock*: Lock
+initLock(frameConfigWriteLock)
+
 proc persistFrameApiUpdate*(payload: JsonNode) =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "Frame update payload must be a JSON object")
 
-  let configPath = getConfigFilename()
-  let existing = loadConfigJson()
-  let nextConfig = frontendFramePayloadToRuntimeConfig(payload, existing)
-  if payload.hasKey("scenes"):
-    persistScenesPayload(payload["scenes"])
-  writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
+  withLock frameConfigWriteLock:
+    let configPath = getConfigFilename()
+    let existing = loadConfigJson()
+    let nextConfig = frontendFramePayloadToRuntimeConfig(payload, existing)
+    if payload.hasKey("scenes"):
+      persistScenesPayload(payload["scenes"])
+    writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
 
 proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
   if controlCode == nil:

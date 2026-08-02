@@ -4,7 +4,7 @@
 ## signature check) and the verb loop all run over a live socket — no cloud,
 ## no network beyond 127.0.0.1.
 
-import std/[base64, json, locks, net, os, strutils, times, unittest]
+import std/[base64, json, locks, net, os, strutils, sysrand, times, unittest]
 import mummy
 import mummy/routers
 
@@ -28,11 +28,25 @@ putEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH", workDir / "cloud_enroll_pending.json
 # ---------------------------------------------------------------------------
 
 const AccessToken = "hub-session-token"
-const Nonce = "test-nonce-0123456789-0123456789-xx"
+
+# The real hub mints 32 raw random bytes, sends them base64-encoded and
+# verifies the device signature over the RAW bytes
+# (cloud/apps/frame-hub/src/hub.ts). The stub does exactly that — signing the
+# base64 text instead would sail through a stub that used a plain-text nonce,
+# and did.
+let NonceBytes = block:
+  var bytes = newString(32)
+  let random = urandom(32)
+  for index in 0 ..< bytes.len:
+    bytes[index] = char(random[index])
+  bytes
+let NonceBase64 = base64.encode(NonceBytes)
 
 type HubRecord = ref object
   authHeader: string
   hello: JsonNode
+  helloCount: int
+  socket: mummy.WebSocket
   authMessage: JsonNode
   signatureValid: bool
   replies: seq[JsonNode]
@@ -68,7 +82,8 @@ proc websocketHandler(websocket: mummy.WebSocket, event: mummy.WebSocketEvent,
   {.gcsafe.}:
     case event
     of mummy.OpenEvent:
-      discard
+      withLock stubLock:
+        recorded.socket = websocket
     of mummy.MessageEvent:
       var msg: JsonNode
       try:
@@ -80,12 +95,13 @@ proc websocketHandler(websocket: mummy.WebSocket, event: mummy.WebSocketEvent,
       of "hello":
         withLock stubLock:
           recorded.hello = msg
-        websocket.send($(%*{"type": "challenge", "nonce": Nonce}))
+          recorded.helloCount += 1
+        websocket.send($(%*{"type": "challenge", "nonce": NonceBase64}))
       of "auth":
         var valid = false
         withLock stubLock:
           recorded.authMessage = msg
-          valid = verifySignatureBase64(devicePublicKey, Nonce, msg{"signature"}.getStr(""))
+          valid = verifySignatureBase64(devicePublicKey, NonceBytes, msg{"signature"}.getStr(""))
           recorded.signatureValid = valid
         if not valid:
           websocket.send($(%*{"type": "error", "error": "bad_signature"}))
@@ -168,6 +184,13 @@ suite "cloud hub session over a live socket":
       check recorded.hello{"scenes_checksum"}.getStr("") == "sum-0"
       # The challenge nonce was signed with the enrolled device key.
       check recorded.signatureValid
+      # Regression: the signature must cover the DECODED nonce bytes, not the
+      # base64 text the challenge carried. The hub verifies against the raw
+      # bytes, so signing the text would fail every real handshake.
+      let signature = recorded.authMessage{"signature"}.getStr("")
+      check signature.len > 0
+      check verifySignatureBase64(devicePublicKey, NonceBytes, signature)
+      check not verifySignatureBase64(devicePublicKey, NonceBase64, signature)
 
     # get_state produced an ok ack plus a state message with the same id.
     let acks = repliesOfType("ack")
@@ -214,7 +237,30 @@ suite "cloud hub session over a live socket":
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
 
+  test "an oversized inbound message drops the session instead of allocating":
+    # ws 0.5.0 would happily assemble whatever length the provider claims; the
+    # client caps inbound messages at 4 MiB, closes and reconnects instead.
+    var socket: mummy.WebSocket
+    var helloesBefore = 0
+    withLock stubLock:
+      socket = recorded.socket
+      helloesBefore = recorded.helloCount
+    socket.send(newString(5 * 1024 * 1024))
+    # The frame reconnects (a fresh hello) rather than dying or hanging on.
+    check waitUntil(30.0, proc(): bool {.gcsafe.} =
+      {.gcsafe.}:
+        withLock stubLock:
+          result = recorded.helloCount > helloesBefore)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      {.gcsafe.}:
+        withLock stubLock:
+          result = recorded.signatureValid)
+
   test "a local disconnect closes the management session":
+    withLock stubLock:
+      # The reconnect above already produced a close; only a close from here on
+      # proves the disconnect route tore the session down.
+      recorded.closed = false
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
       resetLinkState(state)

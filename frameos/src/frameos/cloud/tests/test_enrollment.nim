@@ -233,7 +233,46 @@ suite "cloud enrollment":
     check state{"frame_id"}.getStr("") == "frame-flow-b"
     # The device-flow token stays; flow B never mints a new one.
     check state{"access_token"}.getStr("") == "bearer-token-1"
-    check state{"scope"}.getStr("") == "frame:managed telemetry:metrics"
+    # The enroll response's scope is merged in, not substituted.
+    check state{"scope"}.getStr("") == "frame:link frame:managed telemetry:metrics"
+
+  test "flow B keeps every scope the device-flow grant already carried":
+    clearLinkState()
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      state["provider_url"] = %providerUrl
+      state["status"] = %"connected"
+      state["access_token"] = %"bearer-token-2"
+      state["scope"] = %"frame:link frame:managed auth:login telemetry:logs"
+      saveCloudLinkState(state)
+    # The enroll endpoint always answers with just the managed scope.
+    setStubResponse(200, %*{"frame_id": "frame-flow-b2", "ws_path": "/api/frames/ws",
+                            "scope": "frame:managed"})
+    check enrollManagedFrame(providerUrl, "", "bearer-token-2", "", standaloneConfig()).ok
+    let scopes = linkScopes(linkState())
+    for scope in ["frame:link", "frame:managed", "auth:login", "telemetry:logs"]:
+      check scope in scopes
+    # Merged, not duplicated.
+    check scopes.len == 4
+
+  test "the pending enrollment file is shredded, not just unlinked":
+    clearLinkState()
+    setStubResponse(200, %*{
+      "access_token": "frame-token-3",
+      "scope": "frame:managed",
+      "frame_id": "frame-shred",
+      "ws_path": "/api/frames/ws",
+    })
+    let path = pendingEnrollmentPath()
+    writeFile(path, $(%*{"claim_token": "FRCT-secret-shred", "provider_url": providerUrl}))
+    # Keep the inode alive so we can read what was left behind on disk.
+    let copyPath = path & ".hardlink"
+    createHardlink(path, copyPath)
+    let (resolved, _, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    check resolved and outcome.ok
+    check not fileExists(path)
+    check "FRCT-secret-shred" notin readFile(copyPath)
+    removeFile(copyPath)
 
   test "disconnect-style reset clears the managed fields":
     let before = linkState()

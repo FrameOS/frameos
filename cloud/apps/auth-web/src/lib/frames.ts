@@ -4,7 +4,7 @@
 // (apps/frame-hub) can share the pure helpers via direct source import.
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   createDb,
   frameCommands,
@@ -17,6 +17,17 @@ import {
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
+import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
+
+type Database = ReturnType<typeof createDb>;
+
+// drizzle hands a transaction callback a PgTransaction, not the database
+// object, and the two are structurally different types. Helpers that must
+// work both standalone and inside a transaction take this union so callers
+// never have to cast.
+export type FramesDatabase =
+  | Database
+  | Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export const claimTokenPrefix = "FRCT";
 export const claimTokenTtlMs = 24 * 60 * 60 * 1000;
@@ -33,22 +44,43 @@ export const maxLogsPerFrame = 5000;
 export const maxLogBatch = 200;
 export const maxLogLineBytes = 8 * 1024;
 
+// Cap on the assembled set_scenes payload. The hub ships it to the device in
+// ONE WebSocket frame and the device (a Pi Zero, sometimes an ESP32) caps its
+// inbound message size at 4 MiB — stay comfortably below that so the JSON
+// envelope, checksum and framing overhead still fit. Assignment fails with
+// scenes_payload_too_large rather than queueing a push the device will drop.
+export const maxScenesPayloadBytes = 3 * 1024 * 1024;
+
 // The declarative settings a set_settings push may carry. Everything else —
 // network config, credentials, agent state, update URLs — is absent by
 // design; the device enforces the same list independently.
-export const allowedFrameSettings: Record<
+//
+// These are the device's wire names, and they must stay exactly in sync with
+// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/hub_client.nim: the
+// hub forwards keys verbatim and the device refuses the WHOLE verb when it
+// sees one it does not know, so a single wrong spelling here silently drops
+// every setting in the push. (`brightness` joins the list once the runtime
+// grows a brightness setting — see docs/cloud-frames.md `set_settings`.)
+//
+// A Map, not a plain object: `allowedFrameSettings["toString"]` on an object
+// resolves through Object.prototype to a truthy, callable function that
+// returns a truthy string, so a prototype key would pass validation — and
+// "__proto__" / "valueOf" would throw a TypeError instead.
+export const allowedFrameSettings = new Map<
   string,
   (value: unknown) => boolean
-> = {
-  brightness: (v) => typeof v === "number" && v >= 0 && v <= 100,
-  debug: (v) => typeof v === "boolean",
-  interval: (v) => typeof v === "number" && v >= 1 && v <= 60 * 60 * 24,
-  name: (v) => typeof v === "string" && v.length > 0 && v.length <= 256,
-  rotate: (v) => v === 0 || v === 90 || v === 180 || v === 270,
-  scalingMode: (v) =>
-    v === "contain" || v === "cover" || v === "stretch" || v === "center",
-  timezone: (v) => typeof v === "string" && v.length <= 64,
-};
+>([
+  ["debug", (v) => typeof v === "boolean"],
+  ["interval", (v) => typeof v === "number" && v >= 1 && v <= 60 * 60 * 24],
+  ["name", (v) => typeof v === "string" && v.length > 0 && v.length <= 256],
+  ["rotate", (v) => v === 0 || v === 90 || v === 180 || v === 270],
+  [
+    "scaling_mode",
+    (v) =>
+      v === "contain" || v === "cover" || v === "stretch" || v === "center",
+  ],
+  ["timezone", (v) => typeof v === "string" && v.length <= 64],
+]);
 
 export const allowedFrameCommandTypes = new Set([
   "reboot",
@@ -68,7 +100,7 @@ export function validateFrameSettings(
     return { error: "invalid_settings" };
   }
   for (const [key, entryValue] of entries) {
-    const check = allowedFrameSettings[key];
+    const check = allowedFrameSettings.get(key);
     // One disallowed key refuses the whole payload — a partial apply would
     // make the device and the control plane disagree about what was set.
     if (!check || !check(entryValue)) {
@@ -138,11 +170,24 @@ export function frameSummary(frame: typeof frames.$inferSelect) {
   };
 }
 
+// Frame ids arrive as raw URL path segments. Postgres throws "invalid input
+// syntax for type uuid" on anything else, which surfaces as a 500 — screen
+// the shape first (same check loadOwnedScene uses for scene ids) so every
+// caller's existing "no such frame" branch returns a clean 404 instead.
+const frameIdPattern = /^[0-9a-f-]{36}$/i;
+
+export function isFrameId(value: unknown): value is string {
+  return typeof value === "string" && frameIdPattern.test(value);
+}
+
 export async function frameForAccount(
   db: ReturnType<typeof createDb>,
   accountId: string,
   frameId: string,
 ) {
+  if (!isFrameId(frameId)) {
+    return undefined;
+  }
   const [frame] = await db
     .select()
     .from(frames)
@@ -195,9 +240,12 @@ export async function enqueueFrameCommand(
   return command;
 }
 
-// Supersede queued-but-unsent commands of the same type: a newer set_scenes
-// or set_settings makes the older pending one pointless (and applying both
-// in order would be wasted work on a slow device).
+// Supersede undelivered commands of the same type: a newer set_scenes or
+// set_settings makes the older one pointless (and applying both in order would
+// be wasted work on a slow device). "sent" counts as undelivered — the hub
+// redelivers unacked sent rows after a grace period (redeliverSentCommands in
+// apps/frame-hub/src/hub.ts), so leaving them alone would resurrect a command
+// this one replaces.
 export async function supersedePendingCommands(
   db: ReturnType<typeof createDb>,
   frameId: string,
@@ -210,37 +258,95 @@ export async function supersedePendingCommands(
       and(
         eq(frameCommands.frameId, frameId),
         eq(frameCommands.type, type),
-        eq(frameCommands.status, "pending"),
+        inArray(frameCommands.status, ["pending", "sent"]),
       ),
     );
 }
 
-export function extractScenesJson(zip: Buffer): unknown[] | undefined {
+// Pull the shallowest scenes.json out of a published template zip. The zip is
+// untrusted input (an old version row, a future publish path), so it gets the
+// same entry-count and uncompressed-size caps validateSceneZip enforces at
+// publish time — zip-bomb defence in depth. `bytes` is the raw scenes.json
+// length, used to bound the assembled payload before it is re-serialized.
+export function extractScenesJson(
+  zip: Buffer,
+): { bytes: number; scenes: unknown[] } | undefined {
   try {
     let best: { path: string; data: Uint8Array } | undefined;
+    let entryCount = 0;
+    let totalUncompressed = 0;
     const entries = unzipSync(new Uint8Array(zip), {
-      filter: (file) => /(^|\/)scenes\.json$/.test(file.name),
+      filter: (file) => {
+        entryCount += 1;
+        totalUncompressed += file.originalSize ?? 0;
+        if (
+          entryCount > maxSceneZipEntries ||
+          totalUncompressed > maxSceneZipUncompressedBytes
+        ) {
+          throw new Error("zip_bounds_exceeded");
+        }
+        // Inflate only scenes.json; other entries still count against the
+        // caps above but are never decompressed.
+        return /(^|\/)scenes\.json$/.test(file.name);
+      },
     });
     for (const [path, data] of Object.entries(entries)) {
       if (!best || path.split("/").length < best.path.split("/").length) {
         best = { data, path };
       }
     }
-    if (!best) {
+    // originalSize is read from the central directory and can be absent, so
+    // re-check the one entry we actually inflated against the same ceiling.
+    if (!best || best.data.length > maxSceneZipUncompressedBytes) {
       return undefined;
     }
     const parsed = JSON.parse(Buffer.from(best.data).toString("utf8"));
-    return Array.isArray(parsed) ? parsed : undefined;
+    return Array.isArray(parsed)
+      ? { bytes: best.data.length, scenes: parsed }
+      : undefined;
   } catch {
     return undefined;
   }
+}
+
+// Resolve the store_scene_versions row an assignment actually pins: the
+// requested version when pinned, otherwise the newest non-yanked one.
+//
+// The per-version risk flags live here. store_scenes.risk_flags is a
+// denormalized copy of the LATEST version's flags (store-publish.ts
+// overwrites it on every publish), so it says nothing about an older pinned
+// version — checking it would let "publish shell v1, publish clean v2, pin
+// v1" push shell-flagged bytes.
+export async function pinnedSceneVersion(
+  db: FramesDatabase,
+  sceneId: string,
+  sceneVersion: number | null | undefined,
+) {
+  const [row] = await db
+    .select({
+      riskFlags: storeSceneVersions.riskFlags,
+      version: storeSceneVersions.version,
+    })
+    .from(storeSceneVersions)
+    .where(
+      and(
+        eq(storeSceneVersions.sceneId, sceneId),
+        isNull(storeSceneVersions.yankedAt),
+        ...(sceneVersion === null || sceneVersion === undefined
+          ? []
+          : [eq(storeSceneVersions.version, sceneVersion)]),
+      ),
+    )
+    .orderBy(desc(storeSceneVersions.version))
+    .limit(1);
+  return row;
 }
 
 // Build the interpreted-scene payload for a frame from its assignments. The
 // payload shape matches the device's uploaded-scenes path ({"scenes": […]});
 // the checksum lets the device and the fleet UI agree on sync state.
 export async function buildScenesPayloadForFrame(
-  db: ReturnType<typeof createDb>,
+  db: FramesDatabase,
   frameId: string,
 ): Promise<
   | { scenes: unknown[]; checksum: string; sceneNames: string[] }
@@ -260,6 +366,7 @@ export async function buildScenesPayloadForFrame(
 
   const scenes: unknown[] = [];
   const sceneNames: string[] = [];
+  let rawBytes = 0;
   for (const assignment of assignments) {
     if (assignment.sceneStatus !== "active") {
       return { error: "scene_pulled" };
@@ -267,6 +374,7 @@ export async function buildScenesPayloadForFrame(
     const versionRows = await db
       .select({
         content: storeSceneVersions.content,
+        riskFlags: storeSceneVersions.riskFlags,
         version: storeSceneVersions.version,
       })
       .from(storeSceneVersions)
@@ -274,9 +382,10 @@ export async function buildScenesPayloadForFrame(
         and(
           eq(storeSceneVersions.sceneId, assignment.sceneId),
           isNull(storeSceneVersions.yankedAt),
-          ...(assignment.sceneVersion
-            ? [eq(storeSceneVersions.version, assignment.sceneVersion)]
-            : []),
+          ...(assignment.sceneVersion === null ||
+          assignment.sceneVersion === undefined
+            ? []
+            : [eq(storeSceneVersions.version, assignment.sceneVersion)]),
         ),
       )
       .orderBy(desc(storeSceneVersions.version))
@@ -285,24 +394,39 @@ export async function buildScenesPayloadForFrame(
     if (!versionRow) {
       return { error: "scene_version_missing" };
     }
+    // Last line of defence on the path that actually produces the bytes: the
+    // risk flags of the pinned version, not the scene's denormalized copy of
+    // the latest version's flags.
+    if (versionRow.riskFlags?.includes("shell")) {
+      return { error: "scene_not_allowed" };
+    }
     const extracted = extractScenesJson(versionRow.content);
     if (!extracted) {
       return { error: "invalid_scene_payload" };
     }
-    scenes.push(...extracted);
+    // Running bound on the raw scenes.json bytes, so 20 scenes at the store's
+    // 32 MiB per-zip ceiling can never all be held at once. The exact check on
+    // the serialized payload follows.
+    rawBytes += extracted.bytes;
+    if (rawBytes > maxScenesPayloadBytes) {
+      return { error: "scenes_payload_too_large" };
+    }
+    scenes.push(...extracted.scenes);
     sceneNames.push(assignment.sceneName);
   }
 
-  const checksum = createHash("sha256")
-    .update(JSON.stringify(scenes))
-    .digest("hex");
+  const serialized = JSON.stringify(scenes);
+  if (Buffer.byteLength(serialized, "utf8") > maxScenesPayloadBytes) {
+    return { error: "scenes_payload_too_large" };
+  }
+  const checksum = createHash("sha256").update(serialized).digest("hex");
   return { checksum, sceneNames, scenes };
 }
 
 // Store one batch of shipped logs, enforcing the per-frame retention cap in
 // the same transaction so a chatty device cannot grow unbounded.
 export async function storeFrameLogs(
-  db: ReturnType<typeof createDb>,
+  db: FramesDatabase,
   frameId: string,
   logs: { timestamp: Date; payload: unknown }[],
 ) {
@@ -323,22 +447,25 @@ export async function storeFrameLogs(
   if (batch.length === 0) {
     return 0;
   }
-  await db.insert(frameLogs).values(batch);
-  // Prune beyond the cap: cheap because frame_logs_frame_idx is (frame_id, id).
-  const [cutoff] = await db
-    .select({ id: frameLogs.id })
-    .from(frameLogs)
-    .where(eq(frameLogs.frameId, frameId))
-    .orderBy(desc(frameLogs.id))
-    .offset(maxLogsPerFrame)
-    .limit(1);
-  if (cutoff) {
-    await db
-      .delete(frameLogs)
-      .where(
-        and(eq(frameLogs.frameId, frameId), lt(frameLogs.id, cutoff.id + 1)),
-      );
-  }
+  await db.transaction(async (tx) => {
+    await tx.insert(frameLogs).values(batch);
+    // Prune beyond the cap: cheap because frame_logs_frame_idx is
+    // (frame_id, id).
+    const [cutoff] = await tx
+      .select({ id: frameLogs.id })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, frameId))
+      .orderBy(desc(frameLogs.id))
+      .offset(maxLogsPerFrame)
+      .limit(1);
+    if (cutoff) {
+      await tx
+        .delete(frameLogs)
+        .where(
+          and(eq(frameLogs.frameId, frameId), lt(frameLogs.id, cutoff.id + 1)),
+        );
+    }
+  });
   return batch.length;
 }
 
@@ -384,7 +511,7 @@ export function claimTokenExpiry(now = new Date()) {
 // use_count < max_uses, so a budget of N admits exactly N frames. used_at is
 // stamped when the budget is spent (single-use tokens: on their only use).
 export async function redeemClaimToken(
-  db: ReturnType<typeof createDb>,
+  db: FramesDatabase,
   claimToken: string,
   tokenHashFn: (secret: string) => string,
 ) {
@@ -437,15 +564,29 @@ export async function countActiveClaimTokens(
   return row?.count ?? 0;
 }
 
+// Frames revoked within this window still count toward the account quota.
+// Without it the quota is freely cycleable (revoke → enroll → revoke → …)
+// and the dead rows — with their command queues and retained logs — pile up
+// unboundedly. Actually deleting them belongs in db-cleanup.sh, which today
+// prunes logs by age but never dead frame rows.
+export const revokedFrameQuotaGraceMs = 24 * 60 * 60 * 1000;
+
 export async function countFramesForAccount(
-  db: ReturnType<typeof createDb>,
+  db: FramesDatabase,
   accountId: string,
 ) {
+  const graceCutoff = new Date(Date.now() - revokedFrameQuotaGraceMs);
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(frames)
     .where(
-      and(eq(frames.accountId, accountId), sql`${frames.status} <> 'revoked'`),
+      and(
+        eq(frames.accountId, accountId),
+        or(
+          sql`${frames.status} <> 'revoked'`,
+          gt(frames.updatedAt, graceCutoff),
+        ),
+      ),
     );
   return row?.count ?? 0;
 }

@@ -4,10 +4,11 @@ import type { frameSettingsLogicType } from './frameSettingsLogicType'
 import { loaders } from 'kea-loaders'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { downloadZip } from '../../../../utils/downloadJson'
+import type { FrameId } from '../../../../types'
 
 export const frameSettingsLogic = kea<frameSettingsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'FrameSettings', 'frameSettingsLogic']),
-  props({} as { frameId: number }),
+  props({} as { frameId: FrameId }),
   key((props) => props.frameId),
   loaders(({ props }) => ({
     buildCache: [

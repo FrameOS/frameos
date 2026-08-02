@@ -27,10 +27,15 @@ scripts/db-migrate.sh
 
 server_pid=""
 cleanup() {
-  if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
-    kill "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
-  fi
+  [ -n "$server_pid" ] || return 0
+  kill -0 "$server_pid" 2>/dev/null || return 0
+  # Kill the whole process group (negative pid): $server_pid is the subshell,
+  # and killing only that orphans `pnpm dev` and the next server it spawned,
+  # which keeps listening on port 3000 long after this script exits. The
+  # group exists because the job is started under `set -m` below.
+  kill -TERM -"$server_pid" 2>/dev/null || kill -TERM "$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
+  kill -KILL -"$server_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -39,8 +44,12 @@ if curl -sf "$CLOUD_URL/api/device/request?user_code=AAAAAAAA" >/dev/null 2>&1 |
   echo "Reusing running cloud server at $CLOUD_URL"
 else
   echo "Starting cloud dev server at $CLOUD_URL"
+  # `set -m` gives the background job its own process group, so cleanup can
+  # take down pnpm and the next server with it.
+  set -m
   (cd apps/auth-web && pnpm dev >/tmp/frameos-cloud-e2e-server.log 2>&1) &
   server_pid=$!
+  set +m
   for _ in $(seq 1 120); do
     if curl -s -o /dev/null "$CLOUD_URL"; then
       break

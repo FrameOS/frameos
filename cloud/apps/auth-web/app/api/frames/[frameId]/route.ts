@@ -26,10 +26,9 @@ export async function GET(
     return response;
   }
 
+  // frameForAccount screens the uuid shape itself, so a malformed id lands in
+  // the same "invisible, not forbidden" 404 as someone else's frame.
   const { frameId } = await params;
-  if (!/^[0-9a-f-]{36}$/i.test(frameId)) {
-    return jsonError("invalid_frame", 400);
-  }
   const frame = await frameForAccount(db, session.accountId, frameId);
   if (!frame) {
     return jsonError("invalid_frame", 404);

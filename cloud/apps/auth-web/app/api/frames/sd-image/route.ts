@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -35,9 +38,11 @@ interface ReleaseAsset {
 }
 
 export async function GET(request: NextRequest) {
-  // Large responses; keep the budget tight per account.
+  // Large responses. The IP limit catches shared-address abuse; the real
+  // budget is per account, because one logged-in user behind rotating
+  // addresses would otherwise get a fresh bucket every request.
   const limited = await rateLimitResponse(request, "frames:sd-image", {
-    limit: 10,
+    limit: 30,
     windowMs: 60 * 60 * 1000,
   });
   if (limited) {
@@ -46,6 +51,14 @@ export async function GET(request: NextRequest) {
   const session = await readSession();
   if (!session?.accountId) {
     return jsonError("login_required", 401);
+  }
+  const accountLimited = await identityRateLimitResponse(
+    session.accountId,
+    "frames:sd-image",
+    { limit: 10, windowMs: 60 * 60 * 1000 },
+  );
+  if (accountLimited) {
+    return accountLimited;
   }
 
   const platform = request.nextUrl.searchParams.get("platform") ?? "";

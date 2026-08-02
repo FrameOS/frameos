@@ -1,8 +1,9 @@
 import { getRouteBasePath } from './utils/getBasePath'
 import { frameAdminPath, isInFrameAdminMode } from './utils/frameAdmin'
 import { getFrameControlFrameId } from './utils/frameControlMode'
+import type { FrameId } from './utils/frameId'
 
-function frameUrl(id: number | string, tool?: string): string {
+function frameUrl(id: FrameId, tool?: string): string {
   return getRouteBasePath() + '/frames/' + id + (tool ? `?tool=${encodeURIComponent(tool)}` : '')
 }
 
@@ -19,10 +20,10 @@ export const urls = {
     isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/',
   frame: frameUrl,
   frameControl: frameControlUrl,
-  scenes: (frameId?: number | string, sceneId?: string) =>
+  scenes: (frameId?: FrameId, sceneId?: string) =>
     getRouteBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : ''),
   frameControlScenes: frameControlScenesUrl,
-  apps: (frameId?: number | string, sceneId?: string, nodeId?: string) =>
+  apps: (frameId?: FrameId, sceneId?: string, nodeId?: string) =>
     getRouteBasePath() +
     '/apps' +
     (frameId ? '/' + frameId : '') +

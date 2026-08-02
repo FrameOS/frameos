@@ -124,6 +124,11 @@ else:
   # resets it and reports the total when it catches up.
   var logsDroppedCounter*: Atomic[int]
 
+  # Same, for the cloud forwarding queue. A frame whose uplink is slower than
+  # it logs silently ships an incomplete picture otherwise; the hub client
+  # reports and resets this alongside its batches.
+  var cloudLogsDroppedCounter*: Atomic[int]
+
   proc log*(eventPayload: JsonNode) {.gcsafe.} =
     let eventName = if eventPayload.kind == JObject: eventPayload{"event"}.getStr("log") else: "log"
     let payload = SerializedLog(timestamp: epochTime(), event: eventName, line: $eventPayload)
@@ -131,7 +136,8 @@ else:
       atomicInc(logsDroppedCounter)
     discard logBroadcastChannel.trySend(payload)
     if cloudLogForwardingEnabled.load(moRelaxed):
-      discard cloudLogChannel.trySend(payload)
+      if not cloudLogChannel.trySend(payload):
+        atomicInc(cloudLogsDroppedCounter)
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})

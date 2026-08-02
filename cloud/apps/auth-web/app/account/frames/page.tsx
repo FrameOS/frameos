@@ -1,6 +1,10 @@
 import { asc, eq, sql } from "drizzle-orm";
 import Link from "next/link";
 import { createDb, frameLogs, frames } from "@frameos-cloud/db";
+import {
+  cloudFrameUrl,
+  cloudFramesUrl,
+} from "@frameos/cloud-frontend/src/routes";
 import { AddFramePanel } from "../../../src/components/AddFramePanel";
 import { FrameRowActions } from "../../../src/components/FrameRowActions";
 import { formatBytes, formatDateTime } from "../../../src/lib/format";
@@ -64,7 +68,7 @@ export default async function AccountFramesPage() {
             Frames enrolled directly with FrameOS Cloud. They run sandboxed
             interpreted scenes only — the cloud can never open a shell, write
             files, or reach your network. Manage scenes and settings in the{" "}
-            <Link href="/frames">frames workspace</Link>.
+            <Link href={cloudFramesUrl()}>frames workspace</Link>.
           </p>
         </div>
         <div className="inline-actions">
@@ -90,7 +94,10 @@ export default async function AccountFramesPage() {
             {visibleRows.map((frame) => (
               <tr key={frame.id}>
                 <td>
-                  <Link href={`/frames/${frame.id}`}>{frame.name}</Link>
+                  {/* The SPA mounts at /frames and its own frame route is /frames/:id,
+                      so the real path is doubled — build it from the SPA's own
+                      helper (cloud-frontend/src/routes.ts) instead of by hand. */}
+                  <Link href={cloudFrameUrl(frame.id)}>{frame.name}</Link>
                 </td>
                 <td>
                   {frame.status === "pending" ? (

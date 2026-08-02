@@ -17,7 +17,13 @@
  *
  * When enrolled and the firmware is built with esp_websocket_client, the
  * management WebSocket session (hello / challenge / auth / ready) runs with
- * the small allowlisted verb set; everything else is acked unknown_verb.
+ * the small allowlisted verb set. Documented verbs outside the esp32 profile
+ * (set_schedule, set_settings, get_logs, get_metrics,
+ * notify_update_available) are acked `unsupported_verb`; anything not in the
+ * protocol at all is acked `unknown_verb`. Redials use jittered exponential
+ * backoff (5 s → 5 min) and three consecutive authentication rejections
+ * demote the device back to standalone, keeping the device key and the last
+ * pushed scenes.
  */
 #pragma once
 
@@ -45,3 +51,10 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+
+/* Is this provider URL safe to carry the claim token, the bearer token and
+ * the management session? https:// always is; http:// (and the ws://
+ * downgrade it implies) only for localhost, `.local`/`.localhost` names and
+ * private-network literals, matching docs/cloud-link.md. On false, *reason
+ * (when non-NULL) is set to a short, user-facing explanation. */
+bool fos_cloud_url_transport_ok(const char *url, const char **reason);

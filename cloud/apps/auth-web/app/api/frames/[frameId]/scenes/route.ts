@@ -16,6 +16,7 @@ import {
   buildScenesPayloadForFrame,
   enqueueFrameCommand,
   frameForAccount,
+  pinnedSceneVersion,
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -24,6 +25,11 @@ import { readSession } from "../../../../../src/lib/session";
 export const runtime = "nodejs";
 
 const maxScenesPerFrame = 20;
+
+// buildScenesPayloadForFrame reports failure by return value; inside the
+// assignment transaction that has to become a throw or the delete+insert
+// commits anyway.
+class PayloadBuildError extends Error {}
 
 export async function GET(
   request: NextRequest,
@@ -79,9 +85,11 @@ export async function GET(
 // Replace the frame's scene assignments and enqueue a set_scenes push.
 // Body: {"scenes": [{"scene_id": "...", "scene_version"?: N}, …]} in render
 // order. Safety gates, in order: the frame must be active (owner confirmed),
-// every scene must be accessible to this account (own scene or public), and
-// shell-flagged scenes are refused outright — a cloud push may never carry
-// the store's "shell" risk class (the device refuses them independently).
+// every scene must be accessible to this account (own scene or public), the
+// pinned version must exist, and a version carrying the store's "shell" risk
+// class is refused outright — a cloud push may never carry it (the device
+// refuses them independently). The risk flags checked are the PINNED
+// version's, not store_scenes.risk_flags, which only mirrors the latest.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -128,10 +136,14 @@ export async function POST(
     if (typeof sceneId !== "string" || !/^[0-9a-f-]{36}$/i.test(sceneId)) {
       return jsonError("invalid_scenes", 400);
     }
+    // Versions start at 1; rejecting 0 and negatives here keeps "pinned" and
+    // "track the latest" unambiguous all the way down to the payload build.
     if (
       sceneVersion !== undefined &&
       sceneVersion !== null &&
-      (typeof sceneVersion !== "number" || !Number.isInteger(sceneVersion))
+      (typeof sceneVersion !== "number" ||
+        !Number.isInteger(sceneVersion) ||
+        sceneVersion < 1)
     ) {
       return jsonError("invalid_scenes", 400);
     }
@@ -149,7 +161,6 @@ export async function POST(
       .select({
         accountId: storeScenes.accountId,
         id: storeScenes.id,
-        riskFlags: storeScenes.riskFlags,
         status: storeScenes.status,
         visibility: storeScenes.visibility,
       })
@@ -161,7 +172,7 @@ export async function POST(
         ),
       );
     const byId = new Map(sceneRows.map((row) => [row.id, row]));
-    for (const { sceneId } of requested) {
+    for (const { sceneId, sceneVersion } of requested) {
       const scene = byId.get(sceneId);
       if (!scene || scene.status !== "active") {
         return jsonError("invalid_scene", 400, { scene_id: sceneId });
@@ -172,34 +183,59 @@ export async function POST(
       if (!accessible) {
         return jsonError("invalid_scene", 400, { scene_id: sceneId });
       }
-      if (scene.riskFlags?.includes("shell")) {
+      // The version this push actually pins — not store_scenes.risk_flags,
+      // which is only the latest version's flags. Otherwise "publish shell
+      // v1, publish clean v2, pin v1" walks straight through this gate.
+      const version = await pinnedSceneVersion(db, sceneId, sceneVersion);
+      if (!version) {
+        return jsonError("scene_version_missing", 400, {
+          scene_id: sceneId,
+          scene_version: sceneVersion,
+        });
+      }
+      if (version.riskFlags?.includes("shell")) {
         return jsonError("scene_not_allowed", 403, {
           reason: "shell",
           scene_id: sceneId,
+          scene_version: version.version,
         });
       }
     }
   }
 
-  const payload = await db.transaction(async (tx) => {
-    await tx
-      .delete(frameSceneAssignments)
-      .where(eq(frameSceneAssignments.frameId, frame.id));
-    if (requested.length > 0) {
-      await tx.insert(frameSceneAssignments).values(
-        requested.map((entry, position) => ({
-          frameId: frame.id,
-          position,
-          sceneId: entry.sceneId,
-          sceneVersion: entry.sceneVersion,
-        })),
-      );
+  // All-or-nothing: committing the new assignments while failing to enqueue
+  // the push would leave GET listing scenes the device was never sent, with
+  // assigned_checksum still describing the old set.
+  let payload: Exclude<
+    Awaited<ReturnType<typeof buildScenesPayloadForFrame>>,
+    { error: string }
+  >;
+  try {
+    payload = await db.transaction(async (tx) => {
+      await tx
+        .delete(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, frame.id));
+      if (requested.length > 0) {
+        await tx.insert(frameSceneAssignments).values(
+          requested.map((entry, position) => ({
+            frameId: frame.id,
+            position,
+            sceneId: entry.sceneId,
+            sceneVersion: entry.sceneVersion,
+          })),
+        );
+      }
+      const built = await buildScenesPayloadForFrame(tx, frame.id);
+      if ("error" in built) {
+        throw new PayloadBuildError(built.error);
+      }
+      return built;
+    });
+  } catch (error) {
+    if (error instanceof PayloadBuildError) {
+      return jsonError(error.message, 400);
     }
-    return buildScenesPayloadForFrame(tx as never, frame.id);
-  });
-
-  if ("error" in payload) {
-    return jsonError(payload.error, 400);
+    throw error;
   }
 
   await db

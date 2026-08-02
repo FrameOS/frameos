@@ -126,6 +126,24 @@ SESSION_SECRET=…         # MUST equal auth-web's, or browser sockets get 401
 FRAME_HUB_PORT=3100
 ```
 
+Optional, both with working defaults:
+
+```text
+FRAME_HUB_ALLOWED_ORIGINS=…  # browser WS upgrades; defaults to the three app
+                             # origins (FRAMEOS_CLOUD/ACCOUNT/SCENES_APP_URL).
+                             # WebSocket handshakes bypass CORS, so this is
+                             # what stops a foreign page opening a fleet socket
+                             # on a logged-in user's cookie. Set it explicitly
+                             # if the SPA is served from another origin.
+FRAME_HUB_MAX_CONNECTIONS=5000  # concurrent sockets before upgrades get 503
+```
+
+One nginx-specific trap: the hub rate-limits upgrades per client IP, and it
+derives that IP the same way auth-web does — via `RATE_LIMIT_TRUSTED_PROXY_COUNT`.
+Behind nginx that must count the proxy hops, otherwise every upgrade in the
+fleet collapses onto the proxy's own address and the whole fleet shares one
+budget.
+
 (`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed — the hub only ever compares
 hashed tokens.) Then `systemctl daemon-reload && systemctl enable --now
 frameos-cloud-frame-hub.service`.

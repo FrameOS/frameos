@@ -1,11 +1,12 @@
 import { apiFetch } from './apiFetch'
 import { frameAssetsApiPath } from './frameAssetsApi'
 import { secureToken } from './secureToken'
+import type { FrameId } from '../types'
 
 const DEFAULT_UPLOAD_CHUNK_SIZE = 512 * 1024
 
 interface UploadFileInChunksOptions {
-  frameId: number
+  frameId: FrameId
   suffix: string
   file: File
   path?: string

@@ -155,7 +155,18 @@ shred_remove_file() {
   fi
   target_size="$(wc -c < "$target" 2>/dev/null | tr -d ' \t' || echo 0)"
   if [ "${target_size:-0}" -gt 0 ] 2>/dev/null; then
-    dd if=/dev/zero of="$target" bs=1 count="$target_size" conv=notrunc 2>/dev/null || true
+    # Block-sized writes, then one final partial block: bs=1 for the whole
+    # file is a read+write syscall pair per byte, which visibly stalls a Pi
+    # Zero on a multi-megabyte setup JSON (scenes can be embedded). The byte
+    # count stays exact and conv=notrunc keeps the file length.
+    shred_blocks=$((target_size / 4096))
+    shred_tail=$((target_size % 4096))
+    if [ "$shred_blocks" -gt 0 ]; then
+      dd if=/dev/zero of="$target" bs=4096 count="$shred_blocks" conv=notrunc 2>/dev/null || true
+    fi
+    if [ "$shred_tail" -gt 0 ]; then
+      dd if=/dev/zero of="$target" bs=1 count="$shred_tail" seek="$((shred_blocks * 4096))" conv=notrunc 2>/dev/null || true
+    fi
   fi
   sync || true
   rm -f "$target" || true
@@ -175,6 +186,16 @@ json_fallback_sanitize() {
   printf '%s' "$1" | tr -d '"\\\\' | tr -d '[:cntrl:]'
 }
 
+# Does $CLOUD_FILE hold anything other than comments? Generic release images
+# ship it as an all-comments 4096-byte placeholder that stays on /boot
+# forever, so this has to be answered *before* any of the first-boot work
+# happens — see the bottom gate. Mirrors the parser in handle_cloud_config: a
+# line counts when it is not a comment and contains "=".
+cloud_config_has_key_lines() {
+  [ -f "$CLOUD_FILE" ] || return 1
+  tr -d '\\r' < "$CLOUD_FILE" | grep -v '^[[:space:]]*#' | grep -q '='
+}
+
 handle_cloud_config() {
   echo "Reading cloud personalization from $CLOUD_FILE"
   cloud_url=''
@@ -184,6 +205,8 @@ handle_cloud_config() {
   cloud_wifi_password=''
   cloud_recognized=0
   cloud_unknown_keys=''
+  cloud_enrolled=0
+  cloud_wifi_applied=0
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -212,8 +235,11 @@ handle_cloud_config() {
   # keys means "not personalized": log, leave the file untouched so it stays
   # editable (manually or by the in-browser image personalizer), write no
   # enrollment state, and exit successfully. The systemd unit's
-  # ConditionPathExists keeps firing on every boot while the file exists —
-  # harmless, since this branch only logs and returns 0.
+  # ConditionPathExists keeps firing on every boot while the file exists, but
+  # the bottom gate exits before run_setup when the file has no KEY=value
+  # lines, so an untouched placeholder costs nothing on later boots. (A
+  # typo'd file does reach this branch on every boot, on purpose: it warns
+  # until the user fixes it.)
   if [ "$cloud_recognized" -eq 0 ]; then
     if [ -n "$cloud_unknown_keys" ]; then
       # KEY=value lines exist but none is a key we know — almost certainly a
@@ -240,11 +266,17 @@ handle_cloud_config() {
         printf '%s\\n' '[connection]' 'id=frameos-cloud-wifi' 'type=wifi' 'autoconnect=true' ''
         printf '%s\\n' '[wifi]' 'mode=infrastructure'
         printf 'ssid=%s\\n\\n' "$(nm_keyfile_escape "$cloud_wifi_ssid")"
-        printf '%s\\n' '[wifi-security]' 'key-mgmt=wpa-psk'
-        printf 'psk=%s\\n\\n' "$(nm_keyfile_escape "$cloud_wifi_password")"
+        # Open network (no wifi_password): omit [wifi-security] entirely.
+        # key-mgmt=wpa-psk with an empty psk= is a connection NetworkManager
+        # can never activate.
+        if [ -n "$cloud_wifi_password" ]; then
+          printf '%s\\n' '[wifi-security]' 'key-mgmt=wpa-psk'
+          printf 'psk=%s\\n\\n' "$(nm_keyfile_escape "$cloud_wifi_password")"
+        fi
         printf '%s\\n' '[ipv4]' 'method=auto' '' '[ipv6]' 'method=auto'
       } > "$cloud_wifi_file"; then
         chmod 600 "$cloud_wifi_file" || true
+        cloud_wifi_applied=1
       else
         echo "Warning: failed to write cloud WiFi connection"
       fi
@@ -297,7 +329,34 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     fi
     umask "$old_umask"
     chmod 600 "$pending_file"
+    cloud_enrolled=1
     echo "Wrote cloud enrollment state to $pending_file"
+  fi
+
+  # Only shred once the secrets have actually been consumed. Enrollment
+  # redeems the (single-use) claim token, and a written WiFi keyfile consumes
+  # the password — after either there is nothing left to recover. When
+  # neither happened, the file is the user's only copy of what they typed
+  # (e.g. "claim_tokn=FRCT_..." next to a valid cloud_url: recognized keys
+  # exist, but no enrollment), so keep it and say why. /boot is mounted
+  # root-only (umask=077), so keeping it does not leak to other users.
+  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ]; then
+    echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
+    if [ -n "$cloud_unknown_keys" ]; then
+      echo "Warning: unrecognized keys:$cloud_unknown_keys"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+    fi
+    echo "Warning: fix $CLOUD_FILE and reboot to enroll"
+    return 0
+  fi
+
+  if [ "$cloud_enrolled" -eq 0 ] && [ -n "$cloud_unknown_keys" ]; then
+    # WiFi was applied but the enrollment keys were mistyped: shredding here
+    # would destroy the claim token the user meant to type.
+    echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+    echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
+    return 0
   fi
 
   # Shred, don't rename: the FAT boot partition is readable by anyone with
@@ -434,7 +493,14 @@ echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) wi
 return "$setup_status"
 }
 
-if [ ! -f "$SETUP_FILE" ] && [ ! -f "$CLOUD_FILE" ]; then
+# Nothing to do: no setup JSON, and either no cloud personalization file at
+# all or only the untouched all-comments placeholder that generic release
+# images ship. Exit before run_setup so a placeholder-only image does no work
+# on any boot: no "mount -o remount,rw /" (which is never undone), no line
+# appended to the log on the FAT boot partition, and no reinstalling
+# /boot/frameos-hostname and /boot/frameos-wifi.nmconnection over /etc (which
+# would clobber on-device edits every boot).
+if [ ! -f "$SETUP_FILE" ] && ! cloud_config_has_key_lines; then
   exit 0
 fi
 

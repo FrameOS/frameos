@@ -18,12 +18,28 @@ import { SdImageBuilder } from "./SdImageBuilder";
 const openParam = "add";
 const openValue = "frame";
 
+// Mirrors claimTokenTtlMs in src/lib/frames.ts, which cannot be imported here:
+// that module pulls in the database client. Copy only, used for wording.
+const claimTokenTtlHours = 24;
+
+// Known error codes from POST /api/frames/claim-tokens. "Could not prepare the
+// enrollment" plus a raw code told the user nothing, and the old hint ("check
+// whether you hit the frame limit") was actively wrong for a claim-code quota.
+const mintErrorMessages: Record<string, string> = {
+  claim_token_quota_exceeded: `You have too many unused claim codes. Use one, or wait for them to expire (within ${claimTokenTtlHours} hours), then try again.`,
+  frame_quota_exceeded:
+    "You have reached your frame limit — remove a frame before adding another.",
+  login_required: "Your session expired. Sign in again to add a frame.",
+};
+
 // "Add frame": four enrollment paths (install script, SD image, link code,
-// ESP32 USB flashing). Claim codes are plumbing, not UX: a single-use code
-// is minted automatically when the panel opens and embedded where it is
-// needed (the install command); the SD builder and the ESP32 flasher mint
-// their own. The server stores only hashes; every enrolled frame appears as
-// pending until the owner confirms it.
+// ESP32 USB flashing). Claim codes are plumbing, not UX, but they are also a
+// capped resource (see maxClaimTokensPerAccount) that nothing can revoke once
+// minted — so nothing is minted until the user actually asks for a command.
+// Opening and closing the panel, or paging through it with Back/Forward,
+// costs zero codes; the SD builder and the ESP32 flasher likewise mint their
+// own on first use. The server stores only hashes; every enrolled frame
+// appears as pending until the owner confirms it.
 export function AddFramePanel() {
   const router = useRouter();
   const pathname = usePathname();
@@ -40,15 +56,20 @@ export function AddFramePanel() {
   const [multiUseExpiresAt, setMultiUseExpiresAt] = useState<
     string | undefined
   >();
-  const mintedRef = useRef(false);
+  const [minting, setMinting] = useState(false);
+  const abortRef = useRef<AbortController | undefined>(undefined);
+  const cancelledRef = useRef(false);
 
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
       : "https://cloud.frameos.net";
-  const installCommand = claimToken
-    ? `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${claimToken} sh`
-    : undefined;
+  const installCommandFor = (token: string) =>
+    `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${token} sh`;
+  const installCommand = claimToken ? installCommandFor(claimToken) : undefined;
+  // Shown before a code exists, so the command is not a mystery: same shape,
+  // with the code itself masked until it is minted.
+  const maskedInstallCommand = installCommandFor("<claim code>");
 
   function setOpen(next: boolean) {
     const params = new URLSearchParams(searchParams.toString());
@@ -61,45 +82,66 @@ export function AddFramePanel() {
     router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
-  // Mint the panel's single-use code as soon as it opens, so every command
-  // shown below just works without the user handling codes. Closing discards
-  // it (it may have been spent by an install), so reopening — including via
-  // Back/Forward — mints a fresh one. The ref guards React strict-mode
-  // double effects from minting twice.
+  // Closing the panel discards the single-use code — an install may already
+  // have spent it — and cancels a mint still in flight, so a slow response
+  // can never land on top of a newer token.
   useEffect(() => {
     if (!open) {
-      mintedRef.current = false;
+      return;
+    }
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+      abortRef.current?.abort();
+      abortRef.current = undefined;
       setClaimToken(undefined);
       setError(undefined);
-      return;
-    }
-    if (mintedRef.current) {
-      return;
-    }
-    mintedRef.current = true;
-    void (async () => {
-      try {
-        const response = await fetch("/api/frames/claim-tokens", {
-          body: JSON.stringify({}),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        });
-        const data = (await response.json().catch(() => ({}))) as {
-          claim_token?: string;
-          error?: string;
-        };
-        if (!response.ok || !data.claim_token) {
-          setError(data.error ?? "claim_token_failed");
-          mintedRef.current = false;
-          return;
-        }
-        setClaimToken(data.claim_token);
-      } catch {
-        setError("network_error");
-        mintedRef.current = false;
-      }
-    })();
+      setInstallCopied(false);
+    };
   }, [open]);
+
+  // Minted on demand, when the user asks for the install command. Nothing is
+  // revocable once minted, so an unused code sits against the account's quota
+  // until it expires.
+  async function generateInstallCommand() {
+    if (claimToken || minting) {
+      return;
+    }
+    setMinting(true);
+    setError(undefined);
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+    try {
+      const response = await fetch("/api/frames/claim-tokens", {
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+        signal: controller.signal,
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        claim_token?: string;
+        error?: string;
+      };
+      if (controller.signal.aborted || cancelledRef.current) {
+        return;
+      }
+      if (!response.ok || !data.claim_token) {
+        setError(data.error ?? "claim_token_failed");
+        return;
+      }
+      setClaimToken(data.claim_token);
+    } catch {
+      if (!controller.signal.aborted && !cancelledRef.current) {
+        setError("network_error");
+      }
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = undefined;
+      }
+      setMinting(false);
+    }
+  }
 
   async function copyText(text: string, setFlag: (value: boolean) => void) {
     await navigator.clipboard.writeText(text);
@@ -162,6 +204,7 @@ export function AddFramePanel() {
         </div>
         <div className="inline-actions">
           <input
+            aria-label="Frame name (optional)"
             className="input"
             maxLength={256}
             onChange={(event) => setName(event.target.value)}
@@ -178,9 +221,9 @@ export function AddFramePanel() {
         </div>
       </div>
       {error ? (
-        <p className="copy" style={{ color: "var(--warning)" }}>
-          Could not prepare the enrollment ({error}) — reload and try again,
-          or check whether you hit the frame limit.
+        <p className="copy" role="alert" style={{ color: "var(--warning)" }}>
+          {mintErrorMessages[error] ??
+            `Could not prepare the enrollment (${error}) — try again in a moment.`}
         </p>
       ) : null}
 
@@ -196,21 +239,36 @@ export function AddFramePanel() {
             a few questions about your display, and links the frame here:
           </p>
           <pre className="copy" style={{ overflowX: "auto", userSelect: "all" }}>
-            {installCommand ?? "Preparing the command…"}
+            {installCommand ?? maskedInstallCommand}
           </pre>
-          <button
-            className="button button--subtle button--small"
-            disabled={!installCommand}
-            onClick={() =>
-              installCommand
-                ? void copyText(installCommand, setInstallCopied)
-                : undefined
-            }
-            type="button"
-          >
-            <Copy aria-hidden size={16} />
-            {installCopied ? "Copied" : "Copy command"}
-          </button>
+          {installCommand ? (
+            <button
+              className="button button--subtle button--small"
+              onClick={() => void copyText(installCommand, setInstallCopied)}
+              type="button"
+            >
+              <Copy aria-hidden size={16} />
+              {installCopied ? "Copied" : "Copy command"}
+            </button>
+          ) : (
+            <>
+              <button
+                className="button button--subtle button--small"
+                disabled={minting}
+                onClick={() => void generateInstallCommand()}
+                type="button"
+              >
+                <TerminalSquare aria-hidden size={16} />
+                {minting ? "Creating a claim code…" : "Generate command"}
+              </button>
+              <p className="copy">
+                Generating fills in a single-use claim code. Codes expire
+                within {claimTokenTtlHours} hours and an account can only hold
+                a few unused ones at a time, so we create one only when you
+                ask.
+              </p>
+            </>
+          )}
         </div>
         <div className="card">
           <h4>

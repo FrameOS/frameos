@@ -33,7 +33,7 @@ import {
   frameStatusDescription,
 } from '../../decorators/frame'
 import { urls } from '../../urls'
-import { FrameScene, FrameType } from '../../types'
+import { FrameScene, FrameType, FrameId } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -128,7 +128,7 @@ function FrameTree(): JSX.Element {
   const { closeSecondarySidebar, focusFrame, openFrameChangeDrawer, openFrameTool, selectFrame } =
     useActions(workspaceLogic)
 
-  const focusFrameAfterDrawerUpdate = (frameId: number): void => {
+  const focusFrameAfterDrawerUpdate = (frameId: FrameId): void => {
     focusFrame(frameId)
     if (typeof window === 'undefined') {
       return
@@ -140,7 +140,7 @@ function FrameTree(): JSX.Element {
     })
   }
 
-  const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
+  const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: FrameId): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return
     }
@@ -158,7 +158,7 @@ function FrameTree(): JSX.Element {
     }
   }
 
-  const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
+  const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: FrameId): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return
     }
@@ -246,8 +246,8 @@ function FrameTreeRow({
   selected: boolean
   archived?: boolean
   inactive?: boolean
-  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
-  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
 }): JSX.Element {
   const frameName = frame.name || frameHost(frame)
 
@@ -318,9 +318,9 @@ function FrameTreeGroup({
 }: {
   title: string
   frames: FrameType[]
-  selectedFrameId: number | null
-  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
-  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  selectedFrameId: FrameId | null
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
   expanded?: boolean
   onToggle?: () => void
   inactive?: boolean
@@ -821,7 +821,7 @@ function resolveSceneControlSelection(
 function SceneControlPanelContent({
   sceneControlSelection,
 }: {
-  sceneControlSelection: { frameId: number; sceneId: string }
+  sceneControlSelection: { frameId: FrameId; sceneId: string }
 }): JSX.Element | null {
   const { frames } = useValues(framesModel)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)

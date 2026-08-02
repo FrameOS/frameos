@@ -285,11 +285,16 @@ jobs:
             release-assets/*.metadata.json
           if-no-files-found: error
 
-  # Generic ESP32 firmware (no baked credentials): provisioned after flashing
-  # via the captive portal, the serial console, or the cloud browser flasher
-  # (cloud_url + claim_token over the USB API — docs/cloud-frames.md).
+  # Prebuilt ESP32 firmware with no baked credentials: WiFi and cloud config
+  # are provisioned after flashing via the captive portal, the serial console,
+  # or the cloud browser flasher (cloud_url + claim_token over the USB API —
+  # docs/cloud-frames.md). The panel driver is NOT runtime-selectable: it is
+  # generated at compile time from FRAMEOS_SELECTED_PANEL (see
+  # embedded/esp32/components/frameos_display/CMakeLists.txt), so this binary
+  # drives the Waveshare 7.5" V2 panel only — hence the epd7in5v2 in its name.
+  # Other panels need a build from source.
   build-esp32-generic-firmware:
-    name: Build generic ESP32 firmware
+    name: Build ESP32 firmware (EPD 7in5 V2)
     needs: [update-versions]
     runs-on: ubuntu-latest
     steps:
@@ -301,30 +306,37 @@ jobs:
       - name: Build ESP32 CI Docker image
         run: docker build --target esp32-ci -t frameos-esp32-ci .
 
-      - name: Build generic firmware
+      - name: Build firmware
         timeout-minutes: 60
         env:
           DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
         run: |
           set -euo pipefail
           mkdir -p release-assets
+          # DOCKER_VERSION is passed into the container instead of spliced into
+          # the inner single-quoted script, so the value is never re-parsed by
+          # the container's shell.
           docker run --rm \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e DOCKER_VERSION \
             -v "$PWD/release-assets:/release-assets" \
             frameos-esp32-ci \
             bash -lc '
               set -euo pipefail
               bash embedded/esp32/ci_build_image.sh
               cp embedded/esp32/build-ci/merged-binary.bin \
-                "/release-assets/frameos-'"$DOCKER_VERSION"'-esp32-s3-generic.bin"
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-epd7in5v2.bin"
             '
           ls -lh release-assets/
 
-      - name: Upload generic ESP32 firmware
+      - name: Upload ESP32 firmware
         uses: actions/upload-artifact@v4
         with:
-          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
-          path: release-assets/*-esp32-s3-generic.bin
+          # The github-release job downloads artifacts by the
+          # frameos-<version>-* name pattern, so this name must keep that
+          # prefix.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-epd7in5v2
+          path: release-assets/*-esp32-s3-epd7in5v2.bin
           if-no-files-found: error
 
   build:

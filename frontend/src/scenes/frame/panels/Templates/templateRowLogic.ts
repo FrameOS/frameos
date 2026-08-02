@@ -1,5 +1,5 @@
 import { actions, connect, kea, key, path, props, reducers, selectors, listeners } from 'kea'
-import { FrameScene, RepositoryType, SceneNodeData, TemplateType } from '../../../../types'
+import { FrameScene, RepositoryType, SceneNodeData, TemplateType, FrameId } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { framesModel } from '../../../../models/framesModel'
 import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
@@ -9,7 +9,7 @@ import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import type { templateRowLogicType } from './templateRowLogicType'
 
 export interface TemplateRowLogicProps {
-  frameId?: number
+  frameId?: FrameId
   template: TemplateType
   repository?: RepositoryType
 }
@@ -48,7 +48,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
     ],
     frameMode: [
       (s) => [s.frames, (_, props: TemplateRowLogicProps) => props.frameId],
-      (frames, frameId: number | undefined) => (frameId ? frames[frameId]?.mode : undefined),
+      (frames, frameId: FrameId | undefined) => (frameId ? frames[frameId]?.mode : undefined),
     ],
     trySceneConfig: [
       (s) => [s.scenes, s.frameMode],

@@ -6,11 +6,12 @@ import { frameLogic } from '../../frameLogic'
 import { SourceError } from '../EditApp/editAppLogic'
 import { editor, MarkerSeverity } from 'monaco-editor'
 import { apiFetch } from '../../../../utils/apiFetch'
+import type { FrameId } from '../../../../types'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
 export interface SceneSourceLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

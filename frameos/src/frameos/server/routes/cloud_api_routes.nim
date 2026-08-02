@@ -337,6 +337,11 @@ proc addCloudApiRoutes*(router: var Router) =
         state["verification_uri_complete"] = jsonOrNull(startResponse{"verification_uri_complete"})
         state["interval_seconds"] = %startResponse{"interval"}.getInt(5)
         state["scope"] = %scopes.join(" ")
+        # Remember what THIS device asked for. The poll response below reports
+        # what the provider says it granted, and managed mode — the one scope
+        # that hands a provider remote control of the frame — is only entered
+        # when both agree (managedEnrollmentRequested).
+        state["requested_scope"] = %scopes.join(" ")
         let expiresIn = startResponse{"expires_in"}.getInt(0)
         if expiresIn > 0:
           state["expires_epoch"] = %int(epochTime() + float(expiresIn))
@@ -408,7 +413,13 @@ proc addCloudApiRoutes*(router: var Router) =
           # cannot hold cloudLinkLock — and with it every cloud route — for
           # minutes.
           syncAccessToken = accessToken
-          grantedManagedScope = linkHasScope(state, "frame:managed")
+          # Granted AND locally requested: a provider cannot upgrade a
+          # backups-only link into cloud-managed mode by claiming the scope.
+          grantedManagedScope = managedEnrollmentRequested(state)
+          if linkHasScope(state, "frame:managed") and not grantedManagedScope:
+            log(%*{"event": "cloud:enroll:refused", "reason": "scope_not_requested",
+                   "message": "The provider granted frame:managed but this frame " &
+                              "never asked for it; not entering managed mode."})
         else:
           resetLinkState(state, pollError = (if error.len > 0: error else: "unexpected status " & $pollCode))
           saveCloudLinkState(state)

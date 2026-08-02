@@ -344,24 +344,40 @@ else:
       if b[0] == 127: return true                             # loopback
       if b[0] == 169 and b[1] == 254: return true             # link-local
       if b[0] == 172 and (b[1] and 0b1111_0000'u8) == 16: return true # 172.16/12
+      if b[0] == 192 and b[1] == 0 and b[2] == 0: return true  # 192.0.0.0/24 IETF protocol assignments
       if b[0] == 192 and b[1] == 168: return true             # 192.168/16
-      if b == [255'u8, 255, 255, 255]: return true            # broadcast
+      if b[0] == 198 and (b[1] and 0b1111_1110'u8) == 18: return true # 198.18/15 benchmarking
+      if (b[0] and 0b1111_0000'u8) == 224: return true        # 224/4 multicast
+      if b[0] >= 240: return true                             # 240/4 reserved, incl. 255.255.255.255
       false
     of IpAddressFamily.IPv6:
       let b = ip.address_v6
-      # IPv4-mapped (::ffff:a.b.c.d): classify the embedded IPv4.
-      var mapped = true
+      # ::ffff:a.b.c.d (IPv4-mapped) and ::a.b.c.d (the deprecated
+      # IPv4-compatible form, which has no ffff marker at all): both carry an
+      # IPv4 address in the low 32 bits, so classify that instead. Missing the
+      # second form let ::127.0.0.1 through as "public".
+      var zeroPrefix = true
       for i in 0 .. 9:
-        if b[i] != 0: mapped = false
-      if mapped and b[10] == 0xff and b[11] == 0xff:
-        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
-      # :: and ::1
+        if b[i] != 0: zeroPrefix = false
+      let embedsIPv4 = zeroPrefix and
+        ((b[10] == 0xff and b[11] == 0xff) or (b[10] == 0 and b[11] == 0))
+      # :: and ::1 first: they are the unspecified/loopback addresses, not an
+      # embedded 0.0.0.x.
       var allZero = true
       for i in 0 .. 14:
         if b[i] != 0: allZero = false
       if allZero and b[15] <= 1: return true
+      if embedsIPv4:
+        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
+      # 64:ff9b::/96 — the well-known NAT64 prefix, another wrapper around an
+      # IPv4 destination.
+      if b[0] == 0 and b[1] == 0x64 and b[2] == 0xff and b[3] == 0x9b and
+          b[4] == 0 and b[5] == 0 and b[6] == 0 and b[7] == 0 and
+          b[8] == 0 and b[9] == 0 and b[10] == 0 and b[11] == 0:
+        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
       if (b[0] and 0xfe) == 0xfc: return true                 # fc00::/7 ULA
       if b[0] == 0xfe and (b[1] and 0xc0) == 0x80: return true # fe80::/10 link-local
+      if b[0] == 0xff: return true                            # ff00::/8 multicast
       false
 
   proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
@@ -446,6 +462,31 @@ else:
         raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
       if maxSeconds > 0 and epochTime() > startedAt + maxSeconds:
         raise newException(IOError, &"HTTP response exceeded {maxSeconds} seconds")
+
+  # Headers that authenticate the caller to one specific origin. A redirect to
+  # a different origin must not carry them: an open redirect (or a compromised
+  # first hop) would otherwise hand a bearer token or session cookie to
+  # whatever host the Location header names.
+  const CrossOriginHeaders = ["authorization", "proxy-authorization", "cookie"]
+
+  proc effectiveHttpPort(uri: Uri): string =
+    if uri.port.len > 0: uri.port
+    elif uri.scheme.toLowerAscii() == "https": "443"
+    else: "80"
+
+  proc sameHttpOrigin(a, b: Uri): bool =
+    a.scheme.toLowerAscii() == b.scheme.toLowerAscii() and
+      a.hostname.toLowerAscii() == b.hostname.toLowerAscii() and
+      effectiveHttpPort(a) == effectiveHttpPort(b)
+
+  proc withoutCrossOriginHeaders(headers: HttpHeaders): HttpHeaders =
+    result = newHttpHeaders()
+    if headers == nil:
+      return
+    for key, value in headers:
+      if key.toLowerAscii() in CrossOriginHeaders:
+        continue
+      result.add(key, value)
 
   proc validateHttpUrl(url: string) =
     let parsed = parseUri(url)
@@ -628,16 +669,20 @@ else:
     var currentUrl = url
     var currentMethod = httpMethod
     var currentBody = body
+    var currentHeaders = headers
     for _ in 0 .. max(maxRedirects, 0):
-      result = singleBoundedRequest(currentUrl, currentMethod, currentBody, headers,
+      result = singleBoundedRequest(currentUrl, currentMethod, currentBody, currentHeaders,
                                     timeoutMs, maxBytes, deadline)
       if result.code notin [301, 302, 303, 307, 308]:
         return result
       let location = headerValue(result.headers, "Location")
       if location.len == 0:
         return result
-      currentUrl = $combine(parseUri(currentUrl), parseUri(location))
+      let previousUri = parseUri(currentUrl)
+      currentUrl = $combine(previousUri, parseUri(location))
       validateHttpUrl(currentUrl)
+      if not sameHttpOrigin(previousUri, parseUri(currentUrl)):
+        currentHeaders = withoutCrossOriginHeaders(currentHeaders)
       if result.code in [301, 302, 303] and currentMethod notin {HttpGet, HttpHead}:
         currentMethod = HttpGet
         currentBody = ""

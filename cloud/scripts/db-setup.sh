@@ -17,10 +17,24 @@ if [ ! -s "$pgdata/PG_VERSION" ]; then
   initdb -D "$pgdata" --auth=trust --username=frameos_cloud >/dev/null
 fi
 
+# A listener on the port is not proof that it is *our* Postgres: an unrelated
+# server on 55432 would silently receive the migrations below. Only accept one
+# that answers as the frameos_cloud role.
+# PGCONNECT_TIMEOUT: a listener that speaks something other than the Postgres
+# wire protocol would otherwise hang the handshake indefinitely.
+is_frameos_cloud_server() {
+  [ "$(PGCONNECT_TIMEOUT=5 psql -h 127.0.0.1 -p "$pgport" -U frameos_cloud -d postgres -tAc 'select 1' 2>/dev/null || true)" = "1" ]
+}
+
 if pg_ctl -D "$pgdata" status >/dev/null 2>&1; then
   echo "Postgres is already running"
 elif pg_isready -q -h 127.0.0.1 -p "$pgport"; then
-  echo "Postgres is already listening on 127.0.0.1:$pgport (e.g. the mprocs postgres proc or a sibling checkout)"
+  if ! is_frameos_cloud_server; then
+    echo "Something is listening on 127.0.0.1:$pgport, but it does not answer as the frameos_cloud role." >&2
+    echo "Refusing to migrate against it. Stop whatever owns the port, or set FRAMEOS_CLOUD_PGPORT." >&2
+    exit 1
+  fi
+  echo "Postgres is already listening on 127.0.0.1:$pgport as frameos_cloud (e.g. the mprocs postgres proc or a sibling checkout)"
 else
   echo "Starting Postgres on 127.0.0.1:$pgport"
   pg_ctl -D "$pgdata" -l "$pgroot/postgres.log" -o "-p $pgport" start >/dev/null

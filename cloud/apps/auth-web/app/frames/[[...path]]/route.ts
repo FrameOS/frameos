@@ -30,11 +30,22 @@ export async function GET() {
   // the frame hub on the same origin, so no override is needed. In dev the
   // hub is a separate port — FRAME_HUB_PUBLIC_URL (e.g. http://localhost:3100)
   // tells the SPA where its fleet websocket lives.
+  // The anchor is a named token, not a formatted line, so reindenting the
+  // shell can't silently turn this into a no-op — and if it goes missing
+  // entirely we say so instead of serving a SPA whose websocket points nowhere.
+  const wsOriginAnchor = "//__FRAMEOS_CLOUD_WS_ORIGIN__";
   const hubOrigin = process.env.FRAME_HUB_PUBLIC_URL?.replace(/\/$/, "");
   if (hubOrigin) {
+    if (!html.includes(wsOriginAnchor)) {
+      return new NextResponse(
+        `FRAME_HUB_PUBLIC_URL is set but the frames app shell has no ${wsOriginAnchor} anchor, ` +
+          "so the fleet websocket origin cannot be injected. Rebuild cloud-frontend.",
+        { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
+      );
+    }
     html = html.replace(
-      "cloudMode: true,",
-      `cloudMode: true,\n        cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,
+      wsOriginAnchor,
+      `cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,
     );
   }
 

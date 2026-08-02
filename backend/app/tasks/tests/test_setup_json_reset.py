@@ -44,6 +44,10 @@ class Sandbox:
         self.script.chmod(0o755)
         # The script only takes the no-sudo branch when `id -u` returns 0.
         self._write_bin("id", "#!/bin/sh\necho 0\n")
+        # Record every `mount` invocation instead of touching the host's real
+        # mounts, so tests can assert the read-write remount never happens.
+        self.mount_log = tmp_path / "mount.log"
+        self._write_bin("mount", f'#!/bin/sh\nprintf \'%s\\n\' "$*" >> {self.mount_log}\nexit 0\n')
 
     def _write_bin(self, name: str, content: str) -> None:
         path = self.bin / name
@@ -96,6 +100,24 @@ class Sandbox:
     def cloud_wifi_file(self) -> Path:
         return self.etc / "NetworkManager" / "system-connections" / "frameos-cloud-wifi.nmconnection"
 
+    @property
+    def log_file(self) -> Path:
+        return self.boot / "frameos-setup-reset.log"
+
+    def mount_calls(self) -> str:
+        return self.mount_log.read_text(encoding="utf-8") if self.mount_log.exists() else ""
+
+    def shadow_link(self, path: Path) -> Path:
+        """A second hard link to `path`, so the inode survives the unlink.
+
+        shred_remove_file zeroes in place (conv=notrunc) and then unlinks; the
+        shadow link keeps the inode readable afterwards, which is the only way
+        to prove the bytes were actually overwritten and not merely `rm`ed.
+        """
+        shadow = self.root / f"shadow-{path.name}"
+        os.link(path, shadow)
+        return shadow
+
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
@@ -114,6 +136,8 @@ def test_cloud_config_written_to_pending_enroll_state_and_shredded(tmp_path):
         "\r\n"
         "unknown_key=ignored\r\n"
     )
+    shadow = sandbox.shadow_link(cloud_file)
+    original_size = cloud_file.stat().st_size
 
     result = sandbox.run()
 
@@ -126,8 +150,10 @@ def test_cloud_config_written_to_pending_enroll_state_and_shredded(tmp_path):
     }
     assert _mode(sandbox.pending_file) == 0o600
     assert _mode(sandbox.pending_file.parent) == 0o700
-    # Personalization file is gone (shredded, not renamed).
+    # Personalization file is gone (shredded, not renamed) — and shredded
+    # really means zeroed: the surviving hard link holds no plaintext.
     assert not cloud_file.exists()
+    assert shadow.read_bytes() == b"\0" * original_size
     assert not list(sandbox.boot.glob("setup-done-*"))
     # WiFi keyfile mirrors the frameos-wifi handling: autoconnect + wpa-psk.
     wifi = sandbox.cloud_wifi_file.read_text(encoding="utf-8")
@@ -203,7 +229,11 @@ def test_setup_json_is_shredded_after_successful_setup(tmp_path):
     sandbox = Sandbox(tmp_path)
     argv_log = sandbox.add_fake_frameos(exit_status=0)
     setup_file = sandbox.boot / "frameos-setup.json"
-    setup_file.write_text('{"network": {"wifiPassword": "super-secret"}}', encoding="utf-8")
+    # Larger than one shred block (4096), with a partial final block, so both
+    # dd passes are exercised on a payload holding a real secret.
+    secret_json = '{"network": {"wifiPassword": "super-secret"}}'
+    setup_file.write_text(secret_json + " " * (5000 - len(secret_json)), encoding="utf-8")
+    shadow = sandbox.shadow_link(setup_file)
 
     result = sandbox.run()
 
@@ -214,6 +244,9 @@ def test_setup_json_is_shredded_after_successful_setup(tmp_path):
     ]
     # Shredded and removed — never renamed to setup-done-*.json.
     assert not setup_file.exists()
+    # Zeroed, not just unlinked: the hard link that survived the unlink still
+    # points at the same inode, and every byte of it is 0x00.
+    assert shadow.read_bytes() == b"\0" * 5000
     assert not list(sandbox.boot.glob("setup-done-*"))
     assert (sandbox.boot / "frameos-setup-reset.log").exists()
 
@@ -286,6 +319,15 @@ def test_placeholder_cloud_file_is_a_no_op_and_left_in_place(tmp_path):
     placeholder = render_cloud_config_placeholder()
     cloud_file = sandbox.boot / "frameos-cloud.txt"
     cloud_file.write_bytes(placeholder)
+    # Generic release images keep this file forever, so every boot would
+    # otherwise redo the preamble: remount rw, append to the log, reinstall
+    # /etc from /boot.
+    (sandbox.boot / "frameos-hostname").write_text("from-boot\n", encoding="utf-8")
+    (sandbox.etc / "hostname").write_text("edited-on-device\n", encoding="utf-8")
+    wifi_dir = sandbox.etc / "NetworkManager" / "system-connections"
+    wifi_dir.mkdir(parents=True)
+    (sandbox.boot / "frameos-wifi.nmconnection").write_text("[connection]\nid=from-boot\n", encoding="utf-8")
+    (wifi_dir / "frameos-wifi.nmconnection").write_text("[connection]\nid=edited-on-device\n", encoding="utf-8")
 
     result = sandbox.run()
 
@@ -294,7 +336,61 @@ def test_placeholder_cloud_file_is_a_no_op_and_left_in_place(tmp_path):
     assert cloud_file.read_bytes() == placeholder
     assert not sandbox.pending_file.exists()
     assert not sandbox.cloud_wifi_file.exists()
+    # And no work at all: the placeholder is detected before the preamble.
+    assert result.stdout == ""
+    assert "remount" not in sandbox.mount_calls()
+    assert not sandbox.log_file.exists()
+    assert (sandbox.etc / "hostname").read_text(encoding="utf-8") == "edited-on-device\n"
+    assert "edited-on-device" in (wifi_dir / "frameos-wifi.nmconnection").read_text(encoding="utf-8")
+
+
+def test_placeholder_cloud_file_is_logged_when_setup_json_also_runs(tmp_path):
+    # With a setup JSON present the script runs anyway, and then the untouched
+    # placeholder is explained in the log rather than silently skipped.
+    sandbox = Sandbox(tmp_path)
+    sandbox.add_fake_frameos(exit_status=0)
+    (sandbox.boot / "frameos-setup.json").write_text("{}", encoding="utf-8")
+    cloud_file = sandbox.boot / "frameos-cloud.txt"
+    cloud_file.write_bytes(render_cloud_config_placeholder())
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "placeholder or comments only" in result.stdout
+    assert cloud_file.exists()
+
+
+def test_typo_in_claim_token_key_never_shreds_the_users_only_copy(tmp_path):
+    # A valid cloud_url plus a misspelled claim_token: recognized keys exist,
+    # so the "zero recognized keys" guard does not fire — but no enrollment
+    # happened, and shredding here would destroy the claim token for good.
+    sandbox = Sandbox(tmp_path)
+    content = "cloud_url=https://cloud.example.com\nclaim_tokn=FRCT-typo\n"
+    cloud_file = sandbox.write_cloud_file(content)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert cloud_file.read_text(encoding="utf-8") == content
+    assert not sandbox.pending_file.exists()
+    assert "nothing was applied" in result.stdout
+    assert "claim_tokn" in result.stdout
+
+
+def test_open_wifi_network_omits_the_security_section(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    sandbox.write_cloud_file("claim_token=FRCT-open\nwifi_ssid=Open Cafe\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    wifi = sandbox.cloud_wifi_file.read_text(encoding="utf-8")
+    assert "ssid=Open Cafe" in wifi
+    # key-mgmt=wpa-psk with an empty psk= can never activate.
+    assert "[wifi-security]" not in wifi
+    assert "key-mgmt" not in wifi
+    assert "psk=" not in wifi
+    assert "[ipv4]" in wifi
 
 
 def test_placeholder_cloud_file_with_real_keys_is_processed_and_shredded(tmp_path):

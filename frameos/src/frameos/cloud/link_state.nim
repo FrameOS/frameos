@@ -105,7 +105,8 @@ proc resetLinkState*(state: JsonNode, pollError: string = "") =
   let providerUrl = providerUrlFromState(state)
   for key in ["device_code", "user_code", "verification_uri", "verification_uri_complete",
               "expires_epoch", "access_token", "token_reference", "linked_client_id",
-              "account_id", "account_email", "scope", "poll_error", "local_origin",
+              "account_id", "account_email", "scope", "requested_scope",
+              "poll_error", "local_origin",
               "connected_at", "last_inventory_sync_at", "login_states",
               # Cloud-managed mode (docs/cloud-frames.md): leaving managed mode
               # or resetting the link always clears these too.
@@ -131,6 +132,40 @@ proc linkHasScope*(state: JsonNode, scope: string): bool =
 proc linkScopes*(state: JsonNode): seq[string] =
   for scope in state{"scope"}.getStr("").splitWhitespace():
     result.add(scope)
+
+proc requestedLinkScopes*(state: JsonNode): seq[string] =
+  ## The scopes this frame asked for when the local admin started the link
+  ## (persisted by POST /api/cloud/connect). Empty for links minted before this
+  ## field existed, and for claim-token enrollments, which are a local ceremony
+  ## with no device-flow request behind them.
+  for scope in state{"requested_scope"}.getStr("").splitWhitespace():
+    result.add(scope)
+
+proc managedEnrollmentRequested*(state: JsonNode): bool =
+  ## True only when `frame:managed` was BOTH asked for locally and granted by
+  ## the provider. The granted half alone is the provider's word for it: a
+  ## provider that simply returns `frame:managed` in its device-flow poll
+  ## response must not be able to turn a backups-only link into full remote
+  ## management behind the admin's back.
+  ##
+  ## Links with no recorded request (created before this field existed) never
+  ## auto-enroll; the local admin can still enroll deliberately from the admin
+  ## page, which is the ceremony this check exists to protect.
+  "frame:managed" in requestedLinkScopes(state) and linkHasScope(state, "frame:managed")
+
+proc unionScopeString*(existing, added: string): string =
+  ## Whitespace-separated scope strings merged with existing order preserved
+  ## and no duplicates. Used when a later step in a link's life reports the
+  ## scopes it cares about (managed enrollment answers `frame:managed`): those
+  ## must be added to what the link already holds, never replace it.
+  var scopes: seq[string] = @[]
+  for scope in existing.splitWhitespace():
+    if scope notin scopes:
+      scopes.add(scope)
+  for scope in added.splitWhitespace():
+    if scope notin scopes:
+      scopes.add(scope)
+  scopes.join(" ")
 
 proc isManagedLink*(state: JsonNode): bool =
   ## True when this frame is cloud-managed and the link is live.

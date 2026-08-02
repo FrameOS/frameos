@@ -15,6 +15,7 @@ import { templatesLogic } from '../Templates/templatesLogic'
 import { livePreviewLogic } from './livePreviewLogic'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
+import type { FrameId } from '../../../../types'
 
 // Match the real logs' terminal text coloring (see Logs.tsx logTypeClassName).
 // The preview's runtime lines are raw strings, so classify them by content.
@@ -87,10 +88,10 @@ export function renderLogLine(line: string): JSX.Element | string {
 // toolbar, template row) that may be mounted at the same time. Only ONE of
 // them may render the dialog: two identical stacked dialogs close each other,
 // because a click inside one counts as an outside-click for the other.
-const modalHostStacks = new Map<number, symbol[]>()
-const modalHostListeners = new Map<number, Set<() => void>>()
+const modalHostStacks = new Map<FrameId, symbol[]>()
+const modalHostListeners = new Map<FrameId, Set<() => void>>()
 
-function useLivePreviewModalOwnership(frameId: number): boolean {
+function useLivePreviewModalOwnership(frameId: FrameId): boolean {
   const idRef = useRef<symbol | null>(null)
   if (idRef.current === null) {
     idRef.current = Symbol('LivePreviewModal')
@@ -119,7 +120,7 @@ function useLivePreviewModalOwnership(frameId: number): boolean {
   return (modalHostStacks.get(frameId) ?? [])[0] === id
 }
 
-export function LivePreviewModal({ frameId }: { frameId: number }): JSX.Element | null {
+export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const isModalOwner = useLivePreviewModalOwnership(frameId)
   const {
     livePreviewSceneId,

@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './scenes/App'
 import './index.css'
 import { initKea } from '../../frontend/src/initKea'
+import { cloudAssetsBasePath, cloudRouteBasePath } from './routes'
 
 if (typeof window !== 'undefined') {
   // Cloud mode is NOT frameMode: the fleet has many frames, and project
@@ -13,8 +14,8 @@ if (typeof window !== 'undefined') {
     cloudMode: true,
     frameMode: undefined,
     ingress_path: '',
-    route_base_path: '/frames',
-    assets_base_path: '/frames-app',
+    route_base_path: cloudRouteBasePath,
+    assets_base_path: cloudAssetsBasePath,
   }
 }
 

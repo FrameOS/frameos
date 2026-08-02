@@ -12,6 +12,7 @@ import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
 import { urls } from '../../../../urls'
 import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreviewLogic'
+import type { FrameId } from '../../../../types'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -100,7 +101,7 @@ function HeaderMetricChart({
   )
 }
 
-export function HeaderMetrics({ frameId }: { frameId: number }) {
+export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
   const { theme } = useValues(workspaceLogic)
   const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
     frameMetricsPreviewLogic({ frameId })

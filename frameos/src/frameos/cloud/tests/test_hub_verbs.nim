@@ -1,4 +1,4 @@
-import std/[json, sequtils, unittest]
+import std/[json, sequtils, strutils, unittest]
 
 import ../hub_client
 import ../../types
@@ -10,14 +10,18 @@ type
     persistedChecksums: seq[string]
     audits: seq[JsonNode]
     reboots: int
+    dropEvents: bool ## simulates a full runtime event queue
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
     frameConfig: FrameConfig(mode: "test", device: "web_only", width: 800, height: 480),
     scopes: scopes,
     scenesChecksum: "",
-    sendEventFn: proc(event: string, payload: JsonNode) {.gcsafe.} =
-      recorded.events.add((event, payload)),
+    sendEventFn: proc(event: string, payload: JsonNode): bool {.gcsafe.} =
+      if recorded.dropEvents:
+        return false
+      recorded.events.add((event, payload))
+      true,
     persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
       recorded.persistedSettings.add(payload),
     persistChecksumFn: proc(checksum: string) {.gcsafe.} =
@@ -187,6 +191,54 @@ suite "cloud hub verb dispatcher":
     check reply.extra[0]{"type"}.getStr("") == "scene_ack"
     check reply.extra[0]{"checksum"}.getStr("") == "sum-1"
     check reply.extra[0]{"active_scene"}.getStr("") == "uploaded/scene1"
+
+  test "set_scenes refuses built-in apps that spawn processes":
+    # These two apps run child processes against a configured target
+    # (chromium / ffmpeg), so they never pass through utils/http_client's
+    # private-network chokepoint — a cloud push naming them would be an SSRF
+    # pivot onto the owner's LAN plus, for chromium, an apt-get install.
+    for keyword in ["data/chromiumScreenshot", "data/rstpSnapshot",
+                    "chromiumScreenshot", "legacy/rstpSnapshot"]:
+      let recorded = Recorded()
+      let reply = handleCloudVerb(makeContext(recorded), %*{
+        "id": "sc", "type": "set_scenes", "checksum": "abc",
+        "scenes": [{
+          "id": "scene1", "name": "Test",
+          "nodes": [{"id": "1", "type": "app", "data": {"keyword": keyword}}],
+          "edges": [],
+        }],
+      })
+      check reply.ack{"ok"}.getBool(true) == false
+      check reply.ack{"error"}.getStr("") == "app_not_allowed"
+      check recorded.events.len == 0
+      check recorded.persistedChecksums.len == 0
+      check recorded.audits[^1]{"error"}.getStr("").startsWith("app_not_allowed")
+    # An ordinary app in the same shape still deploys.
+    let ok = Recorded()
+    check handleCloudVerb(makeContext(ok), %*{
+      "id": "sc", "type": "set_scenes", "checksum": "abc",
+      "scenes": [{
+        "id": "scene1", "name": "Test",
+        "nodes": [{"id": "1", "type": "app", "data": {"keyword": "data/clock"}}],
+        "edges": [],
+      }],
+    }).ack{"ok"}.getBool(false) == true
+
+  test "set_scenes reports a retryable error when the event queue is full":
+    # A dropped uploadScenes means the deploy never happened; acking ok (and
+    # persisting the checksum) would make the provider believe the frame is up
+    # to date and never push again.
+    let recorded = Recorded()
+    recorded.dropEvents = true
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "q", "type": "set_scenes", "checksum": "sum-q",
+      "scenes": [{"id": "scene1", "name": "Test", "nodes": [], "edges": []}],
+    })
+    check reply.ack{"ok"}.getBool(true) == false
+    check reply.ack{"error"}.getStr("") == "queue_full"
+    check reply.extra.len == 0
+    check recorded.persistedChecksums.len == 0
+    check recorded.audits[^1]{"error"}.getStr("") == "queue_full"
 
   test "get_logs requires telemetry:logs":
     let recorded = Recorded()

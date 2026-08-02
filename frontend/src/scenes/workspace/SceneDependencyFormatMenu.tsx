@@ -3,6 +3,7 @@ import clsx from 'clsx'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { Switch } from '../../components/Switch'
+import type { FrameId } from '../../types'
 import {
   sceneDependencyGroupingDisabledPath,
   sceneDependencyGroupingIsEnabled,
@@ -11,7 +12,7 @@ import {
 } from './workspaceLogic'
 
 interface SceneDependencyFormatMenuProps {
-  frameId: number
+  frameId: FrameId
   surface: SceneDependencyGroupingSurface
   className?: string
   multiSelect?: {

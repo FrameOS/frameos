@@ -1,5 +1,5 @@
 import { actions, afterMount, beforeUnmount, kea, path } from 'kea'
-import { AiSceneLogType, FrameType, LogType } from '../types'
+import { AiSceneLogType, FrameType, LogType, FrameId } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
 import { getBasePath } from '../utils/getBasePath'
@@ -27,7 +27,7 @@ export const socketLogic = kea<socketLogicType>([
     newLog: (log: LogType) => ({ log }),
     aiSceneLog: (log: AiSceneLogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
-    newSceneImage: (frameId: number, sceneId: string, width: number, height: number) => ({
+    newSceneImage: (frameId: FrameId, sceneId: string, width: number, height: number) => ({
       frameId,
       sceneId,
       width,
@@ -37,7 +37,7 @@ export const socketLogic = kea<socketLogicType>([
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
-    frameRendered: (frameId: number) => ({ frameId }),
+    frameRendered: (frameId: FrameId) => ({ frameId }),
     // Fired when the socket reopens after a drop. All frame state is
     // event-sourced over this socket, so listeners must refetch anything
     // they may have missed while disconnected.

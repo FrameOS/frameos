@@ -31,6 +31,7 @@ import std/atomics
 import std/math
 import std/random
 import std/asyncdispatch
+import std/asyncnet
 import std/httpclient
 import std/net as std_net
 import std/uri
@@ -64,12 +65,50 @@ const
   HubEnrollBackoffMaxSeconds = 600.0
   HubGetLogsDefaultLimit = 200
   HubGetLogsMaxLimit = 1000
+  # The hub pings every 30s and drops sockets that miss a pong
+  # (cloud/apps/frame-hub/src/hub.ts). A link that has delivered nothing at all
+  # — not even a pong — for three heartbeat windows is dead in a way TCP has
+  # not noticed yet (NAT rebind, silent middlebox, sleeping provider), so the
+  # device gives up on it and reconnects instead of waiting for the kernel.
+  HubIdleTimeoutSeconds = 90.0
+  HubPingIntervalSeconds = 30.0
+  # Largest inbound message we will assemble. A real `set_scenes` push carries
+  # the node graphs of at most a handful of scenes (assets live in the store,
+  # not in the payload), so 4 MiB is orders of magnitude more than the wire
+  # contract needs while still fitting on the smallest supported device.
+  HubMaxInboundBytes = 4 * 1024 * 1024
+  # Ed25519 challenge: the hub mints 32 raw random bytes.
+  HubMinNonceBytes = 32
+  # Hub close codes (cloud/apps/frame-hub/src/hub.ts).
+  HubCloseAuthFailed = 4401
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
 # stay in sync with docs/cloud-frames.md (`set_settings`).
 const CLOUD_SETTINGS_ALLOWLIST* = [
   "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
+]
+
+# Built-in apps a provider-pushed scene may not reference. Everything else on a
+# managed frame reaches the network through utils/http_client, where
+# `enforceLocalNetworkPolicy` denies private addresses; these two do not, so a
+# `set_scenes` push naming them would walk straight around that chokepoint.
+# Locally authored scenes are unaffected — this list is only consulted by the
+# cloud verb dispatcher (handleSetScenes).
+#
+# Derived by grepping src/apps for child-process spawning
+# (`utils/process`, `hal/processes`, `runProcess`, `osproc`): those two files
+# are the complete set on this branch. Legacy apps that call std/httpclient
+# directly (apps/legacy/openai*) are not listed because they are not in the
+# compiled registry (src/apps/apps.nim) and therefore cannot be reached by any
+# keyword at all.
+const CLOUD_REFUSED_APP_KEYWORDS* = [
+  # apt-get install (privileged!) plus a headless Chromium pointed at a
+  # configured URL: a package installer and an SSRF pivot in one node.
+  "chromiumScreenshot",
+  # ffmpeg -i <url>: another attacker-chosen target fetched by a child process
+  # rather than by the bounded HTTP client.
+  "rstpSnapshot",
 ]
 
 type
@@ -81,7 +120,9 @@ type
     frameConfig*: FrameConfig
     scopes*: seq[string]
     scenesChecksum*: string
-    sendEventFn*: proc(event: string, payload: JsonNode) {.gcsafe.}
+    ## Returns false when the runtime event queue was full and the event was
+    ## dropped, so verbs that must not be acked optimistically can say so.
+    sendEventFn*: proc(event: string, payload: JsonNode): bool {.gcsafe.}
     persistSettingsFn*: proc(payload: JsonNode) {.gcsafe.}
     persistChecksumFn*: proc(checksum: string) {.gcsafe.}
     getLogsFn*: proc(): JsonNode {.gcsafe.}
@@ -147,6 +188,18 @@ proc providerExemptHostPort(providerUrl: string): string =
     else: "80"
   parsed.hostname.toLowerAscii() & ":" & port
 
+var
+  ## Cached link half of the policy. The hub thread calls the proc below every
+  ## ~2s and the local admin toggle must apply immediately, but the link state
+  ## only ever changes with a generation bump — so re-parse cloud_link.json
+  ## then, not on every tick.
+  policyCacheLock: Lock
+  policyCacheGeneration = -1
+  policyCacheManaged = false
+  policyCacheExempt: seq[string]
+
+initLock(policyCacheLock)
+
 proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
   ## Recomputes the managed-frame private-network HTTP deny
   ## (utils/http_client.nim): active iff the frame is cloud-managed and the
@@ -155,15 +208,26 @@ proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
   ## config changes; standalone and backend-managed frames always end up with
   ## the policy off.
   {.gcsafe.}:
-    let link = snapshotLink()
+    # Sampled before the (possibly cached) read so a save that races us always
+    # leaves the cache key behind the state file, never ahead of it.
+    let generation = currentCloudLinkGeneration()
+    var managed = false
+    var exempt: seq[string] = @[]
+    withLock policyCacheLock:
+      if generation != policyCacheGeneration:
+        let link = snapshotLink()
+        policyCacheManaged = link.managed
+        policyCacheExempt = @[]
+        if link.managed:
+          let hostPort = providerExemptHostPort(link.providerUrl)
+          if hostPort.len > 0:
+            policyCacheExempt.add(hostPort)
+        policyCacheGeneration = generation
+      managed = policyCacheManaged
+      exempt = policyCacheExempt
     let localOverride = frameConfig != nil and frameConfig.network != nil and
       frameConfig.network.allowLocalNetworkAccess
-    var exempt: seq[string] = @[]
-    if link.managed:
-      let hostPort = providerExemptHostPort(link.providerUrl)
-      if hostPort.len > 0:
-        exempt.add(hostPort)
-    setLocalNetworkPolicy(link.managed and not localOverride, exempt)
+    setLocalNetworkPolicy(managed and not localOverride, exempt)
 
 proc demoteManagedLink(reason: string) {.gcsafe.} =
   ## Persistent 401: the provider revoked this frame. Return to standalone —
@@ -207,8 +271,14 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       frameConfig: frameConfig,
       scopes: scopes,
       scenesChecksum: scenesChecksum,
-      sendEventFn: proc(event: string, payload: JsonNode) {.gcsafe.} =
-        sendEvent(event, payload),
+      sendEventFn: proc(event: string, payload: JsonNode): bool {.gcsafe.} =
+        # Same bounded enqueue as channels.sendEvent, but the caller learns
+        # whether the event actually made it: a dropped `uploadScenes` must not
+        # be acked as a successful deploy (the provider would never re-push).
+        {.gcsafe.}:
+          result = eventChannel.trySend((none(SceneId), event, payload))
+          if not result:
+            atomicInc(eventsDroppedCounter),
       persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
         {.gcsafe.}:
           persistFrameApiUpdate(payload),
@@ -276,6 +346,38 @@ proc validateInterpretedScenesPayload*(scenes: JsonNode): tuple[ok: bool, error:
       return (false, "invalid_scenes")
   (true, "")
 
+proc refusedCloudAppKeyword*(scenes: JsonNode): string {.gcsafe.} =
+  ## "" when the payload references no app from CLOUD_REFUSED_APP_KEYWORDS,
+  ## otherwise the offending keyword. Cloud-pushed scenes only: a scene the
+  ## local admin wrote may still use these apps, which is why this check lives
+  ## in the verb dispatcher and not in the scene parser.
+  if scenes == nil or scenes.kind != JArray:
+    return ""
+  for scene in scenes:
+    if scene == nil or scene.kind != JObject:
+      continue
+    let nodes = scene{"nodes"}
+    if nodes == nil or nodes.kind != JArray:
+      continue
+    for node in nodes:
+      if node == nil or node.kind != JObject:
+        continue
+      if node{"type"}.getStr("") != "app":
+        continue
+      let data = node{"data"}
+      if data == nil or data.kind != JObject:
+        continue
+      let keyword = data{"keyword"}.getStr("")
+      if keyword.len == 0:
+        continue
+      # Compare on the trailing segment ("data/rstpSnapshot" → "rstpSnapshot")
+      # so a category rename cannot quietly reopen the hole.
+      let leaf = keyword.rsplit('/', maxsplit = 1)[^1]
+      for refused in CLOUD_REFUSED_APP_KEYWORDS:
+        if cmpIgnoreCase(leaf, refused) == 0:
+          return keyword
+  ""
+
 proc expectedUploadedSceneId(scenes: JsonNode): string =
   ## updateUploadedScenesFromPayload prefixes every scene id with "uploaded/".
   if scenes.kind == JArray and scenes.len > 0 and scenes[0].kind == JObject:
@@ -315,7 +417,16 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
   if not ok:
     ctx.audit("set_scenes", false, error)
     return CloudVerbReply(ack: ackError(id, error))
-  ctx.sendEventFn("uploadScenes", %*{"scenes": scenes})
+  let refused = refusedCloudAppKeyword(scenes)
+  if refused.len > 0:
+    ctx.audit("set_scenes", false, "app_not_allowed: " & refused)
+    return CloudVerbReply(ack: ackError(id, "app_not_allowed"))
+  if not ctx.sendEventFn("uploadScenes", %*{"scenes": scenes}):
+    # The runtime queue was full, so the deploy never happened. Acking ok here
+    # (and persisting the checksum) would tell the provider the frame is up to
+    # date forever; a retryable error makes it push again instead.
+    ctx.audit("set_scenes", false, "queue_full")
+    return CloudVerbReply(ack: ackError(id, "queue_full"))
   ctx.scenesChecksum = checksum
   if not ctx.persistChecksumFn.isNil:
     ctx.persistChecksumFn(checksum)
@@ -347,7 +458,7 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
     except CatchableError as error:
       ctx.audit("set_settings", false, "persist_failed: " & error.msg)
       return CloudVerbReply(ack: ackError(id, "persist_failed"))
-    ctx.sendEventFn("reload", %*{})
+    discard ctx.sendEventFn("reload", %*{})
   ctx.audit("set_settings", true)
   CloudVerbReply(ack: ackOk(id))
 
@@ -361,7 +472,7 @@ proc handleSetSchedule(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
   except CatchableError as error:
     ctx.audit("set_schedule", false, "persist_failed: " & error.msg)
     return CloudVerbReply(ack: ackError(id, "persist_failed"))
-  ctx.sendEventFn("reload", %*{})
+  discard ctx.sendEventFn("reload", %*{})
   ctx.audit("set_schedule", true)
   CloudVerbReply(ack: ackOk(id))
 
@@ -370,7 +481,7 @@ proc handleSetCurrentScene(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): 
   if sceneId.len == 0:
     ctx.audit("set_current_scene", false, "invalid_scene_id")
     return CloudVerbReply(ack: ackError(id, "invalid_scene_id"))
-  ctx.sendEventFn("setCurrentScene", %*{"sceneId": sceneId})
+  discard ctx.sendEventFn("setCurrentScene", %*{"sceneId": sceneId})
   ctx.audit("set_current_scene", true)
   CloudVerbReply(ack: ackOk(id))
 
@@ -434,7 +545,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
   of "get_metrics":
     result = handleGetMetrics(ctx, id)
   of "render":
-    ctx.sendEventFn("render", %*{})
+    discard ctx.sendEventFn("render", %*{})
     result = CloudVerbReply(ack: ackOk(id))
   of "reboot":
     ctx.audit("reboot", true)
@@ -444,7 +555,7 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
   of "restart_runtime":
     ctx.audit("restart_runtime", true)
     result = CloudVerbReply(ack: ackOk(id))
-    ctx.sendEventFn("restart", %*{})
+    discard ctx.sendEventFn("restart", %*{})
   of "notify_update_available":
     # Advisory only: the device fetches release metadata from its own
     # configured archive and verifies signatures itself. The payload carries
@@ -461,8 +572,22 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
 # WebSocket session
 # ---------------------------------------------------------------------------
 
-proc dialManagementSocket(providerUrl, wsPath, accessToken: string):
-    Future[WebSocket] {.async.} =
+type DialHandle = ref object
+  ## Lets the caller close the HTTP client of a dial it gave up on. Without it
+  ## a timed-out `withTimeout(dialFut, …)` leaves the abandoned future holding
+  ## a connected socket that nothing ever closes — one leaked fd per failed
+  ## reconnect, forever.
+  client: AsyncHttpClient
+
+proc closeClient(handle: DialHandle) =
+  if handle != nil and handle.client != nil:
+    try:
+      handle.client.close() # idempotent: no-ops once disconnected
+    except CatchableError:
+      discard
+
+proc dialManagementSocket(providerUrl, wsPath, accessToken: string,
+                          handle: DialHandle): Future[WebSocket] {.async.} =
   ## Opens the management socket with an Authorization header. The `ws`
   ## package's client cannot send custom headers, so this performs the same
   ## HTTP upgrade itself (TLS iff the provider URL is https, matching the
@@ -480,6 +605,7 @@ proc dialManagementSocket(providerUrl, wsPath, accessToken: string):
         newAsyncHttpClient(sslContext = nil)
     else:
       newAsyncHttpClient()
+  handle.client = client
   var secStr = newString(16)
   for i in 0 ..< secStr.len:
     secStr[i] = char rand(255)
@@ -500,14 +626,142 @@ proc dialManagementSocket(providerUrl, wsPath, accessToken: string):
       "Provider did not upgrade the management socket (" & $response.code & ")")
   result = WebSocket(tcpSocket: client.getSocket(), readyState: Open, masked: true)
 
+type HubPacket = object
+  ## One WebSocket packet as the hub session cares about it. Control frames are
+  ## surfaced (rather than swallowed) so the idle deadline can count a pong as
+  ## proof of life and a close code can be acted on.
+  opcode: Opcode
+  data: string
+  closeCode: int
+
+proc recvExactly(socket: AsyncSocket, count: int): Future[string] {.async.} =
+  ## asyncnet's recv may answer short; keep reading until the field is complete
+  ## or the peer goes away.
+  var buffer = newStringOfCap(count)
+  while buffer.len < count:
+    let chunk = await socket.recv(count - buffer.len)
+    if chunk.len == 0:
+      raise newException(WebSocketClosedError, "Management socket closed")
+    buffer.add(chunk)
+  buffer
+
+proc recvHubPacket(socket: WebSocket, maxBytes: int): Future[HubPacket] {.async.} =
+  ## Bounded replacement for ws 0.5.0's `receivePacket`/`receiveStrPacket`.
+  ##
+  ## The library reads whatever length a frame header claims and concatenates
+  ## continuation frames without any cap, so a hostile or merely broken
+  ## provider could make a Pi Zero allocate until the OOM killer fires. It also
+  ## discards the close code, which is exactly the byte that tells a revoked
+  ## frame to stop reconnecting. Both are properties of the frame loop, not of
+  ## anything the package exposes as an option — hence this local reader.
+  if cast[int](socket.tcpSocket.getFd) == -1:
+    socket.readyState = Closed
+    raise newException(WebSocketClosedError, "Management socket closed")
+  var payload = ""
+  var messageOpcode = Opcode.Cont
+  var assembling = false
+  while true:
+    let header = await recvExactly(socket.tcpSocket, 2)
+    let b0 = header[0].uint8
+    let b1 = header[1].uint8
+    let fin = (b0 and 0b1000_0000'u8) != 0
+    if (b0 and 0b0111_0000'u8) != 0:
+      raise newException(WebSocketError, "Provider set a reserved WebSocket bit")
+    # Mapped rather than converted: Opcode has holes (the reserved ranges), and
+    # a reserved opcode is a protocol error, not something to smuggle through.
+    let opcode =
+      case b0 and 0x0f'u8
+      of 0x0'u8: Opcode.Cont
+      of 0x1'u8: Opcode.Text
+      of 0x2'u8: Opcode.Binary
+      of 0x8'u8: Opcode.Close
+      of 0x9'u8: Opcode.Ping
+      of 0xa'u8: Opcode.Pong
+      else:
+        raise newException(WebSocketError, "Provider sent a reserved WebSocket opcode")
+    if (b1 and 0b1000_0000'u8) != 0:
+      # We are the client; a conforming server never masks (RFC 6455 §5.1).
+      raise newException(WebSocketError, "Provider sent a masked frame")
+    var length = int(b1 and 0b0111_1111'u8)
+    if length == 126:
+      let extended = await recvExactly(socket.tcpSocket, 2)
+      length = (int(extended[0].uint8) shl 8) or int(extended[1].uint8)
+    elif length == 127:
+      let extended = await recvExactly(socket.tcpSocket, 8)
+      var wide = 0'u64
+      for index in 0 .. 7:
+        wide = (wide shl 8) or uint64(extended[index].uint8)
+      # Refuse before allocating anything, and before the value can overflow an
+      # int on a 32-bit device.
+      if wide > uint64(maxBytes):
+        raise newException(WebSocketError,
+          "Inbound message exceeds " & $maxBytes & " bytes")
+      length = int(wide)
+    let control = opcode in {Close, Ping, Pong}
+    if control:
+      if length > 125 or not fin:
+        raise newException(WebSocketError, "Provider sent a malformed control frame")
+    elif payload.len + length > maxBytes:
+      raise newException(WebSocketError,
+        "Inbound message exceeds " & $maxBytes & " bytes")
+    let data = if length > 0: await recvExactly(socket.tcpSocket, length) else: ""
+    if control:
+      case opcode
+      of Close:
+        socket.readyState = Closed
+        var code = 0
+        if data.len >= 2:
+          code = (int(data[0].uint8) shl 8) or int(data[1].uint8)
+        return HubPacket(opcode: Close, data: data, closeCode: code)
+      of Ping:
+        if assembling:
+          # Mid-message: handing this to the caller would lose the partial
+          # payload, so answer it here. ws 0.5.0 answers *every* ping from
+          # inside the receive future, which can interleave with a send the
+          # main loop already has in flight; confining that to this rare path
+          # is the point of returning pings below.
+          await socket.send(data, Pong)
+      else:
+        discard
+      # A control frame between fragments must not break reassembly; only
+      # report it when no message is in flight (the caller answers pings and
+      # counts any frame as proof of life).
+      if assembling:
+        continue
+      return HubPacket(opcode: opcode, data: data)
+    if opcode == Cont:
+      if not assembling:
+        raise newException(WebSocketError, "Provider sent a stray continuation frame")
+    else:
+      if assembling:
+        raise newException(WebSocketError, "Provider interleaved a new message")
+      messageOpcode = opcode
+    payload.add(data)
+    if fin:
+      return HubPacket(opcode: messageOpcode, data: payload)
+    assembling = true
+
 proc recvJsonWithin(socket: WebSocket, timeoutMs: int): Future[JsonNode] {.async.} =
-  let recvFut = socket.receiveStrPacket()
+  let recvFut = recvHubPacket(socket, HubMaxInboundBytes)
   if not await withTimeout(recvFut, timeoutMs):
     # A stalled handshake is a network problem, not an authentication
     # rejection — it must not count toward the demotion threshold.
     raise newException(WebSocketError, "Timed out waiting for the provider")
+  let packet = recvFut.read()
+  if packet.opcode == Close:
+    if packet.closeCode == HubCloseAuthFailed:
+      raise newException(CloudHubAuthError,
+        "Provider closed the management socket with 4401 (authentication rejected)")
+    raise newException(WebSocketClosedError,
+      "Provider closed the management socket during the handshake")
+  if packet.opcode == Ping:
+    # Nothing else is sending on this socket during the handshake.
+    await socket.send(packet.data, Pong)
+    return %*{}
+  if packet.opcode != Text:
+    return %*{}
   try:
-    result = parseJson(recvFut.read())
+    result = parseJson(packet.data)
   except JsonParsingError:
     result = %*{}
 
@@ -527,9 +781,24 @@ proc runHandshake(socket: WebSocket, ctx: CloudVerbContext) {.async.} =
       raise newException(CloudHubAuthError,
         "Provider error during handshake: " & challenge{"error"}.getStr(""))
     # Tolerate unknown pre-auth chatter (forward compatibility).
-  let nonce = challenge{"nonce"}.getStr("")
-  if nonce.len == 0:
+  # The hub mints 32 raw random bytes, sends them base64-encoded, and verifies
+  # the signature over the RAW bytes (cloud/apps/frame-hub/src/hub.ts,
+  # verifyFrameSignature). Signing the base64 text would never verify.
+  let encodedNonce = challenge{"nonce"}.getStr("")
+  if encodedNonce.len == 0:
     raise newException(CloudHubAuthError, "Provider sent an empty challenge nonce")
+  var nonce = ""
+  try:
+    nonce = base64.decode(encodedNonce)
+  except CatchableError:
+    raise newException(CloudHubAuthError,
+      "Provider sent a challenge nonce that is not base64")
+  if nonce.len < HubMinNonceBytes:
+    # base64.decode is lenient enough to "succeed" on plain text, so the length
+    # is what actually enforces the wire contract (>= 32 bytes of entropy).
+    raise newException(CloudHubAuthError,
+      "Provider sent a " & $nonce.len & "-byte challenge nonce; the wire " &
+      "contract requires at least " & $HubMinNonceBytes & " bytes")
   let signature = signBase64(nonce)
   await socket.send($(%*{"type": "auth", "signature": signature}))
   while true:
@@ -569,15 +838,40 @@ proc latestMetricsSample(): JsonNode =
 
 var hubStopRequested: Atomic[bool]
 
+proc hubIdleTimeoutSeconds(): float =
+  ## Overridable so the liveness path can be exercised without a 90 s test.
+  let override = getEnv("FRAMEOS_CLOUD_HUB_IDLE_SECONDS")
+  if override.len > 0:
+    try:
+      return parseFloat(override)
+    except ValueError:
+      discard
+  HubIdleTimeoutSeconds
+
 proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
     Future[SessionEndReason] {.async.} =
   var socket: WebSocket
+  let handle = DialHandle()
   try:
-    let dialFut = dialManagementSocket(link.providerUrl, link.wsPath, link.accessToken)
+    let dialFut = dialManagementSocket(link.providerUrl, link.wsPath,
+                                       link.accessToken, handle)
     if not await withTimeout(dialFut, HubHandshakeTimeoutMs):
+      # Close the client we are walking away from, and again if the dial ever
+      # finishes: either way the socket it opened does not outlive this call.
+      dialFut.addCallback(proc() {.gcsafe.} =
+        {.cast(gcsafe).}:
+          try:
+            discard dialFut.read()
+          except CatchableError:
+            discard
+          handle.closeClient())
+      handle.closeClient()
       raise newException(WebSocketError, "Timed out connecting to the provider")
     socket = dialFut.read()
-  except CloudHubAuthError:
+  except CatchableError:
+    # Includes CloudHubAuthError, which the thread counts toward demotion; the
+    # re-raise keeps its type.
+    handle.closeClient()
     raise
   let ctx = defaultCloudVerbContext(frameConfig, link.scopes, link.scenesChecksum)
   var generation = link.generation
@@ -589,6 +883,8 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var logsGranted = "telemetry:logs" in link.scopes
   var metricsGranted = "telemetry:metrics" in link.scopes
   let metricsInterval = max(frameConfig.metricsInterval, 5.0)
+  let idleTimeout = hubIdleTimeoutSeconds()
+  let pingInterval = min(HubPingIntervalSeconds, idleTimeout / 3)
   result = sessionDisconnected
   try:
     await runHandshake(socket, ctx)
@@ -599,7 +895,9 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
       var stale: seq[SerializedLog] = @[]
       drainCloudLogChannel(stale)
       cloudLogForwardingEnabled.store(true, moRelaxed)
-    var recvFut: Future[string] = nil
+    var recvFut: Future[HubPacket] = nil
+    var lastReceivedAt = epochTime()
+    var lastPingSentAt = epochTime()
     while true:
       if hubStopRequested.load(moRelaxed):
         result = sessionStopped
@@ -623,15 +921,29 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
           if not logsNow:
             logBuffer.setLen(0)
       if recvFut == nil:
-        recvFut = socket.receiveStrPacket()
+        recvFut = recvHubPacket(socket, HubMaxInboundBytes)
       if await withTimeout(recvFut, HubRecvTickMs):
-        let raw = recvFut.read()
+        let packet = recvFut.read()
         recvFut = nil
-        # receiveStrPacket answers pings itself and surfaces them as "".
-        if raw.len > 0:
+        # Any frame at all — pong included — proves the link is still there.
+        lastReceivedAt = epochTime()
+        if packet.opcode == Close:
+          if packet.closeCode == HubCloseAuthFailed:
+            log(%*{"event": "cloud:hub:authRejected", "closeCode": packet.closeCode,
+                   "reason": packet.data[min(2, packet.data.len) .. ^1]})
+            result = sessionAuthRejected
+          else:
+            log(%*{"event": "cloud:hub:closed", "closeCode": packet.closeCode})
+            result = sessionDisconnected
+          break
+        if packet.opcode == Ping:
+          # Answered here rather than inside the receive future, so a pong can
+          # never interleave with a log batch or ack already being written.
+          await socket.send(packet.data, Pong)
+        if packet.opcode == Text and packet.data.len > 0:
           var msg: JsonNode
           try:
-            msg = parseJson(raw)
+            msg = parseJson(packet.data)
           except JsonParsingError:
             msg = nil
           let reply = handleCloudVerb(ctx, msg)
@@ -641,6 +953,20 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
             await socket.send($extra)
       # ---- periodic pushes ------------------------------------------------
       let now = epochTime()
+      # ---- liveness --------------------------------------------------------
+      # The hub heartbeats every 30s, so silence past HubIdleTimeoutSeconds
+      # means the socket is dead even though TCP has not said so yet. Prod it
+      # once per heartbeat window first: a pong resets the deadline, and a
+      # broken link fails the send instead of idling on.
+      if now - lastReceivedAt >= idleTimeout:
+        log(%*{"event": "cloud:hub:idleTimeout",
+               "silentSeconds": round(now - lastReceivedAt, 1)})
+        result = sessionDisconnected
+        break
+      if now - lastReceivedAt >= pingInterval and
+          now - lastPingSentAt >= pingInterval:
+        lastPingSentAt = now
+        await socket.ping()
       if logsGranted:
         let before = logBuffer.len
         drainCloudLogChannel(logBuffer)
@@ -669,7 +995,10 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   except CloudHubAuthError:
     # Handshake-level rejection: let the thread count it toward demotion.
     raise
-  except WebSocketError:
+  except WebSocketError as error:
+    # Includes the oversize/protocol refusals from recvHubPacket, which are
+    # worth seeing in the log rather than silently reconnecting forever.
+    log(%*{"event": "cloud:hub:socketError", "error": error.msg})
     result = sessionDisconnected
   except CatchableError as error:
     log(%*{"event": "cloud:hub:error", "error": error.msg})

@@ -30,6 +30,19 @@ await import('../frontend/scripts/generateRepoApps.mjs')
 await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
+
+// cloud/apps/auth-web/app/frames/[[...path]]/route.ts injects the dev
+// websocket origin by string-replacing this exact literal in the shell. A
+// dropping it would make the replacement a silent no-op and break dev
+// websocket routing with no error anywhere, so fail the build loudly instead.
+const configInjectionAnchor = '//__FRAMEOS_CLOUD_WS_ORIGIN__'
+const shellHtml = await fs.readFile(path.join(outputDir, 'index.html'), 'utf8')
+if (!shellHtml.includes(configInjectionAnchor)) {
+  throw new Error(
+    `cloud-frontend/src/index.html must contain the literal ${JSON.stringify(configInjectionAnchor)}: ` +
+      'cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces it to inject cloud_ws_origin in dev.'
+  )
+}
 await fs.cp(publicDir, outputDir, {
   recursive: true,
   filter: (source) => path.basename(source) !== '.DS_Store',

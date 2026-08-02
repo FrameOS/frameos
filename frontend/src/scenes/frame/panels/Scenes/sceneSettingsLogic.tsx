@@ -1,10 +1,10 @@
 import { connect, kea, key, path, props, selectors } from 'kea'
 import { frameLogic } from '../../frameLogic'
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameId } from '../../../../types'
 import type { sceneSettingsLogicType } from './sceneSettingsLogicType'
 
 export interface SceneSettingsLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

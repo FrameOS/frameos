@@ -20,9 +20,8 @@ import { TextInput } from '../../components/TextInput'
 import { frameHost } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
-import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { isCloudMode } from '../../utils/cloudMode'
 import { workspaceLogic } from './workspaceLogic'
+import { frameMenuActionIsAllowed, workspaceMode, type FrameMenuAction } from './workspaceSurfaces'
 
 interface FrameActionsMenuProps {
   frame: FrameType
@@ -51,10 +50,12 @@ export function FrameActionsMenu({
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
-  const inFrameAdminMode = isInFrameAdminMode()
-  // Deploys, SSH power actions, and backend bookkeeping have no cloud
-  // verbs; the deploy drawer is never rendered in cloud mode.
-  const hideBackendActions = inFrameAdminMode || isCloudMode()
+  // Which verbs exist is a property of the control plane, not of this menu —
+  // see workspaceSurfaces.ts. Reboot and restart DO exist on the cloud (they
+  // are two of its four command verbs); deploys, SSH power actions and
+  // backend bookkeeping do not.
+  const mode = workspaceMode()
+  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action)
 
   return (
     <DropdownMenu
@@ -62,19 +63,27 @@ export function FrameActionsMenu({
       horizontal
       className={className}
       items={[
-        {
-          label: 'Rename',
-          title: 'Rename frame',
-          onClick: () => openRenameFrameDialog(frame.id, frameName),
-          icon: <PencilSquareIcon className="h-5 w-5" />,
-        },
-        {
-          label: 'Re-render',
-          title: 'Render frame now',
-          onClick: () => renderFrame(frame.id),
-          icon: <PlayIcon className="h-5 w-5" />,
-        },
-        ...(!hideBackendActions && frame.status === 'deploying'
+        ...(allows('rename')
+          ? [
+              {
+                label: 'Rename',
+                title: 'Rename frame',
+                onClick: () => openRenameFrameDialog(frame.id, frameName),
+                icon: <PencilSquareIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(allows('render')
+          ? [
+              {
+                label: 'Re-render',
+                title: 'Render frame now',
+                onClick: () => renderFrame(frame.id),
+                icon: <PlayIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(allows('cancelDeploy') && frame.status === 'deploying'
           ? [
               {
                 label: 'Cancel deploy',
@@ -85,7 +94,7 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        ...(!hideBackendActions
+        ...(allows('deploy')
           ? [
               {
                 label: 'Deploy',
@@ -93,52 +102,80 @@ export function FrameActionsMenu({
                 onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
                 icon: <RocketLaunchIcon className="h-5 w-5" />,
               },
+            ]
+          : []),
+        ...(allows('buildSdCard')
+          ? [
               {
                 label: 'Build SD card',
                 title: 'Build or download a flashable SD card image',
                 onClick: () => openFrameChangeDrawer(frame.id, 'deploy', 'sdCard'),
                 icon: <ArrowDownTrayIcon className="h-5 w-5" />,
               },
+            ]
+          : []),
+        ...(allows('stop')
+          ? [
               {
                 label: 'Stop FrameOS',
                 title: 'Stop FrameOS service',
                 onClick: () => stopFrame(frame.id),
                 icon: <StopCircleIcon className="h-5 w-5" />,
               },
+            ]
+          : []),
+        ...(allows('restart')
+          ? [
               {
                 label: 'Restart FrameOS',
-                title: 'Restart FrameOS service',
+                title: 'Restart the FrameOS runtime',
                 onClick: () => restartFrame(frame.id),
                 icon: <ArrowPathIcon className="h-5 w-5" />,
               },
+            ]
+          : []),
+        ...(allows('reboot')
+          ? [
               {
                 label: 'Reboot device',
                 title: 'Reboot device',
                 onClick: () => rebootFrame(frame.id),
                 icon: <PowerIcon className="h-5 w-5" />,
               },
-              ...(agentConfigured
-                ? [
-                    {
-                      label: 'Restart Remote',
-                      title: 'Restart FrameOS Remote',
-                      onClick: () => restartRemote(frame.id),
-                      icon: <CommandLineIcon className="h-5 w-5" />,
-                    },
-                    {
-                      label: 'Deploy Remote',
-                      title: 'Deploy FrameOS Remote',
-                      onClick: () => deployRemote(frame.id),
-                      icon: <CommandLineIcon className="h-5 w-5" />,
-                    },
-                  ]
-                : []),
+            ]
+          : []),
+        ...(allows('restartRemote') && agentConfigured
+          ? [
+              {
+                label: 'Restart Remote',
+                title: 'Restart FrameOS Remote',
+                onClick: () => restartRemote(frame.id),
+                icon: <CommandLineIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(allows('deployRemote') && agentConfigured
+          ? [
+              {
+                label: 'Deploy Remote',
+                title: 'Deploy FrameOS Remote',
+                onClick: () => deployRemote(frame.id),
+                icon: <CommandLineIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        ...(allows('archive')
+          ? [
               {
                 label: archived ? 'Restore' : 'Archive',
                 title: archived ? 'Restore frame' : 'Archive frame',
                 onClick: () => setFrameArchived(frame.id, !archived),
                 icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
               },
+            ]
+          : []),
+        ...(allows('delete')
+          ? [
               {
                 label: 'Delete',
                 title: 'Delete frame',

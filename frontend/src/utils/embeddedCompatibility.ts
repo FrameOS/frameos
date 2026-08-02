@@ -37,7 +37,6 @@ function appHasShellFlag(app?: (Partial<AppConfig> & { flags?: string[] }) | nul
 }
 
 function cloudAppCompatibility(
-  keyword: string,
   app?: (Partial<AppConfig> & { flags?: string[] }) | null,
   sources?: Record<string, string> | null
 ): CompatibilityResult {
@@ -87,7 +86,7 @@ export function appCompatibilityForFrame(
   frame?: Partial<FrameType> | null
 ): CompatibilityResult {
   if (isCloudManagedFrame(frame)) {
-    const cloudCompatibility = cloudAppCompatibility(keyword, app, sources)
+    const cloudCompatibility = cloudAppCompatibility(app, sources)
     if (!cloudCompatibility.supported) {
       return cloudCompatibility
     }

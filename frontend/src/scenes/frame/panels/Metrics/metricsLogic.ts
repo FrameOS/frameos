@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { MetricsType } from '../../../../types'
+import { MetricsType, FrameId } from '../../../../types'
 import { router, urlToAction } from 'kea-router'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
@@ -10,7 +10,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { urls } from '../../../../urls'
 
 export interface metricsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface MetricPoint {
@@ -445,7 +445,7 @@ function sameRouteParams(first: Record<string, unknown>, second: Record<string, 
   return [...keys].every((key) => JSON.stringify(first[key]) === JSON.stringify(second[key]))
 }
 
-function isMetricsRouteForFrame(frameId: number): boolean {
+function isMetricsRouteForFrame(frameId: FrameId): boolean {
   return (
     router.values.location.pathname === urls.frame(frameId) &&
     routeValue(router.values.searchParams, 'tool') === 'metrics'
@@ -453,7 +453,7 @@ function isMetricsRouteForFrame(frameId: number): boolean {
 }
 
 function updateMetricsTimeRangeHash(
-  frameId: number,
+  frameId: FrameId,
   preset: MetricsTimeRangePreset,
   timeRange: TimeRange | null
 ): void {

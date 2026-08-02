@@ -4,8 +4,9 @@ import type { FormEvent } from 'react'
 import { Modal } from '../../../../components/Modal'
 import { TextInput } from '../../../../components/TextInput'
 import { scenesLogic } from './scenesLogic'
+import type { FrameId } from '../../../../types'
 
-export function RenameSceneModal({ frameId }: { frameId: number }): JSX.Element | null {
+export function RenameSceneModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const { renameSceneDialog, scenes } = useValues(scenesLogic({ frameId }))
   const { closeRenameSceneDialog, setRenameSceneName, submitRenameScene } = useActions(scenesLogic({ frameId }))
 

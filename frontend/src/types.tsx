@@ -1,5 +1,10 @@
 import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
+import type { FrameId } from './utils/frameId'
+
+// Defined in utils/frameId.ts (which has no imports) and re-exported here so
+// the SPA's usual `from '../types'` import keeps working.
+export type { FrameId }
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
@@ -18,7 +23,7 @@ export interface FrameErrorBehavior {
 }
 
 export interface FrameType {
-  id: number
+  id: FrameId
   project_id: number
   name: string
   mode?: 'rpios' | 'buildroot' | 'embedded'
@@ -338,7 +343,7 @@ export interface LogType {
   ip: string
   type: string
   line: string
-  frame_id: number
+  frame_id: FrameId
 }
 
 export interface AiSceneLogType {
@@ -359,7 +364,7 @@ export interface AssetType {
 export interface MetricsType {
   id: string
   timestamp: string
-  frame_id: number
+  frame_id: FrameId
   metrics: Record<string, any>
 }
 
@@ -710,7 +715,7 @@ export type ChatContextType = 'scene' | 'frame' | 'app'
 
 export interface ChatSummary {
   id: string
-  frameId: number
+  frameId: FrameId
   sceneId?: string | null
   contextType?: ChatContextType | null
   contextId?: string | null

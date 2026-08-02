@@ -40,6 +40,7 @@ import type {
   FrameSyncStatus,
   FrameType,
   LogType,
+  FrameId,
 } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
@@ -164,15 +165,7 @@ function partitionColor(partition: EmbeddedFlashPartition, index: number): strin
   return ['#16a34a', '#2563eb', '#b45309', '#7c3aed'][index % 4]
 }
 
-function FirmwareStat({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: ReactNode
-  detail?: ReactNode
-}): JSX.Element {
+function FirmwareStat({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }): JSX.Element {
   return (
     <div className="min-w-0">
       <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{label}</div>
@@ -280,7 +273,9 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
                   />
                   {partition.name}
                 </div>
-                <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareAddress(partition.offset)}</div>
+                <div className="text-right text-[color:var(--tool-strong)]">
+                  {formatFirmwareAddress(partition.offset)}
+                </div>
                 <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareBytes(partition.size)}</div>
                 <div className="text-right text-[color:var(--tool-strong)]">
                   {partition.usedBytes ? formatFirmwareBytes(partition.usedBytes) : '-'}
@@ -759,7 +754,7 @@ function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
   )
 }
 
-function FrameSettingsLink({ frameId }: { frameId: number }): JSX.Element {
+function FrameSettingsLink({ frameId }: { frameId: FrameId }): JSX.Element {
   return (
     <Link
       href={urls.frame(frameId, 'settings')}
@@ -863,7 +858,7 @@ function DeployTransportToggle({
   deployWithAgent,
   onChange,
 }: {
-  frameId: number
+  frameId: FrameId
   remoteConnected: boolean
   remoteUpgradeNotice: RemoteUpgradeNotice | null
   canDeployRemote: boolean
@@ -1367,7 +1362,8 @@ function formatSyncTimestamp(timestamp?: string | null): string {
 }
 
 function syncDownloadFilename(change: FrameSyncChange, side: 'backend' | 'frame'): string {
-  const name = change.label.replace(/^Scene (changed|added on frame|only in backend):\s*/i, '') || change.choice_key || 'scene'
+  const name =
+    change.label.replace(/^Scene (changed|added on frame|only in backend):\s*/i, '') || change.choice_key || 'scene'
   const safeName = name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
@@ -1567,9 +1563,7 @@ function FrameSyncReviewSection({
           Sync from frame
         </DrawerHeading>
         <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-          <div className="frame-tool-muted text-sm leading-5">
-            The backend copy and the live frame copy differ.
-          </div>
+          <div className="frame-tool-muted text-sm leading-5">The backend copy and the live frame copy differ.</div>
           <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
             <div className="frameos-inset rounded-xl border p-3">
               <div className="frame-tool-muted font-semibold uppercase tracking-wide">Last in sync</div>
@@ -1617,64 +1611,60 @@ function FrameSyncReviewSection({
                 </div>
               </div>
             </div>
-              <div className="space-y-3">
-                {section.changes.map((change) => {
-                  const choiceKey = frameSyncChangeKey(change)
-                  const choice = choices[section.id]?.[choiceKey] ?? 'ignore'
-                  return (
-                    <div key={`${section.id}-${change.path}`} className="frameos-inset rounded-xl border p-3">
-                      <div className="flex items-start gap-2">
-                        <ArrowsRightLeftIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{change.label}</div>
-                          <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-                            <div>
-                              <FrameSyncSideLabel change={change} side="backend" label="Backend" />
-                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
-                                {change.backend}
-                              </div>
-                            </div>
-                            <div>
-                              <FrameSyncSideLabel change={change} side="frame" label="Frame" />
-                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
-                                {change.frame}
-                              </div>
-                            </div>
+            <div className="space-y-3">
+              {section.changes.map((change) => {
+                const choiceKey = frameSyncChangeKey(change)
+                const choice = choices[section.id]?.[choiceKey] ?? 'ignore'
+                return (
+                  <div key={`${section.id}-${change.path}`} className="frameos-inset rounded-xl border p-3">
+                    <div className="flex items-start gap-2">
+                      <ArrowsRightLeftIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{change.label}</div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                          <div>
+                            <FrameSyncSideLabel change={change} side="backend" label="Backend" />
+                            <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">{change.backend}</div>
                           </div>
-                          {change.details?.length ? (
-                            <div className="mt-3 space-y-1 border-t border-slate-200/70 pt-2">
-                              {change.details.slice(0, 8).map((detail) => (
-                                <div
-                                  key={`${change.path}-${detail.path}`}
-                                  className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
-                                >
-                                  <div className="frame-tool-muted truncate font-mono">{detail.path}</div>
-                                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                                    <div className="break-words text-slate-500">Backend: {detail.backend}</div>
-                                    <div className="break-words text-slate-700">Frame: {detail.frame}</div>
-                                  </div>
+                          <div>
+                            <FrameSyncSideLabel change={change} side="frame" label="Frame" />
+                            <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">{change.frame}</div>
+                          </div>
+                        </div>
+                        {change.details?.length ? (
+                          <div className="mt-3 space-y-1 border-t border-slate-200/70 pt-2">
+                            {change.details.slice(0, 8).map((detail) => (
+                              <div
+                                key={`${change.path}-${detail.path}`}
+                                className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
+                              >
+                                <div className="frame-tool-muted truncate font-mono">{detail.path}</div>
+                                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                  <div className="break-words text-slate-500">Backend: {detail.backend}</div>
+                                  <div className="break-words text-slate-700">Frame: {detail.frame}</div>
                                 </div>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="mt-3 border-t border-slate-200/70 pt-3">
-                            <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">
-                              Resolution
-                            </div>
-                            <FrameSyncResolutionButtons
-                              section={section}
-                              change={change}
-                              choice={choice}
-                              onChange={(next) => onChoice(section.id, choiceKey, next)}
-                            />
+                              </div>
+                            ))}
                           </div>
+                        ) : null}
+                        <div className="mt-3 border-t border-slate-200/70 pt-3">
+                          <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">
+                            Resolution
+                          </div>
+                          <FrameSyncResolutionButtons
+                            section={section}
+                            change={change}
+                            choice={choice}
+                            onChange={(next) => onChoice(section.id, choiceKey, next)}
+                          />
                         </div>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  </div>
+                )
+              })}
             </div>
+          </div>
         </section>
       ))}
     </div>
@@ -1993,7 +1983,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     Object.values(frameSyncChoices.frame_json).some((choice) => choice !== 'ignore') ||
     Object.values(frameSyncChoices.scenes_json).some((choice) => choice !== 'ignore')
   const frameSyncStatusNeedsRefresh =
-    hasFrameSyncChanges && Boolean(frame.frame_sync_hint?.has_changes) && (!frameSyncStatus || !frameSyncStatus.has_changes)
+    hasFrameSyncChanges &&
+    Boolean(frame.frame_sync_hint?.has_changes) &&
+    (!frameSyncStatus || !frameSyncStatus.has_changes)
   const frameSyncStatusReady = Boolean(frameSyncStatus && !frameSyncStatusNeedsRefresh)
   const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading
 
@@ -2118,7 +2110,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     <div className="frame-tool-muted text-sm leading-5">
                       The frame reports local changes since the last successful deploy. Checking the detailed diff.
                     </div>
-                    {frameSyncError ? <div className="mt-2 text-sm font-semibold text-red-500">{frameSyncError}</div> : null}
+                    {frameSyncError ? (
+                      <div className="mt-2 text-sm font-semibold text-red-500">{frameSyncError}</div>
+                    ) : null}
                   </div>
                 </section>
               ) : deployPlansLoading ? (

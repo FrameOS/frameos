@@ -8,9 +8,10 @@ import { DropdownMenu, type DropdownMenuProps } from '../../components/DropdownM
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { frameLogic } from '../frame/frameLogic'
+import type { FrameId } from '../../types'
 
 interface FrameLocalDeployMenuProps {
-  frameId: number
+  frameId: FrameId
   buttonColor?: DropdownMenuProps['buttonColor']
   buttonClassName?: string
   buttonContent?: ReactNode

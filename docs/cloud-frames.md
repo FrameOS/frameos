@@ -79,13 +79,23 @@ Response `200`:
 ```
 
 Errors: `400 invalid_claim_token` (unknown/expired/budget spent), `400
-invalid_public_key`, `429` on abuse. Each successful enrollment spends one
-use of the token's budget atomically (single-use by default; see "Multi-use
-claim tokens" under Provisioning). The frame stores its access token in a
-`0600` state file and appears as **pending** in the owner's account; the
-owner confirms it there (a deliberate click, showing hardware details)
-before any scene push is accepted. Re-enrolling a revoked frame needs a
-fresh claim token.
+invalid_public_key`, `429` on abuse, `403 frame_quota_exceeded` when the
+account is at its frame limit. Each successful enrollment spends one use of
+the token's budget atomically (single-use by default; see "Multi-use claim
+tokens" under Provisioning), and a use is spent only when a frame is actually
+created — a rejected enrollment leaves the budget untouched, so a device that
+hits the quota can retry the same token once the owner frees a slot.
+
+Retrying is safe: a repeat of the same `(claim_token, public_key)` pair while
+the frame is still pending is idempotent and returns the same `frame_id` with
+a usable access token, so a response lost in flight does not strand the
+device. The same token presented with a *different* device key is refused —
+`409 public_key_mismatch` — since that is a different device, not a retry.
+
+The frame stores its access token in a `0600` state file and appears as
+**pending** in the owner's account; the owner confirms it there (a deliberate
+click, showing hardware details) before any scene push is accepted.
+Re-enrolling a revoked frame needs a fresh claim token.
 
 ### B. Link code on the device (RFC 8628)
 
@@ -116,43 +126,82 @@ need owner approval on the provider's device screen; removals are immediate).
 
 The frame dials `wss://{provider}{ws_path}` with
 `Authorization: Bearer <access_token>`. Plain `ws://` is acceptable only for
-the hosts `docs/cloud-link.md` allows for `http://` providers (development).
+the hosts `docs/cloud-link.md` allows for `http://` providers — localhost,
+`.local`/`.localhost` names, and private-network literals (RFC1918, loopback,
+link-local, CGNAT). Devices enforce this: a `cloud_url` that is neither
+`https://` nor one of those plaintext dev hosts is refused at provisioning
+time and never enrolled against, because the claim token, the bearer token
+and every scene push ride this connection.
 
 All messages are JSON text frames: `{"id": "…", "type": "…", …payload}`.
-`id` is set by the sender; replies carry the same `id`. Unknown message types
-are answered with `{"type": "error", "error": "unknown_verb"}` — and, on the
-device, audit-logged.
+`id` is set by the sender; replies carry the same `id`. Message types the
+device does not recognize are answered — like every other verb — with an ack
+carrying the failure: `{"id", "type": "ack", "ok": false, "error":
+"unknown_verb"}`, and audit-logged on the device. A verb that *is* in this
+document but is not implemented by the device's profile (see "Device
+profiles" below) is answered `"error": "unsupported_verb"` instead, so a
+provider can tell a smaller profile apart from a protocol violation.
+
+Message size: providers and devices both cap a single text frame. A device
+may cap lower than the provider — the ESP32 firmware refuses anything over
+**512 KiB** (its whole on-device scene store is 512 KiB) and acks
+`message_too_large`. Providers should keep pushes well under the smallest
+profile they target rather than relying on the cap.
 
 ### Session start
 
 1. Frame → provider: `{"type": "hello", "frameos_version": "…",
    "hardware": {…}, "states": {…scene state…}, "scenes_checksum": "…"}`
-2. Provider → frame: `{"type": "challenge", "nonce": "base64, ≥32 bytes"}`
-3. Frame → provider: `{"type": "auth", "signature": "base64 Ed25519 sig over
-   nonce"}` — proves possession of the enrolled private key, so a leaked
-   bearer token alone cannot impersonate a device.
+2. Provider → frame: `{"type": "challenge", "nonce": "base64"}` — the nonce is
+   at least **32 random bytes**, and the minimum is on the *decoded* length,
+   not on the base64 text.
+3. Frame → provider: `{"type": "auth", "signature": "…"}` — proves possession
+   of the enrolled private key, so a leaked bearer token alone cannot
+   impersonate a device.
+
+   **The signature is computed over the raw bytes obtained by base64-decoding
+   `nonce`, not over the base64 text.** The frame must base64-decode the
+   nonce, sign those bytes with its Ed25519 private key, and base64-encode the
+   64-byte signature; the provider verifies the signature against the same
+   decoded bytes it generated. (Signing the base64 text is the obvious
+   mistake, and it fails silently — the socket simply closes.)
 4. Provider → frame: `{"type": "ready", "pending_commands": N}` — then drains
    the durable per-frame command queue in order.
 
 The provider must verify the signature against the enrolled public key and
-close the socket on mismatch. The frame reconnects with jittered exponential
-backoff; the provider treats the WS liveness as `last_seen_at`.
+close the socket on mismatch, with WebSocket close code **4401** (also used
+when the auth step times out and when a frame is revoked mid-session). An
+upgrade rejected before the socket opens — bad or unknown bearer token — is a
+plain HTTP `401`.
+
+The frame reconnects with jittered exponential backoff (a device picks its
+delay uniformly from the lower half of a doubling window, so a fleet that
+lost the provider together does not come back in lockstep); the provider
+treats the WS liveness as `last_seen_at`. Both rejection signals above count
+toward the demotion rule under "Device-side state and demotion".
 
 ### Provider → frame verbs (complete list)
 
 The device rejects and audit-logs anything not listed here. Every verb is
 acked: `{"id", "type": "ack", "ok": true}` or
-`{"id", "type": "ack", "ok": false, "error": "…"}`.
+`{"id", "type": "ack", "ok": false, "error": "…"}`. The ack carries only
+`id` / `ok` / `error`; verbs that return data send it as a separate
+frame → provider message carrying the same `id`.
+
+Common `error` values, beyond the per-verb ones in the table:
+`unknown_verb` (not in this document), `unsupported_verb` (in this document
+but not in this device's profile), `message_too_large`, `invalid_json`,
+`no_memory`.
 
 | Verb | Payload | Device behavior |
 |---|---|---|
-| `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum"}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack then `scene_ack` |
+| `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum"}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack once the payload is accepted and persisted, then `scene_ack` once it is actually live (no `scene_ack` if the hot-load fails — the frame is then genuinely out of sync) |
 | `set_schedule` | `{"schedule": {…}}` | replace the scene schedule |
 | `set_settings` | `{"settings": {…}}` | allowlisted declarative keys only (`name`, `rotate`, `interval`, `scaling_mode`, `timezone`, `debug`; `brightness` joins the list once the runtime grows a brightness setting); unknown or non-allowlisted keys → the whole verb is refused (`error: "setting_not_allowed"`) |
 | `set_current_scene` | `{"scene_id": "…"}` | switch active scene |
-| `get_state` | `{}` | reply with the `hello`-shaped state: the ack carries it as `"state"`, and a `state` message with the same `id` follows |
-| `get_logs` | `{"since"?: iso-ts, "limit"?: N}` | reply with buffered log lines in the ack as `"logs"` (requires `telemetry:logs`; device caps `limit` at 1000) |
-| `get_metrics` | `{}` | reply with buffered metrics samples in the ack as `"metrics"` (requires `telemetry:metrics`) |
+| `get_state` | `{}` | bare ack, then a separate `{"id", "type": "state", …}` message with the same `id` carrying the `hello`-shaped state |
+| `get_logs` | `{"since"?: iso-ts, "limit"?: N}` | bare ack, then a `log_batch` message with the same `id` carrying the buffered lines (requires `telemetry:logs`; device caps `limit` at 1000) |
+| `get_metrics` | `{}` | bare ack, then a `metrics` message with the same `id` carrying the buffered samples (requires `telemetry:metrics`) |
 | `render` | `{}` | trigger a re-render |
 | `reboot` | `{}` | reboot the device |
 | `restart_runtime` | `{}` | restart the FrameOS process |
@@ -161,6 +210,26 @@ acked: `{"id", "type": "ack", "ok": true}` or
 Explicitly absent, by design (see `cloud/docs/cloud-frames.md`): shell/exec,
 PTY, file read/write, SSH anything, network/WiFi config, admin credentials,
 update URLs, agent/profile state, compiled scene deploys.
+
+### Device profiles
+
+Not every device implements the whole verb table, and a provider must be able
+to tell "this device is smaller" from "you sent something that is not in the
+protocol". A device answers `"error": "unsupported_verb"` for a verb that is
+in the table but outside its profile, and `"error": "unknown_verb"` for
+anything else. Both are ordinary `ok: false` acks, so a durable command queue
+drains either way.
+
+| Profile | Implements | Answers `unsupported_verb` for |
+|---|---|---|
+| Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available` |
+
+The ESP32 profile is a subset because the firmware has no scheduler, no log
+buffer and no metrics buffer to expose, and updates itself from its own
+configured archive. A provider should degrade gracefully — hide or disable
+those controls for a frame whose `hardware.platform` is `esp32`, rather than
+enqueueing commands that will come back refused.
 
 ### Frame → provider messages
 
@@ -172,6 +241,29 @@ update URLs, agent/profile state, compiled scene deploys.
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state |
 
 A provider must tolerate unknown frame→provider types (forward compatibility).
+
+A provider acks `log_batch` and `metrics` with `ok: false` and `rate_limited`
+when the frame exceeds its ingestion budget, or `payload_too_large` when a
+message is over the size the provider retains. Neither is fatal: the device
+should drop the batch and keep going rather than reconnect.
+
+### Message size and delivery guarantees
+
+Both ends cap inbound message size and close the socket rather than allocate
+past it. The reference provider caps frames at **4 MiB**; a device may cap
+lower and refuse with `message_too_large` (the ESP32 profile caps at 512 KiB,
+tied to its scene store) — so a provider must be prepared for a `set_scenes`
+push to be refused on size by a small device, and should bound the payloads it
+enqueues accordingly rather than relying on the device to absorb them. A
+provider that must shed a slow consumer closes with WebSocket code **1013**
+(try again later); the device treats that as an ordinary disconnect and
+redials on its normal backoff.
+
+Command delivery is **at-least-once**. A command written to a socket that dies
+before its ack stays queued and is redelivered on the next session, so a
+device may see the same `id` twice: every verb is idempotent, and a device
+should ack a repeat exactly as it acked the original. Action verbs carry a TTL
+and are expired rather than redelivered once it passes.
 
 ## Provisioning
 
@@ -274,13 +366,25 @@ keeps its prompts); every prompt can be pre-answered with the script's
 
 ### ESP32 browser flashing
 
-The provider's flasher page uses WebSerial + esptool-js to write the prebuilt
-generic firmware, then provisions `cloud_url` + `claim_token` (+ optional
+The provider's flasher page uses WebSerial + esptool-js to write a prebuilt
+firmware image, then provisions `cloud_url` + `claim_token` (+ optional
 WiFi) into the device's NVS config partition. Same enrollment flow A over the
 device's own network connection afterwards. The firmware binaries come from
 the release archive; the flasher never receives per-user builds.
 
-Concretely, the generic firmware exposes these as allowlisted keys on the
+**"Generic" means credential-generic, not hardware-generic.** The ESP32
+component compiles exactly one display driver into an image (the panel is
+selected at configure time), so a published image is generic in that it
+carries no user, account or WiFi data — but it is built for one panel family
+and one flash-size profile. The release archive therefore publishes one
+artifact per (board, flash profile, panel) combination and the flasher page
+must let the user pick their panel, or offer only the panels it has images
+for; flashing an image built for another panel gives a device that boots,
+enrolls, and renders nothing usable. Artifact file names are an
+implementation detail of the release archive — read them from the release
+metadata rather than constructing them.
+
+Concretely, the firmware exposes these as allowlisted keys on the
 existing USB serial console (`set cloud_url …`, `set claim_token …`,
 `wifi <ssid> [pass]`), the same machine-readable channel the browser-based
 frame admin already drives — so the flasher provisions over serial after
@@ -291,7 +395,30 @@ device key / access token) back. Enrollment state is surfaced as
 The ESP32 `hardware` object sends `platform: "esp32"` with the panel driver
 name as both `device` and `panel`, plus `width`/`height`; a permanent
 enrollment rejection (HTTP 400) erases the claim token on-device and shows
-`error` until a fresh token is provisioned.
+`error` until a fresh token is provisioned. `set cloud_url` refuses a
+provider URL that would carry the claim token in the clear (see "The
+management WebSocket").
+
+The ESP32 firmware implements the **ESP32 profile** of the verb table, not
+the full one — see "Device profiles" above for exactly which verbs it
+implements and which it answers `unsupported_verb`.
+
+**Secrets at rest on ESP32.** Unlike the Pi flows, which keep their link
+state in `0600` files on a filesystem with real ownership, an ESP32 has no
+users and no file permissions. The device key seed (NVS blob `cloud_sk`), the
+bearer access token (`cloud_token`), the claim token before it is spent, and
+the WiFi PSK all live in the NVS partition in **plaintext** unless the board
+is provisioned with **ESP-IDF flash encryption**. The firmware's own
+discipline is real but bounded: those values are never printed, never echoed
+by the console, `status`, or the HTTP API, and are erased on demotion or
+`factory-reset` — but anyone with physical access and a flash reader can dump
+an unencrypted NVS partition and walk away with the device's identity and the
+owner's WiFi password. Treat physical possession of an unencrypted ESP32
+frame as possession of its cloud link, and enable flash encryption (plus
+secure boot, if the deployment warrants it) for anything installed where that
+matters. Revoking the frame in the owner's account is what invalidates a
+stolen token; the provider rejects the next connection and the device demotes
+itself.
 
 ## Provider-side HTTP API (account-authenticated)
 
@@ -346,7 +473,14 @@ While managed:
 - a persistent `401 invalid_link_token` on the WS or HTTP APIs — the device
   demotes after 3 consecutive authentication rejections — resets the link,
   returns the frame to standalone, and keeps rendering the last pushed
-  scenes;
+  scenes. Both WS rejection signals count: an HTTP `401` on the upgrade and a
+  `4401` close of an established socket. The streak resets when a session
+  reaches `ready`. Demotion discards the access token, `frame_id` and
+  `ws_path`, and keeps the device key — a revoked frame still needs a fresh
+  claim token to re-enroll — and it never touches local admin access, so a
+  provider (or an attacker who reached one) can never lock an owner out of
+  their own device. On ESP32 the same rule drops the NVS `cloud_token` /
+  `cloud_fid` / `cloud_ws` keys and keeps `cloud_sk`;
 - leaving managed mode (to standalone or to backend-managed) is a local admin
   action only (`POST /api/cloud/disconnect`). Enrolling with a backend while
   managed — or vice versa — requires that local demotion first.

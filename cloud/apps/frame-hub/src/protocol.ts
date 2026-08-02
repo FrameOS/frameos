@@ -87,6 +87,11 @@ export function parseLogTimestamp(value: unknown, fallback = new Date()): Date {
   return fallback;
 }
 
+// Longest scene id the hub stores, matching the ceiling auth-web puts on a
+// set_current_scene payload. Applies to a log entry's `scene` and to the
+// active_scene a scene_ack merges into last_state.
+export const maxSceneIdChars = 256;
+
 export function parseLogEntries(
   value: unknown,
 ): { timestamp: Date; payload: unknown }[] {
@@ -98,12 +103,51 @@ export function parseLogEntries(
     if (!isRecord(entry)) {
       continue;
     }
-    entries.push({
-      payload: entry.payload ?? null,
-      timestamp: parseLogTimestamp(entry.timestamp),
-    });
+    // The wire contract allows an optional per-entry `scene`
+    // (docs/cloud-frames.md, "log_batch"). frame_logs has no scene column, so
+    // it is folded into the stored jsonb payload instead of being dropped —
+    // an explicit payload.scene from the device still wins, and a non-object
+    // payload is wrapped rather than losing either half.
+    let payload = entry.payload ?? null;
+    if (typeof entry.scene === "string") {
+      const scene = entry.scene.slice(0, maxSceneIdChars);
+      payload = isRecord(payload) ? { scene, ...payload } : { payload, scene };
+    }
+    entries.push({ payload, timestamp: parseLogTimestamp(entry.timestamp) });
   }
   return entries;
+}
+
+// Size caps for device-supplied values the hub persists. Everything a device
+// sends is untrusted (cloud/docs/cloud-frames.md, threat model): without a cap
+// one oversized `state` writes a huge jsonb row that every later
+// broadcastFrameUpdate re-selects and fans out to every browser socket on the
+// account.
+//
+// Oversized values are rejected, never truncated: a half-serialized jsonb blob
+// is not valid state, and a truncated checksum would compare unequal to the
+// assigned one forever (the UI would show a permanently out-of-sync frame with
+// no way to recover). Rejecting leaves the last good value in place, which is
+// both accurate and self-healing on the next well-formed message.
+export const maxStateBytes = 64 * 1024;
+export const maxMetricsBytes = 16 * 1024;
+export const maxChecksumChars = 128;
+
+export function jsonByteLength(value: unknown) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8");
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+export function withinJsonByteLimit(value: unknown, maxBytes: number) {
+  return jsonByteLength(value) <= maxBytes;
+}
+
+// A checksum is a hex digest; anything longer than maxChecksumChars is not one.
+export function isAcceptableChecksum(value: unknown): value is string {
+  return typeof value === "string" && value.length <= maxChecksumChars;
 }
 
 // Browser event envelope, matching what frontend/src/scenes/socketLogic.tsx

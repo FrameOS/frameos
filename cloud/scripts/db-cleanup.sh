@@ -47,11 +47,20 @@ DELETE FROM frame_commands
 WHERE status IN ('acked', 'failed', 'expired')
   AND created_at < now() - make_interval(days => :'retention_days'::int);
 
+-- 'sent' too: a command written to a socket that died before the ack stays
+-- undelivered, and the hub redelivers it. Without this a frame that is revoked
+-- or never reconnects leaves TTL-less rows behind forever.
 UPDATE frame_commands
 SET status = 'expired', error = 'expired'
-WHERE status = 'pending'
+WHERE status IN ('pending', 'sent')
   AND expires_at IS NOT NULL
   AND expires_at < now();
+
+-- Revoked frames themselves are deliberately NOT pruned here: the row is the
+-- owner's record of a device that existed, and deleting it takes its logs with
+-- it. The quota stops counting them after revokedFrameQuotaGraceMs, so they
+-- cost quota nothing. Reaping them (and the revoked linked_clients row, which
+-- would cascade to that client's backups) is a data-retention decision.
 
 DELETE FROM frame_logs
 WHERE inserted_at < now() - make_interval(days => :'retention_days'::int);

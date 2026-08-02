@@ -829,7 +829,8 @@ async def build_release_image(args: argparse.Namespace) -> None:
         (overlay_dir / "boot" / "frameos-setup.json").unlink(missing_ok=True)
         # Every generic release image ships the 4096-byte all-comments
         # frameos-cloud.txt placeholder. First boot treats a placeholder with
-        # zero recognized keys as "not personalized" (log + leave in place),
+        # no KEY=value lines as "not personalized" and exits before doing any
+        # work at all, so it stays in place and costs nothing per boot,
         # and the provider's in-browser "Download SD image" flow overwrites
         # the placeholder's bytes in place inside the raw image (locating it
         # by its magic first line, "# FRAMEOS-CLOUD-CONFIG-V1"). In-place

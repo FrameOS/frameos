@@ -9,12 +9,43 @@ import { useEffect, useRef, useState } from "react";
 // provisions cloud_url + claim_token (+ optional WiFi) over the device's
 // serial console. The claim token is single-use and short-lived; nothing
 // per-user ever enters the firmware binary.
+//
+// Both the release listing and the firmware bytes come from this cloud's own
+// /api/frames/firmware route: GitHub's release redirect sends no CORS headers,
+// and unauthenticated api.github.com is rate-limited per IP (one office NAT is
+// enough to 403 everyone behind it).
 
-const releaseApiUrl =
-  "https://api.github.com/repos/FrameOS/frameos/releases/latest";
-const genericFirmwareSuffix = "-esp32-s3-generic.bin";
+const firmwareApiUrl = "/api/frames/firmware";
+const firmwarePlatform = "esp32-s3-epd7in5v2";
+// The panel is compiled into the firmware, so this build drives the Waveshare
+// 7.5" V2 panel only — see the esp32 job in docker-publish-multi.yml.
+const genericFirmwareSuffix = "-esp32-s3-epd7in5v2.bin";
 const flashBaudrate = 460800;
 const consoleBaudrate = 115200;
+
+// The console prompt has no trailing space (fos_console.c: `printf("frameos>")`).
+const consolePrompt = "frameos>";
+// cmd_wifi prints "wifi credentials saved, restarting..." before esp_restart().
+const rebootNotice = "restarting";
+const bootPromptTimeoutMs = 20000;
+const commandPromptTimeoutMs = 10000;
+const rebootAckTimeoutMs = 5000;
+
+// 802.11 limits, and both fit the device's 128-byte config fields.
+const maxSsidLength = 32;
+const maxPasswordLength = 64;
+// A newline would end the console line and start a second command; no other
+// control character survives the serial console either. (A character class
+// would say the same, but eslint's no-control-regex bans it in a regex.)
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
 
 type FlashPhase =
   | "idle"
@@ -32,30 +63,82 @@ interface SerialPortLike {
   writable: WritableStream<Uint8Array> | null;
 }
 
+interface ConsoleCommand {
+  // What to show in the log — secrets are redacted there, not on the wire.
+  display: string;
+  // Substring the console prints back once the command took effect: its prompt
+  // after `set`, the reboot notice after `wifi`, nothing at all after
+  // `restart` (cmd_restart resets without printing anything).
+  expect: string | undefined;
+  // Whether a missing acknowledgement means the command failed. Reboot
+  // commands print theirs while the board is already resetting, so that line
+  // can legitimately be lost in the USB TX buffer.
+  required: boolean;
+  text: string;
+}
+
+// esp_console_split_argv (ESP-IDF components/console/split_argv.c, reached via
+// esp_console_run in fos_console.c) understands double quotes and backslash
+// escapes: inside "…" a space is a literal space, and the only recognized
+// escapes are \\, \" and backslash-space — any other escape is silently
+// dropped, so nothing else may be emitted. Quoting the
+// whole value and escaping backslashes and quotes is exactly expressible, and
+// an SSID like `My Home WiFi` arrives as one argv entry.
+function quoteConsoleArgument(value: string): string {
+  return `"${value.replace(/[\\"]/g, "\\$&")}"`;
+}
+
+// Validated before anything is downloaded or flashed: half-provisioning a
+// board and then failing is much worse than refusing up front.
+export function wifiInputError(
+  ssid: string,
+  password: string,
+): string | undefined {
+  if (hasControlCharacter(ssid) || hasControlCharacter(password)) {
+    return "WiFi name and password can't contain line breaks or control characters.";
+  }
+  if (ssid.length > maxSsidLength) {
+    return `WiFi network name must be at most ${maxSsidLength} characters.`;
+  }
+  if (password.length > maxPasswordLength) {
+    return `WiFi password must be at most ${maxPasswordLength} characters.`;
+  }
+  if (!ssid && password) {
+    return "Enter the WiFi network name for that password.";
+  }
+  return undefined;
+}
+
+interface FirmwareAsset {
+  name: string;
+  platform: string;
+  size: number;
+}
+
 async function fetchGenericFirmware(
   log: (line: string) => void,
 ): Promise<Uint8Array> {
   log("Looking up the latest FrameOS release…");
-  const releaseResponse = await fetch(releaseApiUrl, {
-    headers: { accept: "application/vnd.github+json" },
-  });
+  const releaseResponse = await fetch(firmwareApiUrl);
   if (!releaseResponse.ok) {
-    throw new Error(`GitHub release lookup failed (${releaseResponse.status})`);
+    throw new Error(`Release lookup failed (${releaseResponse.status})`);
   }
   const release = (await releaseResponse.json()) as {
-    assets?: { browser_download_url: string; name: string; size: number }[];
-    tag_name?: string;
+    assets?: FirmwareAsset[];
+    release?: string;
   };
-  const asset = release.assets?.find((entry) =>
-    entry.name.endsWith(genericFirmwareSuffix),
+  const asset = release.assets?.find(
+    (entry) => entry.platform === firmwarePlatform,
   );
   if (!asset) {
     throw new Error(
-      `Release ${release.tag_name ?? "?"} has no ${genericFirmwareSuffix} asset yet — it ships with the first release after cloud frames landed. You can flash manually via embedded/esp32 instead.`,
+      `Release ${release.release || "?"} has no ${genericFirmwareSuffix} asset yet — it ships with the first release after cloud frames landed. You can flash manually via embedded/esp32 instead.`,
     );
   }
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`);
-  const firmwareResponse = await fetch(asset.browser_download_url);
+  const firmwareResponse = await fetch(
+    `${firmwareApiUrl}?platform=${encodeURIComponent(firmwarePlatform)}`,
+  );
   if (!firmwareResponse.ok) {
     throw new Error(`Firmware download failed (${firmwareResponse.status})`);
   }
@@ -67,54 +150,116 @@ async function fetchGenericFirmware(
 // substrings rather than parsing the esp_console framing.
 async function provisionOverSerial(
   port: SerialPortLike,
-  commands: string[],
+  commands: ConsoleCommand[],
   log: (line: string) => void,
 ): Promise<void> {
   await port.open({ baudRate: consoleBaudrate });
+  const writer = port.writable?.getWriter();
+  const reader = port.readable?.getReader();
   try {
-    const writer = port.writable?.getWriter();
-    const reader = port.readable?.getReader();
     if (!writer || !reader) {
       throw new Error("Serial port has no readable/writable stream");
     }
     const decoder = new TextDecoder();
     let buffer = "";
+    // Exactly one read() may be outstanding at a time. Racing a fresh read()
+    // against a timer and walking away leaves that read pending — it still
+    // resolves later, and its chunk (possibly the one carrying the prompt) is
+    // lost. So the pending promise is kept and re-awaited until it settles.
+    let pendingRead:
+      | Promise<{ result: ReadableStreamReadResult<Uint8Array>; tag: "read" }>
+      | undefined;
     const readUntil = async (needle: string, timeoutMs: number) => {
       const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const result = await Promise.race([
-          reader.read(),
-          new Promise<{ done: true; value: undefined }>((resolve) =>
-            setTimeout(() => resolve({ done: true, value: undefined }), 500),
-          ),
+      if (buffer.includes(needle)) {
+        return true;
+      }
+      for (;;) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          return false;
+        }
+        pendingRead ??= reader
+          .read()
+          .then((result) => ({ result, tag: "read" as const }));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const outcome = await Promise.race([
+          pendingRead,
+          new Promise<{ tag: "timeout" }>((resolve) => {
+            timer = setTimeout(() => resolve({ tag: "timeout" }), remaining);
+          }),
         ]);
-        if (result.value) {
-          buffer += decoder.decode(result.value, { stream: true });
+        clearTimeout(timer);
+        if (outcome.tag === "timeout") {
+          // Keep pendingRead: its bytes are still coming.
+          continue;
+        }
+        pendingRead = undefined;
+        if (outcome.result.done) {
+          // The device closed the stream; no further bytes will arrive.
+          return buffer.includes(needle);
+        }
+        if (outcome.result.value) {
+          buffer += decoder.decode(outcome.result.value, { stream: true });
           if (buffer.includes(needle)) {
             return true;
           }
         }
       }
-      return false;
     };
 
     // Wait for the console to come up after reset (boot logs then prompt).
     log("Waiting for the FrameOS console…");
-    await readUntil("frameos>", 20000);
-    for (const command of commands) {
-      const display = command.startsWith("set claim_token")
-        ? "set claim_token (redacted)"
-        : command.startsWith("set wifi_pass")
-          ? "set wifi_pass (redacted)"
-          : command;
-      log(`> ${display}`);
-      buffer = "";
-      await writer.write(new TextEncoder().encode(command + "\n"));
-      await readUntil("frameos>", 10000);
+    if (!(await readUntil(consolePrompt, bootPromptTimeoutMs))) {
+      throw new Error(
+        "The flashed firmware never showed its FrameOS console prompt, so nothing was provisioned. Unplug the board, plug it back in and try again.",
+      );
     }
-    writer.releaseLock();
-    reader.releaseLock();
+    for (const command of commands) {
+      log(`> ${command.display}`);
+      buffer = "";
+      await writer.write(new TextEncoder().encode(command.text + "\n"));
+      if (command.expect === undefined) {
+        continue;
+      }
+      const acknowledged = await readUntil(
+        command.expect,
+        command.required ? commandPromptTimeoutMs : rebootAckTimeoutMs,
+      );
+      if (acknowledged) {
+        continue;
+      }
+      if (command.required) {
+        // Every result used to be discarded, so a board that never booted a
+        // console was still reported as provisioned.
+        throw new Error(
+          `The frame never acknowledged \`${command.display}\`, so it is not fully provisioned. Try flashing again.`,
+        );
+      }
+      log(
+        "(No reboot confirmation seen — the board may have reset before it finished printing.)",
+      );
+    }
   } finally {
+    // Hand the streams back even when a step threw, or the port stays locked
+    // and the offered retry fails with "port already open" until a replug.
+    if (reader) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Already errored/closed — nothing to cancel.
+      }
+      try {
+        reader.releaseLock();
+      } catch {
+        // Ditto.
+      }
+    }
+    try {
+      writer?.releaseLock();
+    } catch {
+      // Ditto.
+    }
     try {
       await port.close();
     } catch {
@@ -134,6 +279,7 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
   );
   const [wifiSsid, setWifiSsid] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
+  const [error, setError] = useState<string | undefined>();
   const busyRef = useRef(false);
 
   // WebSerial support is a client-only fact: decide it after mount so the
@@ -173,13 +319,18 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
     if (busyRef.current) {
       return;
     }
+    const inputError = wifiInputError(wifiSsid, wifiPassword);
+    if (inputError) {
+      setError(inputError);
+      setPhase("error");
+      return;
+    }
     busyRef.current = true;
     setLines([]);
+    setError(undefined);
     setProgress(0);
     try {
       setPhase("fetching");
-      log("Preparing a one-time enrollment for this frame…");
-      const token = await mintEnrollmentCode();
       const firmware = await fetchGenericFirmware(log);
 
       setPhase("connecting");
@@ -199,43 +350,81 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
         romBaudrate: 115200,
         transport,
       } as never);
-      await loader.main();
-      log(`Connected: ${loader.chip?.CHIP_NAME ?? "ESP32"}`);
-      // esptool-js wants binary strings; convert in chunks.
-      let binary = "";
-      const chunkSize = 0x8000;
-      for (let offset = 0; offset < firmware.length; offset += chunkSize) {
-        binary += String.fromCharCode(
-          ...firmware.subarray(offset, offset + chunkSize),
-        );
+      try {
+        await loader.main();
+        log(`Connected: ${loader.chip?.CHIP_NAME ?? "ESP32"}`);
+        // esptool-js wants binary strings; convert in chunks.
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < firmware.length; offset += chunkSize) {
+          binary += String.fromCharCode(
+            ...firmware.subarray(offset, offset + chunkSize),
+          );
+        }
+        await loader.writeFlash({
+          compress: true,
+          eraseAll: false,
+          fileArray: [{ address: 0x0, data: binary }],
+          flashFreq: "keep",
+          flashMode: "keep",
+          flashSize: "keep",
+          reportProgress: (_index: number, written: number, total: number) => {
+            setProgress(Math.round((written / total) * 100));
+          },
+        } as never);
+        log("Firmware written. Resetting…");
+        await loader.after();
+      } finally {
+        // Always give the port back, including on a mid-flash throw: esptool-js
+        // holds the WebSerial reader/writer, and provisioning (or a retry)
+        // needs to reopen the same port.
+        try {
+          await transport.disconnect();
+        } catch {
+          // Never mask the flash error with a teardown error.
+        }
       }
-      await loader.writeFlash({
-        compress: true,
-        eraseAll: false,
-        fileArray: [{ address: 0x0, data: binary }],
-        flashFreq: "keep",
-        flashMode: "keep",
-        flashSize: "keep",
-        reportProgress: (_index: number, written: number, total: number) => {
-          setProgress(Math.round((written / total) * 100));
-        },
-      } as never);
-      log("Firmware written. Resetting…");
-      await loader.after();
-      await transport.disconnect();
 
       setPhase("provisioning");
-      const commands = [
-        `set cloud_url ${cloudUrl}`,
-        `set claim_token ${token}`,
+      // Minted here, not at the start: claim tokens are single-use and there is
+      // no revoke endpoint, so minting before the download/connect/flash burned
+      // one code per failed attempt. Now nothing is spent unless the firmware
+      // is actually on the board and only the serial handshake is left.
+      log("Preparing a one-time enrollment for this frame…");
+      const token = await mintEnrollmentCode();
+      const commands: ConsoleCommand[] = [
+        {
+          display: `set cloud_url ${cloudUrl}`,
+          expect: consolePrompt,
+          required: true,
+          text: `set cloud_url ${quoteConsoleArgument(cloudUrl)}`,
+        },
+        {
+          display: "set claim_token (redacted)",
+          expect: consolePrompt,
+          required: true,
+          text: `set claim_token ${quoteConsoleArgument(token)}`,
+        },
       ];
       if (wifiSsid) {
         // `wifi` saves credentials and reboots; enrollment starts on boot.
-        commands.push(
-          wifiPassword ? `wifi ${wifiSsid} ${wifiPassword}` : `wifi ${wifiSsid}`,
-        );
+        commands.push({
+          display: wifiPassword
+            ? `wifi ${wifiSsid} (password redacted)`
+            : `wifi ${wifiSsid}`,
+          expect: rebootNotice,
+          required: false,
+          text: wifiPassword
+            ? `wifi ${quoteConsoleArgument(wifiSsid)} ${quoteConsoleArgument(wifiPassword)}`
+            : `wifi ${quoteConsoleArgument(wifiSsid)}`,
+        });
       } else {
-        commands.push("restart");
+        commands.push({
+          display: "restart",
+          expect: undefined,
+          required: false,
+          text: "restart",
+        });
       }
       await provisionOverSerial(port, commands, log);
 
@@ -245,9 +434,12 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
           ? "Done. The frame joins WiFi, enrolls, and appears above as pending — confirm it there."
           : "Done. Connect the frame to WiFi (serial: `wifi <ssid> <pass>` or the FrameOS-Setup portal); it then enrolls and appears above as pending.",
       );
-    } catch (error) {
+    } catch (flashError) {
+      const message =
+        flashError instanceof Error ? flashError.message : String(flashError);
       setPhase("error");
-      log(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      setError(message);
+      log(`Error: ${message}`);
     } finally {
       busyRef.current = false;
     }
@@ -263,6 +455,9 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
     );
   }
 
+  const busy =
+    phase !== "idle" && phase !== "error" && phase !== "done";
+
   return (
     <div className="card">
       <h4>
@@ -274,13 +469,19 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
       </p>
       <div className="grid" style={{ gap: "0.5rem" }}>
         <input
+          aria-label="WiFi network"
           className="input"
+          disabled={busy}
+          maxLength={maxSsidLength}
           onChange={(event) => setWifiSsid(event.target.value)}
           placeholder="WiFi network (optional — portal works too)"
           value={wifiSsid}
         />
         <input
+          aria-label="WiFi password"
           className="input"
+          disabled={busy}
+          maxLength={maxPasswordLength}
           onChange={(event) => setWifiPassword(event.target.value)}
           placeholder="WiFi password"
           type="password"
@@ -289,7 +490,7 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
         <div className="inline-actions">
           <button
             className="button button--small"
-            disabled={phase !== "idle" && phase !== "error" && phase !== "done"}
+            disabled={busy}
             onClick={() => void flash()}
             type="button"
           >
@@ -304,9 +505,16 @@ export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefine
           </button>
         </div>
       </div>
+      {error ? (
+        <p className="copy" role="alert" style={{ color: "var(--warning)" }}>
+          {error}
+        </p>
+      ) : null}
+      {phase === "done" ? <div data-testid="esp32-flash-done" /> : null}
       {lines.length > 0 ? (
         <pre
           className="copy"
+          role="status"
           style={{ maxHeight: "12rem", overflow: "auto" }}
         >
           {lines.join("\n")}

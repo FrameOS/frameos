@@ -18,22 +18,25 @@ import {
 // server. If the release image has no placeholder the UI falls back to the
 // manual instructions below.
 
-const releaseApiUrl =
-  "https://api.github.com/repos/FrameOS/frameos/releases/latest";
+// Server-side, session-gated and cached release lookup. The browser used to
+// call api.github.com directly, which burns the unauthenticated 60 req/hr/IP
+// budget — a single corporate NAT is enough to turn that into a 403 for
+// everyone behind it.
+const firmwareApiUrl = "/api/frames/firmware";
 
 const knownBoards = [
   { label: "Raspberry Pi Zero 2 W", platform: "raspberry-pi-zero-2-w" },
   { label: "Raspberry Pi Zero W", platform: "raspberry-pi-zero-w" },
 ] as const;
 
-interface ReleaseAsset {
-  browser_download_url: string;
+interface FirmwareAsset {
   name: string;
+  platform: string;
   size: number;
 }
 
 interface Board {
-  asset?: ReleaseAsset | undefined;
+  asset?: FirmwareAsset | undefined;
   label: string;
   platform: string;
 }
@@ -61,10 +64,12 @@ async function* streamChunks(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<Uint8Array, void, undefined> {
   const reader = stream.getReader();
+  let drained = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) {
+        drained = true;
         return;
       }
       if (value && value.length > 0) {
@@ -72,6 +77,12 @@ async function* streamChunks(
       }
     }
   } finally {
+    // Whoever consumes this may bail out early (a patch error, a failed disk
+    // write). Releasing the lock alone would leave a multi-hundred-MB
+    // download running in the background, so cancel the source too.
+    if (!drained) {
+      await reader.cancel().catch(() => undefined);
+    }
     reader.releaseLock();
   }
 }
@@ -118,32 +129,37 @@ export function SdImageBuilder({
     let cancelled = false;
     async function loadRelease() {
       try {
-        const response = await fetch(releaseApiUrl, {
-          headers: { accept: "application/vnd.github+json" },
-        });
+        const response = await fetch(firmwareApiUrl);
         if (!response.ok) {
-          throw new Error(`GitHub release lookup failed (${response.status})`);
+          throw new Error(`Release lookup failed (${response.status})`);
         }
         const data = (await response.json()) as {
-          assets?: ReleaseAsset[];
-          tag_name?: string;
+          assets?: FirmwareAsset[];
+          release?: string;
         };
         if (cancelled) {
           return;
         }
-        const boards: Board[] = knownBoards.map((board) => ({
-          asset: data.assets?.find(
-            (asset) =>
-              asset.name.startsWith("frameos-") &&
-              asset.name.endsWith(`-${board.platform}-buildroot.img.gz`),
-          ),
-          label: board.label,
-          platform: board.platform,
-        }));
+        // The route lists ESP32 firmware alongside the SD images, so match on
+        // the board's platform and prefer an .img.gz; a board with no entry
+        // stays listed but disabled.
+        const boards: Board[] = knownBoards.map((board) => {
+          const candidates = (data.assets ?? []).filter(
+            (asset) => asset.platform === board.platform,
+          );
+          return {
+            asset:
+              candidates.find((asset) => asset.name?.endsWith(".img.gz")) ??
+              candidates[0],
+            label: board.label,
+            platform: board.platform,
+          };
+        });
         setRelease({
           boards,
           status: "ready",
-          version: data.tag_name ?? "latest",
+          // The route sends "" when the release carries no tag.
+          version: data.release || "latest",
         });
         const firstAvailable = boards.find((board) => board.asset);
         if (firstAvailable) {
@@ -277,19 +293,51 @@ export function SdImageBuilder({
           }
         }
       })();
+      // The drain side is the one that touches the disk, so it is where a
+      // full volume shows up mid-image. Once it dies nobody reads
+      // recompressed.readable any more and the loop below would block
+      // forever on gzip backpressure — the UI would sit at "Personalizing…"
+      // with busyRef stuck true. So race every write against a promise that
+      // only ever rejects. The no-op catches keep the same rejection from
+      // being reported a second time as unhandled.
+      const drainFailure = drain.then(
+        () => new Promise<never>(() => undefined),
+        (reason: unknown) => Promise.reject(reason),
+      );
+      drainFailure.catch(() => undefined);
+      // A write/close the race abandons still rejects later (we abort the
+      // writer), so give it a handler of its own before racing it.
+      const raceDrain = (pending: Promise<void>) => {
+        pending.catch(() => undefined);
+        return Promise.race([pending, drainFailure]);
+      };
 
-      for await (const chunk of patchCloudConfig(
-        streamChunks(decompressed),
-        configBytes,
-      )) {
-        await recompressedWriter.write(chunk as BufferSource);
-        written += chunk.length;
-        if (written - lastShown >= 8 * 1024 * 1024) {
-          lastShown = written;
-          setProgressBytes(written);
+      try {
+        for await (const chunk of patchCloudConfig(
+          streamChunks(decompressed),
+          configBytes,
+        )) {
+          await raceDrain(recompressedWriter.write(chunk as BufferSource));
+          written += chunk.length;
+          if (written - lastShown >= 8 * 1024 * 1024) {
+            lastShown = written;
+            setProgressBytes(written);
+          }
         }
+        await raceDrain(recompressedWriter.close());
+      } catch (pipelineError) {
+        // Tear the gzip pipeline down: aborting the writer errors the
+        // readable side, which unblocks (and cancels) the drain and the
+        // download reader behind it, so `drain` always settles from here.
+        await recompressedWriter.abort(pipelineError).catch(() => undefined);
+        // Report the drain's reason when it has one: a failed disk write
+        // cancels the gzip stream, and the "operation was aborted" that the
+        // in-flight write then reports would hide the actual cause.
+        throw await drain.then(
+          () => pipelineError,
+          (reason: unknown) => reason,
+        );
       }
-      await recompressedWriter.close();
       await drain;
       setProgressBytes(written);
       if (writable) {
@@ -326,10 +374,17 @@ export function SdImageBuilder({
           "This release image predates in-browser personalization — update to a newer FrameOS release, or use the install-script flow instead.",
         );
       } else {
-        setError(
-          buildError instanceof Error ? buildError.message : String(buildError),
+        // Always land on a real message: a DOMException from a failed disk
+        // write can carry an empty one, and a blank error would look like a
+        // silent hang.
+        const message =
+          buildError instanceof Error
+            ? buildError.message
+            : String(buildError);
+        failWith(
+          message ||
+            "The image could not be written — check the destination has room and try again.",
         );
-        setPhase("error");
       }
     } finally {
       busyRef.current = false;
@@ -383,6 +438,7 @@ export function SdImageBuilder({
                 ))}
               </select>
               <input
+                aria-label="Frame name (optional)"
                 className="input"
                 disabled={building}
                 maxLength={256}
@@ -391,6 +447,7 @@ export function SdImageBuilder({
                 value={frameName}
               />
               <input
+                aria-label="WiFi network name (optional)"
                 className="input"
                 disabled={building}
                 maxLength={64}
@@ -399,6 +456,7 @@ export function SdImageBuilder({
                 value={wifiSsid}
               />
               <input
+                aria-label="WiFi password"
                 className="input"
                 disabled={building || !wifiSsid}
                 maxLength={128}

@@ -40,24 +40,35 @@ export async function GET(
   }
 
   const afterIdRaw = request.nextUrl.searchParams.get("after_id");
-  const afterId = afterIdRaw ? Number.parseInt(afterIdRaw, 10) : undefined;
+  const parsedAfterId =
+    afterIdRaw === null ? Number.NaN : Number.parseInt(afterIdRaw, 10);
+  // after_id=0 is a real cursor ("everything from the beginning"), not an
+  // absent one — id is a generated identity starting at 1, so a truthiness
+  // check would silently drop the filter.
+  const afterId =
+    Number.isFinite(parsedAfterId) && parsedAfterId >= 0
+      ? parsedAfterId
+      : undefined;
 
+  // One row over the page so the caller can tell a full page from a
+  // truncated one and knows to fetch again with after_id.
   const rows = await db
     .select()
     .from(frameLogs)
     .where(
       and(
         eq(frameLogs.frameId, frame.id),
-        ...(afterId && Number.isFinite(afterId)
-          ? [gt(frameLogs.id, afterId)]
-          : []),
+        ...(afterId === undefined ? [] : [gt(frameLogs.id, afterId)]),
       ),
     )
     .orderBy(asc(frameLogs.id))
-    .limit(maxLogsPerPage);
+    .limit(maxLogsPerPage + 1);
+  const hasMore = rows.length > maxLogsPerPage;
+  const page = hasMore ? rows.slice(0, maxLogsPerPage) : rows;
 
   return NextResponse.json({
-    logs: rows.map((row) => {
+    has_more: hasMore,
+    logs: page.map((row) => {
       const payload =
         row.payload && typeof row.payload === "object"
           ? (row.payload as Record<string, unknown>)

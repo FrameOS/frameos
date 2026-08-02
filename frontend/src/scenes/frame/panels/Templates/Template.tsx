@@ -1,4 +1,4 @@
-import { RepositoryType, TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import {
   ArrowDownTrayIcon,
@@ -62,7 +62,7 @@ export function builtOnNewerFrameos(templateVersion?: string): boolean {
 
 interface TemplateProps {
   template: TemplateType
-  frameId?: number
+  frameId?: FrameId
   repository?: RepositoryType
   applyTemplate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
@@ -451,7 +451,7 @@ export function TemplateRow({
 }
 
 /** Renders the in-browser WASM preview modal for a template's entry scene. */
-function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element | null {
+function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   return livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null
 }

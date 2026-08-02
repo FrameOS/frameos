@@ -3,7 +3,7 @@
 // cookie naming and verification): an HS256 JWT signed with
 // derivedSigningKey("session"), valid only while its sessions row (keyed by
 // the sha256-base64url token hash) is unrevoked and unexpired.
-import { eq } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { jwtVerify } from "jose";
 import { createDb, sessions } from "@frameos-cloud/db";
 import { derivedSigningKey } from "../../auth-web/src/lib/keys";
@@ -46,10 +46,18 @@ export function parseCookieHeader(
   return cookies;
 }
 
+// The authenticated browser session behind an upgrade. tokenHash is kept so
+// the hub can recheck revocation later: sockets outlive the upgrade, and a
+// session revoked afterwards (logout, admin revoke) must stop streaming.
+export interface BrowserSession {
+  accountId: string;
+  tokenHash: string;
+}
+
 export async function verifySessionToken(
   db: ReturnType<typeof createDb>,
   token: string,
-): Promise<string | undefined> {
+): Promise<BrowserSession | undefined> {
   try {
     const verified = await jwtVerify(token, derivedSigningKey("session"), {
       algorithms: ["HS256"],
@@ -59,6 +67,7 @@ export async function verifySessionToken(
       return undefined;
     }
     const accountId = profile.accountId;
+    const tokenHash = hashSecret(token);
     const [row] = await db
       .select({
         accountId: sessions.accountId,
@@ -66,7 +75,7 @@ export async function verifySessionToken(
         revokedAt: sessions.revokedAt,
       })
       .from(sessions)
-      .where(eq(sessions.tokenHash, hashSecret(token)))
+      .where(eq(sessions.tokenHash, tokenHash))
       .limit(1);
     if (
       !row ||
@@ -76,7 +85,7 @@ export async function verifySessionToken(
     ) {
       return undefined;
     }
-    return accountId;
+    return { accountId, tokenHash };
   } catch {
     return undefined;
   }
@@ -87,17 +96,40 @@ export async function verifySessionToken(
 export async function authenticateBrowserSession(
   db: ReturnType<typeof createDb>,
   cookieHeader: string | undefined,
-): Promise<string | undefined> {
+): Promise<BrowserSession | undefined> {
   const cookies = parseCookieHeader(cookieHeader);
   for (const name of sessionCookieCandidates) {
     const token = cookies.get(name);
     if (!token) {
       continue;
     }
-    const accountId = await verifySessionToken(db, token);
-    if (accountId) {
-      return accountId;
+    const session = await verifySessionToken(db, token);
+    if (session) {
+      return session;
     }
   }
   return undefined;
+}
+
+// The subset of the given session token hashes that are still live. Used by
+// the sweep to close browser sockets whose session was revoked or expired
+// after the upgrade — devices are kicked on revocation, browsers must be too.
+export async function liveSessionHashes(
+  db: ReturnType<typeof createDb>,
+  tokenHashes: string[],
+): Promise<Set<string>> {
+  if (tokenHashes.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .select({ tokenHash: sessions.tokenHash })
+    .from(sessions)
+    .where(
+      and(
+        inArray(sessions.tokenHash, tokenHashes),
+        isNull(sessions.revokedAt),
+        gt(sessions.expiresAt, new Date()),
+      ),
+    );
+  return new Set(rows.map((row) => row.tokenHash));
 }

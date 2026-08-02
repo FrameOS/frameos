@@ -41,6 +41,13 @@ suite "private network address classifier":
       "fc00::1", "fdab::1",                       # IPv6 ULA fc00::/7
       "fe80::1",                                  # IPv6 link-local
       "::ffff:192.168.1.10", "::ffff:10.0.0.1",   # IPv4-mapped private
+      "::127.0.0.1", "::10.0.0.1", "::192.168.1.1", # IPv4-compatible (no ffff marker)
+      "192.0.0.1", "192.0.0.171",                 # 192.0.0.0/24 protocol assignments
+      "198.18.0.1", "198.19.255.254",             # 198.18/15 benchmarking
+      "224.0.0.1", "239.255.255.250",             # 224/4 multicast (incl. SSDP)
+      "240.0.0.1", "255.255.255.254",             # 240/4 reserved
+      "ff02::1", "ff05::c",                       # IPv6 multicast
+      "64:ff9b::127.0.0.1",                       # NAT64 wrapper around loopback
     ]:
       check isPrivateNetworkAddress(address)
 
@@ -55,6 +62,12 @@ suite "private network address classifier":
       "126.255.255.255", "128.0.0.1",             # edges around 127/8
       "2606:4700::1111",                          # public IPv6
       "::ffff:8.8.8.8",                           # IPv4-mapped public
+      "::8.8.8.8",                                # IPv4-compatible public
+      "192.0.1.1",                                # edge above 192.0.0.0/24
+      "198.17.255.255", "198.20.0.0",             # edges around 198.18/15
+      "223.255.255.255",                          # edge below 224/4
+      "223.255.255.250",                          # still unicast
+      "64:ff9b::8.8.8.8",                         # NAT64 wrapper around a public IPv4
     ]:
       check not isPrivateNetworkAddress(address)
 

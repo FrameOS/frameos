@@ -6,10 +6,16 @@ import {
   commandMessage,
   deviceAuthError,
   frameUpdateEvent,
+  isAcceptableChecksum,
+  jsonByteLength,
+  maxChecksumChars,
+  maxSceneIdChars,
+  maxStateBytes,
   newLogEvent,
   parseJsonMessage,
   parseLogEntries,
   parseLogTimestamp,
+  withinJsonByteLimit,
   type FrameRow,
 } from "./protocol";
 
@@ -184,6 +190,61 @@ describe("parseLogEntries", () => {
   it("returns [] for non-arrays", () => {
     expect(parseLogEntries({ logs: [] })).toEqual([]);
     expect(parseLogEntries(undefined)).toEqual([]);
+  });
+
+  // The contract's log_batch entries are {"timestamp", "scene"?, "payload"};
+  // frame_logs has no scene column, so the value is folded into the payload
+  // rather than dropped.
+  it("preserves the optional per-entry scene", () => {
+    const entries = parseLogEntries([
+      { payload: { line: "ok" }, scene: "clock", timestamp: 1_754_000_000 },
+      { payload: "plain text", scene: "weather", timestamp: 1_754_000_000 },
+      { payload: { line: "ok", scene: "explicit" }, scene: "outer" },
+      { payload: { line: "ok" }, scene: 42 },
+    ]);
+    expect(entries[0]?.payload).toEqual({ line: "ok", scene: "clock" });
+    expect(entries[1]?.payload).toEqual({
+      payload: "plain text",
+      scene: "weather",
+    });
+    // An explicit payload.scene wins over the envelope's.
+    expect(entries[2]?.payload).toEqual({ line: "ok", scene: "explicit" });
+    // A non-string scene is not part of the contract and is ignored.
+    expect(entries[3]?.payload).toEqual({ line: "ok" });
+  });
+
+  it("caps an absurdly long scene name", () => {
+    const [entry] = parseLogEntries([
+      { payload: {}, scene: "s".repeat(maxSceneIdChars + 100) },
+    ]);
+    expect((entry?.payload as { scene: string }).scene).toHaveLength(
+      maxSceneIdChars,
+    );
+  });
+});
+
+describe("persisted-value size caps", () => {
+  it("measures the serialized JSON size", () => {
+    expect(jsonByteLength({ a: 1 })).toBe(7);
+    expect(jsonByteLength(undefined)).toBe(4);
+    expect(jsonByteLength("ä")).toBe(4);
+  });
+
+  it("accepts states within the cap and rejects oversized ones", () => {
+    expect(withinJsonByteLimit({ active_scene: "clock" }, maxStateBytes)).toBe(
+      true,
+    );
+    expect(
+      withinJsonByteLimit({ blob: "x".repeat(maxStateBytes) }, maxStateBytes),
+    ).toBe(false);
+  });
+
+  it("treats an over-long checksum as malformed rather than truncating it", () => {
+    expect(isAcceptableChecksum("a".repeat(64))).toBe(true);
+    expect(isAcceptableChecksum("a".repeat(maxChecksumChars))).toBe(true);
+    expect(isAcceptableChecksum("a".repeat(maxChecksumChars + 1))).toBe(false);
+    expect(isAcceptableChecksum(undefined)).toBe(false);
+    expect(isAcceptableChecksum(12345)).toBe(false);
   });
 });
 

@@ -2,10 +2,10 @@ import { actions, connect, events, kea, key, listeners, path, props, reducers, s
 
 import type { sceneJSONLogicType } from './sceneJSONLogicType'
 import { frameLogic } from '../../frameLogic'
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameId } from '../../../../types'
 
 export interface SceneJSONLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

@@ -10,7 +10,15 @@ import { appsModel, categoryLabels } from '../../models/appsModel'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
-import { type AppConfig, type AppNodeData, type DiagramNode, type FrameScene, type FrameType } from '../../types'
+import {
+  type AppConfig,
+  type AppNodeData,
+  type DiagramNode,
+  type FrameScene,
+  type FrameType,
+  FrameId,
+} from '../../types'
+import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { FrameosShell } from './FrameosShell'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
 import { appsWorkspaceLogic, SYSTEM_APPS_ROUTE_TOKEN } from './appsWorkspaceLogic'
@@ -44,7 +52,7 @@ interface AppsWorkspaceProps {
 type AppsSourceMode = 'system' | 'frames'
 
 interface AppsWorkspaceFrameProps {
-  frameId: number
+  frameId: FrameId
   sourceMode: AppsSourceMode
   routeSceneId?: string | null
   routeNodeId?: string | null
@@ -83,14 +91,6 @@ function appNodeLanguage(
   return hasJavaScriptAppSource(sources) || isJavaScriptCatalogApp(keyword) || isJavaScriptCatalogApp(origin)
     ? 'javascript'
     : 'nim'
-}
-
-function parseRouteFrameId(frameId?: string | null): number | null {
-  if (!frameId) {
-    return null
-  }
-  const parsed = parseInt(frameId, 10)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function decodeRouteKeyword(value?: string | null): string | null {
@@ -330,7 +330,7 @@ function AppsSelector({
             />
           }
           onChange={(value) => {
-            const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
+            const nextFrame = frames.find((candidate) => frameIdsEqual(candidate.id, value))
             if (!nextFrame) {
               return
             }
@@ -473,7 +473,7 @@ function BackToSceneButton({
   sceneId,
   nodeId,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   nodeId: string
 }): JSX.Element {
@@ -494,7 +494,7 @@ function ActiveAppDiscardButton({
   sceneId,
   nodeId,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   nodeId: string
 }): JSX.Element {
@@ -514,7 +514,7 @@ function ActiveAppDiscardButton({
   )
 }
 
-function FrameSaveButton({ frameId, disabled }: { frameId: number; disabled: boolean }): JSX.Element {
+function FrameSaveButton({ frameId, disabled }: { frameId: FrameId; disabled: boolean }): JSX.Element {
   const { saveFrame } = useActions(frameLogic({ frameId }))
 
   return (
@@ -535,7 +535,7 @@ function ActiveAppSaveButton({
   nodeId,
   frameUnsavedChanges,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   nodeId: string
   frameUnsavedChanges: boolean
@@ -686,7 +686,7 @@ function ActiveAppSelectionMount({
   sceneId,
   app,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   app: AppNodeOption
 }): null {

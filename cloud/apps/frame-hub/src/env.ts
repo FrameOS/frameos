@@ -1,5 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+// auth-web's env helpers are Next-free (same reason the hub can import
+// src/lib/frames.ts), so the two services derive the browser origins from
+// exactly the same variables — see cloud/docs/deployment.md ("Production
+// uses: FRAMEOS_CLOUD_APP_URL / FRAMEOS_ACCOUNT_APP_URL /
+// FRAMEOS_SCENES_APP_URL").
+import { getAppOrigins } from "../../auth-web/src/lib/env";
 
 // Development convenience mirroring Next's .env.local loading: walk up from
 // the working directory and apply the first .env.local found (in local dev
@@ -52,8 +58,76 @@ function unquote(value: string) {
 }
 
 export function getHubPort() {
-  const parsed = Number(process.env.FRAME_HUB_PORT);
+  // An empty FRAME_HUB_PORT= line means "unset", not port 0 (Number("") is 0,
+  // and port 0 would silently bind an ephemeral port nothing can reach).
+  const raw = process.env.FRAME_HUB_PORT?.trim();
+  if (!raw) {
+    return 3100;
+  }
+  const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535
     ? parsed
     : 3100;
+}
+
+// Origins a browser WebSocket upgrade may come from. WS handshakes are not
+// subject to CORS, so a cookie-authenticated socket is only safe as long as
+// the Origin is checked here: today the session cookie is SameSite=Lax, but a
+// split-domain `__Secure-` deployment would otherwise be open to cross-site
+// hijacking of live fleet telemetry.
+//
+// The default is the set of FrameOS app origins auth-web mints its session
+// cookie for; FRAME_HUB_ALLOWED_ORIGINS (comma separated) adds any extra
+// origin a deployment fronts the hub with. Requests without an Origin header
+// are not browsers (native clients, curl, the integration suite) and are
+// judged by their credentials alone.
+export function getAllowedBrowserOrigins(): Set<string> {
+  const origins = new Set<string>();
+  try {
+    for (const origin of getAppOrigins()) {
+      origins.add(origin);
+    }
+  } catch {
+    // A malformed FRAMEOS_*_APP_URL must not take the hub down; the extra
+    // origins below (or an empty allowlist, which rejects every browser
+    // Origin) still apply.
+  }
+  for (const raw of (process.env.FRAME_HUB_ALLOWED_ORIGINS ?? "").split(",")) {
+    const value = raw.trim();
+    if (!value) {
+      continue;
+    }
+    try {
+      origins.add(new URL(value).origin);
+    } catch {
+      origins.add(value);
+    }
+  }
+  return origins;
+}
+
+export function isAllowedBrowserOrigin(
+  origin: string | undefined,
+  allowed: Set<string>,
+) {
+  if (origin === undefined || origin === "") {
+    return true;
+  }
+  // "null" is what a sandboxed iframe or a file:// page sends; never trust it.
+  if (origin === "null") {
+    return false;
+  }
+  try {
+    return allowed.has(new URL(origin).origin);
+  } catch {
+    return false;
+  }
+}
+
+// Hard ceiling on simultaneously attached sockets (devices + browsers), so an
+// unauthenticated flood cannot exhaust file descriptors or heap. Sized for a
+// fleet an order of magnitude larger than the single-host deployment expects.
+export function getMaxConnections() {
+  const parsed = Number(process.env.FRAME_HUB_MAX_CONNECTIONS);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 5000;
 }

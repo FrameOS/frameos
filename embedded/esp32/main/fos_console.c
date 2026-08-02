@@ -154,7 +154,19 @@ static int cmd_set(int argc, char **argv)
     /* Cloud-frame provisioning (browser flasher / manual): the enrollment
      * task picks these up once Wi-Fi is connected. The claim token is single
      * use and never echoed back — check `status` for the enrollment state. */
-    else if (strcmp(key, "cloud_url") == 0) strlcpy(config->cloud_url, value, sizeof(config->cloud_url));
+    else if (strcmp(key, "cloud_url") == 0) {
+        /* Refuse a provider URL the enrollment/WS paths would not use anyway:
+         * the claim token, the bearer token and every scene push ride this
+         * link, so plain http:// is only accepted for local development hosts
+         * (docs/cloud-link.md). Rejecting here means the mistake surfaces at
+         * provisioning time instead of as a silent non-enrolling frame. */
+        const char *why = NULL;
+        if (value[0] && !fos_cloud_url_transport_ok(value, &why)) {
+            printf("refusing cloud_url: %s\n", why ? why : "invalid URL");
+            return 1;
+        }
+        strlcpy(config->cloud_url, value, sizeof(config->cloud_url));
+    }
     else if (strcmp(key, "claim_token") == 0) strlcpy(config->claim_token, value, sizeof(config->claim_token));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
     else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0)
