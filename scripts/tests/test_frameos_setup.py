@@ -291,6 +291,29 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertIn("restart frameos.service", systemctl_calls)
         self.assertNotIn("restart frameos-remote.service", systemctl_calls)
 
+    def test_cloud_claim_token_install_needs_no_answers(self) -> None:
+        # The install command is one line pasted from "Add frame". Nothing is
+        # there to answer a question, so a claim-token install must run to the
+        # end on defaults alone — it used to stop at "Frame name" and sit there.
+        # (This harness has no TTY, so it pins the outcome rather than the
+        # TTY-suppression branch: no prompt may be load-bearing for the flow.)
+        result = self._run_setup(
+            {
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_unattended",
+                "FRAMEOS_CLOUD_URL": "https://cloud.example",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+            }
+        )
+
+        self.assertIn("Cloud: enrolling with https://cloud.example", result.stdout)
+
+        frame_json = self._installed_frame_json()
+        # Defaulted, not asked for.
+        self.assertTrue(frame_json["name"])
+        self.assertTrue(frame_json["device"])
+        self.assertEqual(frame_json["serverHost"], "")
+
     def test_cloud_claim_token_refuses_explicit_backend(self) -> None:
         result = self._run_setup(
             {

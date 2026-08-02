@@ -79,8 +79,11 @@ export function AddFramePanel({
   const cancelledRef = useRef(false);
 
   const origin = cloudOrigin;
+  // No FRAMEOS_CLOUD_URL: /install.sh is served with this provider's origin
+  // already stamped in (app/install.sh/route.ts), so the URL appears once and
+  // the two copies can never disagree.
   const installCommandFor = (token: string) =>
-    `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLOUD_URL=${origin} FRAMEOS_CLAIM_TOKEN=${token} sh`;
+    `curl -fsSL ${origin}/install.sh | sudo FRAMEOS_CLAIM_TOKEN=${token} sh`;
   const installCommand = claimToken ? installCommandFor(claimToken) : undefined;
   // Shown before a code exists, so the command is not a mystery: same shape,
   // with the code itself masked until it is minted.

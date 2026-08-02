@@ -11,7 +11,14 @@ FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"
 # the frame enrolls with the cloud on first start and the self-hosted
 # backend connection is disabled — a frame has exactly one control plane.
 FRAMEOS_CLAIM_TOKEN="${FRAMEOS_CLAIM_TOKEN:-}"
-FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-https://cloud.frameos.net}"
+# A provider serving this script rewrites the marked line below to its own
+# origin (cloud/apps/auth-web/app/install.sh/route.ts), so its install command
+# does not have to repeat the URL the script was just downloaded from. An
+# explicit FRAMEOS_CLOUD_URL always wins. Keep the marker comment: the route
+# refuses to serve the script without it rather than silently pointing a frame
+# at the wrong provider.
+FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" # __FRAMEOS_CLOUD_URL_DEFAULT__
+FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"
 SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
 SUPPORTED_ARCHES="arm64 armhf amd64"
 TTY="/dev/tty"
@@ -19,6 +26,21 @@ GENERATED_ADMIN_PASSWORD=""
 
 if [ ! -r "$TTY" ] || [ ! -w "$TTY" ] || ! ( : <"$TTY" ) 2>/dev/null; then
   TTY=""
+fi
+
+# A cloud install is a one-shot command pasted from the "Add frame" panel: the
+# frame is named and managed from the account, so stopping to ask about the
+# display, timezone, admin login and so on has nothing to answer it. Take every
+# default and run straight through. With TTY empty, ask()/ask_int()/ask_yes_no()
+# return their defaults without reading, and the questions still print (to
+# stderr) so the log shows what was chosen.
+# Set FRAMEOS_INTERACTIVE=1 to get the questions back, and any FRAMEOS_* value
+# passed on the command line still overrides the default it would have used.
+if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  case "$(printf '%s' "${FRAMEOS_INTERACTIVE:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|y|yes|true|on) ;;
+    *) TTY="" ;;
+  esac
 fi
 
 say() {

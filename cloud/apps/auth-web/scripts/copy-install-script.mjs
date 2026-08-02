@@ -11,14 +11,17 @@ import { fileURLToPath } from "node:url";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = join(appDir, "..", "..", "..", "scripts", "frameos-setup.sh");
-const target = join(appDir, "public", "install.sh");
+// NOT public/install.sh: /install.sh is a route handler (app/install.sh/route.ts)
+// that stamps this provider's origin into the script, and a public/ file of the
+// same name would shadow the route and serve the unstamped copy instead.
+const target = join(appDir, "public", "install.template.sh");
 
 if (!existsSync(source)) {
   if (existsSync(target)) {
     console.log(`No repo installer at ${source}; keeping existing ${target}`);
   } else {
     console.warn(
-      `No repo installer at ${source} and no existing ${target}; /install.sh will 404.`,
+      `No repo installer at ${source} and no existing ${target}; /install.sh will 503.`,
     );
   }
 } else {

@@ -275,3 +275,6 @@ suite "cloud hub session over a live socket":
 
 stopCloudHubClient()
 sleep(300)
+# Deliberately no server.close(): mummy's shutdown segfaults here (verified —
+# adding it makes this suite crash after every test has passed, which is how
+# test_enrollment.nim was failing on CI). The stub dies with the process.

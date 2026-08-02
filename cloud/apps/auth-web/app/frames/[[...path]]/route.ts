@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 // directly, so this route only ever answers with the HTML shell. The SPA
 // itself redirects to /login on 401 — the shell is served unauthenticated,
 // like every other static asset. See cloud-frontend/README.md.
-export async function GET() {
+export async function GET(request: NextRequest) {
   let html: string;
   try {
     html = await readFile(
@@ -34,7 +34,31 @@ export async function GET() {
   // shell can't silently turn this into a no-op — and if it goes missing
   // entirely we say so instead of serving a SPA whose websocket points nowhere.
   const wsOriginAnchor = "//__FRAMEOS_CLOUD_WS_ORIGIN__";
-  const hubOrigin = process.env.FRAME_HUB_PUBLIC_URL?.replace(/\/$/, "");
+  // In development the hub is a second process on its own port, so without an
+  // origin the SPA dials ws://localhost:3000/api/frames/updates — this Next
+  // server, which has no WebSocket handler — and loops on 1006 forever.
+  // Default to the hub's own default port (getHubPort in apps/frame-hub) so
+  // `pnpm dev` works unconfigured.
+  //
+  // The "am I in dev" test is the request's own hostname, not NODE_ENV: this
+  // has to hold for however the server was started, and a localhost request is
+  // exactly the case that needs the second port. Behind a real hostname we
+  // never guess — there nginx proxies the WS paths on the same origin, and
+  // pointing the fleet socket at localhost would break every browser.
+  //
+  // Empty counts as unset: FRAME_HUB_PUBLIC_URL= in a .env would otherwise be
+  // an empty string, which ?? happily keeps and which silently disables the
+  // injection (same trap getHubPort documents for FRAME_HUB_PORT=).
+  const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+  const configuredHub = process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(
+    /\/$/,
+    "",
+  );
+  const hubOrigin =
+    configuredHub ||
+    (localHosts.has(new URL(request.url).hostname)
+      ? "http://localhost:3100"
+      : undefined);
   if (hubOrigin) {
     if (!html.includes(wsOriginAnchor)) {
       return new NextResponse(

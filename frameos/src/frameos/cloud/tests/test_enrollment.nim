@@ -286,5 +286,9 @@ suite "cloud enrollment":
     for key in ["mode", "frame_id", "ws_path", "access_token", "scenes_checksum"]:
       check not state.hasKey(key)
 
-server.close()
+# No server.close(): it segfaults in mummy's shutdown path *after* the suite
+# has passed, turning a green run into exit code 1. It reproduces on demand —
+# adding close() to test_hub_session.nim (which never had one and never failed)
+# crashes it the same way every time. The stub server dies with the process,
+# which is all this test needs.
 removeDir(workDir)

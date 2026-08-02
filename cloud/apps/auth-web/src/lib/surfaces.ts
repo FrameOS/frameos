@@ -43,6 +43,9 @@ function isApiOrAsset(pathname: string) {
     // The standalone frame installer (curl -fsSL {origin}/install.sh | sh),
     // copied from scripts/frameos-setup.sh by copy-install-script.mjs.
     pathname === "/install.sh" ||
+    // The un-stamped copy the /install.sh route reads from. Public either way
+    // — it is the same script as on GitHub — but it must not host-route.
+    pathname === "/install.template.sh" ||
     pathname === "/favicon.ico" ||
     pathname === "/logo-dark.svg" ||
     pathname === "/logo-light.svg" ||
