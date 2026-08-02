@@ -1,5 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { frameosLoginCodes } from "@frameos-cloud/db";
+import {
+  accountIdentities,
+  accounts,
+  frameosLoginCodes,
+} from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   authenticateLinkedClient,
@@ -10,14 +14,13 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
-import { parseFrameosLoginCodeProfile } from "../../../../../src/lib/frameos-login";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { hashSecret } from "../../../../../src/lib/secrets";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "frameos-login:token", {
+  const limited = await rateLimitResponse(request, "frameos-login:token", {
     limit: 120,
     windowMs: 15 * 60 * 1000,
   });
@@ -63,37 +66,49 @@ export async function POST(request: NextRequest) {
       ),
     )
     .returning({
+      accountId: frameosLoginCodes.accountId,
       expiresAt: frameosLoginCodes.expiresAt,
-      profile: frameosLoginCodes.profile,
+      identityId: frameosLoginCodes.identityId,
     });
 
-  if (!redeemed || redeemed.expiresAt <= new Date()) {
+  if (!redeemed || redeemed.expiresAt <= new Date() || !redeemed.identityId) {
     return jsonError("invalid_code", 400);
   }
 
-  const profile = parseFrameosLoginCodeProfile(redeemed.profile);
-  if (!profile) {
+  // Resolve the profile at redemption instead of releasing a snapshot taken
+  // at authorization time: the account or identity may have changed (or been
+  // deleted) in between, and the row itself stores no PII.
+  const [resolved] = await db
+    .select({
+      displayName: accounts.displayName,
+      emailSnapshot: accountIdentities.emailSnapshot,
+      emailVerified: accountIdentities.emailVerified,
+      primaryEmail: accounts.primaryEmail,
+      providerIssuer: accountIdentities.providerIssuer,
+      providerSubject: accountIdentities.providerSubject,
+    })
+    .from(accountIdentities)
+    .innerJoin(accounts, eq(accounts.id, accountIdentities.accountId))
+    .where(
+      and(
+        eq(accountIdentities.id, redeemed.identityId),
+        eq(accountIdentities.accountId, redeemed.accountId),
+      ),
+    )
+    .limit(1);
+  if (!resolved) {
     return jsonError("invalid_code", 400);
   }
-
-  // The claims have now been released to their one legitimate reader. All the
-  // row still has to do is prove the code was used, so drop the copy of the
-  // account's email, name and subject rather than leaving it for the cleanup
-  // script to reach a week later.
-  await db
-    .update(frameosLoginCodes)
-    .set({ profile: {} })
-    .where(eq(frameosLoginCodes.codeHash, hashSecret(code)));
 
   return NextResponse.json({
     claims: {
-      account_id: profile.accountId,
-      email: profile.email,
-      email_verified: profile.emailVerified ?? false,
-      name: profile.name,
-      provider_subject: profile.providerSubject,
-      sub: profile.providerSubject,
+      account_id: redeemed.accountId,
+      email: resolved.emailSnapshot ?? resolved.primaryEmail ?? undefined,
+      email_verified: resolved.emailVerified,
+      name: resolved.displayName ?? undefined,
+      provider_subject: resolved.providerSubject,
+      sub: resolved.providerSubject,
     },
-    provider_issuer: profile.providerIssuer,
+    provider_issuer: resolved.providerIssuer,
   });
 }

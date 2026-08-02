@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "account:scenes", {
+  const limited = await rateLimitResponse(request, "account:scenes", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       max_scenes: maxScenesPerAccount,
     });
   }
-  const dailyLimited = identityRateLimitResponse(accountId, "store:fork", {
+  const dailyLimited = await identityRateLimitResponse(accountId, "store:fork", {
     limit: maxNewScenesPerDay,
     windowMs: 24 * 60 * 60 * 1000,
   });

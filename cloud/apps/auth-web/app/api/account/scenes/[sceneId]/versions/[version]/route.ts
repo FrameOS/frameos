@@ -27,7 +27,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "account:scenes", {
+  const limited = await rateLimitResponse(request, "account:scenes", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });

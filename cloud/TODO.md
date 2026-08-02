@@ -51,33 +51,21 @@ Cloud-managed frames (frame lists, frame-linking UI, the "Add frame" flow,
 the WebSocket hub) now **have** a concrete design: see
 `docs/cloud-frames.md`. Build them per that document and its phasing.
 
-Decided alongside that design, and since carried out (details in the doc):
-
-- Relicensed **AGPL-3.0** and merged into the `frameos` monorepo as
-  `cloud/` (2026-07), on the way to sharing the existing frontend as a
-  third wrapper bundle ("fourth adapter" of the repo-root
-  `docs/api-triality.md`). The workspaces are unified: one root lockfile,
-  `frameos-wasm` and `frameos-editor` as `workspace:` dependencies, and
-  Turborepo orchestrating the cross-package builds (vendored tgz and wasm
-  patch long gone). Still pending: the standalone-bundle production deploy
-  (docs/deployment.md, "Monorepo cutover") — until then deploys run from
-  the pre-merge private repo.
-- **No MIT protocol carve-out.** One license everywhere; the wire contract
-  stays as public documentation only, with an explicit note that
-  independent implementations need no permission from us.
-
 Near-term cleanup:
 
-- Add a change-password form on `/account`; today the reset flow covers it.
-- Back rate limiting with a shared store (e.g. Redis or Postgres) before
-  scaling `apps/auth-web` beyond one instance; in-memory buckets are
-  per-instance and reset on restart.
-- Stop storing a profile snapshot in `frameos_login_codes`: keep only account
-  references and resolve the profile at redemption, or encrypt the snapshot.
+- Cut production deploys over to the standalone bundle (`docs/deployment.md`,
+  "Monorepo cutover").
 - Add operator-facing audit/event export only when there is an operator surface.
 
 Done (kept for context):
 
+- Change-password form on `/account/security` (current password required,
+  other sessions revoked); accounts without a password use the reset flow.
+- Rate limiting backed by Postgres (`rate_limit_buckets`, atomic upsert), so
+  limits hold across `apps/auth-web` replicas and restarts; in-memory buckets
+  remain only as the no-database fallback.
+- `frameos_login_codes` stores account/identity references only; profile
+  claims are resolved at redemption instead of released from a snapshot.
 - Integration coverage for the full backend-linking flow against a local
   Postgres database (`pnpm test:integration`, also run in CI against a
   Postgres service container).

@@ -21,7 +21,7 @@ export async function loadOwnedScene(
     return { errorResponse: csrf };
   }
 
-  const limited = rateLimitResponse(
+  const limited = await rateLimitResponse(
     request,
     options.rateLimit?.action ?? "account:scenes",
     options.rateLimit ?? { limit: 60, windowMs: 15 * 60 * 1000 },

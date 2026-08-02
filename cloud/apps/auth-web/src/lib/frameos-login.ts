@@ -1,6 +1,5 @@
 import { jwtVerify, SignJWT, type JWTPayload } from "jose";
 import { derivedSigningKey } from "./keys";
-import type { SessionProfile } from "./session";
 
 const loginRequestType = "frameos_login_request";
 
@@ -13,14 +12,6 @@ export type FrameosLoginRequest = {
   redirectUri: string;
   state: string;
 };
-
-// Profile claims released to the linked client when it redeems a login code.
-// These are stored server-side (frameos_login_codes.profile); the code that
-// travels through the redirect URL is an opaque random token with no PII.
-export type FrameosLoginCodeProfile = Required<
-  Pick<SessionProfile, "accountId" | "providerIssuer" | "providerSubject">
-> &
-  Pick<SessionProfile, "email" | "emailVerified" | "name">;
 
 function secretKey() {
   return derivedSigningKey("frameos-login-request");
@@ -96,33 +87,6 @@ export async function verifyFrameosLoginRequestToken(token: string) {
   }
 }
 
-// Validates the profile jsonb read back from frameos_login_codes. The row is
-// written by our own authorize route, but parse defensively anyway.
-export function parseFrameosLoginCodeProfile(
-  value: unknown,
-): FrameosLoginCodeProfile | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const record = value as Record<string, unknown>;
-  const accountId = stringField(record, "accountId");
-  const providerIssuer = stringField(record, "providerIssuer");
-  const providerSubject = stringField(record, "providerSubject");
-  if (!accountId || !providerIssuer || !providerSubject) {
-    return undefined;
-  }
-
-  return {
-    accountId,
-    email: stringField(record, "email"),
-    emailVerified: record.emailVerified === true,
-    name: stringField(record, "name"),
-    providerIssuer,
-    providerSubject,
-  };
-}
-
 function stringClaim(payload: JWTPayload, key: string) {
   const value = payload[key];
   if (typeof value !== "string") {
@@ -132,11 +96,3 @@ function stringClaim(payload: JWTPayload, key: string) {
   return trimmed ? trimmed : undefined;
 }
 
-function stringField(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}

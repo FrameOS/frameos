@@ -4,6 +4,7 @@
 
 const eventLabels: Record<string, string> = {
   "account.email_verified": "Email address verified",
+  "account.password_changed": "Password changed",
   "account.password_reset": "Password reset completed",
   "account.password_reset_requested": "Password reset requested",
   "account.signed_in": "Signed in",

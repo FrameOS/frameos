@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "auth:reset-confirm", {
+  const limited = await rateLimitResponse(request, "auth:reset-confirm", {
     limit: 10,
     windowMs: 15 * 60 * 1000,
   });

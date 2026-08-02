@@ -18,7 +18,7 @@ const maxTimeoutMs = 30_000;
 // Body: {method, url, headers, bodyBase64, timeoutMs}; the response mirrors
 // the upstream status and bytes.
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "store:preview-proxy", {
+  const limited = await rateLimitResponse(request, "store:preview-proxy", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

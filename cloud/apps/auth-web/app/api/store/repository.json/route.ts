@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 // as a plain scenes repository. frameos resolves "./..." URLs against this
 // file's URL, which lands on /api/store/scenes/{id}/....
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "store:index", {
+  const limited = await rateLimitResponse(request, "store:index", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

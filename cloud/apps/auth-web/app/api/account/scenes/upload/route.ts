@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "account:scene-upload", {
+  const limited = await rateLimitResponse(request, "account:scene-upload", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     return jsonError("login_required", 401);
   }
 
-  const accountLimited = identityRateLimitResponse(
+  const accountLimited = await identityRateLimitResponse(
     session.accountId,
     "store:publish",
     { limit: maxPublishesPerHour, windowMs: 60 * 60 * 1000 },

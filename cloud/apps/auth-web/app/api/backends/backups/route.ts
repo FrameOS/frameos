@@ -31,7 +31,7 @@ export const runtime = "nodejs";
 // backend that relinked to the same account sees backups pushed by the old
 // install, which is exactly what "Restore from FrameOS Cloud" needs.
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:backups", {
+  const limited = await rateLimitResponse(request, "backend:backups", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
 
 // Save (or replace) one config backup blob.
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:backups", {
+  const limited = await rateLimitResponse(request, "backend:backups", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

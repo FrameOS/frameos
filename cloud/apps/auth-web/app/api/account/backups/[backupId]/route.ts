@@ -20,7 +20,7 @@ type RouteContext = { params: Promise<{ backupId: string }> };
 // /api/backends/backups instead; those are scope-checked per kind, while the
 // signed-in owner may always see and manage everything the account stores.
 async function loadBackup(request: NextRequest, context: RouteContext) {
-  const limited = rateLimitResponse(request, "account:backups", {
+  const limited = await rateLimitResponse(request, "account:backups", {
     limit: 120,
     windowMs: 15 * 60 * 1000,
   });

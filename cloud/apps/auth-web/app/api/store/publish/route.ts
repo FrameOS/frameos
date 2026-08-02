@@ -27,7 +27,7 @@ export const runtime = "nodejs";
 // account already owns appends an immutable version to that scene; a new
 // name creates a new scene with a globally unique slug. Private by default.
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "store:publish", {
+  const limited = await rateLimitResponse(request, "store:publish", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     return jsonError("insufficient_scope", 403);
   }
 
-  const accountLimited = identityRateLimitResponse(
+  const accountLimited = await identityRateLimitResponse(
     linkedClient.accountId,
     "store:publish",
     { limit: maxPublishesPerHour, windowMs: 60 * 60 * 1000 },

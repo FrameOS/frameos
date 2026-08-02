@@ -522,24 +522,34 @@ export const storeSceneReports = pgTable(
 );
 
 // Single-use opaque codes for the FrameOS backend login handoff. The code in
-// the redirect URL is a random token; profile claims live only in this row and
-// are released once, to the authenticated linked client, at the token endpoint.
+// the redirect URL is a random token; the row stores only references — the
+// signed-in account and identity — and the profile claims are resolved fresh
+// at the token endpoint, so the row carries no PII snapshot.
 export const frameosLoginCodes = pgTable(
   "frameos_login_codes",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
     codeHash: text("code_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // The identity the user signed in with, so redemption can report the
+    // right provider claims. SET NULL on delete: an identity unlinked in the
+    // two-minute code window simply invalidates the code.
+    identityId: uuid("identity_id").references(() => accountIdentities.id, {
+      onDelete: "set null",
+    }),
     linkedClientId: uuid("linked_client_id")
       .notNull()
       .references(() => linkedClients.id, { onDelete: "cascade" }),
-    profile: jsonb("profile").notNull(),
     redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
+    accountIdx: index("frameos_login_codes_account_idx").on(table.accountId),
     codeHashUnique: uniqueIndex("frameos_login_codes_code_hash_unique").on(
       table.codeHash,
     ),
@@ -548,3 +558,13 @@ export const frameosLoginCodes = pgTable(
     ),
   }),
 );
+
+// Shared fixed-window rate-limit buckets so limits hold across app replicas
+// and survive restarts (the in-memory fallback in apps/auth-web is
+// per-instance). Rows are upserted atomically; expired rows are swept
+// opportunistically from the application.
+export const rateLimitBuckets = pgTable("rate_limit_buckets", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});

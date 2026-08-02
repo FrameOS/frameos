@@ -16,7 +16,7 @@ import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:inventory", {
+  const limited = await rateLimitResponse(request, "backend:inventory", {
     limit: 120,
     windowMs: 15 * 60 * 1000,
   });

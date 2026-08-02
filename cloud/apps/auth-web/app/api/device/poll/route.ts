@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   // A generous multiple of the advertised 5s interval, so a client that polls
   // as told never trips it, and one polling in a tight loop does.
-  const limited = identityRateLimitResponse(
+  const limited = await identityRateLimitResponse(
     hashSecret(deviceCode),
     "device:poll",
     { limit: 240, windowMs: 10 * 60 * 1000 },

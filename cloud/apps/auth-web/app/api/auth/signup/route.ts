@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = rateLimitResponse(request, "auth:signup", {
+  const limited = await rateLimitResponse(request, "auth:signup", {
     limit: 10,
     windowMs: 60 * 60 * 1000,
   });

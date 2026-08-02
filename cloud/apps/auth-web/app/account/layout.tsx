@@ -141,6 +141,7 @@ export default async function AccountLayout({
           backups: getAccountUrl("/account/backups"),
           installs: getAccountUrl("/account/installs"),
           scenes: getAccountUrl("/account/scenes"),
+          security: getAccountUrl("/account/security"),
         }}
       />
       {children}

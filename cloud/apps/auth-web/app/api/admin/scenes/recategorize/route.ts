@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
   // Each run fans out into LLM calls, so budget it far tighter than the
   // per-scene admin actions.
-  const limited = rateLimitResponse(request, "admin:scenes-recategorize", {
+  const limited = await rateLimitResponse(request, "admin:scenes-recategorize", {
     limit: 10,
     windowMs: 15 * 60 * 1000,
   });

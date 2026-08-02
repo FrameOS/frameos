@@ -8,7 +8,7 @@ import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "backend:grants", {
+  const limited = await rateLimitResponse(request, "backend:grants", {
     limit: 120,
     windowMs: 15 * 60 * 1000,
   });

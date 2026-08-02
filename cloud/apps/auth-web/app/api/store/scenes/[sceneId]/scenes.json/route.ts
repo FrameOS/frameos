@@ -17,7 +17,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // in-browser live preview (frameos-wasm) executes. Same access rules as the
 // zip download: public scenes are open, private ones owner-only, pulled 410.
 export async function GET(request: NextRequest, context: RouteContext) {
-  const limited = rateLimitResponse(request, "store:scenes-json", {
+  const limited = await rateLimitResponse(request, "store:scenes-json", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
   });

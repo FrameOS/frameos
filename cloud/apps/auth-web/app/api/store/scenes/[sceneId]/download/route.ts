@@ -17,7 +17,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // downloadable only by their owner's web session. Pulled scenes answer 410
 // everywhere — the moderation kill switch.
 export async function GET(request: NextRequest, context: RouteContext) {
-  const limited = rateLimitResponse(request, "store:download", {
+  const limited = await rateLimitResponse(request, "store:download", {
     limit: 600,
     windowMs: 15 * 60 * 1000,
   });

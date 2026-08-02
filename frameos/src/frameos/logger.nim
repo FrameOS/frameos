@@ -52,6 +52,40 @@ proc gzipLogFile(path: string) =
     except OSError as e:
       echo "Error removing compressed log file: " & e.msg
 
+const LogRetentionDays* = 14
+
+proc cleanupOldRotatedLogs*(filenameTemplate: string, today: DateTime) =
+  ## Delete date-stamped log files older than LogRetentionDays so a
+  ## `{date}`-templated log path cannot grow without bound (Buildroot frames
+  ## log to SD-backed storage by default). Only files matching the template's
+  ## prefix/suffix with an eight-digit date are considered.
+  let parts = filenameTemplate.split("{date}")
+  if parts.len != 2:
+    return
+  let namePrefix = lastPathPart(parts[0])
+  let suffix = parts[1]
+  let dir = parentDir(parts[0] & "00000000" & suffix)
+  let cutoff = (today - initDuration(days = LogRetentionDays)).format("yyyyMMdd")
+  try:
+    for kind, path in walkDir(if dir.len > 0: dir else: "."):
+      if kind != pcFile:
+        continue
+      let base = lastPathPart(path)
+      if not base.startsWith(namePrefix) or base.len < namePrefix.len + 8:
+        continue
+      let dateStr = base[namePrefix.len ..< namePrefix.len + 8]
+      var digits = true
+      for c in dateStr:
+        if c notin {'0' .. '9'}:
+          digits = false
+          break
+      if not digits or not base[namePrefix.len + 8 .. ^1].startsWith(suffix):
+        continue
+      if dateStr < cutoff:
+        removeStoredFile(path)
+  except CatchableError as e:
+    echo "Error cleaning up old log files: " & e.msg
+
 proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, timestamp: float) =
   try:
     if filename.len > 0:
@@ -64,6 +98,7 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, t
         gzipLogFile(lastLogFilePath)
       if lastLogFilePath != file:
         ensureParentDir(file)
+        cleanupOldRotatedLogs(filename, loggedAt)
       lastLogFilePath = file
       appendTextLine(file, loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine)
   except Exception as e:

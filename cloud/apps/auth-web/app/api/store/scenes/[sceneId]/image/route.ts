@@ -15,7 +15,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // The preview image extracted from the published zip at publish time; served
 // with a fixed image content type, never the uploader's choosing.
 export async function GET(request: NextRequest, context: RouteContext) {
-  const limited = rateLimitResponse(request, "store:image", {
+  const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
     windowMs: 15 * 60 * 1000,
   });

@@ -19,7 +19,7 @@ import {
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 
 export async function GET(request: NextRequest) {
-  const limited = rateLimitResponse(request, "auth:google-start", {
+  const limited = await rateLimitResponse(request, "auth:google-start", {
     limit: 30,
     windowMs: 15 * 60 * 1000,
   });
