@@ -1,4 +1,4 @@
-"""End-to-end encryption for cloud config backups (CLOUD-TODO Phase 3).
+"""End-to-end encryption for cloud config backups.
 
 Age-style asymmetric sealing: every writer holds the account's backup
 *public* key and can encrypt, but only the holder of the *private* key — the
