@@ -1,4 +1,4 @@
-"""Store publishing (STORE-TODO Phase 2): publish templates to the cloud store."""
+"""Store publishing: publish templates to the cloud store."""
 import base64
 import io
 import json

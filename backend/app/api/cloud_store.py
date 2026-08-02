@@ -1,4 +1,4 @@
-"""Publish scenes to the FrameOS Cloud store (STORE-TODO Phases 2-3).
+"""Publish scenes to the FrameOS Cloud store.
 
 The payload is the same template interchange zip the backups use; the cloud
 keeps immutable versions per scene. Publishing needs the ``store:publish``

@@ -9,7 +9,7 @@ from app.database import Base
 
 
 class CloudIdentity(Base):
-    """A local user linked to a FrameOS Cloud account (used from Phase 1 on)."""
+    """A local user linked to a FrameOS Cloud account."""
 
     __tablename__ = "cloud_identity"
     __table_args__ = (
@@ -85,7 +85,7 @@ class CloudBackendLink(Base):
 
 
 class CloudMembership(Base):
-    """Cloud-side access grants synced onto this backend (used from Phase 1 on)."""
+    """Cloud-side access grants synced onto this backend."""
 
     __tablename__ = "cloud_membership"
     __table_args__ = (

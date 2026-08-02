@@ -2,7 +2,7 @@
 env
 __pycache__
 *.db
-db/
+/db/
 !.flox/
 !.flox/env/
 !.flox/env/manifest.toml
@@ -76,6 +76,7 @@ gpt.txt
 .local/redis/
 .flox/cache/
 .flox/log/
+.flox/postgres/
 .flox/redis/
 .flox/run/
 .flox/state/
@@ -102,3 +103,6 @@ frontend/public/frameos-wasm/
 frameos/build/wasm/
 dist-editor
 frontend/editor-smoke.png
+
+# Turborepo cache
+.turbo/

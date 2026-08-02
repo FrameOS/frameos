@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="628" height="424" viewBox="-8 0 628 424" role="img" aria-labelledby="title">
+  <title id="title">FrameOS Cloud</title>
+  <path
+    d="M121 389C64 389 18 343 18 286C18 237 53 196 99 186C114 131 166 94 224 101C258 43 326 13 394 31C461 48 511 108 516 179C561 194 592 237 592 286C592 343 546 389 489 389H121Z"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="38"
+  />
+  <rect x="174" y="252" width="76" height="76" rx="13" fill="#0F8F7E" />
+  <rect x="262" y="184" width="76" height="76" rx="13" fill="#99BC3F" />
+  <rect x="350" y="116" width="76" height="76" rx="13" fill="#D8A73A" />
+</svg>
