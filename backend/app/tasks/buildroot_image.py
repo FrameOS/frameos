@@ -2399,6 +2399,7 @@ PY
             }
         )
         managed_boot_files_shell = " ".join(shlex.quote(path) for path in managed_boot_files if path)
+        cloud_config_name = Path(BOOT_CLOUD_CONFIG_FILE).name
         script_path.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -2419,6 +2420,21 @@ for relpath in "${{managed_boot_files[@]}}"; do
     mdel -i "$target" "::${{relpath}}" 2>/dev/null || true
   fi
 done
+# Release images ship {cloud_config_name} as a fixed-size placeholder that the
+# provider's in-browser personalizer later overwrites IN PLACE inside the raw
+# .img (no FAT metadata changes) — which assumes the file's clusters are
+# contiguous. That holds because the BOOT FAT comes from the base image's
+# fresh buildroot mkfs+mcopy build (files written sequentially, nothing
+# deleted), so the free clusters form one sequential run at the tail. Copy
+# the placeholder before the config.txt merges and bulk copies below, which
+# rewrite existing files and can punch holes into the free-cluster run; a
+# file allocated first on the fresh FAT is guaranteed contiguous. Backend-
+# personalized (self-hosted) images stage no placeholder in $boot_root, so
+# this block no-ops there and the managed-file mdel above removes any stale
+# copy instead.
+if [ -f "$boot_root/{cloud_config_name}" ]; then
+  mcopy -i "$target" -o "$boot_root/{cloud_config_name}" "::{cloud_config_name}"
+fi
 merge_config() {{
   relpath="$1"
   src="$boot_root/$relpath"
@@ -2483,7 +2499,7 @@ merge_config "firmware/config.txt"
 
 if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
   cd "$boot_root"
-  find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware -exec mcopy -i "$target" -o -s {{}} :: \\;
+  find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware ! -name {cloud_config_name} -exec mcopy -i "$target" -o -s {{}} :: \\;
   if [ -d firmware ]; then
     mmd -i "$target" ::firmware 2>/dev/null || true
     find firmware -mindepth 1 -maxdepth 1 ! -name config.txt -exec mcopy -i "$target" -o -s {{}} ::firmware/ \\;

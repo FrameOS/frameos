@@ -902,9 +902,14 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
     assert not (boot_root / "frameos-wifi.nmconnection").exists()
     assert "managed_boot_files=(" in captured["boot_patch_script"]
     assert "frameos-wifi.nmconnection" in captured["boot_patch_script"]
-    # Self-hosted personalization clears any stale cloud personalization file.
+    # Self-hosted personalization clears any stale cloud personalization file
+    # (backend-managed frames must not carry the release placeholder).
     assert "frameos-cloud.txt" in captured["boot_patch_script"]
     assert 'mdel -i "$target"' in captured["boot_patch_script"]
+    # Release placeholders are copied first (contiguity for the in-browser
+    # in-place patcher) and excluded from the later bulk copy.
+    assert 'if [ -f "$boot_root/frameos-cloud.txt" ]' in captured["boot_patch_script"]
+    assert "! -name frameos-cloud.txt" in captured["boot_patch_script"]
 
 
 @pytest.mark.asyncio

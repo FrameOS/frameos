@@ -25,6 +25,63 @@ BOOT_CLOUD_CONFIG_FILE = "/boot/frameos-cloud.txt"
 CLOUD_ENROLL_PENDING_FILE = "/srv/frameos/current/state/cloud_enroll_pending.json"
 DEFAULT_CLOUD_PROVIDER_URL = "https://cloud.frameos.net"
 
+# --- Release-image placeholder for /boot/frameos-cloud.txt -------------------
+#
+# Generic release images ship frameos-cloud.txt pre-created as an all-comments
+# placeholder of exactly CLOUD_CONFIG_PLACEHOLDER_SIZE bytes whose first line
+# is CLOUD_CONFIG_MAGIC. The in-browser "Download SD image" personalizer
+# searches the raw .img for that exact byte string, verifies the 4096-byte
+# all-comment tail, and overwrites the region in place with real KEY=value
+# content padded back to the same size — no FAT metadata changes, no rebuild
+# (docs/cloud-frames.md, "Placeholder + in-browser personalization"). Neither
+# the magic line nor the total size may ever change.
+CLOUD_CONFIG_MAGIC = "# FRAMEOS-CLOUD-CONFIG-V1"
+CLOUD_CONFIG_PLACEHOLDER_SIZE = 4096
+# Padding is deterministic: repeated lines of 79 "#" + "\n" (80 bytes each),
+# then one final run of "#" without a trailing newline to hit the exact size.
+CLOUD_CONFIG_PLACEHOLDER_PAD_LINE = b"#" * 79 + b"\n"
+
+_CLOUD_CONFIG_PLACEHOLDER_HEADER = (
+    CLOUD_CONFIG_MAGIC
+    + """
+#
+# FrameOS cloud personalization file. To connect this frame to a FrameOS
+# cloud provider, replace the comment lines below with KEY=value lines
+# (keep the first line of this file intact):
+#
+#   cloud_url=https://cloud.frameos.net
+#   claim_token=FRCT_xxxxxxxxxxxx
+#   name=Kitchen frame
+#   wifi_ssid=MyNetwork
+#   wifi_password=secret
+#
+# This file is read once on first boot. When it contains real keys it is
+# applied, then zero-overwritten and deleted (it may hold WiFi secrets).
+# While it contains only comments like these it is ignored and left in
+# place, so the image stays generic and the file stays editable.
+"""
+)
+
+
+def render_cloud_config_placeholder() -> bytes:
+    """The canonical 4096-byte all-comments /boot/frameos-cloud.txt placeholder.
+
+    Byte layout (deterministic):
+    - line 1: "# FRAMEOS-CLOUD-CONFIG-V1\\n" (the magic; byte-exact)
+    - a fixed block of "# ..." instruction comment lines
+    - padding: repeated lines of 79 x "#" + "\\n", then a final partial run of
+      "#" with no trailing newline, to exactly 4096 bytes total.
+    """
+    header = _CLOUD_CONFIG_PLACEHOLDER_HEADER.encode("ascii")
+    remaining = CLOUD_CONFIG_PLACEHOLDER_SIZE - len(header)
+    if remaining < 0:
+        raise ValueError("Cloud config placeholder header exceeds the fixed placeholder size")
+    full_lines, partial = divmod(remaining, len(CLOUD_CONFIG_PLACEHOLDER_PAD_LINE))
+    placeholder = header + CLOUD_CONFIG_PLACEHOLDER_PAD_LINE * full_lines + b"#" * partial
+    if len(placeholder) != CLOUD_CONFIG_PLACEHOLDER_SIZE:
+        raise AssertionError("Cloud config placeholder is not exactly 4096 bytes")
+    return placeholder
+
 
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
     if getattr(frame, "mode", None) != "buildroot" and not default_if_missing:
@@ -125,6 +182,8 @@ handle_cloud_config() {
   cloud_name=''
   cloud_wifi_ssid=''
   cloud_wifi_password=''
+  cloud_recognized=0
+  cloud_unknown_keys=''
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -136,14 +195,40 @@ handle_cloud_config() {
     cloud_key="$(printf '%s' "${cloud_line%%=*}" | sed 's/[[:space:]]*$//')"
     cloud_value="$(printf '%s' "${cloud_line#*=}" | sed 's/^[[:space:]]*//')"
     case "$cloud_key" in
-      cloud_url) cloud_url="$cloud_value" ;;
-      claim_token) claim_token="$cloud_value" ;;
-      name) cloud_name="$cloud_value" ;;
-      wifi_ssid) cloud_wifi_ssid="$cloud_value" ;;
-      wifi_password) cloud_wifi_password="$cloud_value" ;;
-      *) echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE" ;;
+      cloud_url) cloud_url="$cloud_value"; cloud_recognized=1 ;;
+      claim_token) claim_token="$cloud_value"; cloud_recognized=1 ;;
+      name) cloud_name="$cloud_value"; cloud_recognized=1 ;;
+      wifi_ssid) cloud_wifi_ssid="$cloud_value"; cloud_recognized=1 ;;
+      wifi_password) cloud_wifi_password="$cloud_value"; cloud_recognized=1 ;;
+      *)
+        echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE"
+        cloud_unknown_keys="$cloud_unknown_keys $cloud_key"
+        ;;
     esac
   done < "$CLOUD_FILE"
+
+  # Release images ship this file as an all-comments 4096-byte placeholder
+  # (first line "# FRAMEOS-CLOUD-CONFIG-V1"). A file with zero recognized
+  # keys means "not personalized": log, leave the file untouched so it stays
+  # editable (manually or by the in-browser image personalizer), write no
+  # enrollment state, and exit successfully. The systemd unit's
+  # ConditionPathExists keeps firing on every boot while the file exists —
+  # harmless, since this branch only logs and returns 0.
+  if [ "$cloud_recognized" -eq 0 ]; then
+    if [ -n "$cloud_unknown_keys" ]; then
+      # KEY=value lines exist but none is a key we know — almost certainly a
+      # typo from a manual edit. Do NOT shred: /boot is mounted root-only
+      # (umask=077), so the file cannot leak to other users, and shredding
+      # would destroy the user's only copy of what they typed. Warn loudly,
+      # keep the file, do not enroll.
+      echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+      echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
+    else
+      echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
+    fi
+    return 0
+  fi
 
   if [ -n "$cloud_wifi_ssid" ]; then
     echo "Installing NetworkManager WiFi connection from cloud personalization"

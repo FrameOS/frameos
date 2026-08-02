@@ -49,6 +49,24 @@ export async function POST(request: NextRequest) {
 
   const body = await readJsonObject(request);
   const name = parseOptionalString(body.name)?.slice(0, 256);
+  // Multi-use tokens back the SD-image download: one image, many cards,
+  // each boot enrolls a distinct pending frame. Budget capped at the frame
+  // quota — a leaked image can never enroll more than the account could
+  // hold anyway, and every enrollment still needs owner confirmation.
+  let maxUses = 1;
+  if (body.multi_use === true) {
+    maxUses = maxFramesPerAccount;
+  } else if (body.max_uses !== undefined) {
+    if (
+      typeof body.max_uses !== "number" ||
+      !Number.isInteger(body.max_uses) ||
+      body.max_uses < 1 ||
+      body.max_uses > maxFramesPerAccount
+    ) {
+      return jsonError("invalid_max_uses", 400);
+    }
+    maxUses = body.max_uses;
+  }
 
   await sweepExpiredClaimTokens(db, session.accountId);
   if (
@@ -72,6 +90,7 @@ export async function POST(request: NextRequest) {
     .values({
       accountId: session.accountId,
       expiresAt,
+      maxUses,
       name: name ?? null,
       tokenHash: hashSecret(token),
     })
@@ -87,11 +106,13 @@ export async function POST(request: NextRequest) {
       providerSubject: session.providerSubject,
     },
     eventType: "frame.claim_token_created",
+    metadata: { maxUses },
     target: { claimTokenId: row.id },
   });
 
   return NextResponse.json({
     claim_token: token,
     expires_at: expiresAt.toISOString(),
+    max_uses: maxUses,
   });
 }

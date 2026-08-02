@@ -1,0 +1,228 @@
+// In-browser SD image personalization (docs/cloud-frames.md, "Placeholder +
+// in-browser personalization"). Release images ship /boot/frameos-cloud.txt as
+// an all-comments placeholder of exactly 4096 bytes whose first line is the
+// magic `# FRAMEOS-CLOUD-CONFIG-V1`. The browser stream-decompresses the
+// generic .img.gz, locates the magic, verifies the placeholder, and replaces
+// the region in place with real KEY=value content of the same length — no FAT
+// metadata changes, no rebuild, and WiFi credentials never leave the browser.
+//
+// This module is pure (no DOM, no React) so it can be unit-tested in node.
+
+export const CLOUD_CONFIG_MAGIC = "# FRAMEOS-CLOUD-CONFIG-V1";
+export const CLOUD_CONFIG_REGION_SIZE = 4096;
+
+// The magic sits in the FAT boot partition (first ~34 MiB of the image); if it
+// has not appeared after this many decompressed bytes, the image predates the
+// placeholder and the UI falls back to manual instructions.
+export const DEFAULT_SEARCH_LIMIT = 48 * 1024 * 1024;
+
+export type SdImagePatchErrorCode =
+  | "config_too_large"
+  | "marker_not_found"
+  | "placeholder_invalid"
+  | "truncated_image"
+  | "value_rejected";
+
+export class SdImagePatchError extends Error {
+  readonly code: SdImagePatchErrorCode;
+
+  constructor(code: SdImagePatchErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "SdImagePatchError";
+  }
+}
+
+// The busybox first-boot parser strips double quotes, backslashes, and control
+// characters from values — refuse the first two loudly (silent stripping would
+// corrupt a WiFi password) and drop the rest.
+export function sanitizeConfigValue(value: string, label: string): string {
+  if (/["\\]/.test(value)) {
+    throw new SdImagePatchError(
+      "value_rejected",
+      `${label} must not contain double quotes or backslashes — the on-device config parser cannot represent them.`,
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+}
+
+export interface CloudConfigInput {
+  claimToken: string;
+  cloudUrl: string;
+  name?: string | undefined;
+  wifiPassword?: string | undefined;
+  wifiSsid?: string | undefined;
+}
+
+// Render the personalized frameos-cloud.txt region: magic line, KEY=value
+// lines, then `#` comment padding to exactly CLOUD_CONFIG_REGION_SIZE bytes.
+export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
+  const lines = [CLOUD_CONFIG_MAGIC];
+  const push = (key: string, raw: string | undefined, label: string) => {
+    if (!raw) {
+      return;
+    }
+    const value = sanitizeConfigValue(raw, label);
+    if (value) {
+      lines.push(`${key}=${value}`);
+    }
+  };
+  push("cloud_url", input.cloudUrl, "Cloud URL");
+  push("claim_token", input.claimToken, "Claim code");
+  push("name", input.name, "Frame name");
+  push("wifi_ssid", input.wifiSsid, "WiFi network name");
+  push("wifi_password", input.wifiPassword, "WiFi password");
+
+  const content = new TextEncoder().encode(lines.join("\n") + "\n");
+  if (content.length > CLOUD_CONFIG_REGION_SIZE) {
+    throw new SdImagePatchError(
+      "config_too_large",
+      `Configuration does not fit in the ${CLOUD_CONFIG_REGION_SIZE}-byte placeholder — shorten the frame name or WiFi values.`,
+    );
+  }
+  const region = new Uint8Array(CLOUD_CONFIG_REGION_SIZE);
+  region.set(content);
+  // Pad with '#' comment lines (64 bytes per line including the newline).
+  let offset = content.length;
+  while (offset < CLOUD_CONFIG_REGION_SIZE) {
+    const lineLength = Math.min(64, CLOUD_CONFIG_REGION_SIZE - offset);
+    region.fill(0x23 /* '#' */, offset, offset + lineLength - 1);
+    region[offset + lineLength - 1] = 0x0a; // '\n'
+    offset += lineLength;
+  }
+  return region;
+}
+
+// A pristine placeholder contains only ASCII `#`-comment lines (blank lines
+// tolerated, as on-device parsing tolerates them). Anything else means the
+// image does not carry the editable placeholder and must not be patched.
+export function verifyPlaceholderRegion(region: Uint8Array): boolean {
+  let atLineStart = true;
+  for (let index = 0; index < region.length; index++) {
+    const byte = region[index]!;
+    if (byte === 0x0a /* '\n' */) {
+      atLineStart = true;
+      continue;
+    }
+    if (byte === 0x0d /* '\r' */) {
+      continue;
+    }
+    if (byte < 0x20 || byte > 0x7e) {
+      return false;
+    }
+    if (atLineStart && byte !== 0x23 /* '#' */) {
+      return false;
+    }
+    atLineStart = false;
+  }
+  return true;
+}
+
+function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(a.length + b.length);
+  joined.set(a);
+  joined.set(b, a.length);
+  return joined;
+}
+
+function indexOfSequence(haystack: Uint8Array, needle: Uint8Array): number {
+  const limit = haystack.length - needle.length;
+  outer: for (let index = 0; index <= limit; index++) {
+    for (let offset = 0; offset < needle.length; offset++) {
+      if (haystack[index + offset] !== needle[offset]) {
+        continue outer;
+      }
+    }
+    return index;
+  }
+  return -1;
+}
+
+// Stream patcher: passes decompressed image chunks through unchanged except
+// for the placeholder region, which is verified and replaced by configBytes.
+// Memory stays bounded — while searching, only a (magic-1)-byte tail is
+// retained between chunks; once the magic is found at most one region
+// (4096 bytes) plus the current chunk is buffered; afterwards chunks are
+// forwarded untouched.
+export async function* patchCloudConfig(
+  chunks: AsyncIterable<Uint8Array>,
+  configBytes: Uint8Array,
+  options: { searchLimit?: number } = {},
+): AsyncGenerator<Uint8Array, void, undefined> {
+  if (configBytes.length !== CLOUD_CONFIG_REGION_SIZE) {
+    throw new SdImagePatchError(
+      "config_too_large",
+      `Internal error: config region must be exactly ${CLOUD_CONFIG_REGION_SIZE} bytes.`,
+    );
+  }
+  const magic = new TextEncoder().encode(CLOUD_CONFIG_MAGIC);
+  const searchLimit = options.searchLimit ?? DEFAULT_SEARCH_LIMIT;
+  const markerNotFound = () =>
+    new SdImagePatchError(
+      "marker_not_found",
+      "The cloud-config placeholder was not found in this image — the release predates in-browser personalization.",
+    );
+
+  let pending: Uint8Array = new Uint8Array(0);
+  // Decompressed bytes already emitted while searching (start offset of
+  // `pending` within the image).
+  let scannedBase = 0;
+  let searching = true;
+
+  for await (const chunk of chunks) {
+    if (!searching) {
+      if (chunk.length > 0) {
+        yield chunk;
+      }
+      continue;
+    }
+    pending = pending.length > 0 ? concat(pending, chunk) : chunk;
+    const index = indexOfSequence(pending, magic);
+    if (index === -1) {
+      // Keep a tail so a marker straddling the chunk boundary is still found.
+      const keep = Math.min(pending.length, magic.length - 1);
+      const flushLength = pending.length - keep;
+      if (flushLength > 0) {
+        yield pending.slice(0, flushLength);
+        scannedBase += flushLength;
+        pending = pending.slice(flushLength);
+      }
+      if (scannedBase >= searchLimit) {
+        throw markerNotFound();
+      }
+      continue;
+    }
+    if (pending.length < index + CLOUD_CONFIG_REGION_SIZE) {
+      // Marker found but the region is not fully buffered yet.
+      continue;
+    }
+    const region = pending.subarray(index, index + CLOUD_CONFIG_REGION_SIZE);
+    if (!verifyPlaceholderRegion(region)) {
+      throw new SdImagePatchError(
+        "placeholder_invalid",
+        "The image's cloud-config region is not the expected all-comments placeholder — refusing to patch it.",
+      );
+    }
+    if (index > 0) {
+      yield pending.slice(0, index);
+    }
+    yield configBytes.slice();
+    const rest = pending.slice(index + CLOUD_CONFIG_REGION_SIZE);
+    pending = new Uint8Array(0);
+    searching = false;
+    if (rest.length > 0) {
+      yield rest;
+    }
+  }
+
+  if (searching) {
+    if (indexOfSequence(pending, magic) !== -1) {
+      throw new SdImagePatchError(
+        "truncated_image",
+        "The image ended before the full cloud-config placeholder — the download appears truncated.",
+      );
+    }
+    throw markerNotFound();
+  }
+}

@@ -15,8 +15,12 @@ from pathlib import Path
 
 from app.tasks.setup_json_reset import (
     BOOT_CLOUD_CONFIG_FILE,
+    CLOUD_CONFIG_MAGIC,
+    CLOUD_CONFIG_PLACEHOLDER_PAD_LINE,
+    CLOUD_CONFIG_PLACEHOLDER_SIZE,
     DEFAULT_CLOUD_PROVIDER_URL,
     DEFAULT_SETUP_JSON_RESET_FILE_PATH,
+    render_cloud_config_placeholder,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
 )
@@ -249,6 +253,88 @@ def test_script_exits_zero_when_nothing_to_do(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (sandbox.boot / "frameos-setup-reset.log").exists()
+
+
+def test_cloud_config_placeholder_layout():
+    placeholder = render_cloud_config_placeholder()
+
+    # The in-browser personalizer locates the placeholder by these exact
+    # bytes and overwrites the 4096-byte region in place; size and magic are
+    # load-bearing.
+    assert len(placeholder) == CLOUD_CONFIG_PLACEHOLDER_SIZE == 4096
+    assert placeholder.startswith(CLOUD_CONFIG_MAGIC.encode("ascii") + b"\n")
+    assert CLOUD_CONFIG_MAGIC == "# FRAMEOS-CLOUD-CONFIG-V1"
+    text = placeholder.decode("ascii")
+    # Only comment lines: first boot must treat the file as "not
+    # personalized" and leave it in place.
+    assert all(line.startswith("#") for line in text.splitlines())
+    # The comments double as manual-editing instructions.
+    for key in ("cloud_url", "claim_token", "name", "wifi_ssid", "wifi_password"):
+        assert key in text
+    assert "first boot" in text
+    # Deterministic padding: full 79x'#'+newline lines, then a final partial
+    # run of '#' without a trailing newline.
+    assert CLOUD_CONFIG_PLACEHOLDER_PAD_LINE == b"#" * 79 + b"\n"
+    tail = placeholder[placeholder.rindex(b"\n") + 1:]
+    assert tail == b"#" * len(tail) and len(tail) < 80
+    assert placeholder[: placeholder.rindex(b"\n") + 1].endswith(CLOUD_CONFIG_PLACEHOLDER_PAD_LINE)
+    assert render_cloud_config_placeholder() == placeholder  # deterministic
+
+
+def test_placeholder_cloud_file_is_a_no_op_and_left_in_place(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    placeholder = render_cloud_config_placeholder()
+    cloud_file = sandbox.boot / "frameos-cloud.txt"
+    cloud_file.write_bytes(placeholder)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Not personalized: file kept byte-for-byte, nothing enrolled, no WiFi.
+    assert cloud_file.read_bytes() == placeholder
+    assert not sandbox.pending_file.exists()
+    assert not sandbox.cloud_wifi_file.exists()
+    assert "placeholder or comments only" in result.stdout
+
+
+def test_placeholder_cloud_file_with_real_keys_is_processed_and_shredded(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    placeholder = render_cloud_config_placeholder().decode("ascii")
+    # Simulate in-browser personalization: same magic first line, real keys,
+    # padded back with comment lines (content between magic and padding
+    # replaced in place).
+    lines = placeholder.splitlines()
+    personalized = "\n".join(
+        [lines[0], "cloud_url=https://cloud.example.com", "claim_token=FRCT-patched"] + lines[3:]
+    )
+    cloud_file = sandbox.write_cloud_file(personalized)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending == {"claim_token": "FRCT-patched", "provider_url": "https://cloud.example.com"}
+    assert not cloud_file.exists()
+
+
+def test_cloud_file_with_only_unrecognized_keys_warns_and_is_kept(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    # Typo'd manual edit: KEY=value lines present, but none recognized. /boot
+    # is root-only (umask=077), so the file is kept for the user to fix
+    # instead of shredding their only copy.
+    content = "cloud_urll=https://cloud.example.com\nclaimtoken=FRCT-typo\n"
+    cloud_file = sandbox.write_cloud_file(content)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert cloud_file.read_text(encoding="utf-8") == content
+    assert not sandbox.pending_file.exists()
+    assert not sandbox.cloud_wifi_file.exists()
+    assert "no recognized keys" in result.stdout
+    assert "cloud_urll" in result.stdout
+    assert "claimtoken" in result.stdout
+    assert "leaving" in result.stdout
 
 
 def test_service_condition_fires_on_setup_json_or_cloud_file():

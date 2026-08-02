@@ -24,8 +24,9 @@ user-editable, same rules as `docs/cloud-link.md`). **Frame** is the device.
   device's interpreted runtime. Compiled scenes, drivers, and shell access
   remain the domain of the self-hosted backend.
 - **No long-term secrets in images.** SD images and flasher payloads carry at
-  most a single-use, short-lived claim token. The device generates its own
-  keypair at enrollment; the provider stores only the public key.
+  most a short-lived claim token with a small use budget (single-use by
+  default). The device generates its own keypair at enrollment; the provider
+  stores only the public key.
 - **One control plane at a time.** A frame is managed by its self-hosted
   backend or by a provider, never both. Switching is a local action on the
   device; no provider verb can change it.
@@ -77,12 +78,14 @@ Response `200`:
 }
 ```
 
-Errors: `400 invalid_claim_token` (unknown/expired/used), `400
-invalid_public_key`, `429` on abuse. The claim token is dead after one use,
-success or failure. The frame stores the token in its `0600` state file and
-appears as **pending** in the owner's account; the owner confirms it there
-(a deliberate click, showing hardware details) before any scene push is
-accepted. Re-enrolling a revoked frame needs a fresh claim token.
+Errors: `400 invalid_claim_token` (unknown/expired/budget spent), `400
+invalid_public_key`, `429` on abuse. Each successful enrollment spends one
+use of the token's budget atomically (single-use by default; see "Multi-use
+claim tokens" under Provisioning). The frame stores its access token in a
+`0600` state file and appears as **pending** in the owner's account; the
+owner confirms it there (a deliberate click, showing hardware details)
+before any scene push is accepted. Re-enrolling a revoked frame needs a
+fresh claim token.
 
 ### B. Link code on the device (RFC 8628)
 
@@ -190,10 +193,41 @@ wifi_password=…        # optional
 
 Parsing is deliberately forgiving: `KEY=value` lines, `#` comments, blank
 lines, CRLF endings, and whitespace around keys/values are all tolerated;
-unknown keys are ignored. `cloud_url` may be omitted and defaults to
-`https://cloud.frameos.net`. On minimal (busybox-only) images the first-boot
-handler strips double quotes, backslashes, and control characters from
-values, so avoid them in `name` and WiFi credentials.
+unknown keys are ignored (when recognized keys are also present).
+`cloud_url` may be omitted and defaults to `https://cloud.frameos.net`. On
+minimal (busybox-only) images the first-boot handler strips double quotes,
+backslashes, and control characters from values, so avoid them in `name` and
+WiFi credentials. A file whose `KEY=value` lines are *all* unrecognized (a
+typo'd manual edit) is kept in place with a loud warning and no enrollment:
+`/boot` is mounted root-only (`umask=077`) so nothing leaks, and shredding
+would destroy the user's only copy of what they typed instead of letting
+them fix the key names and reboot.
+
+**Placeholder + in-browser personalization.** Release images ship the file
+pre-created as an all-comments placeholder of exactly **4096 bytes**, first
+line `# FRAMEOS-CLOUD-CONFIG-V1`, padded with lines of 79 `#` characters
+plus a final partial `#` run with no trailing newline (the comments double
+as editing instructions; canonical bytes come from
+`app.tasks.setup_json_reset.render_cloud_config_placeholder`). A file with
+no recognized keys is ignored on boot — the image stays generic and the
+file stays editable. Image composition copies the placeholder onto the
+freshly built BOOT FAT before any other write, so its clusters are
+contiguous and the 4096-byte region can be rewritten in the raw image
+without touching FAT metadata. The provider's
+"Download SD image" flow personalizes **client-side**: the browser fetches
+the generic `.img.gz` release asset, stream-decompresses it, locates the
+magic line within the boot-partition region, verifies the 4096-byte
+placeholder tail, and overwrites the region in place with the real
+`KEY=value` content (starting with the same magic line, padded back to 4096
+bytes) — same length, so no FAT metadata changes and no rebuild. WiFi
+credentials therefore never leave the browser. If verification fails the UI
+falls back to the manual instructions above.
+
+**Multi-use claim tokens.** A provider may mint claim tokens with a use
+budget (`max_uses` > 1) so one personalized image can be flashed to many
+cards: each boot enrolls a distinct frame (every device generates its own
+keypair) and each appears individually as pending. The token dies when its
+budget is spent or it expires, whichever comes first.
 
 First boot: if the file exists, the device stores the config (Pi/buildroot:
 `state/cloud_enroll_pending.json` under the FrameOS working directory, mode

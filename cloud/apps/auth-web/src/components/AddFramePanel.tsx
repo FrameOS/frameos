@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Esp32CloudFlasher } from "./Esp32CloudFlasher";
+import { SdImageBuilder } from "./SdImageBuilder";
 
 // "Add frame": mints a single-use claim token and walks through the three
 // enrollment paths (SD image, link code on the device, ESP32 USB flashing).
@@ -22,6 +23,13 @@ export function AddFramePanel() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [installCopied, setInstallCopied] = useState(false);
+  // Multi-use token for the SD image builder: one personalized image can be
+  // flashed to many cards, each boot enrolling a distinct frame. Minted once
+  // per panel session, on the first build.
+  const [multiUseToken, setMultiUseToken] = useState<string | undefined>();
+  const [multiUseExpiresAt, setMultiUseExpiresAt] = useState<
+    string | undefined
+  >();
 
   const origin =
     typeof window !== "undefined"
@@ -63,6 +71,36 @@ export function AddFramePanel() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Passed to SdImageBuilder; the multi_use flag is forwarded to the claim
+  // token endpoint so one token covers many enrollments.
+  async function mintClaimToken({
+    multiUse,
+  }: {
+    multiUse: boolean;
+  }): Promise<string> {
+    if (multiUse && multiUseToken) {
+      return multiUseToken;
+    }
+    const response = await fetch("/api/frames/claim-tokens", {
+      body: JSON.stringify(multiUse ? { multi_use: true } : {}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    const data = (await response.json()) as {
+      claim_token?: string;
+      error?: string;
+      expires_at?: string;
+    };
+    if (!response.ok || !data.claim_token) {
+      throw new Error(data.error ?? "claim_token_failed");
+    }
+    if (multiUse) {
+      setMultiUseToken(data.claim_token);
+      setMultiUseExpiresAt(data.expires_at);
+    }
+    return data.claim_token;
   }
 
   async function copyToken() {
@@ -181,32 +219,11 @@ export function AddFramePanel() {
             <MonitorSmartphone aria-hidden size={18} /> SD card image
             (Raspberry Pi)
           </h4>
-          <p className="copy">
-            Download the generic FrameOS image for your board from the{" "}
-            <a
-              href="https://github.com/FrameOS/frameos/releases/latest"
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              latest release
-            </a>
-            , flash it, then create a file named{" "}
-            <code>frameos-cloud.txt</code> on the SD card&apos;s boot
-            partition:
-          </p>
-          <pre className="copy">
-            {`cloud_url=${typeof window !== "undefined" ? window.location.origin : "https://cloud.frameos.net"}
-claim_token=${claimToken ?? "<your claim code>"}
-# optional:
-# name=Kitchen frame
-# wifi_ssid=MyNetwork
-# wifi_password=…`}
-          </pre>
-          <p className="copy">
-            The file is read once on first boot and destroyed. Without WiFi
-            credentials the frame opens the <code>FrameOS-Setup</code> hotspot
-            so you can connect it to your network first.
-          </p>
+          <SdImageBuilder
+            claimToken={multiUseToken}
+            claimTokenExpiresAt={multiUseExpiresAt}
+            mintClaimToken={mintClaimToken}
+          />
         </div>
         <div className="card">
           <h4>
@@ -219,7 +236,7 @@ claim_token=${claimToken ?? "<your claim code>"}
             a claim code into the frame&apos;s setup portal.
           </p>
         </div>
-        <Esp32CloudFlasher claimToken={claimToken} />
+        <Esp32CloudFlasher frameName={name || undefined} />
       </div>
     </div>
   );

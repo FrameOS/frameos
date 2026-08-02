@@ -611,8 +611,10 @@ export const frames = pgTable(
   }),
 );
 
-// Single-use claim tokens minted by "Add frame" (FRCT-…), hashed at rest.
-// Dead after one redemption attempt, success or failure.
+// Claim tokens minted by "Add frame" (FRCT_…), hashed at rest. Single-use
+// by default; the SD-image download mints multi-use tokens (max_uses > 1)
+// so one image flashed to many cards enrolls many frames. used_at is set
+// when the budget is spent.
 export const frameEnrollmentTokens = pgTable(
   "frame_enrollment_tokens",
   {
@@ -624,6 +626,8 @@ export const frameEnrollmentTokens = pgTable(
     name: text("name"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
+    maxUses: integer("max_uses").default(1).notNull(),
+    useCount: integer("use_count").default(0).notNull(),
     frameId: uuid("frame_id").references(() => frames.id, {
       onDelete: "set null",
     }),

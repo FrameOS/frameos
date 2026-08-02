@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { frameEnrollmentTokens, frames, linkedClients } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
@@ -17,6 +17,7 @@ import {
   frameManagedScope,
   isValidEd25519PublicKey,
   maxFramesPerAccount,
+  redeemClaimToken,
 } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
@@ -104,19 +105,10 @@ async function enrollWithClaimToken(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   input: EnrollInput & { claimToken: string },
 ) {
-  // Single-use, atomically: whoever marks used_at first wins; every other
-  // attempt (including a replay of the same token) sees invalid_claim_token.
-  const [token] = await db
-    .update(frameEnrollmentTokens)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(frameEnrollmentTokens.tokenHash, hashSecret(input.claimToken)),
-        isNull(frameEnrollmentTokens.usedAt),
-        gt(frameEnrollmentTokens.expiresAt, new Date()),
-      ),
-    )
-    .returning();
+  // Atomic budget spend: single-use tokens admit exactly one enrollment;
+  // multi-use tokens (SD images flashed to many cards) admit max_uses. A
+  // replay past the budget or expiry sees invalid_claim_token.
+  const token = await redeemClaimToken(db, input.claimToken, hashSecret);
   if (!token) {
     return jsonError("invalid_claim_token", 400);
   }

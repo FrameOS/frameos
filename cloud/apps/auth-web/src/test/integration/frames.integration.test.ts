@@ -261,6 +261,54 @@ describe("cloud-managed frame enrollment", () => {
     expect(confirmed?.status).toBe("active");
   });
 
+  it("multi-use claim tokens enroll distinct frames until the budget is spent", async () => {
+    const accountId = await signIn();
+    const mintResponse = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { max_uses: 2, name: "SD batch" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mintResponse.status).toBe(200);
+    const minted = (await mintResponse.json()) as {
+      claim_token: string;
+      max_uses: number;
+    };
+    expect(minted.max_uses).toBe(2);
+
+    // Two cards flashed from the same image: two distinct frames, each with
+    // its own device keypair, each individually pending.
+    const first = await enroll(minted.claim_token, deviceKeypair().publicKeyBase64);
+    expect(first.status).toBe(200);
+    const second = await enroll(minted.claim_token, deviceKeypair().publicKeyBase64);
+    expect(second.status).toBe(200);
+    const firstPayload = (await first.json()) as { frame_id: string };
+    const secondPayload = (await second.json()) as { frame_id: string };
+    expect(firstPayload.frame_id).not.toBe(secondPayload.frame_id);
+
+    const rows = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, accountId));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.status === "pending")).toBe(true);
+    expect(rows[0]?.publicKey).not.toBe(rows[1]?.publicKey);
+
+    // The budget is spent: the third card gets invalid_claim_token.
+    const third = await enroll(minted.claim_token, deviceKeypair().publicKeyBase64);
+    expect(third.status).toBe(400);
+    expect(((await third.json()) as { error: string }).error).toBe(
+      "invalid_claim_token",
+    );
+
+    // Bad budgets are refused.
+    const badMint = await mintClaimToken(
+      postJson("/api/frames/claim-tokens", { max_uses: 0 }, { origin: baseUrl }),
+    );
+    expect(badMint.status).toBe(400);
+  });
+
   it("rejects garbage public keys and unknown claim tokens", async () => {
     await signIn();
     const claimToken = await mintToken();

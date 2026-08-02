@@ -123,11 +123,7 @@ async function provisionOverSerial(
   }
 }
 
-export function Esp32CloudFlasher({
-  claimToken,
-}: {
-  claimToken?: string | undefined;
-}) {
+export function Esp32CloudFlasher({ frameName }: { frameName?: string | undefined }) {
   const [phase, setPhase] = useState<FlashPhase>("idle");
   const [lines, setLines] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
@@ -136,7 +132,6 @@ export function Esp32CloudFlasher({
       ? window.location.origin
       : "https://cloud.frameos.net",
   );
-  const [token, setToken] = useState(claimToken ?? "");
   const [wifiSsid, setWifiSsid] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
   const busyRef = useRef(false);
@@ -148,6 +143,28 @@ export function Esp32CloudFlasher({
     setLines((previous) => [...previous.slice(-200), line]);
   }
 
+  // Enrollment codes are plumbing, not UX: mint a fresh single-use code per
+  // flash, provision it over serial, never show it to the user.
+  async function mintEnrollmentCode(): Promise<string> {
+    const response = await fetch("/api/frames/claim-tokens", {
+      body: JSON.stringify(frameName ? { name: frameName } : {}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      claim_token?: string;
+      error?: string;
+    };
+    if (!response.ok || !data.claim_token) {
+      throw new Error(
+        data.error === "frame_quota_exceeded"
+          ? "You've reached the frame limit for this account."
+          : "Could not prepare the enrollment — are you still signed in?",
+      );
+    }
+    return data.claim_token;
+  }
+
   async function flash() {
     if (busyRef.current) {
       return;
@@ -156,10 +173,9 @@ export function Esp32CloudFlasher({
     setLines([]);
     setProgress(0);
     try {
-      if (!token || !token.startsWith("FRCT_")) {
-        throw new Error("Enter a claim code first (create one above).");
-      }
       setPhase("fetching");
+      log("Preparing a one-time enrollment for this frame…");
+      const token = await mintEnrollmentCode();
       const firmware = await fetchGenericFirmware(log);
 
       setPhase("connecting");
@@ -249,17 +265,10 @@ export function Esp32CloudFlasher({
         <Zap aria-hidden size={18} /> Flash an ESP32 from this browser
       </h4>
       <p className="copy">
-        Writes the generic FrameOS firmware (no account data inside) over USB,
-        then provisions this cloud and your one-time claim code over the
-        serial console.
+        Plug the board in over USB and click flash — it writes the generic
+        FrameOS firmware and links the frame to this account automatically.
       </p>
       <div className="grid" style={{ gap: "0.5rem" }}>
-        <input
-          className="input"
-          onChange={(event) => setToken(event.target.value.trim())}
-          placeholder="Claim code (FRCT_…)"
-          value={token}
-        />
         <input
           className="input"
           onChange={(event) => setWifiSsid(event.target.value)}

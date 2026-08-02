@@ -140,8 +140,14 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
         overlay = temp_dir / "overlay"
         # Generic release images ship no per-frame setup payload...
         assert not (overlay / "boot" / "frameos-setup.json").exists()
-        assert not (overlay / "boot" / "frameos-cloud.txt").exists()
         assert not (overlay / "boot" / "frameos-wifi.nmconnection").exists()
+        # ...but they DO ship the canonical 4096-byte all-comments
+        # frameos-cloud.txt placeholder that the in-browser personalizer
+        # patches in place (byte-exact: magic first line + fixed size).
+        placeholder = (overlay / "boot" / "frameos-cloud.txt").read_bytes()
+        assert placeholder == module.render_cloud_config_placeholder()
+        assert len(placeholder) == 4096
+        assert placeholder.startswith(b"# FRAMEOS-CLOUD-CONFIG-V1\n")
         # ...but the first-boot service and script stay staged and dormant,
         # armed for both frameos-setup.json and frameos-cloud.txt.
         script_path = overlay / "usr" / "local" / "bin" / "frameos-setup-reset.sh"

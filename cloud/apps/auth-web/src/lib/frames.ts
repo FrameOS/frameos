@@ -380,6 +380,31 @@ export function claimTokenExpiry(now = new Date()) {
   return new Date(now.getTime() + claimTokenTtlMs);
 }
 
+// Spend one use of a claim token, atomically: concurrent enrollments race on
+// use_count < max_uses, so a budget of N admits exactly N frames. used_at is
+// stamped when the budget is spent (single-use tokens: on their only use).
+export async function redeemClaimToken(
+  db: ReturnType<typeof createDb>,
+  claimToken: string,
+  tokenHashFn: (secret: string) => string,
+) {
+  const [token] = await db
+    .update(frameEnrollmentTokens)
+    .set({
+      useCount: sql`${frameEnrollmentTokens.useCount} + 1`,
+      usedAt: sql`case when ${frameEnrollmentTokens.useCount} + 1 >= ${frameEnrollmentTokens.maxUses} then now() else ${frameEnrollmentTokens.usedAt} end`,
+    })
+    .where(
+      and(
+        eq(frameEnrollmentTokens.tokenHash, tokenHashFn(claimToken)),
+        lt(frameEnrollmentTokens.useCount, frameEnrollmentTokens.maxUses),
+        gt(frameEnrollmentTokens.expiresAt, new Date()),
+      ),
+    )
+    .returning();
+  return token;
+}
+
 export async function sweepExpiredClaimTokens(
   db: ReturnType<typeof createDb>,
   accountId: string,
@@ -389,7 +414,7 @@ export async function sweepExpiredClaimTokens(
     .where(
       and(
         eq(frameEnrollmentTokens.accountId, accountId),
-        isNull(frameEnrollmentTokens.usedAt),
+        lt(frameEnrollmentTokens.useCount, frameEnrollmentTokens.maxUses),
         lt(frameEnrollmentTokens.expiresAt, new Date()),
       ),
     );
@@ -405,7 +430,7 @@ export async function countActiveClaimTokens(
     .where(
       and(
         eq(frameEnrollmentTokens.accountId, accountId),
-        isNull(frameEnrollmentTokens.usedAt),
+        lt(frameEnrollmentTokens.useCount, frameEnrollmentTokens.maxUses),
         gt(frameEnrollmentTokens.expiresAt, new Date()),
       ),
     );
