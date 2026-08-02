@@ -330,6 +330,56 @@ describe("cloud-managed frame enrollment", () => {
     expect(confirmed?.status).toBe("active");
   });
 
+  // ws_url is the device-side analogue of the SPA's cloud_ws_origin
+  // injection (app/frames/[[...path]]/route.test.ts): present only when the
+  // management WebSocket lives somewhere other than {cloud_url}{ws_path}.
+  it("offers ws_url from FRAME_HUB_PUBLIC_URL, ws-scheme, trailing slash and all", async () => {
+    await signIn();
+    process.env.FRAME_HUB_PUBLIC_URL = "https://hub.frameos.net/";
+    try {
+      const claimToken = await mintToken();
+      const response = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as Record<string, unknown>;
+      expect(payload.ws_path).toBe("/api/frames/ws");
+      expect(payload.ws_url).toBe("wss://hub.frameos.net/api/frames/ws");
+    } finally {
+      delete process.env.FRAME_HUB_PUBLIC_URL;
+    }
+  });
+
+  it("defaults ws_url to the dev hub port for loopback request hosts", async () => {
+    // baseUrl is http://localhost:3000 — a dev server, where nothing on the
+    // request origin speaks WebSocket; the hub is a second process on :3100.
+    await signIn();
+    const claimToken = await mintToken();
+    const response = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.ws_url).toBe("ws://localhost:3100/api/frames/ws");
+  });
+
+  it("omits ws_url for a public host without FRAME_HUB_PUBLIC_URL", async () => {
+    // In production nginx proxies ws_path on the same origin, so the default
+    // contract needs no override — and we never guess a second port there.
+    await signIn();
+    const claimToken = await mintToken();
+    const response = await enrollFrame(
+      new NextRequest(new URL("/api/frames/enroll", "https://cloud.frameos.net"), {
+        body: JSON.stringify({
+          claim_token: claimToken,
+          public_key: deviceKeypair().publicKeyBase64,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.ws_path).toBe("/api/frames/ws");
+    expect("ws_url" in payload).toBe(false);
+  });
+
   it("multi-use claim tokens enroll distinct frames until the budget is spent", async () => {
     const accountId = await signIn();
     const mintResponse = await mintClaimToken(

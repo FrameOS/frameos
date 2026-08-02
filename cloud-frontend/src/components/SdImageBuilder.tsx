@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, CircleStackIcon } from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, ArrowRightIcon, CheckCircleIcon, CircleStackIcon } from '@heroicons/react/24/outline'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
@@ -6,6 +6,8 @@ import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudCo
 import { fetchReleaseListing } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 import { piDeviceGroups } from '../lib/generated-devices'
+import { cloudFrameUrl } from '../routes'
+import { useEnrollmentWatch } from './enrollmentWatch'
 
 // "Download SD image" for cloud-managed Raspberry Pi frames
 // (docs/cloud-frames.md, "Placeholder + in-browser personalization"): the
@@ -479,6 +481,13 @@ export function SdImageBuilder({
   const building = phase === 'building'
   const progressMb = (progressBytes / 1024 / 1024).toFixed(0)
 
+  // Once the image is saved, keep an eye on the frames list: a card flashed
+  // from it enrolls whenever the Pi first boots with network, and users were
+  // left refreshing the page by hand to see it. The first successful poll is
+  // the baseline — nothing can boot the image before it exists — and polling
+  // stops with the drawer (unmount) or when a frame shows up.
+  const { enrolledFrame, hintDue } = useEnrollmentWatch({ active: phase === 'done' })
+
   if (!supported) {
     return (
       <p className="frameos-muted text-xs">
@@ -698,11 +707,66 @@ export function SdImageBuilder({
             : ''}
         </div>
       ) : null}
+      {phase === 'done' ? (
+        <div className="frameos-card space-y-2 rounded-xl border px-3 py-2 text-xs" data-testid="sd-image-enrollment">
+          {enrolledFrame ? (
+            <>
+              <p className="frameos-strong flex items-start gap-1.5 text-sm font-semibold">
+                <CheckCircleIcon aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                <span>
+                  Frame &ldquo;{enrolledFrame.name || 'New frame'}&rdquo; joined
+                  {enrolledFrame.status === 'pending' ? ' and is waiting for your confirmation' : ''}.
+                </span>
+              </p>
+              <a
+                data-testid="sd-image-open-frame"
+                className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                href={cloudFrameUrl(enrolledFrame.id)}
+              >
+                Open frame
+                <ArrowRightIcon aria-hidden className="h-4 w-4" />
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="frameos-muted">
+                Waiting for a device to enroll with this image&apos;s claim code — a frame flashed from it appears here
+                (and in the workspace as pending) the moment it reaches the cloud.
+              </p>
+              {hintDue ? (
+                <p className="frameos-muted">
+                  Nothing yet — that usually means the frame has not reached the cloud: check its power and WiFi (a
+                  first boot can also take a couple of minutes). The claim code stays valid, so it appears here
+                  whenever it gets through.
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
       {error ? (
         <p className="frameos-warning-button rounded-xl border px-3 py-2 text-xs" role="alert">
           {error}
         </p>
       ) : null}
+      <details className="frameos-muted text-xs">
+        <summary className="cursor-pointer">If the frame doesn&apos;t appear here after booting…</summary>
+        <ul className="mt-1.5 list-disc space-y-1 pl-4">
+          <li>
+            First boot writes <code>/boot/frameos-setup-reset.log</code> on the card&apos;s FAT partition (readable on
+            any computer) — it records exactly what the personalization did.
+          </li>
+          <li>
+            If <code>/boot/frameos-cloud.txt</code> is still on the card, personalization never ran (a typo&apos;d file
+            is kept so you can fix it and reboot). If it&apos;s gone, it was applied and shredded, and the frame keeps
+            retrying enrollment itself.
+          </li>
+          <li>
+            The claim code stays valid for the period chosen above — the frame appears here as <em>pending</em>{' '}
+            whenever it first reaches this cloud, even much later.
+          </li>
+        </ul>
+      </details>
     </div>
   )
 }

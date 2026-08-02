@@ -74,9 +74,22 @@ Response `200`:
   "scope": "frame:managed",
   "frame_id": "…",
   "status": "pending",
-  "ws_path": "/api/frames/ws"
+  "ws_path": "/api/frames/ws",
+  "ws_url": "ws://10.0.0.5:3100/api/frames/ws"
 }
 ```
+
+`ws_url` is optional: a full `ws://` or `wss://` URL the device dials for the
+management WebSocket *instead of* `{cloud_url}{ws_path}`. Providers send it
+only when the socket lives somewhere other than the enrollment origin — in
+practice a development deployment whose frame hub is a second process on its
+own port (cloud.frameos.net's dev setup: the hub from `FRAME_HUB_PUBLIC_URL`,
+or `:3100` on the same host when the enrollment request arrived on a loopback
+host). In production the WS path is proxied on the same origin and the field
+is omitted. Devices hold `ws_url` to the same transport rule as `cloud_url`
+(`wss://` anywhere; plain `ws://` only for localhost, `.local`/`.localhost`
+and private-network hosts) and ignore a value that fails it, falling back to
+the `ws_path` flow.
 
 Errors: `400 invalid_claim_token` (unknown/expired/budget spent), `400
 invalid_public_key`, `429` on abuse, `403 frame_quota_exceeded` when the
@@ -124,7 +137,8 @@ need owner approval on the provider's device screen; removals are immediate).
 
 ## The management WebSocket
 
-The frame dials `wss://{provider}{ws_path}` with
+The frame dials `wss://{provider}{ws_path}` — or the enrollment response's
+`ws_url` verbatim when one was given (see Enrollment) — with
 `Authorization: Bearer <access_token>`. Plain `ws://` is acceptable only for
 the hosts `docs/cloud-link.md` allows for `http://` providers — localhost,
 `.local`/`.localhost` names, and private-network literals (RFC1918, loopback,
