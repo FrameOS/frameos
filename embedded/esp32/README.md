@@ -66,7 +66,9 @@ separate host toolchain.
 ./build_nim.sh             # compile the Nim runtime to C (optional but recommended)
 idf.py set-target esp32s3
 FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
-# reconfigure picks up new nimcache/generated_config.h and the selected panel
+# reconfigure picks up new nimcache/generated_config.h. Every supported panel
+# driver is compiled in; FRAMEOS_SELECTED_PANEL only sets the boot-time
+# default panel (optional — `set panel <key>` switches at runtime).
 idf.py -p /dev/tty.usbmodem* flash monitor
 ```
 
@@ -256,13 +258,13 @@ For other flash sizes, append the matching defaults file:
 
 ```bash
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.16mb-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 ```
 
 OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
@@ -275,18 +277,24 @@ has no OTA partition, so firmware updates must be flashed over USB.
 
 1. Add or update the root Waveshare driver wrapper under
    `frameos/src/drivers/waveshare/...`. The ESP32 generator reads that metadata
-   (`init`, `clear`, `display`, dimensions, color option) and symlinks only the
-   selected root C source/header into the IDF build tree.
+   (`init`, `clear`, `display`, dimensions, color option) and symlinks every
+   supported root C source/header into the IDF build tree.
 2. If the wrapper is a native Nim port with a separate C fallback, add the source
-   mapping to `components/frameos_display/generate_selected_panel.py`.
+   mapping to `components/frameos_display/generate_panel_table.py`.
 3. If it introduces a new packed pixel layout, add the matching
    `fos_pixel_format_t`, backend FOSB packer, and Nim dither/pack path.
 4. Bump `EMBEDDED_FIRMWARE_VERSION`.
 
-The ESP32 component intentionally compiles only one selected display driver per
-firmware image. Backend builds set `FRAMEOS_SELECTED_PANEL` from the frame's
-device, so changing panel families means rebuilding firmware for that frame.
-The same applies to published release images: an image is "generic" only in
-that it carries no credentials — it is still built for one panel and one
-flash-size profile, so the cloud flasher has to offer (and the user has to
-pick) the matching artifact.
+Every supported panel driver is compiled into each firmware image
+(`generate_panel_table.py` emits a runtime table of name, dimensions, format
+and driver function pointers; ~75 KB of flash for all of them — the 4MB
+no-OTA profile still has ~430 KB free). The active
+panel is picked at runtime from the configured panel name, so switching panels
+is `set panel EPD_13in3e` on the serial console (or the setup portal dropdown,
+which lists the whole table) followed by a restart — no rebuild. Panels whose
+symbols collide with a newer variant of the same family are excluded
+(`EPD_7in5_V2_gray`, `EPD_4in2b_V2_old`, `EPD_7in5b_V2_old`), as are the
+IT8951 and 12.48" controller stacks. `FRAMEOS_SELECTED_PANEL` (backend builds
+set it from the frame's device) only chooses the boot-time default panel.
+Published release images remain per flash-size profile, but one generic image
+now covers all panels.

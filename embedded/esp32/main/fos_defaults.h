@@ -43,7 +43,14 @@
 #define FRAMEOS_DEFAULT_HARDWARE_PRESET ""
 #endif
 #ifndef FRAMEOS_DEFAULT_PANEL
+/* All panel drivers are always compiled in; FRAMEOS_SELECTED_PANEL only sets
+ * the default the device boots with before `set panel` / portal / NVS
+ * override it. generated_config.h (backend builds) takes precedence. */
+#ifdef FRAMEOS_ENV_DEFAULT_PANEL
+#define FRAMEOS_DEFAULT_PANEL FRAMEOS_ENV_DEFAULT_PANEL
+#else
 #define FRAMEOS_DEFAULT_PANEL "none"
+#endif
 #endif
 #ifndef FRAMEOS_DEFAULT_RENDER_MODE
 #define FRAMEOS_DEFAULT_RENDER_MODE 0 /* local */

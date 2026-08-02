@@ -7,6 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Boot-time default panel only: every supported panel driver is compiled into
+# the image and can be selected at runtime (`set panel <key>` / setup portal).
 PANEL="${FRAMEOS_SELECTED_PANEL:-EPD_7in5_V2}"
 BUILD_NAME="${FRAMEOS_ESP32_BUILD_DIR:-build-ci}"
 if [[ "$BUILD_NAME" = /* ]]; then
@@ -63,7 +65,7 @@ mkdir -p "$BUILD_DIR"
 cd "$SCRIPT_DIR"
 
 export FRAMEOS_SELECTED_PANEL="$PANEL"
-echo "Building FrameOS ESP32 firmware for panel $FRAMEOS_SELECTED_PANEL"
+echo "Building FrameOS ESP32 firmware (all panels compiled in, default panel $FRAMEOS_SELECTED_PANEL)"
 ./build_nim.sh
 idf.py -B "$BUILD_DIR" \
     -D SDKCONFIG="$SDKCONFIG_PATH" \

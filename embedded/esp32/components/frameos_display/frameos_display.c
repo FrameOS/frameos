@@ -6,22 +6,14 @@
 #include "esp_timer.h"
 
 #include "DEV_Config.h"
+#include "frameos_panel_table.h"
 #include "photo_painter_pmic.h"
 
 static const char *TAG = "fos_display";
 
-const char *fos_selected_panel_name(void);
-int fos_selected_panel_width(void);
-int fos_selected_panel_height(void);
-int fos_selected_panel_format(void);
-int fos_selected_panel_requires_cs2(void);
-int fos_selected_panel_driver_init(void);
-void fos_selected_panel_clear(void);
-void fos_selected_panel_display(uint8_t *buf);
-void fos_selected_panel_sleep(void);
 void EPD_7IN3E_SetPhotoPainterMode(int enabled) __attribute__((weak));
 
-static bool s_panel_present = false;
+static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
 
 static bool is_photo_painter_hardware(const fos_display_config_t *config)
@@ -53,7 +45,7 @@ static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format
 
 esp_err_t fos_display_init(const fos_display_config_t *config)
 {
-    s_panel_present = false;
+    s_panel = NULL;
     if (!config) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -62,14 +54,19 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
         return ESP_OK;
     }
 
-    const char *selected = fos_selected_panel_name();
-    if (!selected || strcmp(selected, "none") == 0 || strcmp(selected, config->panel) != 0) {
-        ESP_LOGE(TAG, "panel %s is not compiled into this firmware (selected=%s)",
-                 config->panel, selected ? selected : "none");
+    const fos_panel_entry_t *entry = NULL;
+    for (size_t i = 0; i < fos_panel_table_count; i++) {
+        if (strcmp(fos_panel_table[i].name, config->panel) == 0) {
+            entry = &fos_panel_table[i];
+            break;
+        }
+    }
+    if (!entry) {
+        ESP_LOGE(TAG, "panel %s is not supported by this firmware", config->panel);
         return ESP_ERR_NOT_FOUND;
     }
-    if (fos_selected_panel_requires_cs2() && config->cs2 < 0) {
-        ESP_LOGE(TAG, "panel %s requires pins.cs2 for the second chip-select", selected);
+    if (entry->requires_cs2 && config->cs2 < 0) {
+        ESP_LOGE(TAG, "panel %s requires pins.cs2 for the second chip-select", entry->name);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -88,19 +85,20 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,
                      config->sck, config->mosi, config->pwr);
-    s_panel_present = true;
-    ESP_LOGI(TAG, "panel %s (%dx%d, fmt=%d, %u byte buffer)", selected,
+    s_panel = entry;
+    ESP_LOGI(TAG, "panel %s (%dx%d, fmt=%d, %u byte buffer)", entry->name,
              fos_display_width(), fos_display_height(), (int)fos_display_format(),
              (unsigned)fos_display_buffer_size());
     return ESP_OK;
 }
 
-bool fos_display_present(void) { return s_panel_present; }
-int fos_display_width(void) { return s_panel_present ? fos_selected_panel_width() : 0; }
-int fos_display_height(void) { return s_panel_present ? fos_selected_panel_height() : 0; }
+bool fos_display_present(void) { return s_panel != NULL; }
+const char *fos_display_selected_panel(void) { return s_panel ? s_panel->name : "none"; }
+int fos_display_width(void) { return s_panel ? s_panel->width : 0; }
+int fos_display_height(void) { return s_panel ? s_panel->height : 0; }
 fos_pixel_format_t fos_display_format(void)
 {
-    return s_panel_present ? (fos_pixel_format_t)fos_selected_panel_format() : FOS_PIXEL_1BPP;
+    return s_panel ? (fos_pixel_format_t)s_panel->format : FOS_PIXEL_1BPP;
 }
 
 size_t fos_display_buffer_size(void)
@@ -110,28 +108,28 @@ size_t fos_display_buffer_size(void)
 
 size_t fos_display_panel_count(void)
 {
-    return strcmp(fos_selected_panel_name(), "none") == 0 ? 0u : 1u;
+    return fos_panel_table_count;
 }
 
 const char *fos_display_panel_name(size_t index)
 {
-    return index == 0 && fos_display_panel_count() == 1 ? fos_selected_panel_name() : "";
+    return index < fos_panel_table_count ? fos_panel_table[index].name : "";
 }
 
 int fos_display_panel_width(size_t index)
 {
-    return index == 0 && fos_display_panel_count() == 1 ? fos_selected_panel_width() : 0;
+    return index < fos_panel_table_count ? fos_panel_table[index].width : 0;
 }
 
 int fos_display_panel_height(size_t index)
 {
-    return index == 0 && fos_display_panel_count() == 1 ? fos_selected_panel_height() : 0;
+    return index < fos_panel_table_count ? fos_panel_table[index].height : 0;
 }
 
 fos_pixel_format_t fos_display_panel_format(size_t index)
 {
-    return index == 0 && fos_display_panel_count() == 1
-        ? (fos_pixel_format_t)fos_selected_panel_format()
+    return index < fos_panel_table_count
+        ? (fos_pixel_format_t)fos_panel_table[index].format
         : FOS_PIXEL_1BPP;
 }
 
@@ -143,7 +141,7 @@ fos_pixel_format_t fos_display_panel_format(size_t index)
 
 size_t fos_display_render_psram_bytes(void)
 {
-    if (!s_panel_present) return 0;
+    if (!s_panel) return 0;
     size_t rgba = (size_t)fos_display_width() * (size_t)fos_display_height() * 4u;
     return rgba + fos_display_buffer_size() + FOS_RENDER_PSRAM_RESERVE;
 }
@@ -160,29 +158,29 @@ static esp_err_t ensure_module(void)
 
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 {
-    if (!s_panel_present) return ESP_ERR_INVALID_STATE;
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
     if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
     int64_t start = esp_timer_get_time();
-    if (fos_selected_panel_driver_init() != 0) {
+    if (s_panel->driver_init() != 0) {
         ESP_LOGE(TAG, "panel init failed");
         return ESP_FAIL;
     }
-    fos_selected_panel_display((uint8_t *)buf);
-    fos_selected_panel_sleep();
+    s_panel->display((uint8_t *)buf);
+    s_panel->sleep();
     ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
     return ESP_OK;
 }
 
 esp_err_t fos_display_clear(void)
 {
-    if (!s_panel_present) return ESP_ERR_INVALID_STATE;
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
-    if (fos_selected_panel_driver_init() != 0) return ESP_FAIL;
-    fos_selected_panel_clear();
-    fos_selected_panel_sleep();
+    if (s_panel->driver_init() != 0) return ESP_FAIL;
+    s_panel->clear();
+    s_panel->sleep();
     return ESP_OK;
 }

@@ -171,7 +171,27 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
     else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0)
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
-    else if (strcmp(key, "panel") == 0) strlcpy(config->panel, value, sizeof(config->panel));
+    else if (strcmp(key, "panel") == 0) {
+        /* Every supported panel is compiled in, so an unknown key can only be
+         * a typo — and it would surface as a frame that renders to nothing
+         * after the next restart. Refuse it now, while someone is looking. */
+        if (strcmp(value, "none") != 0) {
+            bool panel_known = false;
+            for (size_t i = 0; i < fos_display_panel_count(); i++) {
+                if (strcmp(fos_display_panel_name(i), value) == 0) {
+                    panel_known = true;
+                    break;
+                }
+            }
+            if (!panel_known) {
+                printf("unknown panel \"%s\" — this firmware compiles in %u panels; "
+                       "see the setup portal's list or `set panel none`\n",
+                       value, (unsigned)fos_display_panel_count());
+                return 1;
+            }
+        }
+        strlcpy(config->panel, value, sizeof(config->panel));
+    }
     else if (strcmp(key, "render_mode") == 0)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
@@ -347,7 +367,7 @@ static int cmd_display_test(int argc, char **argv)
     }
 
     printf("display_test: mode=%s panel=%s %dx%d format=%d bytes=%u\n",
-           mode, fos_display_panel_name(0), width, height, (int)format, (unsigned)len);
+           mode, fos_display_selected_panel(), width, height, (int)format, (unsigned)len);
     esp_err_t err = fos_display_blit(buf, len);
     free(buf);
     printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);

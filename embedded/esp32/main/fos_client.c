@@ -131,7 +131,7 @@ static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, 
     state->height = (uint16_t)height;
     state->format = (uint8_t)format;
     state->len = (uint32_t)len;
-    strlcpy(state->panel, fos_display_panel_name(0), sizeof(state->panel));
+    strlcpy(state->panel, fos_display_selected_panel(), sizeof(state->panel));
     if (sha256_buffer(buf, len, state->sha256) != ESP_OK) {
         memset(state, 0, sizeof(*state));
         return false;
