@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ accountId: string }> };
 
-// Account-level publish ban (STORE-TODO Phase 3). The account keeps working
+// Account-level publish ban. The account keeps working
 // — sign-in, backups, existing scenes — but every new store publish is
 // rejected until the ban is lifted. Existing scenes are moderated separately
 // (pull them per scene if needed).

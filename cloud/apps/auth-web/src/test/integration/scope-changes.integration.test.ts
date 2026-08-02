@@ -160,7 +160,7 @@ describe("scope changes (enabled features)", () => {
     ]);
   });
 
-  it("adds included (safe) features immediately, without consent", async () => {
+  it("never adds scopes without owner approval, even account-included ones", async () => {
     const { accessToken, linkedClientId } = await linkClient([
       "backend:link",
       "backend:read",
@@ -183,24 +183,16 @@ describe("scope changes (enabled features)", () => {
     );
     expect(response.status).toBe(200);
     const payload = await readJson(response);
-    expect(payload.status).toBe("updated");
-    expect(payload.device_code).toBeUndefined();
-    expect(payload.scope).toBe(
-      "backend:link backend:read backup:scenes backup:frames store:publish",
-    );
+    expect(payload.status).toBe("approval_required");
+    expect(payload.device_code).toBeDefined();
 
+    // Nothing changes until the owner approves on the device screen.
     const [client] = await db
       .select()
       .from(linkedClients)
       .where(eq(linkedClients.id, linkedClientId));
     const metadata = client?.providerClientMetadata as Record<string, unknown>;
-    expect(metadata.requestedScopes).toEqual([
-      "backend:link",
-      "backend:read",
-      "backup:scenes",
-      "backup:frames",
-      "store:publish",
-    ]);
+    expect(metadata.requestedScopes).toEqual(["backend:link", "backend:read"]);
   });
 
   it("never drops the base link scope", async () => {

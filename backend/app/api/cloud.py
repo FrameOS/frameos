@@ -1,7 +1,7 @@
 """Linking this FrameOS installation to a FrameOS Cloud provider.
 
-Phase 0 of CLOUD-TODO.md: establish and hold a scoped link token via the
-OAuth 2.0 Device Authorization Grant. Phase 1: cloud login — a browser
+Establishes and holds a scoped link token via the OAuth 2.0 Device
+Authorization Grant. Also here: cloud login — a browser
 handoff that signs local users in with their FrameOS Cloud account, plus the
 first-run setup flow that can create the first user from a cloud principal.
 The protocol is documented in docs/cloud-link.md; the provider URL is
@@ -494,7 +494,7 @@ async def disconnect_cloud(db: Session = Depends(get_db)):
 #
 # A fresh install has no user to log in with, but the setup screen must be able
 # to link to the cloud so the first user can be created from a cloud account
-# (and Phase 3 backups restored). Anyone who can reach a fresh install can
+# (and config backups restored). Anyone who can reach a fresh install can
 # already claim it through the open /api/signup, so these carry the same trust.
 
 
@@ -533,7 +533,7 @@ async def setup_cloud_disconnect(db: Session = Depends(get_db)):
     return await disconnect_cloud(db)
 
 
-# ---- cloud login (Phase 1) ---------------------------------------------------
+# ---- cloud login -------------------------------------------------------------
 
 
 def _safe_next_path(value: str | None) -> str | None:

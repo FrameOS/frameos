@@ -76,6 +76,7 @@ gpt.txt
 .local/redis/
 .flox/cache/
 .flox/log/
+.flox/postgres/
 .flox/redis/
 .flox/run/
 .flox/state/

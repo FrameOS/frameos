@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// Report a public scene (STORE-TODO Phase 3). Reports need a signed-in
+// Report a public scene. Reports need a signed-in
 // account (raises the cost of report-spam) and land in the superadmin queue
 // at /admin/reports. One open report per (scene, reporter) — enforced by a
 // partial unique index — so re-reporting is a no-op.

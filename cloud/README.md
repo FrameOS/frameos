@@ -48,16 +48,22 @@ Password login works locally out of the box. Google SSO additionally needs
 
 ## Development
 
-Use Flox for the toolchain and dependency sync:
+The toolchain comes from the monorepo's single Flox environment at the repo
+root (Node, pnpm, and Postgres included — there is no separate `cloud/.flox`
+env). From the repo root:
 
 ```sh
 flox activate
+cd cloud
 pnpm db:setup
 pnpm dev
 ```
 
-The activation hook follows the same pattern as the repo root: it installs
-workspace dependencies when package files or the lockfile change.
+Or start it as the `cloud` pane of the repo-level `pnpm dev` (mprocs) runner,
+which runs `db:setup` and the dev server in one step. The root activation
+hook installs workspace dependencies when package files or the lockfile
+change; local Postgres data lives in the repo root's `.flox/postgres/`
+(gitignored, `FRAMEOS_CLOUD_PGROOT` overrides).
 
 Useful commands:
 

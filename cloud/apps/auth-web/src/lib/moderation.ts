@@ -1,4 +1,4 @@
-// Content moderation for the public store (STORE-TODO Phase 3). Everything a
+// Content moderation for the public store. Everything a
 // user can push onto publicly visible pages — scene name, description, preview
 // image — is classified before it is accepted, using OpenAI's free
 // omni-moderation endpoint (one call covers text and image together).

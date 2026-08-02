@@ -41,7 +41,7 @@ export async function generateMetadata({
   return publisher ? { title: publisher.displayName ?? "FrameOS user" } : {};
 }
 
-// Publisher page (STORE-TODO Phase 3): "more from this publisher". Publishers
+// Publisher page: "more from this publisher". Publishers
 // are identified by their opaque account id — the web-first/no-usernames
 // decision; a page only exists while the account has at least one public
 // scene, so account ids cannot be probed for existence.

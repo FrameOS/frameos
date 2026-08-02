@@ -17,7 +17,7 @@ Current product scope:
 - Direct backend login handoff through an already linked backend, gated on
   the `auth:login` scope (`403 insufficient_scope` otherwise).
 - Config backups for linked clients (`/api/backends/backups`): account-owned
-  replace-in-place blobs for the `backup:templates` / `backup:frames` scopes,
+  replace-in-place blobs for the `backup:scenes` / `backup:frames` scopes,
   scope-enforced per kind, 8 MB per blob, 500 per account
   (`client_backups` table, `src/lib/backups.ts`).
 - Local Postgres setup and migrations for the current schema only.

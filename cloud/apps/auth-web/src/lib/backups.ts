@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 // Config backup kinds a linked backend/frame may store, and the consent scope
-// each one requires. Asset backups (backup:assets) are a later phase: they are
+// each one requires. Asset backups (backup:assets) are future work: they are
 // client-side encrypted and content-addressed, not simple replace-in-place
 // blobs like these. The "templates" kind string predates the templates→scenes
 // rename and stays for protocol stability; user-facing labels say "Scene".

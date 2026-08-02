@@ -1,4 +1,4 @@
-"""Cloud config backups and the local tarball export (CLOUD-TODO Phase 3).
+"""Cloud config backups and the local tarball export.
 
 Scenes (stored locally as templates) and frame configs can be pushed to /
 restored from the linked FrameOS Cloud provider (scopes ``backup:scenes`` /

@@ -4,7 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 pgport="${FRAMEOS_CLOUD_PGPORT:-55432}"
-pgroot="${FRAMEOS_CLOUD_PGROOT:-$PWD/.flox/postgres}"
+# Data lives under the repo-root Flox environment (the only one since the
+# cloud/.flox env merged into it); FRAMEOS_CLOUD_PGROOT overrides.
+pgroot="${FRAMEOS_CLOUD_PGROOT:-$PWD/../.flox/postgres}"
 pgdata="$pgroot/data"
 database_url="postgres://frameos_cloud@127.0.0.1:$pgport/frameos_cloud"
 

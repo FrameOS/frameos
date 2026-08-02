@@ -191,7 +191,7 @@ async def backend_set_scopes(
     )
 
 
-# ---- login handoff (Phase 1) -------------------------------------------------
+# ---- login handoff -----------------------------------------------------------
 
 
 async def frameos_login_start(
@@ -212,7 +212,7 @@ async def frameos_login_token(
     )
 
 
-# ---- config backups (Phase 3) ------------------------------------------------
+# ---- config backups ----------------------------------------------------------
 
 
 async def backup_list(provider_url: str, access_token: str) -> tuple[int, dict[str, Any]]:
