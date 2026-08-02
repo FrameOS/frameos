@@ -128,11 +128,10 @@ function createNextConfig(phase: string): NextConfig {
           source: "/frameos-editor/index.html",
         },
         {
-          // The frames SPA references hashless assets
-          // (/frames-app/static/main.js): with no origin cache-control,
-          // Cloudflare's 4-hour default TTL kept serving the previous
-          // deploy's UI after every release. no-cache forces revalidation
-          // while the ETag keeps repeat loads as cheap 304s.
+          // Un-hashed frames-app files (images copied from frontend/public):
+          // no-cache forces revalidation while the ETag keeps repeat loads
+          // as cheap 304s. (Cloudflare's Browser Cache TTL rewrites this to
+          // max-age=14400 unless the zone is set to respect origin headers.)
           headers: [
             {
               key: "Cache-Control",
@@ -140,6 +139,19 @@ function createNextConfig(phase: string): NextConfig {
             },
           ],
           source: "/frames-app/:path*",
+        },
+        {
+          // The entry bundle is content-hashed (cloud-frontend/build.mjs):
+          // the no-store shell references new names each deploy, so these
+          // can be cached forever — which also sidesteps Cloudflare
+          // rewriting weaker origin cache-control headers.
+          headers: [
+            {
+              key: "Cache-Control",
+              value: "public, max-age=31536000, immutable",
+            },
+          ],
+          source: "/frames-app/static/:path*",
         },
         {
           headers: [noStoreHeader],

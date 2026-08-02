@@ -186,8 +186,9 @@ export async function GET(request: NextRequest) {
   return new NextResponse(html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
-      // The shell references hashless /frames-app/static/main.js|css, so it
-      // must never be cached across deploys.
+      // The shell references the deploy's content-hashed
+      // /frames-app/static/main-<hash>.js|css, so the shell itself must
+      // never be cached across deploys.
       "cache-control": "no-store",
     },
   });
