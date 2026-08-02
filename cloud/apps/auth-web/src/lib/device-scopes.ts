@@ -17,6 +17,8 @@ export const deviceScopeDescriptions: Record<string, string> = {
     "Store encrypted backups of your scenes (may require a paid plan)",
   "frame:link":
     "Link a frame directly to your FrameOS Cloud account without a backend",
+  "frame:managed":
+    "Manage this frame from FrameOS Cloud: assign scenes, change display settings, reboot",
   "gallery:read": "Show curated images from the FrameOS gallery on frames",
   "remote:access":
     "Open a relay so this backend can be reached from cloud.frameos.net (may require a paid plan)",
@@ -39,6 +41,7 @@ export const deviceScopeLabels: Record<string, string> = {
   "backup:frames": "Frame backups",
   "backup:scenes": "Scene backups",
   "frame:link": "Frame link",
+  "frame:managed": "Cloud-managed frame",
   "gallery:read": "Gallery access",
   "remote:access": "Remote access",
   "store:publish": "Save and share scenes",

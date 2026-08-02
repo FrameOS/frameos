@@ -1,6 +1,6 @@
 import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { eventsLogicType } from './eventsLogicType'
-import { AppConfigField, FrameEvent, FrameScene } from '../../../../types'
+import { AppConfigField, FrameEvent, FrameScene, FrameId } from '../../../../types'
 import { searchInText } from '../../../../utils/searchInText'
 import { frameEventsForScene } from '../../../../utils/frameEvents'
 import { frameLogic } from '../../frameLogic'
@@ -8,7 +8,7 @@ import { frameLogic } from '../../frameLogic'
 export type EventsTab = 'listen' | 'dispatch' | 'custom'
 
 export interface EventsLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

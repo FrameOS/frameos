@@ -30,6 +30,10 @@ static const char *TAG = "fos_scenes";
 
 static bool s_mounted = false;
 static volatile bool s_pending = false;
+/* Bumped once per pending-payload apply attempt by the render task; producers
+ * poll it to learn whether their payload went live (see fos_scenes.h). */
+static volatile uint32_t s_apply_generation = 0;
+static volatile bool s_apply_ok = false;
 static volatile bool s_sync_requested = false;
 static volatile bool s_scene_select_pending = false;
 static int s_loaded = 0;
@@ -364,18 +368,26 @@ bool fos_scenes_apply_pending(void)
 {
     if (!s_pending || !s_mounted) return false;
     s_pending = false;
+    bool ok = false;
     size_t len = 0;
     char *json = read_file(SCENES_PATH, &len);
     if (json == NULL) {
         ESP_LOGW(TAG, "no readable %s", SCENES_PATH);
         log_scene_event("scenes:load", "error", "stored", "", "read-failed",
                         0, 0, 0, ESP_ERR_NOT_FOUND);
-        return false;
+    } else {
+        ok = load_into_nim(json, len, "stored");
+        free(json);
     }
-    bool ok = load_into_nim(json, len, "stored");
-    free(json);
+    /* Publish the outcome before the generation, so a poller that sees a new
+     * generation always reads the matching result. */
+    s_apply_ok = ok;
+    s_apply_generation++;
     return ok;
 }
+
+uint32_t fos_scenes_apply_generation(void) { return s_apply_generation; }
+bool fos_scenes_apply_succeeded(void) { return s_apply_ok; }
 
 int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }

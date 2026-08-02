@@ -1,6 +1,7 @@
 packages:
   - frontend
   - frameos/frontend
+  - cloud-frontend
   - frameos/wasm
   - frameos/editor
   - cloud

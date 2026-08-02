@@ -22,13 +22,14 @@ import {
   renderLogLine,
 } from '../scenes/frame/panels/Scenes/LivePreviewModal'
 import { StateFieldEdit } from '../scenes/frame/panels/Scenes/StateFieldEdit'
+import type { FrameId } from '../types'
 
 // The Preview drawer panel of the standalone embedded editor: runs the edited
 // scenes through the frameos-wasm runtime, in the browser — canvas, event
 // buttons, live scene state and the runtime log. Same livePreviewLogic as the
 // main app's "Preview in browser" modal, rendered as panel content and
 // without the frame-dependent actions (there is no frame to preview on).
-export function EmbedScenePreview({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element {
+export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element {
   const {
     livePreviewScene,
     previewStatus,

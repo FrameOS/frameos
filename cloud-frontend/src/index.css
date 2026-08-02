@@ -1,0 +1,15 @@
+@import "../../frontend/src/index.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: "Inter", "SF Pro", system-ui, -apple-system, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+  max-width: none !important;
+}

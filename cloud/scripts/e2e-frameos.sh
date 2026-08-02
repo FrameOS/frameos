@@ -27,10 +27,15 @@ scripts/db-migrate.sh
 
 server_pid=""
 cleanup() {
-  if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
-    kill "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
-  fi
+  [ -n "$server_pid" ] || return 0
+  kill -0 "$server_pid" 2>/dev/null || return 0
+  # Kill the whole process group (negative pid): $server_pid is the subshell,
+  # and killing only that orphans `pnpm dev` and the next server it spawned,
+  # which keeps listening on port 3000 long after this script exits. The
+  # group exists because the job is started under `set -m` below.
+  kill -TERM -"$server_pid" 2>/dev/null || kill -TERM "$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
+  kill -KILL -"$server_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -39,8 +44,12 @@ if curl -sf "$CLOUD_URL/api/device/request?user_code=AAAAAAAA" >/dev/null 2>&1 |
   echo "Reusing running cloud server at $CLOUD_URL"
 else
   echo "Starting cloud dev server at $CLOUD_URL"
+  # `set -m` gives the background job its own process group, so cleanup can
+  # take down pnpm and the next server with it.
+  set -m
   (cd apps/auth-web && pnpm dev >/tmp/frameos-cloud-e2e-server.log 2>&1) &
   server_pid=$!
+  set +m
   for _ in $(seq 1 120); do
     if curl -s -o /dev/null "$CLOUD_URL"; then
       break
@@ -59,8 +68,12 @@ echo "Running the frameos backend e2e test"
 cd "$FRAMEOS_DIR/backend"
 # -u DATABASE_URL: that variable belongs to the cloud dev server; the frameos
 # backend must fall back to its own sqlite test database.
+# FRAMEOS_PUBLIC_URL must be a loopback origin: the provider rejects
+# non-local origins at link time (safeLocalOrigin), and the login handoff's
+# redirect_uri must live on it.
 env -u DATABASE_URL \
   FRAMEOS_CLOUD_E2E_URL="$CLOUD_URL" \
   FRAMEOS_CLOUD_E2E_COOKIE="$cookie" \
   FRAMEOS_CLOUD_E2E_EMAIL="$email" \
+  FRAMEOS_PUBLIC_URL="http://127.0.0.1:8999" \
   "$PYTHON" -m pytest app/api/tests/test_cloud_e2e.py -v

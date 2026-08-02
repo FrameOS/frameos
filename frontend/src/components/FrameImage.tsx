@@ -6,6 +6,7 @@ import { ArrowPathIcon, MagnifyingGlassPlusIcon } from '@heroicons/react/24/outl
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 import { urls } from '../urls'
+import type { FrameId } from '../types'
 
 const placeholderRefreshAttempts = new Set<string>()
 
@@ -41,7 +42,7 @@ function sessionRefreshAttempted(key: string): boolean {
 }
 
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
-  frameId: number
+  frameId: FrameId
   sceneId?: string
   className?: string
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void
@@ -59,7 +60,7 @@ export function FrameImageRefreshButton({
   sceneId,
   className,
 }: {
-  frameId: number
+  frameId: FrameId
   sceneId?: string
   className?: string
 }) {
@@ -87,7 +88,7 @@ export function FrameImageRefreshButton({
   )
 }
 
-export function FrameImagePreviewButton({ frameId, className }: { frameId: number; className?: string }) {
+export function FrameImagePreviewButton({ frameId, className }: { frameId: FrameId; className?: string }) {
   return (
     <button
       type="button"

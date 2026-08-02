@@ -19,6 +19,7 @@ import {
   EventNodeData,
   DispatchNodeData,
   FrameType,
+  FrameId,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
@@ -41,7 +42,7 @@ export const CANVAS_NODE_ID = '__canvas__'
 const INLINE_CODE_OPTION_LABEL = 'New inline node'
 
 export interface NewNodePickerLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   updateNodeInternals?: (nodeId: string) => void
 }
@@ -904,7 +905,9 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
 
           if (oldEdge) {
             actions.setEdges(
-              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter((a) => !!a) as DiagramEdge[]
+              [...edges.filter((edge) => edge.id !== oldEdge?.id), newEdge, extraEdge].filter(
+                (a) => !!a
+              ) as DiagramEdge[]
             )
           } else {
             actions.setEdges([...values.edges, newEdge])

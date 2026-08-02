@@ -4,6 +4,7 @@ import { urls } from '../../urls'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
+import { parseRouteFrameId } from '../../utils/frameId'
 import { workspaceLogic } from './workspaceLogic'
 
 import type { appsWorkspaceLogicType } from './appsWorkspaceLogicType'
@@ -14,14 +15,6 @@ export interface AppsWorkspaceLogicProps {
   routeFrameId?: string | null
   routeSceneId?: string | null
   routeNodeId?: string | null
-}
-
-function parseFrameId(frameId?: string | null): number | null {
-  if (!frameId) {
-    return null
-  }
-  const parsed = parseInt(frameId, 10)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function currentAppsHref(): string | null {
@@ -52,7 +45,7 @@ export const appsWorkspaceLogic = kea<appsWorkspaceLogicType>([
       return
     }
 
-    const frameId = parseFrameId(props.routeFrameId)
+    const frameId = parseRouteFrameId(props.routeFrameId)
     const sceneId = props.routeSceneId ?? null
 
     workspaceLogic.actions.setRouteSelection(frameId, sceneId)

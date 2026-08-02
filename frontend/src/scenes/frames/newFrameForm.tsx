@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
+import { FrameInstallMethod, FrameOSSettings, NewFrameFormType, FrameId } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -111,7 +111,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
-    frameCreated: (frameId: number, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
+    frameCreated: (frameId: FrameId, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
   }),
   reducers({
     file: [

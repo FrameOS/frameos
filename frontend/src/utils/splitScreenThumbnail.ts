@@ -1,4 +1,4 @@
-import type { FrameType } from '../types'
+import type { FrameType, FrameId } from '../types'
 import { getBasePath } from './getBasePath'
 import { projectApiPath } from './projectApi'
 import {
@@ -33,7 +33,7 @@ function imageApiUrl(path: string): string {
   return path.startsWith('/api/') && basePath ? `${basePath}${path}` : path
 }
 
-async function fetchSceneImage(frameId: number, sceneId: string): Promise<HTMLImageElement | null> {
+async function fetchSceneImage(frameId: FrameId, sceneId: string): Promise<HTMLImageElement | null> {
   const apiPath = await projectApiPath(`/api/frames/${frameId}/scene_images/${sceneId}`)
   const imageUrl = `${imageApiUrl(apiPath)}?thumb=1&t=${Date.now()}`
   const response = await fetch(imageUrl, { credentials: 'include' })

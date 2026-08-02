@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { AssetType, MetricsType } from '../../../../types'
+import { AssetType, MetricsType, FrameId } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
@@ -15,7 +15,7 @@ import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWith
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface AssetsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface AssetNode {

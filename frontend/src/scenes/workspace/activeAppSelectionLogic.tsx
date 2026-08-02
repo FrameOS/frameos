@@ -1,12 +1,12 @@
 import { afterMount, kea, key, path, props } from 'kea'
-import { AppNodeData } from '../../types'
+import { AppNodeData, FrameId } from '../../types'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 import type { activeAppSelectionLogicType } from './activeAppSelectionLogicType'
 
 export interface ActiveAppSelectionLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   nodeId: string
   nodeData: AppNodeData

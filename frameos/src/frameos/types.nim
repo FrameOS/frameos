@@ -92,6 +92,11 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+    # Local-presence override for the cloud-managed default-deny on private
+    # network HTTP (docs/cloud-frames.md). Settable only through the local
+    # admin settings path — deliberately absent from the cloud set_settings
+    # allowlist.
+    allowLocalNetworkAccess*: bool
 
   # Part of FrameConfig
   AgentConfig* = ref object

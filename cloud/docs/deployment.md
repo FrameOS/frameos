@@ -1,8 +1,9 @@
 # Deployment Notes
 
-The first deployable can run as one web/API process from `apps/auth-web`.
-Background workers should be added only when email, webhooks, cleanup, or sync
-jobs need separate execution.
+The deployment is two processes: the web/API process from `apps/auth-web`
+and the frame hub WebSocket service from `apps/frame-hub` (see "Frame hub"
+below). Background workers should be added only when email, webhooks,
+cleanup, or sync jobs need separate execution.
 
 ## Required Runtime
 
@@ -78,6 +79,116 @@ startable by the current unit; the cutover-era backups
 `frameos-cloud-auth-web.service.pre-monorepo`) would have to be restored to
 run it.
 
+## Frame hub
+
+The second service in the release is the frame hub
+(`cloud/apps/frame-hub`), the WebSocket control plane for cloud-managed
+frames (wire contract: `docs/cloud-frames.md` at the repo root). The deploy
+script builds it as a single self-contained esbuild bundle
+(`cloud/apps/frame-hub/dist/index.cjs` — no `node_modules` needed at
+runtime), ships it inside the same release archive, and restarts
+`frameos-cloud-frame-hub.service` after the swap (skipped with a notice if
+the unit is not installed yet).
+
+One-time host setup — create `/etc/systemd/system/frameos-cloud-frame-hub.service`:
+
+```ini
+[Unit]
+Description=FrameOS Cloud frame hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Same user/group as frameos-cloud-auth-web.service.
+User=frameos-cloud
+Group=frameos-cloud
+WorkingDirectory=/opt/frameos-cloud/cloud/apps/frame-hub
+ExecStart=/usr/bin/node /opt/frameos-cloud/cloud/apps/frame-hub/dist/index.cjs
+EnvironmentFile=/etc/frameos-cloud/frame-hub.env
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/frameos-cloud/frame-hub.env` needs only:
+
+```text
+NODE_ENV=production
+DATABASE_URL=…           # same database as auth-web
+SESSION_SECRET=…         # MUST equal auth-web's, or browser sockets get 401
+FRAME_HUB_PORT=3100
+```
+
+Optional, both with working defaults:
+
+```text
+FRAME_HUB_ALLOWED_ORIGINS=…  # browser WS upgrades; defaults to the three app
+                             # origins (FRAMEOS_CLOUD/ACCOUNT/SCENES_APP_URL).
+                             # WebSocket handshakes bypass CORS, so this is
+                             # what stops a foreign page opening a fleet socket
+                             # on a logged-in user's cookie. Set it explicitly
+                             # if the SPA is served from another origin.
+FRAME_HUB_MAX_CONNECTIONS=5000  # concurrent sockets before upgrades get 503
+```
+
+One nginx-specific trap: the hub rate-limits upgrades per client IP, and it
+derives that IP the same way auth-web does — via `RATE_LIMIT_TRUSTED_PROXY_COUNT`.
+Behind nginx that must count the proxy hops, otherwise every upgrade in the
+fleet collapses onto the proxy's own address and the whole fleet shares one
+budget.
+
+(`FRAMEOS_CLOUD_ENCRYPTION_KEY` is not needed — the hub only ever compares
+hashed tokens.) Then `systemctl daemon-reload && systemctl enable --now
+frameos-cloud-frame-hub.service`.
+
+Like auth-web, the hub is **single instance only**: on boot it resets the
+`connected` flag of every frame, because a lone hub owns all device sockets.
+Connection liveness and the command queue are keyed through Postgres so a
+multi-instance hub stays possible later, but do not run two hubs today.
+
+nginx routes only the two WebSocket paths to the hub; every other
+`/api/frames/*` route stays on auth-web. Add to each HTTPS server block
+(before the catch-all `location /`):
+
+```nginx
+# FrameOS frame hub WebSockets (device + browser live updates).
+location = /api/frames/ws {
+    proxy_pass http://127.0.0.1:3100;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # The hub pings every 30s; anything over a minute of silence is dead.
+    proxy_read_timeout 90s;
+    proxy_send_timeout 90s;
+}
+# Covers both /api/frames/{id}/updates (one frame) and /api/frames/updates
+# (account-wide fleet socket).
+location ~ ^/api/frames/([^/]+/)?updates$ {
+    proxy_pass http://127.0.0.1:3100;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 90s;
+    proxy_send_timeout 90s;
+}
+```
+
+Health check: `curl http://127.0.0.1:3100/healthz` on the host returns
+`{"connected_frames": N}`.
+
 All three public hostnames point at the same process. `cloud.frameos.net` is
 the login/auth domain, `account.frameos.net` owns account, device, and admin
 pages, and `scenes.frameos.net` owns the public store and scene/publisher
@@ -111,6 +222,31 @@ FRAMEOS_SCENES_APP_URL=http://localhost:3000
 
 That intentionally leaves host routing disabled, so `pnpm dev` still serves
 the complete app on one localhost port exactly as before.
+
+## Frame limits
+
+Per-account limits for cloud-managed frames, all optional:
+
+```text
+FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=50       # enrolled frames
+FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT=50 # outstanding unused claim codes
+FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS=24        # how long a claim code lives
+```
+
+Values are read at startup; a non-integer or non-positive value logs a warning
+and falls back to the default rather than failing the boot.
+
+The claim-code cap bounds how many enrollment secrets can be live at once. It
+is not a product limit: codes are stored only as hashes, so an outstanding one
+can never be shown to the user again, and refusing at the cap would lock an
+account out for a full TTL over codes nobody could use. Reaching the cap
+therefore recycles the account's oldest never-used single-use code instead of
+erroring. Multi-use codes — the ones behind SD-card images, which may already
+be flashed to hardware — are never recycled, so an account whose cap is
+entirely SD-image codes does still get `claim_token_quota_exceeded`.
+
+Raising `FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT` also raises the budget of a
+multi-use SD-image code, which is capped at the frame limit.
 
 ## DNS and Reverse Proxy
 

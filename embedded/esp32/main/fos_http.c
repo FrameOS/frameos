@@ -22,6 +22,7 @@
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -654,6 +655,9 @@ char *fos_http_status_json(void)
     fos_storage_info_t storage;
     collect_storage_info(&storage);
 
+    char *cloud_url = json_escape_dup(config->cloud_url);
+    char *cloud_frame_id = json_escape_dup(fos_cloud_frame_id());
+    char *cloud_error = json_escape_dup(fos_cloud_last_error());
     char *app_name = json_escape_dup(app->project_name);
     char *app_version = json_escape_dup(app->version);
     char *idf_version = json_escape_dup(app->idf_ver);
@@ -667,9 +671,11 @@ char *fos_http_status_json(void)
     char *ssid = json_escape_dup(config->wifi_ssid);
     char *nim_info = json_escape_dup(frameos_nim_info());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
-        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info) {
+        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info ||
+        !cloud_url || !cloud_frame_id || !cloud_error) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
         free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        free(cloud_url); free(cloud_frame_id); free(cloud_error);
         return NULL;
     }
 
@@ -694,6 +700,9 @@ char *fos_http_status_json(void)
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
         "\"displayStateReady\":%s,\"panelImageReady\":%s},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
+        /* enrollment state only — no claim token, access token, or key */
+        "\"cloud\":{\"state\":\"%s\",\"url\":\"%s\",\"frameId\":\"%s\","
+        "\"wsConnected\":%s,\"error\":\"%s\"},"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
         "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
@@ -725,6 +734,8 @@ char *fos_http_status_json(void)
         display_state_ready ? "true" : "false",
         (render_count > 0 || display_state_ready) ? "true" : "false",
         nim_info, scene_json,
+        fos_cloud_state_name(), cloud_url, cloud_frame_id,
+        fos_cloud_ws_connected() ? "true" : "false", cloud_error,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec,
@@ -736,6 +747,7 @@ char *fos_http_status_json(void)
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
     free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+    free(cloud_url); free(cloud_frame_id); free(cloud_error);
     if (len < 0 || !json) {
         free(json);
         return NULL;

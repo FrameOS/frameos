@@ -38,6 +38,15 @@ if [ ! -f "$standalone_dir/cloud/$app_dir/server.js" ]; then
   exit 1
 fi
 
+# Second service: the frame hub is an esbuild bundle, self-contained in one
+# file (see docs/deployment.md "Frame hub"). `pnpm build` above built it via
+# the turbo filter in cloud/package.json.
+hub_dir="apps/frame-hub"
+if [ ! -f "$hub_dir/dist/index.cjs" ]; then
+  echo "Frame hub bundle missing at $hub_dir/dist/index.cjs; did \`pnpm build\` run @frameos-cloud/frame-hub#build?" >&2
+  exit 1
+fi
+
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
@@ -49,6 +58,9 @@ cp -a "$standalone_dir/." "$stage/"
 cp -a "$app_dir/.next/static" "$stage/cloud/$app_dir/.next/static"
 cp -a "$app_dir/public" "$stage/cloud/$app_dir/public"
 cp -a "$app_dir/scripts" "$stage/cloud/$app_dir/scripts"
+# Frame hub: the single-file bundle is all the service needs at runtime.
+mkdir -p "$stage/cloud/$hub_dir"
+cp -a "$hub_dir/dist" "$stage/cloud/$hub_dir/dist"
 mkdir -p "$stage/cloud/packages/db"
 cp -a packages/db/drizzle "$stage/cloud/packages/db/drizzle"
 mkdir -p "$stage/cloud/scripts"
@@ -61,6 +73,18 @@ tar -C "$stage" -cf - . |
 
 echo "Verifying service and public URLs"
 ssh -i "$ssh_key" "$deploy_host" systemctl is-active frameos-cloud-auth-web.service
+
+# Restart the frame hub from the freshly swapped release. Tolerate the unit
+# not being installed yet on a host that predates the hub (unit file content:
+# docs/deployment.md "Frame hub").
+ssh -i "$ssh_key" "$deploy_host" '
+  if systemctl cat frameos-cloud-frame-hub.service >/dev/null 2>&1; then
+    systemctl restart frameos-cloud-frame-hub.service &&
+    systemctl is-active frameos-cloud-frame-hub.service
+  else
+    echo "frameos-cloud-frame-hub.service not installed; see cloud/docs/deployment.md"
+  fi
+'
 
 # The service restart races the first request; retry briefly before alarming.
 for attempt in 1 2 3 4 5 6; do

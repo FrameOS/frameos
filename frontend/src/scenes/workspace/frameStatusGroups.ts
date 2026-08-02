@@ -17,7 +17,9 @@ function sortFramesAlphabetically(frames: FrameType[]): FrameType[] {
       numeric: true,
       sensitivity: 'base',
     })
-    return byName !== 0 ? byName : first.id - second.id
+    // Ids are opaque (numbers on the backend, uuids on the cloud): compare as
+    // strings so the tie-break is stable in both modes.
+    return byName !== 0 ? byName : String(first.id).localeCompare(String(second.id))
   })
 }
 

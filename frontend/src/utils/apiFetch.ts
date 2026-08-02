@@ -4,6 +4,7 @@ import { getBasePath } from './getBasePath'
 import { urls } from '../urls'
 import { isFrameControlMode } from './frameControlMode'
 import { isInFrameAdminMode } from './frameAdmin'
+import { isCloudMode } from './cloudMode'
 import { clearCachedProjectId, projectApiPath } from './projectApi'
 
 export interface ApiFetchOptions extends RequestInit {}
@@ -13,6 +14,11 @@ export type FirstUserStatus = 'exists' | 'missing' | 'unknown'
 export async function firstUserStatus(): Promise<FirstUserStatus> {
   if (isFrameControlMode()) {
     return 'missing'
+  }
+  if (isCloudMode()) {
+    // The cloud has no /api/has_first_user; its Next.js auth pages own
+    // signup, so the SPA's own signup flow must never engage.
+    return 'exists'
   }
   try {
     const resp = await fetch(`${getBasePath()}/api/has_first_user`, {
@@ -50,6 +56,31 @@ function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
   return new Promise(() => {})
 }
 
+// Catalogs owned by a self-hosted backend. The cloud serves only /api/frames/**,
+// so in cloud mode these are guaranteed 404s: three failed requests and three
+// console errors on every page load, purely to reach fallbacks the callers
+// already have (the embedded app catalog, an empty font list). Answer them
+// locally with the empty shape each loader expects instead.
+//
+// GET only: a POST to /api/templates imports a template, and pretending that
+// succeeded would silently swallow the import. Exact paths only, so
+// /api/templates/{id}/image still goes to the network and fails honestly.
+//
+// If the cloud ever grows one of these for real, delete its line — leaving it
+// here would mask the new endpoint.
+const cloudEmptyCatalogs: Record<string, string> = {
+  '/api/apps': '{"apps":{}}',
+  '/api/fonts': '{"fonts":[]}',
+  '/api/templates': '[]',
+}
+
+function emptyCloudCatalog(path: string, method?: string): string | undefined {
+  if (method && method.toUpperCase() !== 'GET') {
+    return undefined
+  }
+  return cloudEmptyCatalogs[path.split('?')[0] ?? path]
+}
+
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
   // The standalone embedded editor (editor.html sets the flag) has no
   // backend: answer every API call with a synthetic 404 so the callers'
@@ -60,10 +91,21 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   }
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
+  const cloudMode = isCloudMode()
   const headers: HeadersInit = options.headers || {}
 
+  if (cloudMode && typeof input === 'string') {
+    const empty = emptyCloudCatalog(input, options.method)
+    if (empty) {
+      return new Response(empty, { headers: { 'Content-Type': 'application/json' }, status: 200 })
+    }
+  }
+
   if (typeof input === 'string') {
-    if (!frameControlMode) {
+    // Cloud mode: paths are already canonical (/api/frames/...) at the
+    // account origin — no project scoping. Frame-control mode: the local
+    // frame serves unscoped /api paths directly.
+    if (!frameControlMode && !cloudMode) {
       try {
         input = await projectApiPath(input)
       } catch (error) {
@@ -82,6 +124,14 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
 
   if (!inHassioIngress() && response.status === 401) {
+    if (cloudMode) {
+      // Next.js owns auth on the cloud: hand over to its login page and
+      // come back to where we were. Never resolve — mirrors the
+      // frame-admin redirect below.
+      window.location.href = '/login?return_to=' + encodeURIComponent(window.location.pathname)
+      return new Promise(() => {})
+    }
+
     if (frameControlMode && inFrameAdminMode) {
       window.location.replace('/login')
       return new Promise(() => {})

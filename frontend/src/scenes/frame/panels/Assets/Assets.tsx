@@ -28,6 +28,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
+import type { FrameId } from '../../../../types'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -60,7 +61,7 @@ function opensAsBrowserImage(name: string): boolean {
   return browserImagePattern.test(name)
 }
 
-function openFrameAsset(frameId: number, path: string, name: string): void {
+function openFrameAsset(frameId: FrameId, path: string, name: string): void {
   const openInline = opensAsBrowserImage(name)
   const url = frameAssetUrl(frameId, path, {
     filename: name,
@@ -96,7 +97,7 @@ function TreeNode({
   toggleShowSystemFolders,
 }: {
   node: AssetNode
-  frameId: number
+  frameId: FrameId
   uploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
@@ -105,7 +106,7 @@ function TreeNode({
   createImageFolderScene: (path: string) => void
   uploadDroppedFiles: (path: string, files: File[]) => void
   frameAssetFolderExpansion: Record<string, boolean>
-  setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => void
+  setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
   showSystemFolders: boolean
   toggleShowSystemFolders: () => void
 }): JSX.Element {

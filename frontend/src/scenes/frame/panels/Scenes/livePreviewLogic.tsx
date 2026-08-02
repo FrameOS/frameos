@@ -1,7 +1,7 @@
 import { actions, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
-import { FrameScene, GPIOButton, RepositoryType, TemplateType } from '../../../../types'
+import { FrameScene, GPIOButton, RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assetUrl } from '../../../../utils/assetUrl'
 import { getBasePath } from '../../../../utils/getBasePath'
@@ -12,7 +12,7 @@ import { collectScenePreviewPayloadScenes, scenesLogic } from './scenesLogic'
 import type { livePreviewLogicType } from './livePreviewLogicType'
 
 export interface LivePreviewLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface LivePreviewSceneEvent {

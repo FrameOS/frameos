@@ -26,13 +26,16 @@ proc serverLoop() {.thread.} =
     var client: Socket
     server.accept(client)
     var requestLine = ""
+    var authHeader = ""
     try:
       requestLine = client.recvLine(timeout = 5000)
-      # drain headers
+      # drain headers, remembering the credentials the client chose to send
       while true:
         let line = client.recvLine(timeout = 5000)
         if line == "\r\n" or line.len == 0:
           break
+        if line.toLowerAscii().startsWith("authorization:"):
+          authHeader = line.split(':', 1)[1].strip()
     except CatchableError:
       client.close()
       continue
@@ -53,6 +56,15 @@ proc serverLoop() {.thread.} =
       respond(client, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nstreamed until close")
     of "/redirect":
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /content-length\r\nContent-Length: 0\r\n\r\n")
+    of "/echo-auth":
+      respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $authHeader.len &
+        "\r\n\r\n" & authHeader)
+    of "/redirect-same-origin":
+      respond(client, "HTTP/1.1 302 Found\r\nLocation: /echo-auth\r\nContent-Length: 0\r\n\r\n")
+    of "/redirect-other-origin":
+      # Same server, different origin as far as the URL is concerned.
+      respond(client, "HTTP/1.1 302 Found\r\nLocation: http://localhost:" &
+        $int(serverPort) & "/echo-auth\r\nContent-Length: 0\r\n\r\n")
     of "/redirect-loop":
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /redirect-loop\r\nContent-Length: 0\r\n\r\n")
     of "/big":
@@ -141,6 +153,19 @@ suite "bounded http client":
       discard boundedRequest(baseUrl() & "/redirect", maxRedirects = 0)
     check boundedRequestContent(baseUrl() & "/redirect", maxRedirects = 1) == "hello world"
 
+
+  test "credentials survive a same-origin redirect":
+    var headers = newHttpHeaders({"Authorization": "Bearer secret-token"})
+    check boundedRequestContent(baseUrl() & "/redirect-same-origin", headers = headers) ==
+      "Bearer secret-token"
+
+  test "credentials are stripped when a redirect crosses origins":
+    # An open redirect on the first host must not hand the caller's bearer
+    # token to whatever the Location header names.
+    var headers = newHttpHeaders({"Authorization": "Bearer secret-token"})
+    check boundedRequestContent(baseUrl() & "/redirect-other-origin", headers = headers) == ""
+    # The header the caller passed in is untouched for its own next use.
+    check headers["Authorization"] == "Bearer secret-token"
 
   test "stops test server":
     try:

@@ -1,6 +1,6 @@
 import { actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { forms } from 'kea-forms'
-import { FrameScene, FrameType } from '../types'
+import { FrameScene, FrameType, FrameId } from '../types'
 import { frameFormSceneErrors } from '../scenes/frame/frameFormSceneErrors'
 import type { embedFrameLogicType } from './embedFrameLogicType'
 
@@ -15,7 +15,7 @@ import type { embedFrameLogicType } from './embedFrameLogicType'
 // form-generated actions such as submitFrameFormSuccess.
 
 export interface EmbedFrameLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export const embedBridge: {
@@ -62,7 +62,7 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
     },
   }),
   selectors({
-    frameId: [() => [(_: any, props: EmbedFrameLogicProps) => props.frameId], (frameId: number) => frameId],
+    frameId: [() => [(_: any, props: EmbedFrameLogicProps) => props.frameId], (frameId: FrameId) => frameId],
     scenes: [
       (s: any) => [s.frame, s.frameForm],
       (frame: Partial<FrameType> | null, frameForm: Partial<FrameType>): FrameScene[] =>

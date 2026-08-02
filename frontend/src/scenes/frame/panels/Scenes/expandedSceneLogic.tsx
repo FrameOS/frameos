@@ -3,7 +3,7 @@ import { connect, kea, key, path, props, selectors } from 'kea'
 import type { expandedSceneLogicType } from './expandedSceneLogicType'
 import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
-import { FrameScene, FrameType } from '../../../../types'
+import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
@@ -11,7 +11,7 @@ import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 
 export interface ExpandedSceneLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   scene?: FrameScene | null
 }

@@ -40,7 +40,6 @@ from app.tasks.buildroot_platforms import RASPBERRY_PI_ZERO_2_W, RASPBERRY_PI_ZE
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import (
-    BOOT_ROOT_PASSWORD_FILE,
     DEFAULT_SETUP_JSON_RESET_FILE_PATH,
     render_setup_json_reset_service,
     render_setup_json_reset_script,
@@ -217,23 +216,38 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     script = render_setup_json_reset_script("/boot/frameos-setup.json")
     service = render_setup_json_reset_service("/boot/frameos-setup.json")
 
-    assert "/srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
-    assert "sudo -E /srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
-    assert "LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes" in script
+    assert '"$SRV_DIR"/frameos/current/frameos setup --with-setup="$SETUP_FILE"' in script
+    assert 'sudo -E "$SRV_DIR"/frameos/current/frameos setup --with-setup="$SETUP_FILE"' in script
+    assert 'LD_LIBRARY_PATH="$SRV_DIR/frameos/current/drivers:$SRV_DIR/frameos/current/scenes' in script
+    # Production defaults stay /boot, /srv, /etc; env vars exist for tests only.
+    assert 'BOOT_DIR="${FRAMEOS_BOOT_DIR:-/boot}"' in script
+    assert 'SRV_DIR="${FRAMEOS_SRV_DIR:-/srv}"' in script
+    assert 'ETC_DIR="${FRAMEOS_ETC_DIR:-/etc}"' in script
+    assert 'SETUP_FILE="$BOOT_DIR"/frameos-setup.json' in script
+    assert 'CLOUD_FILE="$BOOT_DIR"/frameos-cloud.txt' in script
     assert "mount -o remount,rw /" in script
-    assert "install -d -m 700 /etc/NetworkManager/system-connections" in script
+    assert 'install -d -m 700 "$ETC_DIR"/NetworkManager/system-connections' in script
     assert "root:%s" in script
     assert "chpasswd" in script
     assert 'DROPBEAR_ARGS=""' in script
     assert "systemctl try-restart dropbear.service" in script
-    assert f"rm -f {BOOT_ROOT_PASSWORD_FILE}" in script
+    assert 'shred_remove_file "$ROOT_PASSWORD_FILE"' in script
     assert "frameos-setup-reset.log" in script
     assert "leaving $SETUP_FILE in place for retry" in script
+    # Consumed secrets are shredded, never renamed to setup-done-*.json.
+    assert 'mv -f "$SETUP_FILE"' not in script
+    assert 'shred_remove_file "$SETUP_FILE"' in script
+    assert 'shred_remove_file "$CLOUD_FILE"' in script
+    assert "dd if=/dev/zero" in script
+    assert "cloud_enroll_pending.json" in script
+    assert "frameos-cloud-wifi.nmconnection" in script
     assert "request_reboot()" in script
     assert "systemctl reboot" in script
     assert "Reboot command accepted" in script
     assert "with status 0 (reboot requested)" in script
     assert "Before=dropbear.service frameos.service frameos-remote.service" in service
+    assert "ConditionPathExists=|/boot/frameos-setup.json" in service
+    assert "ConditionPathExists=|/boot/frameos-cloud.txt" in service
     assert "--from-file" not in script
 
 
@@ -582,14 +596,23 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     nm_state_dir = overlay / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
     assert nm_state_dir.is_dir()
     assert oct(nm_state_dir.stat().st_mode & 0o777) == "0o700"
-    assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in (
-        overlay / "etc" / "fstab"
-    ).read_text(encoding="utf-8")
+    fstab_text = (overlay / "etc" / "fstab").read_text(encoding="utf-8")
+    assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in fstab_text
+    # /boot must be root-only: it can hold one-time provisioning secrets.
+    assert "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0" in fstab_text
+    assert "umask=000 0 0\nLABEL=FRAMEOS" not in fstab_text
     multi_user_wants = overlay / "etc" / "systemd" / "system" / "multi-user.target.wants"
     for service in ("dcron.service", "systemd-timesyncd.service"):
         link = multi_user_wants / service
         assert link.is_symlink()
         assert link.readlink().as_posix() == f"/usr/lib/systemd/system/{service}"
+
+
+def test_partition_post_build_script_mounts_boot_root_only():
+    script = buildroot_image_module.PARTITION_POST_BUILD_SCRIPT
+    assert "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0" in script
+    assert "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0" not in script
+    assert buildroot_image_module.BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in script
 
 
 def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
@@ -855,6 +878,22 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
         "root_patch_script"
     ]
     assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
+    # Older cached base images get the current first-boot script/unit and
+    # fstab (root-only /boot) patched into their root partition.
+    assert (
+        "write $service_root/usr/local/bin/frameos-setup-reset.sh /usr/local/bin/frameos-setup-reset.sh"
+        in captured["root_patch_script"]
+    )
+    assert "sif /usr/local/bin/frameos-setup-reset.sh mode 0100755" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/system/frameos-firstboot-setup.service "
+        "/etc/systemd/system/frameos-firstboot-setup.service"
+    ) in captured["root_patch_script"]
+    assert (
+        "symlink /etc/systemd/system/multi-user.target.wants/frameos-firstboot-setup.service "
+        "../frameos-firstboot-setup.service"
+    ) in captured["root_patch_script"]
+    assert "write $service_root/etc/fstab /etc/fstab" in captured["root_patch_script"]
     assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
     assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
     boot_root = temp_dir / "overlay" / "boot"
@@ -863,7 +902,14 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
     assert not (boot_root / "frameos-wifi.nmconnection").exists()
     assert "managed_boot_files=(" in captured["boot_patch_script"]
     assert "frameos-wifi.nmconnection" in captured["boot_patch_script"]
+    # Self-hosted personalization clears any stale cloud personalization file
+    # (backend-managed frames must not carry the release placeholder).
+    assert "frameos-cloud.txt" in captured["boot_patch_script"]
     assert 'mdel -i "$target"' in captured["boot_patch_script"]
+    # Release placeholders are copied first (contiguity for the in-browser
+    # in-place patcher) and excluded from the later bulk copy.
+    assert 'if [ -f "$boot_root/frameos-cloud.txt" ]' in captured["boot_patch_script"]
+    assert "! -name frameos-cloud.txt" in captured["boot_patch_script"]
 
 
 @pytest.mark.asyncio

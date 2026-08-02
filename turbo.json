@@ -45,13 +45,40 @@
       ],
       "outputs": ["../../frontend/public/frameos-wasm/**"]
     },
+    "@frameos-cloud/frame-hub#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+        "../auth-web/src/lib/**",
+        "../../packages/db/src/**"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@frameos/cloud-frontend#build": {
+      "inputs": [
+        "src/**",
+        "build.mjs",
+        "package.json",
+        "tsconfig.json",
+        "tailwind.config.js",
+        "postcss.config.js",
+        "../frontend/src/**",
+        "../frontend/public/**",
+        "../frontend/scripts/**",
+        "../repo/**"
+      ],
+      "outputs": ["dist/**"]
+    },
     "@frameos-cloud/auth-web#build": {
       "dependsOn": ["^build"],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
         "public/frameos-editor/**",
-        "public/frameos-wasm/**"
+        "public/frameos-wasm/**",
+        "public/frames-app/**"
       ]
     },
     "lint": {},

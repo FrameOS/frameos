@@ -1,6 +1,6 @@
 import { actions, kea, listeners, path, reducers } from 'kea'
 
-import type { LogType } from '../types'
+import type { LogType, FrameId } from '../types'
 import type { embeddedUsbLogsModelType } from './embeddedUsbLogsModelType'
 
 export type EmbeddedUsbLogStreamStatus = 'idle' | 'selecting' | 'connecting' | 'streaming' | 'stopping' | 'error'
@@ -31,7 +31,7 @@ const OPEN_RETRY_ATTEMPTS = 20
 let nextUsbLogId = -1
 
 interface UsbLogSession {
-  frameId: number
+  frameId: FrameId
   port: SerialPort
   reader?: ReadableStreamDefaultReader<Uint8Array>
   readLoop?: Promise<void>
@@ -40,9 +40,9 @@ interface UsbLogSession {
   failureMessage?: string
 }
 
-const sessions = new Map<number, UsbLogSession>()
-const lastPorts = new Map<number, SerialPort>()
-const usbApiCommandLocks = new Map<number, Promise<void>>()
+const sessions = new Map<FrameId, UsbLogSession>()
+const lastPorts = new Map<FrameId, SerialPort>()
+const usbApiCommandLocks = new Map<FrameId, Promise<void>>()
 const serialPortReconnectEligible = new WeakMap<SerialPort, boolean>()
 
 interface EmbeddedUsbApiCommandOptions {
@@ -79,7 +79,7 @@ function serialErrorMessage(error: unknown): string {
   return detail || 'USB serial log stream failed.'
 }
 
-function usbLog(line: string, frameId: number, type = 'usb'): LogType {
+function usbLog(line: string, frameId: FrameId, type = 'usb'): LogType {
   return {
     id: nextUsbLogId--,
     frame_id: frameId,
@@ -90,14 +90,14 @@ function usbLog(line: string, frameId: number, type = 'usb'): LogType {
   }
 }
 
-function appendUsbLine(frameId: number, line: string, type = 'usb'): void {
+function appendUsbLine(frameId: FrameId, line: string, type = 'usb'): void {
   if (line.length === 0) {
     return
   }
   embeddedUsbLogsModel.actions.appendUsbLog(usbLog(line, frameId, type))
 }
 
-export function appendEmbeddedUsbLogLine(frameId: number, line: string, type = 'usb'): void {
+export function appendEmbeddedUsbLogLine(frameId: FrameId, line: string, type = 'usb'): void {
   appendUsbLine(frameId, line, type)
 }
 
@@ -148,7 +148,7 @@ async function openPort(port: SerialPort, options?: { resetBaud?: boolean }): Pr
   throw lastError
 }
 
-function appendSelectedUsbPort(frameId: number, port: SerialPort): void {
+function appendSelectedUsbPort(frameId: FrameId, port: SerialPort): void {
   lastPorts.set(frameId, port)
 }
 
@@ -219,7 +219,7 @@ export async function resolveLiveSerialPort(original: SerialPort): Promise<Seria
   return replacement
 }
 
-async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promise<T>): Promise<T> {
+async function withUsbApiCommandLock<T>(frameId: FrameId, operation: () => Promise<T>): Promise<T> {
   const previousLock = usbApiCommandLocks.get(frameId)
   if (previousLock) {
     appendUsbLine(frameId, '[USB API] waiting for previous USB command to finish')
@@ -243,7 +243,7 @@ async function withUsbApiCommandLock<T>(frameId: number, operation: () => Promis
   }
 }
 
-export function embeddedUsbApiCanUse(frameId: number): boolean {
+export function embeddedUsbApiCanUse(frameId: FrameId): boolean {
   // Only claim USB is usable when the remembered port is still connected —
   // a port granted earlier in the session goes stale once the board is
   // unplugged, and callers that prefer USB over HTTP must fall through to
@@ -263,7 +263,7 @@ export function embeddedUsbApiCanPrompt(): boolean {
   return webSerialSupported()
 }
 
-export async function ensureEmbeddedUsbApiPort(frameId: number): Promise<boolean> {
+export async function ensureEmbeddedUsbApiPort(frameId: FrameId): Promise<boolean> {
   if (!webSerialSupported()) {
     appendUsbLine(frameId, '[USB API] USB port selection failed: Web Serial is not supported in this browser.')
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
@@ -501,7 +501,7 @@ async function runUsbApiCommandOnPort(
 }
 
 export async function runEmbeddedUsbApiCommand(
-  frameId: number,
+  frameId: FrameId,
   command: string,
   options?: EmbeddedUsbApiCommandOptions
 ): Promise<EmbeddedUsbApiCommandResult> {
@@ -509,7 +509,7 @@ export async function runEmbeddedUsbApiCommand(
 }
 
 async function runEmbeddedUsbApiCommandLocked(
-  frameId: number,
+  frameId: FrameId,
   command: string,
   options?: EmbeddedUsbApiCommandOptions
 ): Promise<EmbeddedUsbApiCommandResult> {
@@ -670,11 +670,11 @@ export function isEmbeddedUsbLogStreamOpen(streamState?: EmbeddedUsbLogStreamSta
   return !!streamState && ['selecting', 'connecting', 'streaming', 'stopping'].includes(streamState.status)
 }
 
-export function embeddedUsbLogStreamSessionPort(frameId: number): SerialPort | null {
+export function embeddedUsbLogStreamSessionPort(frameId: FrameId): SerialPort | null {
   return sessions.get(frameId)?.port ?? null
 }
 
-export async function stopEmbeddedUsbLogStream(frameId: number): Promise<SerialPort | null> {
+export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<SerialPort | null> {
   const session = sessions.get(frameId)
   if (!session) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
@@ -699,7 +699,7 @@ export async function stopEmbeddedUsbLogStream(frameId: number): Promise<SerialP
   return session.port
 }
 
-export async function startEmbeddedUsbLogStream(frameId: number, port?: SerialPort): Promise<boolean> {
+export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialPort): Promise<boolean> {
   if (!webSerialSupported()) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       error: 'Web Serial is not supported in this browser. Use Chrome or Edge to stream USB logs.',
@@ -765,13 +765,13 @@ export const embeddedUsbLogsModel = kea<embeddedUsbLogsModelType>([
   path(['src', 'models', 'embeddedUsbLogsModel']),
   actions({
     appendUsbLog: (log: LogType) => ({ log }),
-    setUsbLogStreamState: (frameId: number, streamState: EmbeddedUsbLogStreamState) => ({ frameId, streamState }),
-    startUsbLogStream: (frameId: number) => ({ frameId }),
-    stopUsbLogStream: (frameId: number) => ({ frameId }),
+    setUsbLogStreamState: (frameId: FrameId, streamState: EmbeddedUsbLogStreamState) => ({ frameId, streamState }),
+    startUsbLogStream: (frameId: FrameId) => ({ frameId }),
+    stopUsbLogStream: (frameId: FrameId) => ({ frameId }),
   }),
   reducers({
     usbLogsByFrameId: [
-      {} as Record<number, LogType[]>,
+      {} as Record<FrameId, LogType[]>,
       {
         appendUsbLog: (state, { log }) => {
           const logs = state[log.frame_id] ?? []
@@ -780,7 +780,7 @@ export const embeddedUsbLogsModel = kea<embeddedUsbLogsModelType>([
       },
     ],
     usbLogStreamStatesByFrameId: [
-      {} as Record<number, EmbeddedUsbLogStreamState>,
+      {} as Record<FrameId, EmbeddedUsbLogStreamState>,
       {
         setUsbLogStreamState: (state, { frameId, streamState }) => ({
           ...state,

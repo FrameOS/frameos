@@ -1,5 +1,5 @@
 import { kea, key, path, props, selectors } from 'kea'
-import { LogType } from '../../src/types'
+import { LogType, FrameId } from '../../src/types'
 import type { logsLogicType } from './logsLogicShimType'
 
 // Swapped in for panels/Logs/logsLogic by the embedded-editor build: there is
@@ -7,7 +7,7 @@ import type { logsLogicType } from './logsLogicShimType'
 // badges on nodes) is permanently empty.
 
 export interface LogsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export const logsLogic = kea<logsLogicType>([

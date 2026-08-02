@@ -1,22 +1,20 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
-import { FrameScene, FrameType } from '../types'
+import { FrameScene, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
 import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
+import { isCloudMode } from '../utils/cloudMode'
+import { sendCloudFrameCommand, pushCloudFrameSettings } from '../utils/cloudFrameApi'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import {
-  embeddedUsbApiCanUse,
-  embeddedUsbLogsModel,
-  runEmbeddedUsbApiCommand,
-} from './embeddedUsbLogsModel'
+import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -33,7 +31,7 @@ function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTr
   return queryString ? `?${queryString}` : ''
 }
 
-function deployTaskId(frameId: number, fastDeploy: boolean): string {
+function deployTaskId(frameId: FrameId, fastDeploy: boolean): string {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -100,18 +98,18 @@ function startBrowserDownload(path: string): void {
   anchor.remove()
 }
 
-const pendingSdCardImageDownloads = new Set<number>()
-const sdCardImageStatusPollsInFlight = new Set<number>()
-const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
+const pendingSdCardImageDownloads = new Set<FrameId>()
+const sdCardImageStatusPollsInFlight = new Set<FrameId>()
+const sdCardImageProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
 
-const pendingEmbeddedFirmwareDownloads = new Set<number>()
-const embeddedFirmwareStatusPollsInFlight = new Set<number>()
-const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
-const embeddedFirmwareRecoveryAttempts = new Map<number, number>()
+const pendingEmbeddedFirmwareDownloads = new Set<FrameId>()
+const embeddedFirmwareStatusPollsInFlight = new Set<FrameId>()
+const embeddedFirmwareProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
+const embeddedFirmwareRecoveryAttempts = new Map<FrameId, number>()
 const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
-const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
-const embeddedUsbImageRefreshesInFlight = new Set<number>()
-const embeddedUsbImageRefreshRetries = new Map<number, number>()
+const embeddedUsbImageRefreshTimers = new Map<FrameId, ReturnType<typeof window.setTimeout>>()
+const embeddedUsbImageRefreshesInFlight = new Set<FrameId>()
+const embeddedUsbImageRefreshRetries = new Map<FrameId, number>()
 const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
 const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
 // The first render after a deploy takes minutes on e-paper; keep asking
@@ -151,7 +149,7 @@ function mergeEmbeddedFirmwareStatus(
   }
 }
 
-async function requestEmbeddedFirmwareBuild(frameId: number, force = false): Promise<EmbeddedFirmware | null> {
+async function requestEmbeddedFirmwareBuild(frameId: FrameId, force = false): Promise<EmbeddedFirmware | null> {
   const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
     method: 'POST',
   })
@@ -162,7 +160,7 @@ async function requestEmbeddedFirmwareBuild(frameId: number, force = false): Pro
   return (data?.firmware as EmbeddedFirmware | undefined) ?? null
 }
 
-async function recoverEmbeddedFirmwareBuild(frameId: number, status: EmbeddedFirmware): Promise<boolean> {
+async function recoverEmbeddedFirmwareBuild(frameId: FrameId, status: EmbeddedFirmware): Promise<boolean> {
   if (status.status !== 'stale' && status.status !== 'missing') {
     return false
   }
@@ -205,7 +203,7 @@ function embeddedUsbImageSceneId(metadata?: string): string | null {
   return sceneId || null
 }
 
-async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
+async function refreshEmbeddedUsbFrameImage(frameId: FrameId): Promise<void> {
   if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbApiCanUse(frameId)) {
     return
   }
@@ -258,7 +256,7 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
 }
 
 export function scheduleEmbeddedUsbFrameImageRefresh(
-  frameId: number,
+  frameId: FrameId,
   delayMs: number = EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS
 ): void {
   if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
@@ -286,7 +284,7 @@ function sdCardImageProgressDetail(startedAt: number): string {
   return 'Still preparing SD card image'
 }
 
-function stopSdCardImageProgress(frameId: number): void {
+function stopSdCardImageProgress(frameId: FrameId): void {
   const timer = sdCardImageProgressTimers.get(frameId)
   if (timer === undefined || typeof window === 'undefined') {
     return
@@ -295,7 +293,7 @@ function stopSdCardImageProgress(frameId: number): void {
   sdCardImageProgressTimers.delete(frameId)
 }
 
-async function pollSdCardImageStatus(frameId: number, downloadUrl?: string): Promise<void> {
+async function pollSdCardImageStatus(frameId: FrameId, downloadUrl?: string): Promise<void> {
   if (!pendingSdCardImageDownloads.has(frameId) || sdCardImageStatusPollsInFlight.has(frameId)) {
     return
   }
@@ -336,7 +334,7 @@ async function pollSdCardImageStatus(frameId: number, downloadUrl?: string): Pro
   }
 }
 
-function startSdCardImageProgress(frameId: number): void {
+function startSdCardImageProgress(frameId: FrameId): void {
   stopSdCardImageProgress(frameId)
   if (typeof window === 'undefined') {
     return
@@ -370,7 +368,7 @@ function embeddedFirmwareProgressDetail(startedAt: number): string {
   return 'Still building firmware'
 }
 
-function stopEmbeddedFirmwareProgress(frameId: number): void {
+function stopEmbeddedFirmwareProgress(frameId: FrameId): void {
   const timer = embeddedFirmwareProgressTimers.get(frameId)
   if (timer === undefined || typeof window === 'undefined') {
     return
@@ -379,7 +377,7 @@ function stopEmbeddedFirmwareProgress(frameId: number): void {
   embeddedFirmwareProgressTimers.delete(frameId)
 }
 
-async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string): Promise<void> {
+async function pollEmbeddedFirmwareStatus(frameId: FrameId, downloadUrl?: string): Promise<void> {
   if (!pendingEmbeddedFirmwareDownloads.has(frameId) || embeddedFirmwareStatusPollsInFlight.has(frameId)) {
     return
   }
@@ -436,7 +434,7 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
   }
 }
 
-function startEmbeddedFirmwareProgress(frameId: number): void {
+function startEmbeddedFirmwareProgress(frameId: FrameId): void {
   stopEmbeddedFirmwareProgress(frameId)
   if (typeof window === 'undefined') {
     return
@@ -467,33 +465,33 @@ export const framesModel = kea<framesModelType>([
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
-    loadFrame: (id: number) => ({ id }),
-    deployFrame: (id: number, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
-    cancelDeploy: (id: number) => ({ id }),
-    stopFrame: (id: number) => ({ id }),
-    restartFrame: (id: number) => ({ id }),
-    rebootFrame: (id: number) => ({ id }),
-    renderFrame: (id: number) => ({ id }),
-    deleteFrame: (id: number) => ({ id }),
-    renameFrame: (id: number, name: string) => ({ id, name }),
-    deployRemote: (id: number, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
+    loadFrame: (id: FrameId) => ({ id }),
+    deployFrame: (id: FrameId, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
+    cancelDeploy: (id: FrameId) => ({ id }),
+    stopFrame: (id: FrameId) => ({ id }),
+    restartFrame: (id: FrameId) => ({ id }),
+    rebootFrame: (id: FrameId) => ({ id }),
+    renderFrame: (id: FrameId) => ({ id }),
+    deleteFrame: (id: FrameId) => ({ id }),
+    renameFrame: (id: FrameId, name: string) => ({ id, name }),
+    deployRemote: (id: FrameId, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
       transport,
     }),
-    restartRemote: (id: number, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
-    downloadSdCardImage: (id: number) => ({ id }),
-    downloadEmbeddedFirmware: (id: number) => ({ id }),
-    updateEmbeddedFirmwareStatus: (id: number, firmware: EmbeddedFirmware) => ({ id, firmware }),
-    applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),
-    setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
-    setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
+    restartRemote: (id: FrameId, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
+    downloadSdCardImage: (id: FrameId) => ({ id }),
+    downloadEmbeddedFirmware: (id: FrameId) => ({ id }),
+    updateEmbeddedFirmwareStatus: (id: FrameId, firmware: EmbeddedFirmware) => ({ id, firmware }),
+    applyEmbeddedFirmwareOta: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
+    setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
     toggleInactiveFramesExpanded: true,
   }),
   loaders(({ values }) => ({
     frames: [
-      {} as Record<number, FrameType>,
+      {} as Record<FrameId, FrameType>,
       {
         loadFrame: async ({ id }) => {
           try {
@@ -532,8 +530,20 @@ export const framesModel = kea<framesModelType>([
     ],
   })),
   reducers(() => ({
+    // Whether the frame list has come back at least once — NOT whether it
+    // contains anything. `framesLoaded` below means "has at least one frame",
+    // which reads the same at a glance and is what gates the cloud workspace:
+    // an account with no frames yet sat on "Loading..." forever, which is
+    // exactly what a brand-new account sees. The loader swallows its own
+    // errors, so success is the only outcome to listen for.
+    framesEverLoaded: [
+      false,
+      {
+        loadFramesSuccess: () => true,
+      },
+    ],
     frames: [
-      {} as Record<number, FrameType>,
+      {} as Record<FrameId, FrameType>,
       {
         addFrame: (state, { frame }) => ({
           ...state,
@@ -688,9 +698,15 @@ export const framesModel = kea<framesModelType>([
           }
         }
         if (!usbSucceeded) {
-          const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
-          if (!response.ok) {
-            throw new Error('Failed to send render event')
+          if (isCloudMode()) {
+            // The cloud has no /event/* routes; `render` is one of its four
+            // command verbs (cloud/apps/auth-web/src/lib/frames.ts).
+            await sendCloudFrameCommand(id, 'render')
+          } else {
+            const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+            if (!response.ok) {
+              throw new Error('Failed to send render event')
+            }
           }
         }
       } catch (error) {
@@ -743,12 +759,20 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
+      if (isCloudMode()) {
+        await sendCloudFrameCommand(id, 'restart_runtime')
+        return
+      }
       const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
       if (!response.ok) {
         throw new Error('Failed to restart frame')
       }
     },
     rebootFrame: async ({ id }) => {
+      if (isCloudMode()) {
+        await sendCloudFrameCommand(id, 'reboot')
+        return
+      }
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
     deployRemote: async ({ id, recompile, transport }) => {
@@ -1046,6 +1070,12 @@ export const framesModel = kea<framesModelType>([
     },
     renameFrame: async ({ id, name }) => {
       try {
+        if (isCloudMode()) {
+          // `name` is on the cloud's settings allowlist; there is no
+          // POST /api/frames/{id} to rename through.
+          await pushCloudFrameSettings(id, { name })
+          return
+        }
         const response = await apiFetch(`/api/frames/${id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

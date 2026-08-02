@@ -17,7 +17,7 @@ import {
   stopEmbeddedUsbLogStream,
 } from '../../models/embeddedUsbLogsModel'
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
-import type { FrameType } from '../../types'
+import type { FrameType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { workspaceLogic } from './workspaceLogic'
 
@@ -84,7 +84,7 @@ async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
 
 type FirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
-function appendBrowserFlashLog(frameId: number, message: string): void {
+function appendBrowserFlashLog(frameId: FrameId, message: string): void {
   appendEmbeddedUsbLogLine(frameId, `[browser flash] ${message}`)
 }
 
@@ -124,7 +124,7 @@ function flashTraceLogMessage(message: string): string | null {
   return message
 }
 
-function createUsbLogTerminal(frameId: number): FlashLogTerminal {
+function createUsbLogTerminal(frameId: FrameId): FlashLogTerminal {
   let pendingLine = ''
   let flushTimer: ReturnType<typeof window.setTimeout> | null = null
 
@@ -173,7 +173,7 @@ function createUsbLogTerminal(frameId: number): FlashLogTerminal {
   }
 }
 
-function mirrorTransportTrace(frameId: number, transport: EspTransport): void {
+function mirrorTransportTrace(frameId: FrameId, transport: EspTransport): void {
   const traceableTransport = transport as unknown as TraceableTransportInternals
   const originalTrace = traceableTransport.trace.bind(traceableTransport)
   traceableTransport.trace = (message: string): void => {
@@ -186,7 +186,7 @@ function mirrorTransportTrace(frameId: number, transport: EspTransport): void {
   }
 }
 
-async function fetchFirmwareStatus(frameId: number): Promise<FirmwareStatus> {
+async function fetchFirmwareStatus(frameId: FrameId): Promise<FirmwareStatus> {
   const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware`)
   if (!response.ok) {
     throw new Error('Failed to fetch firmware status')
@@ -196,7 +196,7 @@ async function fetchFirmwareStatus(frameId: number): Promise<FirmwareStatus> {
   return firmware
 }
 
-async function startFirmwareBuild(frameId: number, force = false): Promise<FirmwareStatus> {
+async function startFirmwareBuild(frameId: FrameId, force = false): Promise<FirmwareStatus> {
   const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
     method: 'POST',
   })
@@ -225,7 +225,7 @@ function firmwareFlashSize(frame: FrameType, firmware?: FirmwareStatus | null): 
 }
 
 /** Make sure a fresh firmware image exists, building one if needed. */
-async function ensureFirmwareReady(frameId: number, onStatus: (message: string) => void): Promise<FirmwareStatus> {
+async function ensureFirmwareReady(frameId: FrameId, onStatus: (message: string) => void): Promise<FirmwareStatus> {
   let firmware = await fetchFirmwareStatus(frameId)
   if (firmware.status !== 'ready') {
     onStatus(

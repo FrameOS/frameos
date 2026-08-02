@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { urls } from '../urls'
-import { getBasePath } from '../utils/getBasePath'
+import { getRouteBasePath } from '../utils/getBasePath'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
 
 export type SceneComponent = ComponentType<Record<string, any>>
@@ -72,7 +72,7 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 
 export const getRoutes = () =>
   ({
-    ...(getBasePath() ? { [getBasePath() + '/']: 'frames' } : {}),
+    ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     [urls.frame(':id')]: 'frame',
     [urls.scenes()]: 'sceneWorkspace',

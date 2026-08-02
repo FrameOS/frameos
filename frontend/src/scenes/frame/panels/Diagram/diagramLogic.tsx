@@ -38,6 +38,7 @@ import {
   MarkdownField,
   SceneApp,
   StateNodeData,
+  FrameId,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
@@ -64,7 +65,7 @@ function fieldOrderFromFields(fields?: (AppConfigField | MarkdownField)[] | null
 }
 
 export interface DiagramLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   updateNodeInternals?: (nodeId: string) => void
 }

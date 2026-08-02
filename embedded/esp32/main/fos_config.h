@@ -56,6 +56,13 @@ typedef struct {
     char wifi_pass[FOS_STR_LEN];
     char backend_url[FOS_URL_LEN]; /* e.g. http://192.168.1.10:8989 */
     char api_key[FOS_STR_LEN];     /* frame server_api_key */
+    /* Cloud-managed frames (docs/cloud-frames.md): provider base URL and the
+     * single-use enrollment claim token. The claim token lives in NVS only
+     * until enrollment succeeds or permanently fails, then it is erased.
+     * Long-lived cloud credentials (Ed25519 seed, access token) are NVS-only
+     * and managed by fos_cloud.c — they never enter this struct. */
+    char cloud_url[FOS_URL_LEN];   /* e.g. https://cloud.frameos.net */
+    char claim_token[FOS_STR_LEN]; /* FRCT_…, single use, short lived */
     uint32_t frame_id;
     char hostname[FOS_STR_LEN];    /* DHCP hostname, e.g. "kitchen" */
     char hardware_preset[FOS_STR_LEN]; /* e.g. waveshare_esp32_s3_photopainter */

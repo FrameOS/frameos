@@ -2,11 +2,11 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 import { v4 as uuidv4 } from 'uuid'
 
 import type { scheduleLogicType } from './scheduleLogicType'
-import { ScheduledEvent, StateField } from '../../../../types'
+import { ScheduledEvent, StateField, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 
 export interface ScheduleLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 const defaultScheduleMinute = 14 * 60

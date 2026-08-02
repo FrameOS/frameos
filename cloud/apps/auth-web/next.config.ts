@@ -32,11 +32,25 @@ function createNextConfig(phase: string): NextConfig {
       ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
       : "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'";
 
+  // The frames SPA opens a WebSocket to the frame hub. In production that is
+  // the same origin (nginx proxies /api/frames/ws and /**/updates), which
+  // 'self' already covers. In development the hub is a second process on its
+  // own port, so it is a different origin and CSP refuses the connection —
+  // the socket fails before the fleet UI can load, with no clue why unless
+  // you notice the CSP violation. Allow the hub explicitly, in both its http
+  // and ws forms (connect-src matches the scheme literally).
+  const hubOrigin =
+    process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(/\/$/, "") ||
+    (phase === PHASE_DEVELOPMENT_SERVER ? "http://localhost:3100" : "");
+  const hubConnectSrc = hubOrigin
+    ? ` ${hubOrigin} ${hubOrigin.replace(/^http/, "ws")}`
+    : "";
+
   const contentSecurityPolicy = (frameAncestors: string) =>
     [
       "default-src 'self'",
       "base-uri 'self'",
-      "connect-src 'self' https:",
+      `connect-src 'self' https:${hubConnectSrc}`,
       "font-src 'self' data:",
       `form-action 'self' ${new URL(getCloudBaseUrl()).origin}`,
       `frame-ancestors ${frameAncestors}`,

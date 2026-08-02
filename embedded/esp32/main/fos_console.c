@@ -21,6 +21,7 @@
 
 #include "fos_battery.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
 #include "fos_ota.h"
@@ -82,6 +83,17 @@ static int cmd_status(int argc, char **argv)
     printf("wifi:        ssid=\"%s\" state=%d ip=%s rssi=%d\n",
            config->wifi_ssid, (int)fos_wifi_state(), fos_wifi_ip(), fos_wifi_rssi());
     printf("backend:     %s\n", config->backend_url[0] ? config->backend_url : "(unset)");
+    /* Never print the claim token, access token, or device key. */
+    printf("cloud:       %s url=%s claim_token=%s%s%s ws=%s\n",
+           fos_cloud_state_name(),
+           config->cloud_url[0] ? config->cloud_url : "(unset)",
+           config->claim_token[0] ? "(set)" : "(none)",
+           fos_cloud_frame_id()[0] ? " frame=" : "",
+           fos_cloud_frame_id(),
+           fos_cloud_ws_connected() ? "connected" : "off");
+    if (fos_cloud_last_error()[0]) {
+        printf("cloud_error: %s\n", fos_cloud_last_error());
+    }
     printf("https:       %s port=%u cert=%s key=%s\n",
            config->tls_enable ? "enabled" : "disabled",
            (unsigned)config->tls_port,
@@ -120,7 +132,8 @@ static int cmd_status(int argc, char **argv)
 static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
-        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|frame_id|hardware|panel|render_mode|"
+        printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
+               "hardware|panel|render_mode|"
                "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins> <value...>\n");
         return 1;
@@ -138,6 +151,23 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "wifi_pass") == 0) strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
     else if (strcmp(key, "backend") == 0) strlcpy(config->backend_url, value, sizeof(config->backend_url));
     else if (strcmp(key, "api_key") == 0) strlcpy(config->api_key, value, sizeof(config->api_key));
+    /* Cloud-frame provisioning (browser flasher / manual): the enrollment
+     * task picks these up once Wi-Fi is connected. The claim token is single
+     * use and never echoed back — check `status` for the enrollment state. */
+    else if (strcmp(key, "cloud_url") == 0) {
+        /* Refuse a provider URL the enrollment/WS paths would not use anyway:
+         * the claim token, the bearer token and every scene push ride this
+         * link, so plain http:// is only accepted for local development hosts
+         * (docs/cloud-link.md). Rejecting here means the mistake surfaces at
+         * provisioning time instead of as a silent non-enrolling frame. */
+        const char *why = NULL;
+        if (value[0] && !fos_cloud_url_transport_ok(value, &why)) {
+            printf("refusing cloud_url: %s\n", why ? why : "invalid URL");
+            return 1;
+        }
+        strlcpy(config->cloud_url, value, sizeof(config->cloud_url));
+    }
+    else if (strcmp(key, "claim_token") == 0) strlcpy(config->claim_token, value, sizeof(config->claim_token));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
     else if (strcmp(key, "hardware") == 0 || strcmp(key, "hardware_preset") == 0)
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));

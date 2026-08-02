@@ -2,9 +2,10 @@ import { afterMount, kea, key, path, props } from 'kea'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import type { workspaceChatDrawerLogicType } from './workspaceChatDrawerLogicType'
+import type { FrameId } from '../../types'
 
 export interface WorkspaceChatDrawerLogicProps {
-  frameId: number
+  frameId: FrameId
   nodeId?: string | null
   sceneId?: string | null
 }

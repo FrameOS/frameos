@@ -22,7 +22,8 @@ import { FrameImage } from '../../components/FrameImage'
 import { Tag } from '../../components/Tag'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
-import { FrameScene, FrameType, NodeData } from '../../types'
+import { FrameScene, FrameType, NodeData, FrameId } from '../../types'
+import { parseRouteFrameId } from '../../utils/frameId'
 import { FrameosShell } from './FrameosShell'
 import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
@@ -51,6 +52,7 @@ import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { sceneUtilityPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -58,7 +60,7 @@ interface SceneWorkspaceProps {
 }
 
 interface SceneWorkspaceFrameProps {
-  frameId: number
+  frameId: FrameId
 }
 
 interface UtilityDefinition {
@@ -82,7 +84,15 @@ function sceneIsCompiled(scene: FrameScene | null, frameMode?: FrameType['mode']
 }
 
 function sceneUtilityDefinitions(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): UtilityDefinition[] {
-  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+  const mode = workspaceMode()
+  return utilityDefinitions.filter(
+    (definition) =>
+      // Allow-list per control plane (workspaceSurfaces.ts), plus one
+      // per-scene rule: SceneSource shows generated Nim, so it needs a
+      // compiled scene even where the mode permits the panel.
+      sceneUtilityPanelIsAllowed(mode, definition.panel) &&
+      (definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+  )
 }
 
 function sceneUtilityDefinition(
@@ -169,7 +179,7 @@ function SceneSelector({
                 <div className="relative min-w-0 flex-1">
                   <select
                     value={frame.id}
-                    onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+                    onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
                     className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
                   >
                     {frameGroups.map((group) => (
@@ -362,7 +372,7 @@ function SceneTree({
   )
 }
 
-function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function SceneNodesList({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { selectedNodeId } = useValues(workspaceLogic)
   const { selectNode } = useActions(workspaceLogic)
   const nodeTreeItems = buildDiagramNodeTreeItems(scene.nodes ?? [], scene.edges ?? [])
@@ -554,7 +564,7 @@ function SceneDiagramOverlay({
   scene,
   sceneId,
 }: {
-  frameId: number
+  frameId: FrameId
   frameMode?: FrameType['mode'] | null
   scene: FrameScene | null
   sceneId: string | null
@@ -674,11 +684,11 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
   )
 }
 
-function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
 }
 
-function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { renameScene, updateSceneFromRepo } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
@@ -790,7 +800,7 @@ function UtilityDrawer({
   scene,
   frameMode,
 }: {
-  frameId: number
+  frameId: FrameId
   scene: FrameScene | null
   frameMode?: FrameType['mode'] | null
 }): JSX.Element | null {
@@ -854,7 +864,7 @@ function SceneCanvas({
   selectedSceneId,
 }: {
   hasScenes: boolean
-  frameId: number
+  frameId: FrameId
   frameMode?: FrameType['mode'] | null
   selectedScene: FrameScene | null
   selectedSceneId: string | null
@@ -922,7 +932,7 @@ function SceneCanvas({
   )
 }
 
-function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: number; sceneId: string }): null {
+function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
   const { selectedNodeId } = useValues(workspaceLogic)
   const diagram = diagramLogic({ frameId, sceneId })
   const { nodes } = useValues(diagram)
@@ -1018,9 +1028,9 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: frameId ?? null, routeSceneId: sceneId ?? null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesLoading } = useValues(framesModel)
-  const routeFrameId = frameId ? parseInt(frameId, 10) : null
+  const routeFrameId = parseRouteFrameId(frameId)
 
-  if (routeFrameId && Number.isFinite(routeFrameId)) {
+  if (routeFrameId !== null) {
     return <SceneWorkspaceFrame frameId={routeFrameId} />
   }
 

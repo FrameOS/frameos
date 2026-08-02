@@ -5,6 +5,7 @@ import { ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outli
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
+import type { FrameId } from '../../types'
 
 export function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
   return (
@@ -41,14 +42,20 @@ export function FrameChangeStatusIcon({
   frameId,
   variant = 'sidebar',
 }: {
-  frameId: number
+  frameId: FrameId
   variant?: 'sidebar' | 'dashboard'
 }): JSX.Element {
   const { hasFrameSyncChanges, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : hasFrameSyncChanges ? 'Sync' : undeployedChanges ? 'Undeployed' : null
+  const statusLabel = unsavedChanges
+    ? 'Unsaved'
+    : hasFrameSyncChanges
+    ? 'Sync'
+    : undeployedChanges
+    ? 'Undeployed'
+    : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon

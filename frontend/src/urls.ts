@@ -1,9 +1,10 @@
-import { getBasePath } from './utils/getBasePath'
+import { getRouteBasePath } from './utils/getBasePath'
 import { frameAdminPath, isInFrameAdminMode } from './utils/frameAdmin'
 import { getFrameControlFrameId } from './utils/frameControlMode'
+import type { FrameId } from './utils/frameId'
 
-function frameUrl(id: number | string, tool?: string): string {
-  return getBasePath() + '/frames/' + id + (tool ? `?tool=${encodeURIComponent(tool)}` : '')
+function frameUrl(id: FrameId, tool?: string): string {
+  return getRouteBasePath() + '/frames/' + id + (tool ? `?tool=${encodeURIComponent(tool)}` : '')
 }
 
 function frameControlUrl(tool?: string): string {
@@ -11,27 +12,28 @@ function frameControlUrl(tool?: string): string {
 }
 
 function frameControlScenesUrl(sceneId?: string): string {
-  return getBasePath() + '/scenes/' + getFrameControlFrameId() + (sceneId ? '/' + sceneId : '')
+  return getRouteBasePath() + '/scenes/' + getFrameControlFrameId() + (sceneId ? '/' + sceneId : '')
 }
 
 export const urls = {
-  frames: () => (isInFrameAdminMode() ? getBasePath() + frameAdminPath() : getBasePath() ? getBasePath() : '/'),
+  frames: () =>
+    isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/',
   frame: frameUrl,
   frameControl: frameControlUrl,
-  scenes: (frameId?: number | string, sceneId?: string) =>
-    getBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : ''),
+  scenes: (frameId?: FrameId, sceneId?: string) =>
+    getRouteBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : ''),
   frameControlScenes: frameControlScenesUrl,
-  apps: (frameId?: number | string, sceneId?: string, nodeId?: string) =>
-    getBasePath() +
+  apps: (frameId?: FrameId, sceneId?: string, nodeId?: string) =>
+    getRouteBasePath() +
     '/apps' +
     (frameId ? '/' + frameId : '') +
     (frameId && sceneId ? '/' + sceneId : '') +
     (frameId && sceneId && nodeId ? '/' + nodeId : ''),
   systemApps: (keyword?: string | null) =>
-    getBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
-  settings: () => (isInFrameAdminMode() ? frameControlUrl('settings') : getBasePath() + '/settings'),
-  login: () => getBasePath() + '/login',
-  logout: () => getBasePath() + '/logout',
-  signup: () => getBasePath() + '/signup',
-  setupUnavailable: () => getBasePath() + '/setup-unavailable',
+    getRouteBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
+  settings: () => (isInFrameAdminMode() ? frameControlUrl('settings') : getRouteBasePath() + '/settings'),
+  login: () => getRouteBasePath() + '/login',
+  logout: () => getRouteBasePath() + '/logout',
+  signup: () => getRouteBasePath() + '/signup',
+  setupUnavailable: () => getRouteBasePath() + '/setup-unavailable',
 } as const

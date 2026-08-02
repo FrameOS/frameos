@@ -1,6 +1,6 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, SceneNodeData } from '../../../../types'
+import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
@@ -20,7 +20,7 @@ import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../mode
 import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
 
 export interface ScenesLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface SceneRenameDialog {

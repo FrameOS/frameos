@@ -1,5 +1,5 @@
 import { useMountedLogic, useValues } from 'kea'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 import { appsModel } from '../../../../../frontend/src/models/appsModel'
 import { entityImagesModel } from '../../../../../frontend/src/models/entityImagesModel'
@@ -44,14 +44,26 @@ function AdminGate({ children }: { children: ReactNode }) {
   const { framesLoaded } = useValues(framesModel)
   const { isChecking, isAuthenticated } = useValues(adminLogic)
 
+  // Navigate from an effect, once. Assigning window.location during render
+  // fires again on every re-render this component happens to get while
+  // unauthenticated (framesModel and socketLogic both push updates through
+  // here), and each assignment aborts the navigation the previous one
+  // started — the browser reports that as net::ERR_ABORTED and the login
+  // page may never actually load.
+  const redirectedToLogin = useRef(false)
+  const needsLogin = !isChecking && !isAuthenticated
+  useEffect(() => {
+    if (needsLogin && !redirectedToLogin.current && typeof window !== 'undefined') {
+      redirectedToLogin.current = true
+      window.location.href = '/login'
+    }
+  }, [needsLogin])
+
   if (isChecking) {
     return <div>Loading...</div>
   }
 
   if (!isAuthenticated) {
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login'
-    }
     return <div>Redirecting to login...</div>
   }
 

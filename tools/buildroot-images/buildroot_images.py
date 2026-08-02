@@ -34,6 +34,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
+    BUILDROOT_FSTAB_CONTENT,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
@@ -64,8 +65,10 @@ from app.models.frame import (  # noqa: E402
 from app.tasks.binary_builder import FrameBinaryBuildResult  # noqa: E402
 from app.utils.cross_compile import TargetMetadata  # noqa: E402
 from app.tasks.setup_json_reset import (  # noqa: E402
+    BOOT_CLOUD_CONFIG_FILE,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
+    render_cloud_config_placeholder,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
 )
@@ -471,13 +474,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
-    (overlay / "etc" / "fstab").write_text(
-        "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0\n"
-        "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
-        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n"
-        f"{BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE}\n",
-        encoding="utf-8",
-    )
+    (overlay / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
     (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "profile.d" / "frameos.sh").write_text(
         "export FRAMEOS_HOME=/srv/frameos/current\n",
@@ -824,7 +821,26 @@ async def build_release_image(args: argparse.Namespace) -> None:
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)
+        # Generic release images carry no per-frame setup payload. The
+        # first-boot service and script staged above stay in place, dormant
+        # until a user (or the cloud provider) drops /boot/frameos-setup.json
+        # or personalizes the cloud config /boot/frameos-cloud.txt on the FAT
+        # boot partition.
         (overlay_dir / "boot" / "frameos-setup.json").unlink(missing_ok=True)
+        # Every generic release image ships the 4096-byte all-comments
+        # frameos-cloud.txt placeholder. First boot treats a placeholder with
+        # no KEY=value lines as "not personalized" and exits before doing any
+        # work at all, so it stays in place and costs nothing per boot,
+        # and the provider's in-browser "Download SD image" flow overwrites
+        # the placeholder's bytes in place inside the raw image (locating it
+        # by its magic first line, "# FRAMEOS-CLOUD-CONFIG-V1"). In-place
+        # patching assumes the file's clusters are contiguous in the BOOT
+        # FAT; _patch_boot_partition mcopy's this file first, before anything
+        # else can fragment the fresh FAT's free-cluster run (see the
+        # contiguity comment in backend/app/tasks/buildroot_image.py).
+        (overlay_dir / "boot" / Path(BOOT_CLOUD_CONFIG_FILE).name).write_bytes(
+            render_cloud_config_placeholder()
+        )
 
         base_entry = await resolve_buildroot_base_entry(platform)
         base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())

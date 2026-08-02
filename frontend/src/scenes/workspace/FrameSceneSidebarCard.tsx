@@ -8,6 +8,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
 import { workspaceLogic } from './workspaceLogic'
+import { frameMenuActionIsAllowed, workspaceMode } from './workspaceSurfaces'
 
 interface FrameSceneSidebarCardProps {
   frame: FrameType
@@ -42,16 +43,23 @@ export function FrameSceneSidebarCard({
     openFrameChangeDrawer(frame.id, 'deploy')
   }
 
+  // Cloud-managed frames deploy on save — there is no deploy drawer, and no
+  // deploy verb in the protocol (workspaceSurfaces.ts). Save stays because it
+  // maps onto the cloud's declarative settings push (utils/cloudFrameApi.ts).
+  const mode = workspaceMode()
+  const canDeploy = frameMenuActionIsAllowed(mode, 'deploy')
+  const canLocalDeploy = frameMenuActionIsAllowed(mode, 'localDeploy')
+
   return (
-    <div className={clsx('grid grid-cols-2 gap-2', className)}>
+    <div className={clsx('grid gap-2', canDeploy || canLocalDeploy ? 'grid-cols-2' : 'grid-cols-1', className)}>
       <SaveFrameButton onSave={saveFrame} unsavedChanges={unsavedChanges} />
-      {inFrameAdminMode ? (
+      {canLocalDeploy && inFrameAdminMode ? (
         <FrameLocalDeployMenu
           frameId={frame.id}
           buttonTitle="Frame actions"
           buttonClassName={unsavedChanges ? 'frameos-warning-button' : 'frameos-secondary-button'}
         />
-      ) : (
+      ) : !canDeploy ? null : (
         <button
           type="button"
           onClick={() => openDeployPlan()}
@@ -68,13 +76,7 @@ export function FrameSceneSidebarCard({
   )
 }
 
-function SaveFrameButton({
-  onSave,
-  unsavedChanges,
-}: {
-  onSave: () => void
-  unsavedChanges: boolean
-}): JSX.Element {
+function SaveFrameButton({ onSave, unsavedChanges }: { onSave: () => void; unsavedChanges: boolean }): JSX.Element {
   return (
     <button
       type="button"

@@ -29,7 +29,10 @@ function selectProjectId(projects: ProjectResponse[]): number | null {
   const storedProject = storedProjectId ? projects.find((project) => project.id === storedProjectId) : null
   const projectId = storedProject?.id ?? projects[0]?.id
 
-  return Number.isInteger(projectId) && projectId > 0 ? projectId : null
+  // Explicit undefined check: an empty project list makes this undefined, and
+  // Number.isInteger(undefined) is false but `undefined > 0` is not a
+  // comparison TypeScript will allow under the cloud app's stricter settings.
+  return typeof projectId === 'number' && Number.isInteger(projectId) && projectId > 0 ? projectId : null
 }
 
 export function cachedProjectId(): number | null {

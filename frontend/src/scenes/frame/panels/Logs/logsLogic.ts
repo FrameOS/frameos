@@ -1,6 +1,6 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { LogType } from '../../../../types'
+import { LogType, FrameId } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
@@ -9,7 +9,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { embeddedUsbLogsModel } from '../../../../models/embeddedUsbLogsModel'
 
 export interface LogsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 const MAX_LOG_LINES = 50000
 
@@ -56,7 +56,7 @@ function downloadTextFile(content: string, fileName: string): void {
   downloadBlob(new Blob([content], { type: 'text/plain;charset=utf-8' }), fileName)
 }
 
-function timestampedLogFileName(frameId: number, type: 'logs' | 'full-logs'): string {
+function timestampedLogFileName(frameId: FrameId, type: 'logs' | 'full-logs'): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   return `frame-${frameId}-${type}-${timestamp}.log`
 }

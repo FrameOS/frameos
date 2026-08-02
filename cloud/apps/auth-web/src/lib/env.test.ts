@@ -75,6 +75,14 @@ describe("env", () => {
     expect(getAccountUrl("/account/scenes")).toBe(
       "https://account.frameos.net/scenes",
     );
+
+    // "My frames" keeps its full path: /frames on the account host is the
+    // fleet SPA, so shortening it would send the nav tab (and the /account
+    // landing redirect) to the workspace instead of the frame list.
+    expect(getAccountPath("/account/frames")).toBe("/account/frames");
+    expect(getAccountUrl("/account/frames")).toBe(
+      "https://account.frameos.net/account/frames",
+    );
   });
 
   it("requires a parent-domain session cookie for split origins", () => {

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FrameOS Cloud</title>
+    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <link rel="stylesheet" href="/frames-app/static/main.css" />
+    <script>
+      // NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ line below is a named
+      // replacement anchor for cloud/apps/auth-web/app/frames/[[...path]]/route.ts,
+      // which swaps it for cloud_ws_origin in dev. Keep the token; the text
+      // around it is free to change. build.mjs fails the build if it goes
+      // missing, and the route fails loudly rather than serving a shell whose
+      // websocket points nowhere.
+      // Base-path contract (see cloud-frontend/README.md):
+      //   API           /api/frames/...  -> ingress_path ''
+      //   SPA routes    /frames/**       -> route_base_path
+      //   Public assets /frames-app/**   -> assets_base_path
+      window.FRAMEOS_APP_CONFIG = {
+        ...(window.FRAMEOS_APP_CONFIG || {}),
+        cloudMode: true,
+        //__FRAMEOS_CLOUD_WS_ORIGIN__
+        ingress_path: '',
+        route_base_path: '/frames',
+        assets_base_path: '/frames-app',
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="popper" style="position: absolute; z-index: 80"></div>
+    <script type="module" src="/frames-app/static/main.js"></script>
+  </body>
+</html>

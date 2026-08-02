@@ -8,7 +8,7 @@ import { Button } from '../../../../components/Button'
 import { controlLogic } from './controlLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { StateFieldEdit } from './StateFieldEdit'
-import { FrameScene } from '../../../../types'
+import { FrameScene, FrameId } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
@@ -23,7 +23,7 @@ import { SceneActionKey } from './sceneActionsLogic'
 
 export interface ExpandedSceneProps {
   sceneId: string
-  frameId: number
+  frameId: FrameId
   scene?: FrameScene | null
   showEditButton?: boolean
   isUnsaved?: boolean

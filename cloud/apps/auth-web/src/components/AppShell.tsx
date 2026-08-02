@@ -23,6 +23,8 @@ export function AppShell({
   const adminUrl = new URL("/admin", getAccountBaseUrl()).toString();
   const logoutUrl = new URL("/api/auth/logout", cloudBaseUrl).toString();
   const scenesUrl = new URL("/", getScenesBaseUrl()).toString();
+  // The fleet SPA is served from the account origin (app/frames/[[...path]]).
+  const framesUrl = new URL("/frames", getAccountBaseUrl()).toString();
 
   return (
     <div className="shell">
@@ -35,6 +37,9 @@ export function AppShell({
           <nav aria-label="Primary" className="nav">
             <Link className="nav-link-button" href={scenesUrl}>
               Scenes
+            </Link>
+            <Link className="nav-link-button" href={framesUrl}>
+              Frames
             </Link>
             <Link className="nav-link-button" href={accountUrl}>
               Account

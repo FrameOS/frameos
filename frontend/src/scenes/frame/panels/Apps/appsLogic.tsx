@@ -3,7 +3,7 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 import type { appsLogicType } from './appsLogicType'
 import { appsModel, categoryLabels } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
-import { AppConfig, AppNodeData, SceneApp } from '../../../../types'
+import { AppConfig, AppNodeData, SceneApp, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
@@ -17,7 +17,7 @@ export const INLINE_CODE_NODE_APP: AppConfig = {
 }
 
 export interface AppsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export const appsLogic = kea<appsLogicType>([

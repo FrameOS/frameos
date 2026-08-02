@@ -16,7 +16,8 @@ import {
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
-import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
+import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
+import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
@@ -58,6 +59,12 @@ import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import {
+  frameSettingsSectionIsAllowed,
+  frameToolPanelIsAllowed,
+  workspaceMode,
+  type WorkspaceMode,
+} from './workspaceSurfaces'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -210,7 +217,7 @@ function restoreFrameToolScrollTop(scrollTop: number): () => void {
 
 function frameToolInitialScrollTop(
   positions: Record<string, number>,
-  frameId: number,
+  frameId: FrameId,
   panel: WorkspaceUtilityPanel
 ): number | null {
   const key = frameToolScrollKey(frameId, panel)
@@ -249,12 +256,10 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
-const frameAdminUnsupportedToolPanels = new Set<WorkspaceUtilityPanel>(['terminal', 'ping'])
-
-function frameToolDefinitionsForMode(inFrameAdminMode: boolean): FrameToolDefinition[] {
-  return inFrameAdminMode
-    ? frameToolDefinitions.filter((definition) => !frameAdminUnsupportedToolPanels.has(definition.panel))
-    : frameToolDefinitions
+// Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
+// invisible in every mode until it is listed there.
+function frameToolDefinitionsForMode(mode: WorkspaceMode = workspaceMode()): FrameToolDefinition[] {
+  return frameToolDefinitions.filter((definition) => frameToolPanelIsAllowed(mode, definition.panel))
 }
 
 function frameToolPanelFromSearchParams(
@@ -271,7 +276,7 @@ function frameToolPanelFromSearchParams(
     : 'overview'
 }
 
-const frameSettingsSections = [
+const allFrameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-device', label: 'Device' },
   { id: 'frame-settings-ssh', label: 'SSH' },
@@ -291,6 +296,10 @@ const frameSettingsSections = [
   { id: 'frame-settings-logs', label: 'Logs' },
   { id: 'frame-settings-reboot', label: 'Reboot' },
 ]
+
+function frameSettingsSectionsForMode(mode: WorkspaceMode = workspaceMode()): { id: string; label: string }[] {
+  return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id))
+}
 
 function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
@@ -312,12 +321,8 @@ function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   })
 }
 
-function parseFrameId(frameId?: string): number | null {
-  if (!frameId) {
-    return null
-  }
-  const parsed = parseInt(frameId, 10)
-  return Number.isFinite(parsed) ? parsed : null
+function parseFrameId(frameId?: string): FrameId | null {
+  return parseRouteFrameId(frameId)
 }
 
 function FrameSelector({
@@ -367,7 +372,7 @@ function FrameSelector({
         <div className="relative min-w-0 flex-1">
           <select
             value={frame.id}
-            onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
+            onChange={(event) => navigateToFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
             className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
           >
             {frameGroups.map((group) => (
@@ -391,8 +396,9 @@ function FrameSelector({
   )
 }
 
-function FrameSettingsSectionLinks({ frameId }: { frameId: number }): JSX.Element {
+function FrameSettingsSectionLinks({ frameId }: { frameId: FrameId }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
+  const frameSettingsSections = frameSettingsSectionsForMode()
   const splitIndex = Math.ceil(frameSettingsSections.length / 2)
   const sectionColumns = [frameSettingsSections.slice(0, splitIndex), frameSettingsSections.slice(splitIndex)]
 
@@ -426,7 +432,7 @@ function FrameToolRow({
 }: {
   definition: FrameToolDefinition
   active: boolean
-  frameId: number
+  frameId: FrameId
 }): JSX.Element {
   const { closeSecondarySidebar } = useActions(workspaceLogic)
 
@@ -1280,11 +1286,18 @@ function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
   return activeTool !== 'preview'
 }
 
-function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
+function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element {
   const frameLogicProps = { frameId }
   const inFrameAdminMode = isInFrameAdminMode()
-  const availableToolDefinitions = frameToolDefinitionsForMode(inFrameAdminMode)
-  useMountedLogic(terminalLogic(frameLogicProps))
+  const mode = workspaceMode()
+  const availableToolDefinitions = frameToolDefinitionsForMode(mode)
+  if (frameToolPanelIsAllowed(mode, 'terminal')) {
+    // The cloud protocol has no shell, so terminalLogic must never mount
+    // there. The mode is constant for the app's lifetime, so this
+    // conditional hook is stable across renders.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useMountedLogic(terminalLogic(frameLogicProps))
+  }
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
 
@@ -1463,10 +1476,10 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
   const { searchParams } = useValues(router)
-  const availableToolDefinitions = frameToolDefinitionsForMode(isInFrameAdminMode())
+  const availableToolDefinitions = frameToolDefinitionsForMode()
   const routeFrameId = parseFrameId(id)
   const firstFrame =
-    (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
+    (routeFrameId ? framesList.find((frame) => frameIdsEqual(frame.id, routeFrameId)) : null) ??
     selectedFrame ??
     activeFramesList[0] ??
     framesList[0] ??

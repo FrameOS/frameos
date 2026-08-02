@@ -22,6 +22,7 @@ main/                     boot orchestration + platform modules
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
+  fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_console.c           USB-serial REPL: status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them
@@ -115,6 +116,78 @@ frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
+
+## Cloud enrollment (cloud-managed frames)
+
+Generic firmware can enroll directly with a cloud provider (enrollment flow A
+in `docs/cloud-frames.md`) instead of — or before — being paired with a
+self-hosted backend. The browser flasher provisions `cloud_url` and
+`claim_token` into NVS over the USB serial API after flashing; by hand it is:
+
+```
+frameos> set cloud_url https://cloud.frameos.net
+frameos> set claim_token FRCT_...        # single use, never echoed back
+frameos> wifi MySSID MyPassword          # saves and reboots
+frameos> status                          # cloud: pending → enrolled
+```
+
+Once Wi-Fi is up, the device generates an Ed25519 keypair (vendored
+Monocypher; the 32-byte seed lives in NVS key `cloud_sk` and is never
+printed), POSTs `{cloud_url}/api/frames/enroll`, and on success persists the
+access token / frame id / WS path (NVS `cloud_token` / `cloud_fid` /
+`cloud_ws`) and erases the claim token. A `400` response (invalid, expired,
+or already-used token) also erases the claim token — it is dead after one
+use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
+until a fresh token is set. Transient failures retry with exponential backoff
+(10 s → 15 min).
+
+Expected `status` line while waiting for enrollment:
+
+```
+cloud:       pending url=https://cloud.frameos.net claim_token=(set) ws=off
+```
+
+and after enrollment (`GET /status` carries the same data under `"cloud"`):
+
+```
+cloud:       enrolled url=https://cloud.frameos.net claim_token=(none) frame=… ws=connected
+```
+
+`cloud_url` must be `https://`; plain `http://` is accepted only for
+localhost, `.local`/`.localhost` names and private-network literals, so a
+typo cannot silently ship the claim token and bearer token in the clear.
+`set cloud_url` rejects anything else outright, and the enrollment/WS paths
+refuse to dial it.
+
+When enrolled, the firmware dials the management WebSocket
+(`esp_websocket_client` managed component) and runs the
+hello/challenge/auth/ready handshake, signing the base64-**decoded** nonce
+bytes with the device key. Implemented verbs: `get_state`, `render`,
+`reboot`, `restart_runtime` (same as reboot on ESP32), `set_current_scene`,
+and `set_scenes` (stored through the same interpreted-scene path as
+`usb_api upload-scenes`; `scene_ack` is sent only after the render task has
+actually hot-loaded the payload). Documented verbs outside this profile —
+`set_settings`, `set_schedule`, `get_logs`, `get_metrics`,
+`notify_update_available` — are acked `unsupported_verb`; anything not in the
+protocol is acked `unknown_verb`. Both are logged. Log shipping and
+declarative settings are TODO.
+
+Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
+authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote
+the device back to standalone: the access token, frame id and WS path are
+dropped from NVS, the device key is kept, and the last pushed scenes keep
+rendering. `factory-reset` erases all cloud state, including the device key.
+
+A single management WebSocket message is capped at **512 KiB** (the same
+ceiling as the on-device scene store); larger frames are dropped and acked
+`message_too_large`.
+
+Secrets at rest: `cloud_sk` (the Ed25519 seed), `cloud_token`, the unspent
+claim token and the WiFi PSK live in NVS in plaintext unless the board is
+provisioned with ESP-IDF flash encryption. The firmware never prints or
+echoes them, but physical access to an unencrypted module means physical
+access to the link — see the "Secrets at rest on ESP32" note in
+`docs/cloud-frames.md`.
 
 ## Power management (M4)
 
@@ -213,3 +286,7 @@ has no OTA partition, so firmware updates must be flashed over USB.
 The ESP32 component intentionally compiles only one selected display driver per
 firmware image. Backend builds set `FRAMEOS_SELECTED_PANEL` from the frame's
 device, so changing panel families means rebuilding firmware for that frame.
+The same applies to published release images: an image is "generic" only in
+that it carries no credentials — it is still built for one panel and one
+flash-size profile, so the cloud flasher has to offer (and the user has to
+pick) the matching artifact.

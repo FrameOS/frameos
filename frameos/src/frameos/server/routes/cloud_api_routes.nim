@@ -3,118 +3,43 @@
 ## Mirrors the backend's /api/cloud/* endpoints (backend/app/api/cloud.py) so
 ## the shared React settings section works against either server. Protocol
 ## documented in docs/cloud-link.md: OAuth 2.0 Device Authorization Grant,
-## outbound-only, scoped tokens. Link state lives in ./state/cloud_link.json.
+## outbound-only, scoped tokens. Link state lives in ./state/cloud_link.json
+## (helpers shared with the managed-mode modules in frameos/cloud/).
+##
+## Cloud-managed frames (docs/cloud-frames.md) add POST /api/cloud/enroll
+## (claim-token flow A) here, and the device-flow poll below upgrades a link
+## whose granted scopes include frame:managed (flow B).
 
 import algorithm
 import json
 import locks
-import os
 import strutils
 import times
 import mummy
 import mummy/routers
 import httpcore
 import std/httpclient
+import frameos/channels
 import frameos/upgrade
 import frameos/utils/http_client
+import frameos/cloud/link_state
+import frameos/cloud/enrollment
+import frameos/cloud/hub_client
 import ../api
 import ../auth
 import ../rate_limit
 import ../state
 
 const
-  CLOUD_LINK_STATE_PATH = "./state/cloud_link.json"
-  DEFAULT_CLOUD_PROVIDER_URL = "https://cloud.frameos.net"
   CLOUD_REQUEST_TIMEOUT_MS = 15000
   CLOUD_REQUEST_MAX_SECONDS = 20.0
   CLOUD_REQUEST_MAX_REDIRECTS = 1
 
-# Scopes a frame link may request; must stay in sync with docs/cloud-link.md.
-const KNOWN_FRAME_SCOPES = [
-  "frame:link",
-  "auth:login",
-  "backup:assets",
-  "remote:access",
-  "telemetry:logs",
-  "telemetry:metrics",
-]
-const DEFAULT_FRAME_SCOPES = @["frame:link"]
-
-var cloudLinkLock: Lock
-initLock(cloudLinkLock)
-
-proc isoTimestamp(epoch: int64): string =
-  format(fromUnix(epoch), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
-
-proc loadCloudLinkState(): JsonNode =
-  if fileExists(CLOUD_LINK_STATE_PATH):
-    try:
-      let parsed = parseJson(readFile(CLOUD_LINK_STATE_PATH))
-      if parsed.kind == JObject:
-        return parsed
-    except CatchableError:
-      discard
-  %*{"status": "disconnected"}
-
-proc saveCloudLinkState(state: JsonNode) =
-  ## This file holds the link bearer token, so its bytes must never be readable
-  ## by another local account — not even for the window between writing the
-  ## content and chmod'ing it, which is what the previous order left open at
-  ## whatever the process umask happened to be.
-  let dir = splitFile(CLOUD_LINK_STATE_PATH).dir
-  if dir.len > 0 and not dirExists(dir):
-    createDir(dir)
-  if dir.len > 0:
-    try:
-      setFilePermissions(dir, {fpUserRead, fpUserWrite, fpUserExec})
-    except CatchableError:
-      discard
-  let tempPath = CLOUD_LINK_STATE_PATH & ".tmp"
-  let handle = open(tempPath, fmWrite)
-  try:
-    setFilePermissions(tempPath, {fpUserRead, fpUserWrite})
-    handle.write(pretty(state, indent = 2) & "\n")
-  finally:
-    handle.close()
-  # Rename straight over the target: an interrupted replace then leaves the
-  # previous state intact instead of no state at all.
-  moveFile(tempPath, CLOUD_LINK_STATE_PATH)
-
-proc normalizeProviderUrl(value: string): string =
-  ## Empty string means "invalid"; callers fall back or reject.
-  var url = value.strip()
-  if url.len == 0:
-    return ""
-  if not (url.startsWith("http://") or url.startsWith("https://")):
-    return ""
-  while url.endsWith("/"):
-    url = url[0 ..< url.len - 1]
-  url
-
-proc providerUrlFromState(state: JsonNode): string =
-  let stored = normalizeProviderUrl(state{"provider_url"}.getStr(""))
-  if stored.len > 0: stored else: DEFAULT_CLOUD_PROVIDER_URL
-
-proc resetLinkState(state: JsonNode, pollError: string = "") =
-  let providerUrl = providerUrlFromState(state)
-  for key in ["device_code", "user_code", "verification_uri", "verification_uri_complete",
-              "expires_epoch", "access_token", "token_reference", "linked_client_id",
-              "account_id", "account_email", "scope", "poll_error", "local_origin",
-              "connected_at", "last_inventory_sync_at", "login_states"]:
-    if state.hasKey(key):
-      state.delete(key)
-  state["provider_url"] = %providerUrl
-  state["status"] = %"disconnected"
-  if pollError.len > 0:
-    state["poll_error"] = %pollError
-
-proc expireIfNeeded(state: JsonNode): bool =
-  if state{"status"}.getStr("") == "connecting" and
-      state{"expires_epoch"}.getInt(0) > 0 and
-      int64(state{"expires_epoch"}.getInt(0)) <= int64(epochTime()):
-    resetLinkState(state, pollError = "expired")
-    return true
-  false
+proc jsonOrNull(node: JsonNode): JsonNode =
+  ## `state{...}` yields nil for missing keys, and a nil embedded in `%*`
+  ## segfaults std/json's serializer. A claim-token enrollment (flow A) has no
+  ## account_id/linked_client_id, so every optional field must go through this.
+  if node == nil: newJNull() else: node
 
 proc cloudStatusPayload(state: JsonNode): JsonNode =
   let status = state{"status"}.getStr("disconnected")
@@ -124,15 +49,15 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     "default_provider_url": DEFAULT_CLOUD_PROVIDER_URL,
     "status": status,
     "can_edit_provider": status == "disconnected",
-    "poll_error": state{"poll_error"},
+    "poll_error": jsonOrNull(state{"poll_error"}),
     "connection": newJNull(),
     "link": newJNull(),
   }
   if status == "connecting":
     result["connection"] = %*{
-      "user_code": state{"user_code"},
-      "verification_uri": state{"verification_uri"},
-      "verification_uri_complete": state{"verification_uri_complete"},
+      "user_code": jsonOrNull(state{"user_code"}),
+      "verification_uri": jsonOrNull(state{"verification_uri"}),
+      "verification_uri_complete": jsonOrNull(state{"verification_uri_complete"}),
       "expires_at": (
         if state{"expires_epoch"}.getInt(0) > 0:
           %isoTimestamp(int64(state{"expires_epoch"}.getInt(0)))
@@ -146,13 +71,16 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     for scope in state{"scope"}.getStr("").splitWhitespace():
       scopes.add(%scope)
     result["link"] = %*{
-      "linked_client_id": state{"linked_client_id"},
+      "linked_client_id": jsonOrNull(state{"linked_client_id"}),
       "scopes": scopes,
-      "account_id": state{"account_id"},
-      "account_email": state{"account_email"},
-      "connected_at": state{"connected_at"},
-      "last_inventory_sync_at": state{"last_inventory_sync_at"},
+      "account_id": jsonOrNull(state{"account_id"}),
+      "account_email": jsonOrNull(state{"account_email"}),
+      "connected_at": jsonOrNull(state{"connected_at"}),
+      "last_inventory_sync_at": jsonOrNull(state{"last_inventory_sync_at"}),
     }
+    if state{"mode"}.getStr("") == "managed":
+      result["mode"] = %"managed"
+      result["link"]["frame_id"] = jsonOrNull(state{"frame_id"})
 
 proc cloudRequest(providerUrl, path: string, httpMethod = HttpPost,
                   accessToken = "", body: JsonNode = nil): (int, JsonNode) =
@@ -228,9 +156,6 @@ proc rateLimitedResponse(request: Request, bucket: string): bool {.gcsafe.} =
   headers["Content-Type"] = "application/json"
   request.respond(429, headers, $(%*{"detail": "Too many requests"}))
   true
-
-proc linkHasScope(state: JsonNode, scope: string): bool =
-  scope in state{"scope"}.getStr("").splitWhitespace()
 
 proc pruneLoginStates(state: JsonNode): bool {.discardable.} =
   ## Drop expired pending login-handoff states (stored under login_states), then
@@ -406,12 +331,17 @@ proc addCloudApiRoutes*(router: var Router) =
         state["status"] = %"connecting"
         # The provider only accepts login-handoff redirects on this origin.
         state["local_origin"] = %origin
-        state["device_code"] = startResponse{"device_code"}
-        state["user_code"] = startResponse{"user_code"}
-        state["verification_uri"] = startResponse{"verification_uri"}
-        state["verification_uri_complete"] = startResponse{"verification_uri_complete"}
+        state["device_code"] = jsonOrNull(startResponse{"device_code"})
+        state["user_code"] = jsonOrNull(startResponse{"user_code"})
+        state["verification_uri"] = jsonOrNull(startResponse{"verification_uri"})
+        state["verification_uri_complete"] = jsonOrNull(startResponse{"verification_uri_complete"})
         state["interval_seconds"] = %startResponse{"interval"}.getInt(5)
         state["scope"] = %scopes.join(" ")
+        # Remember what THIS device asked for. The poll response below reports
+        # what the provider says it granted, and managed mode — the one scope
+        # that hands a provider remote control of the frame — is only entered
+        # when both agree (managedEnrollmentRequested).
+        state["requested_scope"] = %scopes.join(" ")
         let expiresIn = startResponse{"expires_in"}.getInt(0)
         if expiresIn > 0:
           state["expires_epoch"] = %int(epochTime() + float(expiresIn))
@@ -446,6 +376,7 @@ proc addCloudApiRoutes*(router: var Router) =
         networkError = true
 
       var syncAccessToken = ""
+      var grantedManagedScope = false
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         if state{"status"}.getStr("") != "connecting" or state{"device_code"}.getStr("") != deviceCode:
@@ -467,8 +398,8 @@ proc addCloudApiRoutes*(router: var Router) =
           let accessToken = pollResponse{"access_token"}.getStr("")
           state["status"] = %"connected"
           state["access_token"] = %accessToken
-          state["token_reference"] = pollResponse{"token_reference"}
-          state["linked_client_id"] = pollResponse{"linked_client_id"}
+          state["token_reference"] = jsonOrNull(pollResponse{"token_reference"})
+          state["linked_client_id"] = jsonOrNull(pollResponse{"linked_client_id"})
           if pollResponse{"scope"}.getStr("") != "":
             state["scope"] = pollResponse{"scope"}
           for key in ["device_code", "user_code", "verification_uri",
@@ -482,6 +413,13 @@ proc addCloudApiRoutes*(router: var Router) =
           # cannot hold cloudLinkLock — and with it every cloud route — for
           # minutes.
           syncAccessToken = accessToken
+          # Granted AND locally requested: a provider cannot upgrade a
+          # backups-only link into cloud-managed mode by claiming the scope.
+          grantedManagedScope = managedEnrollmentRequested(state)
+          if linkHasScope(state, "frame:managed") and not grantedManagedScope:
+            log(%*{"event": "cloud:enroll:refused", "reason": "scope_not_requested",
+                   "message": "The provider granted frame:managed but this frame " &
+                              "never asked for it; not entering managed mode."})
         else:
           resetLinkState(state, pollError = (if error.len > 0: error else: "unexpected status " & $pollCode))
           saveCloudLinkState(state)
@@ -489,6 +427,29 @@ proc addCloudApiRoutes*(router: var Router) =
           return
 
       let synced = fetchConnectSync(providerUrl, syncAccessToken)
+
+      # Flow B (docs/cloud-frames.md): a device-flow link granted the
+      # frame:managed scope registers the device keypair with the provider and
+      # becomes cloud-managed. Runs without cloudLinkLock — it is another
+      # provider round trip — and persists mode/frame_id/ws_path itself.
+      if grantedManagedScope:
+        {.gcsafe.}:
+          if otherControlPlaneActive(globalFrameConfig):
+            log(%*{"event": "cloud:enroll:refused", "reason": "backend_managed",
+                   "message": "This frame is managed by a self-hosted backend; " &
+                              "remove serverHost from frame.json before enrolling with a cloud provider"})
+          else:
+            let outcome = enrollManagedFrame(providerUrl, "", syncAccessToken, "", globalFrameConfig)
+            if outcome.ok:
+              startCloudHubClient(globalFrameConfig)
+            else:
+              log(%*{"event": "cloud:enroll:error", "flow": "device_flow",
+                     "status": outcome.status, "error": outcome.error})
+              withLock cloudLinkLock:
+                let state = loadCloudLinkState()
+                state["managed_enroll_error"] = %outcome.error
+                saveCloudLinkState(state)
+
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         for key, value in synced:
@@ -496,6 +457,63 @@ proc addCloudApiRoutes*(router: var Router) =
         if synced.len > 0:
           saveCloudLinkState(state)
         jsonResponse(request, Http200, cloudStatusPayload(state))
+  )
+
+  router.post("/api/cloud/enroll", proc(request: Request) {.gcsafe.} =
+    ## Flow A (docs/cloud-frames.md): enroll this frame as cloud-managed with
+    ## a claim token pasted into the local admin page or setup portal. Local
+    ## admin session required — enrollment is a local ceremony, never a
+    ## provider verb.
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except JsonParsingError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      let claimToken = payload{"claim_token"}.getStr("").strip()
+      if claimToken.len == 0:
+        jsonResponse(request, Http400, %*{"detail": "Missing claim_token"})
+        return
+      # One control plane at a time: refuse while a self-hosted backend is
+      # configured, and while already enrolled with a provider.
+      if otherControlPlaneActive(globalFrameConfig):
+        jsonResponse(request, Http409,
+          %*{"detail": "This frame is managed by a self-hosted backend. " &
+                       "Remove serverHost from frame.json before enrolling with FrameOS Cloud."})
+        return
+      var providerUrl = ""
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        discard expireIfNeeded(state)
+        if state{"status"}.getStr("") == "connected":
+          jsonResponse(request, Http409,
+            %*{"detail": "Already connected to FrameOS Cloud; disconnect first"})
+          return
+        let fromBody = normalizeProviderUrl(payload{"provider_url"}.getStr(""))
+        providerUrl = if fromBody.len > 0: fromBody else: providerUrlFromState(state)
+
+      let outcome = enrollManagedFrame(
+        providerUrl, claimToken, "", payload{"name"}.getStr(""), globalFrameConfig)
+      if not outcome.ok:
+        let status =
+          if outcome.status == 400: Http400
+          elif outcome.status == 409: Http409
+          elif outcome.status == 429: Http429
+          elif outcome.status == 0: Http502
+          else: Http502
+        jsonResponse(request, status, %*{
+          "detail": "Enrollment failed: " & outcome.error,
+          "error": outcome.error,
+        })
+        return
+      startCloudHubClient(globalFrameConfig)
+      # Managed mode activates the private-network HTTP deny immediately.
+      refreshLocalNetworkPolicy(globalFrameConfig)
+      withLock cloudLinkLock:
+        jsonResponse(request, Http200, cloudStatusPayload(loadCloudLinkState()))
   )
 
   # ---- cloud login for the on-device admin -----------------------------------
@@ -705,7 +723,13 @@ proc addCloudApiRoutes*(router: var Router) =
           discard
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
+        # resetLinkState also clears the managed-mode fields (mode, frame_id,
+        # ws_path, scenes_checksum); the hub client thread notices the state
+        # generation change and closes its management socket. The last pushed
+        # scenes keep rendering.
         resetLinkState(state)
         saveCloudLinkState(state)
         jsonResponse(request, Http200, cloudStatusPayload(state))
+      # Leaving managed mode lifts the private-network HTTP deny immediately.
+      refreshLocalNetworkPolicy(globalFrameConfig)
   )

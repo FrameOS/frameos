@@ -148,6 +148,13 @@ Cloud-profile verb set (complete):
 
 Anything else the socket receives is rejected and audit-logged on-device.
 
+Not every device implements all of it. Microcontroller frames (ESP32) run a
+subset — scenes, current scene, state, render, reboot — and answer
+`unsupported_verb` for `set_schedule`, `set_settings`, `get_logs`,
+`get_metrics` and `notify_update_available`. The management UI should hide
+those controls for an `esp32` frame rather than enqueue commands that come
+back refused; the profile table lives in `docs/cloud-frames.md`.
+
 ### Device identity and enrollment secrets
 
 - Today's model (backend mints `agentSharedSecret`, stores it in its DB) is

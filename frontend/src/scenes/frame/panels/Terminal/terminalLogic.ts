@@ -5,10 +5,10 @@ import { frameLogic } from '../../frameLogic'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { projectWebSocketPath } from '../../../../utils/projectApi'
-import { FrameType } from '../../../../types'
+import { FrameType, FrameId } from '../../../../types'
 
 export interface TerminalLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export type TerminalConnectionState = 'connecting' | 'connected' | 'closed'

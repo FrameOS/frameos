@@ -7,9 +7,10 @@ import { cachedProjectId, projectApiPathForProject } from '../../utils/projectAp
 import { showSuccessMessage } from '../../utils/workingMessage'
 
 import type { frameBootstrapLogicType } from './frameBootstrapLogicType'
+import type { FrameId } from '../../types'
 
 export interface FrameBootstrapLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 interface FrameBootstrapApiResponse {
@@ -17,13 +18,15 @@ interface FrameBootstrapApiResponse {
   script_url: string
 }
 
-function redactedFrameBootstrapUrl(scriptUrl: string, frameId: number): string {
+function redactedFrameBootstrapUrl(scriptUrl: string, frameId: FrameId): string {
   const projectId = cachedProjectId()
   const frameBootstrapPath = projectApiPathForProject(projectId, `/api/frame-bootstrap/${frameId}`)
 
   try {
     const url = new URL(scriptUrl)
-    const projectScopedMatch = url.pathname.match(new RegExp(`^(.*/api/projects/\\d+/frame-bootstrap/${frameId})(?:/|$)`))
+    const projectScopedMatch = url.pathname.match(
+      new RegExp(`^(.*/api/projects/\\d+/frame-bootstrap/${frameId})(?:/|$)`)
+    )
     if (projectScopedMatch) {
       return `${url.origin}${projectScopedMatch[1]}/[secret]`
     }
@@ -38,7 +41,7 @@ function redactedFrameBootstrapUrl(scriptUrl: string, frameId: number): string {
   }
 }
 
-function frameBootstrapCommandPreview(scriptUrl: string, frameId: number): string {
+function frameBootstrapCommandPreview(scriptUrl: string, frameId: FrameId): string {
   const command = `curl -fsSL ${redactedFrameBootstrapUrl(scriptUrl, frameId)} | sudo sh`
   const maxLength = 140
 

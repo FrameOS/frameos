@@ -16,12 +16,15 @@ import {
   FrameType,
   SceneNodeData,
   TemplateType,
+  FrameId,
 } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
+import { isCloudMode } from '../../utils/cloudMode'
+import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
@@ -199,7 +202,7 @@ function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
 export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
 
 export interface FrameLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
@@ -1085,7 +1088,7 @@ function templatesFromPayload(template: Partial<TemplateType>): Partial<Template
 }
 
 async function saveTemplateSceneImages(
-  frameId: number,
+  frameId: FrameId,
   template: Partial<TemplateType>,
   newScenes: FrameScene[]
 ): Promise<void> {
@@ -1508,8 +1511,20 @@ export function buildSplitScene(
   )
 }
 
-async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
+async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAction: FrameNextAction): Promise<void> {
   const normalizedFrame = normalizeFrameForSubmit(frame)
+  if (isCloudMode()) {
+    // Cloud frames have no POST /api/frames/{id} — the control plane only
+    // accepts the declarative settings allowlist, and applies it on the
+    // device immediately (which is why Save stays visible with no deploy
+    // step). Scene assignment is a separate, store-scene-only endpoint
+    // (/api/frames/{id}/scenes) that takes published store scene ids, not
+    // the frame's edited scene graphs, so Save deliberately never touches it.
+    if (!(await pushCloudFrameSettings(frameId, normalizedFrame))) {
+      throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
+    }
+    return
+  }
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
@@ -1526,7 +1541,7 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAct
   }
 }
 
-function openSceneControlDrawer(frameId: number, sceneId: string): void {
+function openSceneControlDrawer(frameId: FrameId, sceneId: string): void {
   const searchParams = {
     ...router.values.searchParams,
     drawer: 'scene',
