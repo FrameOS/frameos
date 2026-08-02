@@ -210,6 +210,31 @@ suite "cloud enrollment":
     check outcomeAfter.error == "claim_token_expired"
     check not fileExists(pendingEnrollmentPath())
 
+  test "a pre-NTP expiry stamp is discarded, not treated as expired":
+    # A Pi Zero has no RTC: the hub thread's first pass stamped
+    # "now + 24h" while the clock still read 2025, NTP then jumped the
+    # clock forward, and the next pass deleted the pending enrollment as
+    # expired — no request ever left the frame. The bogus stamp must be
+    # discarded and the enrollment must still go through.
+    clearLinkState()
+    setStubResponse(200, %*{
+      "access_token": "frame-token-ntp",
+      "scope": "frame:managed",
+      "frame_id": "frame-ntp",
+      "ws_path": "/api/frames/ws",
+    })
+    writeFile(pendingEnrollmentPath(), $(%*{
+      "claim_token": "FRCT-boot-ntp",
+      "provider_url": providerUrl,
+      # What a pre-NTP clock stamps: far in the past relative to real time,
+      # below the sanity epoch.
+      "expires_epoch": PENDING_ENROLL_CLOCK_SANITY_EPOCH - 1000,
+    }))
+    let (resolved, attempted, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    check resolved and attempted and outcome.ok
+    check not fileExists(pendingEnrollmentPath())
+    check linkState(){"frame_id"}.getStr("") == "frame-ntp"
+
   test "device-flow bearer enrollment upgrades an existing link":
     clearLinkState()
     withLock cloudLinkLock:
