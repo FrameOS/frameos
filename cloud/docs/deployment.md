@@ -36,8 +36,10 @@ pnpm --filter @frameos-cloud/auth-web start
 
 Production runs on a single Hetzner host — set `FRAMEOS_CLOUD_DEPLOY_HOST`
 (user@host) and optionally `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`; host specifics live
-in the private ops notes. It runs as the `frameos-cloud-auth-web.service` systemd unit, with the app in
-`/opt/frameos-cloud` and env in `/etc/frameos-cloud/auth-web.env`.
+in the private ops notes. It runs as the `frameos-cloud-auth-web.service`
+systemd unit, which starts the Next.js standalone server
+(`node cloud/apps/auth-web/server.js`) from `/opt/frameos-cloud`, with env in
+`/etc/frameos-cloud/auth-web.env`. The server has no pnpm and does not build.
 
 Deploy the pushed HEAD with:
 
@@ -45,26 +47,22 @@ Deploy the pushed HEAD with:
 pnpm deploy:prod
 ```
 
-**Monorepo cutover — pending.** The pre-unification flow streamed a tar of
-the `cloud/` subtree into `/usr/local/bin/frameos-cloud-update --archive -`,
-which swapped `/opt/frameos-cloud` (previous release kept at
-`/opt/frameos-cloud.previous` for rollback), ran
-`pnpm install --frozen-lockfile`, `scripts/db-migrate.sh`, built, and
-restarted the service. Since the workspace unification there is no
-cloud-local lockfile and `workspace:` dependencies resolve against the
-monorepo, so that server contract cannot work from this checkout:
-`pnpm deploy:prod` refuses to run, and production deploys continue from the
-pre-merge private repository until cutover.
+The deploy builds locally and ships a self-contained bundle:
 
-The planned replacement builds locally and ships a self-contained bundle,
-removing pnpm from the server entirely:
+1. `turbo run build --filter=@frameos-cloud/auth-web` builds the editor and
+   wasm packages as needed and produces `.next/standalone`
+   (`output: "standalone"` in `next.config.ts`, traced from the monorepo root
+   so pnpm workspace dependencies resolve into the bundle).
+2. The script assembles `.next/standalone` + `.next/static` + `public/`
+   (including the editor and wasm assets) + `apps/auth-web/scripts/` +
+   `packages/db/drizzle/` + `scripts/db-migrate.sh` and `db-cleanup.sh`, and
+   streams the tar into `/usr/local/bin/frameos-cloud-update --archive -` on
+   the server.
+3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
+   release (before the swap, so a failed migration leaves the running app
+   untouched), swaps `/opt/frameos-cloud` (previous release kept at
+   `/opt/frameos-cloud.previous` for rollback), and restarts the service.
 
-1. `turbo run build --filter=@frameos-cloud/auth-web` — builds the
-   frontend, editor, and wasm packages as needed; add
-   `output: "standalone"` to `next.config.ts` as part of this.
-2. Ship `.next/standalone` + `.next/static` + `public/` (including the
-   editor and wasm assets) + `packages/db/drizzle` + `scripts/`.
-3. `frameos-cloud-update` becomes: unpack, run migrations, restart.
 The script refuses to deploy a dirty tree or an unpushed commit, and checks the
 service plus the public login URL afterwards. Override
 `FRAMEOS_CLOUD_DEPLOY_HOST`, `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`, or
@@ -74,7 +72,11 @@ health check requires all three public origins to return a 2xx or 3xx response.
 
 To roll back, move `/opt/frameos-cloud.previous` back to `/opt/frameos-cloud`
 and restart `frameos-cloud-auth-web.service` (database migrations are not
-rolled back automatically).
+rolled back automatically). The pre-monorepo pnpm-based release is not
+startable by the current unit; the cutover-era backups
+(`frameos-cloud-update.pre-monorepo`,
+`frameos-cloud-auth-web.service.pre-monorepo`) would have to be restored to
+run it.
 
 All three public hostnames point at the same process. `cloud.frameos.net` is
 the login/auth domain, `account.frameos.net` owns account, device, and admin

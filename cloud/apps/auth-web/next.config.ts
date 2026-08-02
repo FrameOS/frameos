@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 import {
   PHASE_DEVELOPMENT_SERVER,
@@ -49,6 +50,11 @@ function createNextConfig(phase: string): NextConfig {
     ].join("; ");
 
   return {
+    // Production deploys ship .next/standalone as a self-contained bundle
+    // (see cloud/docs/deployment.md). Trace from the monorepo root so pnpm
+    // workspace dependencies resolve into the bundle.
+    output: "standalone",
+    outputFileTracingRoot: path.join(__dirname, "../../.."),
     async headers() {
       const noStoreHeader = {
         key: "Cache-Control",
