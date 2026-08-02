@@ -238,11 +238,13 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin "${GITHUB_REF_NAME}"
             git reset --hard "origin/${GITHUB_REF_NAME}"
+            # --force: the checkout always carries a committed manifest.json,
+            # and the R2 copy is the source of truth we are mirroring over it.
             python3 tools/buildroot-images/buildroot_images.py \
               --platform "${PLATFORM}" \
               --bucket "${R2_BUCKET}" \
               --prefix "${R2_PREFIX}" \
-              download
+              download --force
             # R2's manifest upsert is read-modify-write: two uploads finishing
             # in the same instant could drop an entry. Committing a mirror
             # that lost OUR image would silently unpublish it — fail loudly
