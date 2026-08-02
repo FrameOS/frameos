@@ -918,8 +918,8 @@ $(OBJECTS): pre-build
         pixie_env = ""
         if pixie_override is not None:
             pixie_env = f"FRAMEOS_PIXIE_PATH={shlex.quote(str(pixie_override))} "
-            await log(
-                self.db, self.redis, int(frame.id), "stdout",
+            await self.log(
+                "stdout",
                 f"Using local Pixie checkout at {pixie_override}",
             )
         cmd = (

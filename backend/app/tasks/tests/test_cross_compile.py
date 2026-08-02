@@ -227,6 +227,57 @@ async def test_run_docker_build_prepares_quickjs_archive_before_linking(
 
 
 @pytest.mark.asyncio
+async def test_run_docker_build_armv6_avoids_poisoned_toolchain_paths(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    temp_dir = tmp_path / "tmp"
+    build_dir = tmp_path / "build"
+    temp_dir.mkdir()
+    build_dir.mkdir()
+    captured_script: dict[str, str] = {}
+
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="armv6l", distro="debian", version="bookworm"),
+        temp_dir=str(temp_dir),
+        prebuilt_entry=None,
+    )
+
+    async def fake_ensure_toolchain_image() -> str:
+        return "frameos-cross-test"
+
+    async def fake_docker_run(**_kwargs):
+        captured_script["content"] = (temp_dir / "frameos-cross-build.sh").read_text()
+        return 0, "", ""
+
+    monkeypatch.setattr(compiler, "_ensure_toolchain_image", fake_ensure_toolchain_image)
+    compiler.executor = SimpleNamespace(docker_run=fake_docker_run)
+
+    await compiler._run_docker_build(str(build_dir))
+
+    script = captured_script["content"]
+    # The Bootlin/Buildroot wrapper hard-errors on -I/-L paths under /usr, so
+    # the Debian target headers/libs must go through the /opt symlink mirror.
+    assert "-I/opt/frameos/debian-target/include/arm-linux-gnueabihf" in script
+    assert "-I/opt/frameos/debian-target/include" in script
+    assert "-L/opt/frameos/debian-target/lib/arm-linux-gnueabihf" in script
+    assert "-I/usr/" not in script
+    assert "-L/usr/" not in script
+    assert 'ln -sfn /usr/include "$debian_mirror/include"' in script
+    # Debian lib stubs are filtered per-file: anything the toolchain sysroot
+    # already provides (libc, libm, crt*.o, ...) must not be linked from
+    # Debian, whose glibc is older than the toolchain's.
+    assert '"$CC" -print-sysroot' in script
+    assert 'if [ -e "$toolchain_sysroot/usr/lib/$name" ] || [ -e "$toolchain_sysroot/lib/$name" ]; then' in script
+    assert 'ln -sfn "$lib" "$debian_stub_dir/$name"' in script
+
+
+@pytest.mark.asyncio
 async def test_quickjs_preparation_is_quiet_on_success(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
     logs: list[tuple[str, str]] = []
