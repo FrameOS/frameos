@@ -28,6 +28,7 @@ import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
+import { longRunningTasksModel } from '../../models/longRunningTasksModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
@@ -2123,8 +2124,8 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
-          : firstDeployChangeDetails(frameForm, mode),
+            ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
+            : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -2289,6 +2290,27 @@ export const frameLogic = kea<frameLogicType>([
       saveFrame: () => actions.submitFrameForm(),
       submitFrameFormSuccess: () => {
         framesModel.actions.loadFrame(props.frameId)
+      },
+      submitFrameFormFailure: ({ error }) => {
+        // Nothing listened to this before, so a failed Save vanished without
+        // a trace — most visibly on the cloud, where saving to a frame the
+        // owner has not confirmed yet is refused with `frame_not_active`
+        // (409) and the workspace just sat there still saying "unsaved".
+        // Field-level validation renders inline; skip its sentinel error.
+        if (error?.message === 'Validation Failed') {
+          return
+        }
+        const detail =
+          error?.message?.includes('frame_not_active') && isCloudMode()
+            ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
+            : error?.message || 'Failed to save the frame'
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: 'Saving frame',
+          detail: null,
+        })
+        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
       },
       saveAndDeployFrame: async () => {
         const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)

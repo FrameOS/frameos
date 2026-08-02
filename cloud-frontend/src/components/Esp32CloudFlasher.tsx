@@ -1,4 +1,4 @@
-import { BoltIcon, CpuChipIcon } from '@heroicons/react/24/outline'
+import { ArrowRightIcon, BoltIcon, CheckCircleIcon, CpuChipIcon } from '@heroicons/react/24/outline'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
@@ -6,6 +6,8 @@ import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorMessage } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 import { esp32Panels } from '../lib/generated-devices'
+import { cloudFrameUrl } from '../routes'
+import { fetchFrameList, useEnrollmentWatch } from './enrollmentWatch'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -447,6 +449,10 @@ export function Esp32CloudFlasher({
   // the hardware/panel choice, so it wins over a preset's wiring.
   const [pinsSpec, setPinsSpec] = useState('')
   const busyRef = useRef(false)
+  // The frames that already existed when this flash started (snapshotted just
+  // before the claim token is minted, so the enrolled frame can never be in
+  // it). null = no usable snapshot; then the panel does not guess.
+  const [knownFrameIds, setKnownFrameIds] = useState<ReadonlySet<string> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -469,6 +475,15 @@ export function Esp32CloudFlasher({
   // `set hardware`, or a bare panel via `set panel`.
   const provisionKey = panelChoice.replace(/^(hw|panel):/, '')
   const provisionCommand = panelChoice.startsWith('hw:') ? 'hardware' : 'panel'
+
+  // The handoff to the freshly enrolled frame: once provisioning is done the
+  // board reboots and enrolls on its own schedule, so watch the frames list
+  // until a frame appears that predates nothing — then offer to open it.
+  // Without a snapshot there is no telling old frames from new; stay quiet.
+  const { enrolledFrame, hintDue } = useEnrollmentWatch({
+    active: phase === 'done' && knownFrameIds !== null,
+    knownFrameIds,
+  })
 
   // WebSerial support cannot change while the page is open, so probe it once.
   // (The Next.js version deferred this to an effect purely to keep SSR and
@@ -526,6 +541,7 @@ export function Esp32CloudFlasher({
     setLines([])
     setError(undefined)
     setProgress(0)
+    setKnownFrameIds(null)
     try {
       setPhase('fetching')
       const firmware = await fetchGenericFirmware(log)
@@ -632,6 +648,11 @@ export function Esp32CloudFlasher({
       // one code per failed attempt. Now nothing is spent unless the firmware
       // is actually on the board and only the serial handshake is left.
       log('Preparing a one-time enrollment for this frame…')
+      // Snapshot the fleet BEFORE the claim token exists: whatever frame
+      // appears beyond this set can only be the one this flash enrolls. A
+      // failed snapshot (undefined) just disables the automatic handoff.
+      const framesBeforeEnrollment = await fetchFrameList()
+      setKnownFrameIds(framesBeforeEnrollment ? new Set(framesBeforeEnrollment.map((frame) => frame.id)) : null)
       const token = await mintEnrollmentCode()
       const commands: ConsoleCommand[] = [
         {
@@ -827,7 +848,45 @@ export function Esp32CloudFlasher({
           {error}
         </p>
       ) : null}
-      {phase === 'done' ? <div data-testid="esp32-flash-done" /> : null}
+      {phase === 'done' ? (
+        <div
+          data-testid="esp32-flash-done"
+          className={enrolledFrame || knownFrameIds ? 'frameos-card space-y-2 rounded-xl border p-3' : undefined}
+        >
+          {enrolledFrame ? (
+            <>
+              <p className="frameos-strong flex items-start gap-1.5 text-sm font-semibold">
+                <CheckCircleIcon aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                <span>
+                  Frame &ldquo;{enrolledFrame.name || 'New frame'}&rdquo; enrolled
+                  {enrolledFrame.status === 'pending' ? ' and is waiting for your confirmation' : ''}.
+                </span>
+              </p>
+              <a
+                data-testid="esp32-flash-open-frame"
+                className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                href={cloudFrameUrl(enrolledFrame.id)}
+              >
+                Open frame
+                <ArrowRightIcon aria-hidden className="h-4 w-4" />
+              </a>
+            </>
+          ) : knownFrameIds ? (
+            <>
+              <p className="frameos-muted text-xs">
+                Watching for the frame to enroll — the moment it phones home it appears here (and in the workspace as
+                pending).
+              </p>
+              {hintDue ? (
+                <p className="frameos-muted text-xs">
+                  Nothing yet — check the board has power and can reach your WiFi (its console over USB shows what it
+                  is doing). The enrollment stays valid: the frame appears here whenever it reaches the cloud.
+                </p>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {lines.length > 0 ? (
         <pre
           className="frameos-inset max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-[11px] leading-relaxed"

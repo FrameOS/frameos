@@ -9,6 +9,9 @@ import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
@@ -471,7 +474,7 @@ export const templatesLogic = kea<templatesLogicType>([
         favouriteTemplates.filter((template) => template.compatibility.supported),
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, props, values }) => ({
     // Install the scene(s) behind a pasted URL (template zip, or a scene page
     // with a frameos:zip meta tag) straight onto this frame — the flow behind
     // "copy this link into the Templates search box" on FrameOS Cloud.
@@ -551,6 +554,39 @@ export const templatesLogic = kea<templatesLogicType>([
       }
       const scenes = await loadRepositoryTemplateScenes(repository, template)
       actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer)
+
+      // On the cloud control plane the scene list that actually reaches the
+      // device is the server-side store-scene assignment (set_scenes over the
+      // hub WS) — the client-side applyTemplate above only shapes the
+      // workspace view. Both cloud catalogs (the public store and "my cloud
+      // scenes") carry the store scene uuid, so assign it here too.
+      const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
+      if (isCloudMode() && storeSceneId) {
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: `Adding "${template.name}"`,
+          detail: 'Assigning the scene to this frame',
+        })
+        try {
+          const assigned = await assignCloudFrameStoreScene(props.frameId, storeSceneId)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'save',
+            status: 'success',
+            detail: assigned ? 'Scene queued for the frame' : 'Scene was already on the frame',
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'save',
+            detail: message.includes('frame_not_active')
+              ? 'This frame is still pending — confirm it on its dashboard, then add the scene again.'
+              : message,
+          })
+        }
+      }
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
       const templates: Partial<TemplateType>[] = []

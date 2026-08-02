@@ -61,6 +61,7 @@ import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import {
   frameSettingsSectionIsAllowed,
+  frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
   workspaceMode,
   type WorkspaceMode,
@@ -75,6 +76,10 @@ interface FrameToolDefinition {
   label: string
   description: string
   icon: JSX.Element
+  // Non-null when the panel stays visible but this frame's device profile
+  // cannot serve it (e.g. Schedule on an esp32 cloud frame): the rail shows
+  // it disabled with this explanation instead of hiding it.
+  disabledReason?: string | null
 }
 
 const uploadedScenePrefix = 'uploaded/'
@@ -257,14 +262,20 @@ const frameToolDefinitions: FrameToolDefinition[] = [
 ]
 
 // Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
-// invisible in every mode until it is listed there. The frame narrows it
-// further by device profile — a cloud-managed ESP32 frame has no schedule,
-// settings, logs or metrics verbs (docs/cloud-frames.md, "Device profiles").
+// invisible in every mode until it is listed there. The frame's device
+// profile never hides a panel — it disables it with an explanation (e.g.
+// Schedule on an esp32 cloud frame, whose firmware refuses `set_schedule`),
+// so the workspace keeps its shape whatever the hardware.
 function frameToolDefinitionsForMode(
   mode: WorkspaceMode = workspaceMode(),
   frame?: FrameType | null
 ): FrameToolDefinition[] {
-  return frameToolDefinitions.filter((definition) => frameToolPanelIsAllowed(mode, definition.panel, frame))
+  return frameToolDefinitions
+    .filter((definition) => frameToolPanelIsAllowed(mode, definition.panel))
+    .map((definition) => ({
+      ...definition,
+      disabledReason: frameToolPanelDisabledReason(mode, definition.panel, frame),
+    }))
 }
 
 function frameToolPanelFromSearchParams(
@@ -440,6 +451,28 @@ function FrameToolRow({
   frameId: FrameId
 }): JSX.Element {
   const { closeSecondarySidebar } = useActions(workspaceLogic)
+
+  if (definition.disabledReason) {
+    // Visible but inert: the device profile cannot serve this panel, and a
+    // tooltip that says why beats a control that silently vanished.
+    return (
+      <div
+        aria-disabled
+        title={definition.disabledReason}
+        className="frameos-frame-tool-row flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-slate-700 opacity-50"
+      >
+        <span className="frameos-frame-tool-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+          {definition.icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{definition.label}</span>
+          <span className="frameos-frame-tool-description block truncate text-xs text-slate-400">
+            {definition.description}
+          </span>
+        </span>
+      </div>
+    )
+  }
 
   return (
     <A
@@ -1311,17 +1344,20 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
-  // Computed with the frame in hand: the device profile can hide panels the
-  // mode alone would allow (an esp32 cloud frame has no schedule/settings/
-  // logs/metrics verbs), and the ?tool= fallback below must not land on one.
+  // Computed with the frame in hand: the device profile can disable panels
+  // the mode alone would allow (an esp32 cloud frame has no schedule or
+  // settings verbs). Disabled panels stay in the rail — visible with a
+  // tooltip — but the ?tool= deep link and the fallback must not land the
+  // user inside one.
   const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
-  const requestedPanel = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions)
-  const fallbackPanel = availableToolDefinitions.some((definition) => definition.panel === utilityPanel)
+  const enabledToolDefinitions = availableToolDefinitions.filter((definition) => !definition.disabledReason)
+  const requestedPanel = frameToolPanelFromSearchParams(searchParams, enabledToolDefinitions)
+  const fallbackPanel = enabledToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel
     : 'overview'
   const activeTool =
-    availableToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
-    availableToolDefinitions[0]
+    enabledToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
+    enabledToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)

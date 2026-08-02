@@ -47,7 +47,9 @@ export function CloudDrive({ openInstalledSceneDrawer = false }: CloudDriveProps
       <div className="flex justify-between w-full items-center">
         <H6 className="flex cursor-pointer items-center gap-1" onClick={() => toggleExpanded(EXPANDED_KEY)}>
           {expanded ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
-          Private cloud scenes
+          {/* "My cloud scenes" on the cloud control plane, "Private cloud
+              scenes" behind a backend link — the repository knows. */}
+          {driveRepository.name}
           {hasDriveScope && driveTemplates.length ? ` (${driveTemplates.length})` : ''}
           {driveTemplatesLoading ? <Spinner className="ml-1 h-4 w-4" /> : null}
         </H6>

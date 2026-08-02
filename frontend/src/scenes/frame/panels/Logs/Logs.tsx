@@ -11,6 +11,7 @@ import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } fr
 import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { EMBEDDED_ESP32_S3 } from '../../../../devices'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
+import { frameSupportsUsbSerialConsole } from '../../../workspace/workspaceSurfaces'
 import {
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
@@ -334,8 +335,13 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const visibleBaseLogCount = logs.length
   const virtuosoKey = compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  // Two roads to a USB console: a backend/on-device embedded frame, or a
+  // cloud-managed esp32 frame (hardware.platform from enrollment). The cloud
+  // case matters most for a board that never joins WiFi — its serial console
+  // is the only log source there is.
   const isEsp32Frame =
-    frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3
+    (frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3) ||
+    frameSupportsUsbSerialConsole(frame)
   const showUsbLogControls = isEsp32Frame && webSerialSupported
   const usbLogStreamState = usbLogStreamStatesByFrameId[frameId]
   const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)

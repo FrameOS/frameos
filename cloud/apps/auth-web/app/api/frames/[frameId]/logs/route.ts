@@ -1,4 +1,4 @@
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { frameLogs } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
@@ -52,6 +52,12 @@ export async function GET(
 
   // One row over the page so the caller can tell a full page from a
   // truncated one and knows to fetch again with after_id.
+  //
+  // Direction matters: with a cursor this walks FORWARD (oldest first after
+  // the cursor — incremental catch-up). Without one it must page from the
+  // NEWEST end, like the backend (frames.py api_frame_get_logs: newest 1000,
+  // then reversed) — ascending from the top of a 5000-row retention window
+  // opened the panel on the oldest, stalest logs a chatty frame had.
   const rows = await db
     .select()
     .from(frameLogs)
@@ -61,10 +67,14 @@ export async function GET(
         ...(afterId === undefined ? [] : [gt(frameLogs.id, afterId)]),
       ),
     )
-    .orderBy(asc(frameLogs.id))
+    .orderBy(afterId === undefined ? desc(frameLogs.id) : asc(frameLogs.id))
     .limit(maxLogsPerPage + 1);
   const hasMore = rows.length > maxLogsPerPage;
   const page = hasMore ? rows.slice(0, maxLogsPerPage) : rows;
+  if (afterId === undefined) {
+    // Chronological for display; the query fetched newest-first.
+    page.reverse();
+  }
 
   return NextResponse.json({
     has_more: hasMore,

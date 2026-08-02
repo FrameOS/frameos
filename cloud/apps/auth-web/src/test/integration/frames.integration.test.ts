@@ -21,6 +21,7 @@ import { GET as listFrames } from "../../../app/api/frames/route";
 import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
 import { GET as getFrameLogs } from "../../../app/api/frames/[frameId]/logs/route";
+import { GET as getFrameLogsFull } from "../../../app/api/frames/[frameId]/logs/full/route";
 import { POST as revokeFrameRoute } from "../../../app/api/frames/[frameId]/revoke/route";
 import {
   GET as getFrameScenes,
@@ -1263,6 +1264,67 @@ describe("frame management API", () => {
     expect(list.status).toBe(200);
     const listPayload = (await list.json()) as { frames: unknown[] };
     expect(listPayload.frames).toHaveLength(1);
+  });
+
+  it("opens the log page on the NEWEST rows when the window overflows a page", async () => {
+    // Without a cursor the panel shows the first page it gets — ascending
+    // from a 5000-row retention window that used to be the oldest, stalest
+    // logs. It must mirror the backend: newest page, chronological order.
+    const { frame_id } = await enrolledFrame();
+    const total = 1001; // maxLogsPerPage + 1
+    const batch = 250;
+    for (let offset = 0; offset < total; offset += batch) {
+      await db.insert(frameLogs).values(
+        Array.from({ length: Math.min(batch, total - offset) }, (_, index) => ({
+          frameId: frame_id,
+          payload: { event: "log", line: `line ${offset + index}` },
+          sizeBytes: 40,
+          timestamp: new Date(),
+        })),
+      );
+    }
+
+    const response = await getFrameLogs(
+      getRequest(`/api/frames/${frame_id}/logs`),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      has_more: boolean;
+      logs: { id: number; line: string }[];
+    };
+    expect(payload.logs).toHaveLength(1000);
+    expect(payload.has_more).toBe(true);
+    // The oldest row fell off the page; the newest is last (chronological).
+    expect(payload.logs[0]?.line).toBe("line 1");
+    expect(payload.logs.at(-1)?.line).toBe("line 1000");
+    // Ids ascend within the page, so ?after_id incremental catch-up works.
+    expect(payload.logs[0]!.id).toBeLessThan(payload.logs.at(-1)!.id);
+  });
+
+  it("downloads the full retained log as text", async () => {
+    const { frame_id } = await enrolledFrame();
+    await db.insert(frameLogs).values(
+      Array.from({ length: 2 }, (_, index) => ({
+        frameId: frame_id,
+        payload: { event: "render", line: `full line ${index}` },
+        sizeBytes: 40,
+        timestamp: new Date("2026-08-01T00:00:00Z"),
+      })),
+    );
+
+    const response = await getFrameLogsFull(
+      getRequest(`/api/frames/${frame_id}/logs/full`),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(response.headers.get("content-disposition")).toContain("full-logs");
+    const body = await response.text();
+    expect(body).toBe(
+      "[2026-08-01T00:00:00.000Z] (render) full line 0\n" +
+        "[2026-08-01T00:00:00.000Z] (render) full line 1\n",
+    );
   });
 
   it("revokes a frame: linked client dies, queue drains, bearer stops working", async () => {

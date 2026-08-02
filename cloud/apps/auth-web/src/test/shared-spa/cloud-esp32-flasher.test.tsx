@@ -182,6 +182,9 @@ function mockCloudApi(
       }),
     ),
   metadata: typeof metadataPayload = metadataPayload,
+  // The enrollment watcher's frames-list snapshot/polling. Defaults to an
+  // account with no frames that never gains one.
+  frames: () => unknown[] = () => [],
 ) {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
@@ -193,6 +196,9 @@ function mockCloudApi(
     }
     if (url === "/api/frames/claim-tokens") {
       return Promise.resolve(Response.json({ claim_token: "FRCT_minted" }));
+    }
+    if (url === "/api/frames") {
+      return Promise.resolve(Response.json({ frames: frames() }));
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`));
   });
@@ -323,6 +329,62 @@ describe("Esp32CloudFlasher", () => {
     expect(
       fetchedUrls().filter((url) => url === "/api/frames/claim-tokens"),
     ).toHaveLength(1);
+  });
+
+  it("hands off to the enrolled frame once it appears in the account", async () => {
+    // The fleet is snapshotted before the claim token is minted; whatever
+    // frame appears beyond that set is the one this flash enrolled. The
+    // first list call is the snapshot (empty), the next is the watcher's
+    // poll after "done" — by then the board has enrolled.
+    let framesCalls = 0;
+    mockCloudApi(undefined, metadataPayload, () => {
+      framesCalls += 1;
+      return framesCalls === 1
+        ? []
+        : [
+            {
+              created_at: "2026-08-02T00:00:00Z",
+              id: "abc-123",
+              name: "Kitchen",
+              status: "pending",
+            },
+          ];
+    });
+    stubSerial(createHealthyPort());
+    render(
+      <Esp32CloudFlasher cloudOrigin={window.location.origin} frameName="Kitchen" />,
+    );
+    await screen.findByRole("button", { name: /connect & flash/i });
+    clickFlash();
+
+    const done = await screen.findByTestId("esp32-flash-done", undefined, {
+      timeout: 5000,
+    });
+    const open = await screen.findByTestId("esp32-flash-open-frame", undefined, {
+      timeout: 5000,
+    });
+    // cloudFrameUrl: SPA base path /frames + its own /frames/<id> route.
+    expect(open.getAttribute("href")).toBe("/frames/frames/abc-123");
+    expect(done.textContent).toContain("Kitchen");
+    expect(done.textContent).toContain("waiting for your confirmation");
+  });
+
+  it("keeps Done quiet when the fleet snapshot was unavailable", async () => {
+    // No snapshot means no way to tell the new frame from the old ones —
+    // the panel must not guess (and must not poll forever).
+    mockCloudApi(undefined, metadataPayload, () => {
+      throw new Error("frames list down");
+    });
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+    clickFlash();
+
+    const done = await screen.findByTestId("esp32-flash-done", undefined, {
+      timeout: 5000,
+    });
+    expect(done.textContent).toBe("");
+    expect(screen.queryByTestId("esp32-flash-open-frame")).toBeNull();
   });
 
   it("provisions the chosen e-paper panel when the release ships the all-panels firmware", async () => {

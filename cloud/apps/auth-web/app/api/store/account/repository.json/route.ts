@@ -11,14 +11,23 @@ import {
 } from "../../../../../src/lib/device-flow";
 import { getScenesBaseUrl } from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { readSession } from "../../../../../src/lib/session";
 import { storePublishScope } from "../../../../../src/lib/store";
 
 export const runtime = "nodejs";
 
 // "My cloud drive": the authenticated account's own scenes — private and
-// public — in the frameos repository format. Fetched by a linked frameos
-// backend with the store scope; URLs are absolute because the backend
-// attaches the link token when requesting them from the provider host.
+// public — in the frameos repository format. Two callers, two credentials:
+//
+//   * a linked frameos backend sends its link token (Authorization header)
+//     and needs the store scope;
+//   * the /frames workspace runs ON the cloud, where the browser session IS
+//     the account — its Add-scene drawer lists these directly, no link
+//     involved.
+//
+// URLs are absolute because the backend attaches the link token when
+// requesting them from the provider host; for the workspace they are
+// same-deployment URLs the browser can fetch with its session cookie.
 export async function GET(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:drive", {
     limit: 240,
@@ -33,15 +42,23 @@ export async function GET(request: NextRequest) {
     return response;
   }
 
-  const linkedClient = await authenticateLinkedClient(
-    db,
-    request.headers.get("authorization"),
-  );
-  if (!linkedClient) {
-    return jsonError("invalid_link_token", 401);
-  }
-  if (!linkedClientHasScope(linkedClient, storePublishScope)) {
-    return jsonError("insufficient_scope", 403);
+  let accountId: string | undefined;
+  const authorization = request.headers.get("authorization");
+  if (authorization) {
+    const linkedClient = await authenticateLinkedClient(db, authorization);
+    if (!linkedClient) {
+      return jsonError("invalid_link_token", 401);
+    }
+    if (!linkedClientHasScope(linkedClient, storePublishScope)) {
+      return jsonError("insufficient_scope", 403);
+    }
+    accountId = linkedClient.accountId;
+  } else {
+    const session = await readSession();
+    if (!session?.accountId) {
+      return jsonError("login_required", 401);
+    }
+    accountId = session.accountId;
   }
 
   const scenes = await db
@@ -66,7 +83,7 @@ export async function GET(request: NextRequest) {
     .leftJoin(accounts, eq(accounts.id, storeScenes.accountId))
     .where(
       and(
-        eq(storeScenes.accountId, linkedClient.accountId),
+        eq(storeScenes.accountId, accountId),
         eq(storeScenes.status, "active"),
         gt(storeScenes.latestVersion, 0),
       ),

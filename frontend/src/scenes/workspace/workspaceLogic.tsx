@@ -3,7 +3,7 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType, FrameId } from '../../types'
-import { parseRouteFrameId } from '../../utils/frameId'
+import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -43,19 +43,6 @@ function searchValue(search: Record<string, unknown>, key: string): string | nul
   }
   if (Array.isArray(value) && typeof value[0] === 'string') {
     return value[0]
-  }
-  return null
-}
-
-function searchNumberValue(search: Record<string, unknown>, key: string): number | null {
-  const value = search[key]
-  const candidate = Array.isArray(value) ? value[0] : value
-  if (typeof candidate === 'number') {
-    return Number.isFinite(candidate) ? candidate : null
-  }
-  if (typeof candidate === 'string') {
-    const parsed = Number(candidate)
-    return Number.isFinite(parsed) ? parsed : null
   }
   return null
 }
@@ -104,8 +91,13 @@ export function sceneDependencyGroupingIsEnabled(
   return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
 }
 
-function drawerFrameIdFromSearch(search: Record<string, unknown>): number | null {
-  return searchNumberValue(search, 'frameId')
+// NEVER a number parse: frame ids are opaque (the backend numbers frames, the
+// cloud keys them by uuid). Number()-ing the `?frameId=` of a cloud drawer URL
+// gave null, so applyDrawerFromSearch closed every drawer the moment its own
+// actionToUrl push echoed back through urlToAction — "Add scene" opened and
+// self-closed within the same tick.
+function drawerFrameIdFromSearch(search: Record<string, unknown>): FrameId | null {
+  return parseRouteFrameId(searchValue(search, 'frameId'))
 }
 
 function clearDrawerSearchParams(search: Record<string, unknown>): Record<string, unknown> {
@@ -130,7 +122,7 @@ function deployDrawerSearchForFrame(
     return baseSearch
   }
   const drawerFrameId = drawerFrameIdFromSearch(sourceSearch) ?? frameIdFromWorkspacePath(sourcePathname)
-  if (drawerFrameId !== frameId) {
+  if (!frameIdsEqual(drawerFrameId, frameId)) {
     return baseSearch
   }
   const deployView = deployDrawerViewFromSearch(sourceSearch)
@@ -188,7 +180,7 @@ function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boole
   )
 }
 
-function pathNumberAfterToken(pathname: string, tokenizedPath: string, token: string): number | null {
+function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: string): FrameId | null {
   const tokenIndex = tokenizedPath.indexOf(token)
   if (tokenIndex === -1) {
     return null
@@ -197,16 +189,15 @@ function pathNumberAfterToken(pathname: string, tokenizedPath: string, token: st
   if (!pathname.startsWith(prefix)) {
     return null
   }
-  const rawValue = pathname.slice(prefix.length).split('/')[0]
-  const parsedValue = Number(rawValue)
-  return Number.isFinite(parsedValue) ? parsedValue : null
+  // Opaque, like every frame id: uuids on the cloud, numbers on the backend.
+  return parseRouteFrameId(pathname.slice(prefix.length).split('/')[0])
 }
 
-function frameIdFromWorkspacePath(pathname: string): number | null {
+function frameIdFromWorkspacePath(pathname: string): FrameId | null {
   return (
-    pathNumberAfterToken(pathname, urls.frame(':frameId'), ':frameId') ??
-    pathNumberAfterToken(pathname, urls.scenes(':frameId'), ':frameId') ??
-    pathNumberAfterToken(pathname, urls.apps(':frameId'), ':frameId')
+    pathFrameIdAfterToken(pathname, urls.frame(':frameId'), ':frameId') ??
+    pathFrameIdAfterToken(pathname, urls.scenes(':frameId'), ':frameId') ??
+    pathFrameIdAfterToken(pathname, urls.apps(':frameId'), ':frameId')
   )
 }
 

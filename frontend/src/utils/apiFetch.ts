@@ -70,7 +70,13 @@ function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
 // here would mask the new endpoint.
 const cloudEmptyCatalogs: Record<string, string> = {
   '/api/apps': '{"apps":{}}',
+  // The workspace's uploaded-asset catalog (settingsLogic loadCustomFonts
+  // filters it for fonts/*.ttf) — backend file storage the cloud lacks.
+  '/api/assets': '[]',
   '/api/fonts': '{"fonts":[]}',
+  // Backend-wide settings (SSH defaults, API keys, repositories…). The cloud
+  // stores none of that; loaders merge this over their defaults.
+  '/api/settings': '{}',
   '/api/templates': '[]',
 }
 

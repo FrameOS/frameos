@@ -36,6 +36,12 @@ describe("cloud mode backend catalogs", () => {
     const templates = await apiFetch("/api/templates");
     expect(await templates.json()).toEqual([]);
 
+    const settings = await apiFetch("/api/settings");
+    expect(await settings.json()).toEqual({});
+
+    const assets = await apiFetch("/api/assets");
+    expect(await assets.json()).toEqual([]);
+
     // No request reached the network: that is the whole point.
     expect(fetchMock).not.toHaveBeenCalled();
   });

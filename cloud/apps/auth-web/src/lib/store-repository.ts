@@ -84,6 +84,12 @@ export async function buildStoreRepository(
       imageHeight: scene.previewImageHeight ?? undefined,
       imageWidth: scene.previewImageWidth ?? undefined,
       name: scene.name,
+      // The scene uuid. The /frames workspace needs it to assign a picked
+      // scene to a cloud frame (POST /api/frames/{id}/scenes takes store
+      // scene ids) and to reach /scenes/{id}/scenes.json without parsing it
+      // out of the zip URL; the drive index has carried it for the same
+      // reason since it shipped. Older frameos installs ignore extra fields.
+      sceneId: scene.id,
       tags: scene.tags.length > 0 ? scene.tags : undefined,
       // Human-facing scene page ("View store page" in frameos' templates
       // panel); absolute because it lives outside the /api/store/ prefix
