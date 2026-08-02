@@ -27,6 +27,8 @@ export function PublicShell({
   const scenesBaseUrl = getScenesBaseUrl();
   const scenesHomeUrl = new URL("/", scenesBaseUrl).toString();
   const accountUrl = getAccountUrl();
+  // The fleet workspace is served from the account origin (app/frames).
+  const framesUrl = new URL("/frames", getAccountBaseUrl()).toString();
   const adminUrl = new URL("/admin", getAccountBaseUrl()).toString();
   const logoutUrl = new URL("/api/auth/logout", cloudBaseUrl).toString();
   const signInUrl = new URL("/login", cloudBaseUrl);
@@ -46,6 +48,12 @@ export function PublicShell({
             </Link>
             {signedIn ? (
               <>
+                {/* Signed-in only, and ordered as in AppShell (Scenes, Frames,
+                    Account): a signed-out visitor has no frames, so the link
+                    would only bounce them through the login page. */}
+                <Link className="nav-link-button" href={framesUrl}>
+                  Frames
+                </Link>
                 <Link className="nav-link-button" href={accountUrl}>
                   Account
                 </Link>
