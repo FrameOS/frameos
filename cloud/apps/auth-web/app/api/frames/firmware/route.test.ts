@@ -1,4 +1,7 @@
 import { NextRequest } from "next/server";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
@@ -177,10 +180,6 @@ describe("local generic firmware escape hatch", () => {
   // Until a release publishes the all-panels build, a dev/self-hosted
   // deployment can serve a locally built binary via
   // FRAMEOS_ESP32_GENERIC_FIRMWARE — a published release always wins.
-  const { mkdtempSync, rmSync, writeFileSync } = require("node:fs") as
-    typeof import("node:fs");
-  const { tmpdir } = require("node:os") as typeof import("node:os");
-  const { join } = require("node:path") as typeof import("node:path");
   const localBytes = new Uint8Array(48).fill(0xab);
   let dir: string;
 

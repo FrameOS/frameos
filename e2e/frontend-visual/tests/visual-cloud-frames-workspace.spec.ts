@@ -367,29 +367,28 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(drawer.getByLabel('Display width')).toHaveCount(0)
 
     // Picking a panel prefills its native dimensions.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" E (Spectra 6)' })
-    await expect(drawer.getByLabel('Display width')).toHaveValue('1600')
-    await expect(drawer.getByLabel('Display height')).toHaveValue('1200')
+    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
+    await expect(drawer.getByLabel('Display width')).toHaveValue('1200')
+    await expect(drawer.getByLabel('Display height')).toHaveValue('1600')
     await expect(drawer.getByLabel('Rotation')).toHaveValue('0')
-    // VCOM is an IT8951 knob no curated panel needs — custom keys only.
+    // VCOM is an IT8951 knob only the 10.3\" reads — hidden for the rest.
     await expect(drawer.getByLabel('VCOM (optional)')).toHaveCount(0)
     // …and no upload URL: that belongs to http.upload (and custom).
     await expect(drawer.getByLabel('Upload URL')).toHaveCount(0)
 
     // A smaller panel swaps the prefill.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 7.3" E (Spectra 6)' })
+    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' })
     await expect(drawer.getByLabel('Display width')).toHaveValue('800')
     await expect(drawer.getByLabel('Display height')).toHaveValue('480')
 
     // HTTP upload shows the upload URL field, still no VCOM.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'HTTP upload (POST rendered PNG)' })
+    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'HTTP upload' })
     await expect(drawer.getByLabel('Upload URL')).toHaveAttribute('placeholder', 'Upload URL (required)')
     await expect(drawer.getByLabel('VCOM (optional)')).toHaveCount(0)
 
-    // Custom keys get both optional knobs.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Custom device key…' })
+    // The IT8951 10.3" is the one panel whose driver reads VCOM.
+    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 10.3" 1872x1404 16 Grayscale' })
     await expect(drawer.getByLabel('VCOM (optional)')).toBeVisible()
-    await expect(drawer.getByLabel('Upload URL')).toBeVisible()
 
     // The rest of the SD builder's new controls.
     // Both add-frame flows offer it (SD builder and ESP32 flasher, sharing
@@ -416,8 +415,8 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(page.getByText('Kitchen frame').first()).toBeVisible()
     const drawer = await openAddFrameDrawer(page)
 
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" E (Spectra 6)' })
-    await expect(drawer.getByLabel('Display width')).toHaveValue('1600')
+    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
+    await expect(drawer.getByLabel('Display width')).toHaveValue('1200')
     await expect(drawer.getByText('FRCT_e2e00000000000000000000000000000000').first()).toBeVisible()
 
     await settleForScreenshot(page)
@@ -444,9 +443,10 @@ test.describe('cloud /frames workspace @e2e', () => {
       panelPicker.locator('option', { hasText: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)' })
     ).toHaveCount(1)
 
-    // "Custom panel key…" reveals the free-form key input.
-    await panelPicker.selectOption('custom')
-    await expect(drawer.getByLabel('Custom panel key')).toBeVisible()
+    // The full compiled-in panel table is offered for bare-panel XIAO builds.
+    await expect(
+      panelPicker.locator('option', { hasText: 'Waveshare 7.5" (V2) 800x480 Black/White' })
+    ).toHaveCount(1)
 
     expectNoCloudFrontendErrors(readErrors)
   })

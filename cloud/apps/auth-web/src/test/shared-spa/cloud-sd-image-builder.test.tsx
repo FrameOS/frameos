@@ -331,8 +331,9 @@ describe("SdImageBuilder", () => {
       target: { value: "waveshare.EPD_13in3e" },
     });
     // Native panel dimensions are prefilled and editable.
-    expect((screen.getByLabelText("Display width") as HTMLInputElement).value).toBe("1600");
-    expect((screen.getByLabelText("Display height") as HTMLInputElement).value).toBe("1200");
+    // Portrait-native, straight from the backend device registry.
+    expect((screen.getByLabelText("Display width") as HTMLInputElement).value).toBe("1200");
+    expect((screen.getByLabelText("Display height") as HTMLInputElement).value).toBe("1600");
     fireEvent.change(screen.getByLabelText("Rotation"), { target: { value: "90" } });
     // vcom is an IT8951 knob — no curated panel needs it, so it must not
     // clutter a Waveshare pick.
@@ -344,13 +345,16 @@ describe("SdImageBuilder", () => {
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
     expect(regionText).toContain("device=waveshare.EPD_13in3e\n");
-    expect(regionText).toContain("width=1600\n");
-    expect(regionText).toContain("height=1200\n");
+    expect(regionText).toContain("width=1200\n");
+    expect(regionText).toContain("height=1600\n");
     expect(regionText).toContain("rotate=90\n");
     expect(regionText).not.toContain("vcom=");
   });
 
-  it("offers vcom for custom device keys and writes it into the image", async () => {
+  it("offers vcom for the IT8951 panel and writes it into the image", async () => {
+    // The 10.3" is the one catalog panel whose driver reads vcom
+    // (portal.nim marks it vcomRequired) — the full generated device list
+    // includes it, so no free-form key entry is needed.
     mockReleaseAndImage();
     const saved = stubSaveFilePicker();
     render(
@@ -364,9 +368,6 @@ describe("SdImageBuilder", () => {
     });
 
     fireEvent.change(screen.getByLabelText("Display"), {
-      target: { value: "custom" },
-    });
-    fireEvent.change(screen.getByLabelText("Custom device key"), {
       target: { value: "waveshare.EPD_10in3" },
     });
     fireEvent.change(screen.getByLabelText("VCOM (optional)"), {

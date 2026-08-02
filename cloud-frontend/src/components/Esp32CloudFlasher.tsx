@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorMessage } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
+import { esp32Panels } from '../lib/generated-devices'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -32,20 +33,17 @@ const genericPlatform = 'esp32-s3-generic'
 const legacyPlatform = 'esp32-s3-epd7in5v2'
 const genericFirmwareSuffix = '-esp32-s3-generic.bin'
 
-// Curated hardware for the picker. Integrated boards are BUNDLES: `set
-// hardware <preset>` makes the firmware apply the panel, EPD wiring, GPIO
-// buttons and TF-card pins in one shot (the preset table in fos_console.c,
-// mirroring EMBEDDED_HARDWARE_PRESETS in the backend). Bare panels on a XIAO
-// only need `set panel`; the default (empty) keeps the firmware's baked-in
-// EPD_7in5_V2, and "custom" accepts any panel key the firmware's driver
-// table knows (`set panel` rejects unknown names at the console).
-const panelChoices = [
+// Hardware picker. Integrated boards are BUNDLES: `set hardware <preset>`
+// makes the firmware apply the panel, EPD wiring, GPIO buttons and TF-card
+// pins in one shot (the preset table in fos_console.c, mirroring
+// EMBEDDED_HARDWARE_PRESETS in the backend). Everything else is a XIAO with
+// a bare panel wired to it — the full compiled-in panel table
+// (lib/generated-devices) is offered via `set panel`; the default (empty)
+// keeps the firmware's baked-in EPD_7in5_V2.
+const boardChoices = [
   { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.5" V2 (default)', value: '' },
-  { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.3" E — Spectra 6', value: 'panel:EPD_7in3e' },
-  { label: 'Seeed XIAO ESP32-S3 + Waveshare 13.3" E — Spectra 6', value: 'panel:EPD_13in3e' },
   { label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)', value: 'hw:waveshare_esp32_s3_photopainter' },
   { label: 'Waveshare 13.3" E frame (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
-  { label: 'Custom panel key…', value: 'custom' },
 ] as const
 const flashBaudrate = 460800
 const consoleBaudrate = 115200
@@ -419,7 +417,6 @@ export function Esp32CloudFlasher({
   // display init on a panel other than the one compiled in).
   const [panelSelectable, setPanelSelectable] = useState(false)
   const [panelChoice, setPanelChoice] = useState('')
-  const [customPanel, setCustomPanel] = useState('')
   const busyRef = useRef(false)
 
   useEffect(() => {
@@ -441,7 +438,7 @@ export function Esp32CloudFlasher({
 
   // What to provision for the chosen hardware: a whole-board preset via
   // `set hardware`, or a bare panel via `set panel`.
-  const provisionKey = panelChoice === 'custom' ? customPanel.trim() : panelChoice.replace(/^(hw|panel):/, '')
+  const provisionKey = panelChoice.replace(/^(hw|panel):/, '')
   const provisionCommand = panelChoice.startsWith('hw:') ? 'hardware' : 'panel'
 
   // WebSerial support cannot change while the page is open, so probe it once.
@@ -482,15 +479,6 @@ export function Esp32CloudFlasher({
     const inputError = wifiInputError(wifiSsid, wifiPassword)
     if (inputError) {
       setError(inputError)
-      setPhase('error')
-      return
-    }
-    if (panelSelectable && panelChoice === 'custom' && !/^[A-Za-z0-9_.-]+$/.test(provisionKey)) {
-      setError(
-        provisionKey
-          ? 'Panel keys are plain identifiers like EPD_2in13_V4 — no spaces or quotes.'
-          : 'Enter the custom panel key (e.g. EPD_2in13_V4), or pick your hardware from the list.'
-      )
       setPhase('error')
       return
     }
@@ -712,23 +700,21 @@ export function Esp32CloudFlasher({
               onChange={(event) => setPanelChoice(event.target.value)}
               value={panelChoice}
             >
-              {panelChoices.map((choice) => (
-                <option key={choice.value} value={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
+              <optgroup label="Integrated boards">
+                {boardChoices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Seeed XIAO ESP32-S3 + Waveshare panel">
+                {esp32Panels.map((panel) => (
+                  <option key={panel.key} value={`panel:${panel.key}`}>
+                    {panel.label}
+                  </option>
+                ))}
+              </optgroup>
             </select>
-            {panelChoice === 'custom' ? (
-              <input
-                aria-label="Custom panel key"
-                className={controlClassName}
-                disabled={busy}
-                maxLength={64}
-                onChange={(event) => setCustomPanel(event.target.value)}
-                placeholder="Panel key (e.g. EPD_2in13_V4 — any supported Waveshare panel)"
-                value={customPanel}
-              />
-            ) : null}
           </>
         ) : null}
         <input

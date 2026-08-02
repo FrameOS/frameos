@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudConfig } from '../lib/sd-image-patch'
 import { fetchReleaseListing } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
+import { piDeviceGroups } from '../lib/generated-devices'
 
 // "Download SD image" for cloud-managed Raspberry Pi frames
 // (docs/cloud-frames.md, "Placeholder + in-browser personalization"): the
@@ -31,29 +32,19 @@ const knownBoards = [
   { label: 'Raspberry Pi Zero W', platform: 'raspberry-pi-zero-w' },
 ] as const
 
-// The curated display list mirrors the install script's menu
-// (scripts/frameos-setup.sh, choose_device). The release image ships every
-// compiled driver, so this choice is written into the image's frameos-cloud.txt
-// and applied on first boot — "custom" accepts any device key the frame
-// understands. Empty device = decide later in the on-device setup portal.
-const displayChoices = [
-  { label: 'Pick the display later (FrameOS-Setup portal)', value: '' },
-  { height: 480, label: 'Web preview only (no display)', value: 'web_only', width: 800 },
-  { label: 'HDMI / Linux framebuffer', value: 'framebuffer' },
-  { height: 480, label: 'HTTP upload (POST rendered PNG)', value: 'http.upload', width: 800 },
-  { height: 480, label: 'Pimoroni Inky Impression 7.3" (2025)', value: 'pimoroni.inky_impression_7_2025', width: 800 },
-  {
-    height: 1200,
-    label: 'Pimoroni Inky Impression 13.3" (2025)',
-    value: 'pimoroni.inky_impression_13_2025',
-    width: 1600,
-  },
-  { height: 480, label: 'Waveshare 7.3" E (Spectra 6)', value: 'waveshare.EPD_7in3e', width: 800 },
-  { height: 1200, label: 'Waveshare 13.3" E (Spectra 6)', value: 'waveshare.EPD_13in3e', width: 1600 },
-  { height: 480, label: 'Waveshare 7.5" V2 (black/white)', value: 'waveshare.EPD_7in5_V2', width: 800 },
-  { height: 480, label: 'Waveshare PhotoPainter (7.3" E)', value: 'waveshare.rpi_zero_photopainter_7in3e', width: 800 },
-  { label: 'Custom device key…', value: 'custom' },
-] as const
+// The full device catalog, generated from the backend registry (every
+// Pimoroni and Waveshare driver the release image ships). The choice is
+// written into the image's frameos-cloud.txt and applied on first boot.
+// Empty device = decide later in the on-device setup portal.
+function findDeviceOption(value: string) {
+  for (const group of piDeviceGroups) {
+    const option = group.options.find((entry) => entry.value === value)
+    if (option) {
+      return option
+    }
+  }
+  return undefined
+}
 
 const rotationChoices = ['0', '90', '180', '270'] as const
 
@@ -163,7 +154,6 @@ export function SdImageBuilder({
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
   const [displayChoice, setDisplayChoice] = useState<string>('')
-  const [customDevice, setCustomDevice] = useState('')
   const [width, setWidth] = useState('')
   const [height, setHeight] = useState('')
   const [rotate, setRotate] = useState('0')
@@ -241,22 +231,20 @@ export function SdImageBuilder({
     setPhase('error')
   }
 
-  const device = displayChoice === 'custom' ? customDevice.trim() : displayChoice
-  const showCustomDevice = displayChoice === 'custom'
-  // vcom only matters for panels whose driver reads it (IT8951-style, e.g.
-  // waveshare.EPD_10in3) — none of the curated list does, so it only shows
-  // for custom keys instead of cluttering every Waveshare pick.
-  const showVcom = displayChoice === 'custom'
-  const showUploadUrl = displayChoice === 'custom' || device === 'http.upload'
+  const device = displayChoice
+  // vcom only matters for panels whose driver reads it (IT8951): the 10.3"
+  // is the one such panel in the catalog (portal.nim marks it vcomRequired).
+  const showVcom = device === 'waveshare.EPD_10in3'
+  const showUploadUrl = device === 'http.upload'
   const showDisplayDetails = displayChoice !== ''
 
   function pickDisplay(value: string): void {
     setDisplayChoice(value)
-    const choice = displayChoices.find((entry) => entry.value === value)
+    const choice = findDeviceOption(value)
     // Prefill the panel's native dimensions; clear them when they are
-    // unknown (framebuffer autodetects, custom is anyone's guess).
-    setWidth(choice && 'width' in choice && choice.width ? String(choice.width) : '')
-    setHeight(choice && 'height' in choice && choice.height ? String(choice.height) : '')
+    // unknown (framebuffer autodetects).
+    setWidth(choice?.width ? String(choice.width) : '')
+    setHeight(choice?.height ? String(choice.height) : '')
   }
 
   // Returns an error message, or undefined when the display inputs are sane.
@@ -265,9 +253,6 @@ export function SdImageBuilder({
   function displayInputError(): string | undefined {
     if (!showDisplayDetails) {
       return undefined
-    }
-    if (showCustomDevice && !device) {
-      return 'Enter the custom device key (e.g. waveshare.EPD_2in13_V4).'
     }
     for (const [value, label] of [
       [width, 'Display width'],
@@ -551,23 +536,17 @@ export function SdImageBuilder({
             onChange={(event) => pickDisplay(event.target.value)}
             value={displayChoice}
           >
-            {displayChoices.map((choice) => (
-              <option key={choice.value} value={choice.value}>
-                {choice.label}
-              </option>
+            <option value="">Pick the display later (FrameOS-Setup portal)</option>
+            {piDeviceGroups.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
-          {showCustomDevice ? (
-            <input
-              aria-label="Custom device key"
-              className={controlClassName}
-              disabled={building}
-              maxLength={128}
-              onChange={(event) => setCustomDevice(event.target.value)}
-              placeholder="Device key (e.g. waveshare.EPD_2in13_V4)"
-              value={customDevice}
-            />
-          ) : null}
           {showDisplayDetails ? (
             <div className="grid grid-cols-3 gap-2">
               <input
