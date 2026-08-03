@@ -16,6 +16,7 @@ import {
   validatePasswordCandidate,
 } from "../../../../src/lib/passwords";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { notifyNewCloudUser } from "../../../../src/lib/signup-notifications";
 
 // Deliberately loose: real validation happens when the address receives the
 // password reset email. This only rejects obvious garbage.
@@ -91,6 +92,16 @@ export async function POST(request: NextRequest) {
     eventType: "account.signed_up",
     metadata: { method: "password" },
     target: { providerIssuer: passwordProviderIssuer },
+  });
+
+  // Fire-and-forget: createPasswordAccount above only ever inserts a new
+  // account (duplicates 409 out earlier), so this is always a fresh signup.
+  // notifyNewCloudUser never throws and no-ops without its env vars.
+  void notifyNewCloudUser({
+    accountId: account.accountId,
+    displayName: name,
+    email,
+    provider: "password",
   });
 
   await beginEmailVerification(db, account.accountId, email);

@@ -15,7 +15,10 @@ export type GoogleClaims = {
 };
 
 export type GoogleSignInResolution =
-  | { status: "ok"; accountId: string }
+  // `created` is true only when this sign-in minted a brand new account, so
+  // the callback can fire signup-only notifications and skip them on every
+  // later login (or when Google merely linked into an existing account).
+  | { status: "ok"; accountId: string; created: boolean }
   // A password account exists for this email but its address was never
   // verified, so the password may have been set by someone who does not own
   // the email. Merging would hand that password-holder the Google user's
@@ -51,7 +54,7 @@ export async function resolveGoogleSignIn(
         providerKey: googleProviderKey,
         providerSubject: claims.sub,
       });
-      return { accountId: passwordAccount.id, status: "ok" };
+      return { accountId: passwordAccount.id, created: false, status: "ok" };
     }
   }
 
@@ -63,5 +66,9 @@ export async function resolveGoogleSignIn(
     providerKey: googleProviderKey,
     providerSubject: claims.sub,
   });
-  return { accountId: account.accountId, status: "ok" };
+  return {
+    accountId: account.accountId,
+    created: account.created,
+    status: "ok",
+  };
 }
