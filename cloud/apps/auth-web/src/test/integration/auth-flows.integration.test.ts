@@ -411,7 +411,8 @@ describe("google sign-in merging", () => {
       email_verified: true,
       sub: `google-sub-${email}`,
     });
-    expect(resolution).toEqual({ accountId, status: "ok" });
+    // A link into an existing account is not a new signup: created is false.
+    expect(resolution).toEqual({ accountId, created: false, status: "ok" });
 
     const identities = await db
       .select({ providerKey: accountIdentities.providerKey })
@@ -451,7 +452,7 @@ describe("google sign-in merging", () => {
       email_verified: true,
       sub,
     });
-    expect(linked).toEqual({ accountId, status: "ok" });
+    expect(linked).toEqual({ accountId, created: false, status: "ok" });
   });
 
   it("never links when google did not verify the email", async () => {
@@ -472,6 +473,17 @@ describe("google sign-in merging", () => {
       sub: "google-sub-fresh",
     });
     expect(resolution.status).toBe("ok");
+    // First sign-in mints the account; only then do signup notifications fire.
+    expect(resolution).toMatchObject({ created: true });
+
+    // The same Google identity signing in again is a login, not a signup.
+    const again = await resolveGoogleSignIn(db, googleIssuer, {
+      email: "fresh-google@example.com",
+      email_verified: true,
+      name: "Fresh Google",
+      sub: "google-sub-fresh",
+    });
+    expect(again).toMatchObject({ created: false, status: "ok" });
   });
 
   it("adds a password to a google-first account through the reset flow", async () => {

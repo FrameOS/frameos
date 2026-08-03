@@ -22,6 +22,7 @@ import {
   sessionCookieName,
   sessionCookieOptions,
 } from "../../../../../src/lib/session";
+import { notifyNewCloudUser } from "../../../../../src/lib/signup-notifications";
 
 export async function GET(request: NextRequest) {
   const expectedState = request.cookies.get(authCookieNames.state)?.value;
@@ -128,6 +129,18 @@ export async function GET(request: NextRequest) {
   }
 
   const accountId = resolution.accountId;
+
+  // Only a brand new account (not a login or a link into an existing one)
+  // announces itself. Fire-and-forget: notifyNewCloudUser never throws and
+  // no-ops without its env vars.
+  if (resolution.created) {
+    void notifyNewCloudUser({
+      accountId,
+      displayName: claims.name,
+      email: claims.email,
+      provider: "google",
+    });
+  }
 
   await recordAuditEvent(db, {
     accountId,

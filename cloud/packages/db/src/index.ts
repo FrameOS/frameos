@@ -56,6 +56,10 @@ function parsePoolMax(value: string | undefined) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 5;
 }
 
+// Returns the account id plus `created`: true when this call inserted a brand
+// new account, false when the identity already existed. Callers use the flag
+// to trigger signup-only side effects (notifications) without firing them on
+// every sign-in.
 export async function upsertAccountFromIdentity(
   db: ReturnType<typeof createDb>,
   identity: {
@@ -88,7 +92,7 @@ export async function upsertAccountFromIdentity(
           updatedAt: new Date(),
         })
         .where(eq(accounts.id, existing.accountId));
-      return existing;
+      return { accountId: existing.accountId, created: false };
     }
 
     const [account] = await tx
@@ -112,7 +116,7 @@ export async function upsertAccountFromIdentity(
       providerSubject: identity.providerSubject,
     });
 
-    return account;
+    return { accountId: account.accountId, created: true };
   });
 }
 

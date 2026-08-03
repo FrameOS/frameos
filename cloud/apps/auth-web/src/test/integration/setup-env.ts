@@ -13,3 +13,8 @@ process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY = Buffer.from(
   "integration-test-encryption-key!",
 ).toString("base64");
 process.env.SESSION_SECRET = "frameos-cloud-integration-test-session-secret";
+// Signup notifications must stay dormant: with these unset, signup routes
+// never reach out to Discord or PostHog during the suite.
+delete process.env.FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL;
+delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+delete process.env.NEXT_PUBLIC_POSTHOG_HOST;

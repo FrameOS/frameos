@@ -298,6 +298,27 @@ keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 
+## Signup Notifications
+
+When a brand new account is created (password signup or first Google
+sign-in), auth-web fires two optional fire-and-forget notifications
+(`src/lib/signup-notifications.ts`). Each is skipped silently when its
+environment variable is unset, and failures never affect the signup:
+
+```text
+FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL=…  # Discord webhook for a one-line
+                                             # "new user" message in the
+                                             # reports channel
+NEXT_PUBLIC_POSTHOG_KEY=…                    # PostHog project key; also used
+                                             # by the browser SDK
+NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
+                                             # https://eu.i.posthog.com
+```
+
+The PostHog event is `cloud user signed up` with the account id as
+`distinct_id`, sent server-side to the `/capture` endpoint using the same
+public project key as the browser SDK (no extra secret required).
+
 ## Service Boundaries
 
 Keep the current deployment focused on auth, account sessions, backend linking,
