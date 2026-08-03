@@ -173,6 +173,96 @@ BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS = max(1, min(60, BUILDROOT_IMAGE_INAC
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
+
+# Buildroot's `make olddefconfig` silently deletes any symbol whose Kconfig
+# dependencies are unmet on the selected architecture/toolchain: no warning, no
+# non-zero exit, the package just never gets built. That is how a Raspberry Pi
+# Zero W (ARMv6) image shipped without NetworkManager/nmcli even though the
+# shared config asked for it. This checker runs right after olddefconfig and
+# fails the build with the exact list of symbols that vanished.
+#
+# Only BR2_PACKAGE_* symbols are enforced: non-package symbols such as
+# BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_* are host-dependent on purpose (see
+# BuildrootPlatform.extra_config_lines) and are expected to fall back.
+BUILDROOT_ENFORCED_CONFIG_PREFIXES = ("BR2_PACKAGE_",)
+BUILDROOT_CONFIG_CHECK_SCRIPT = r'''
+import sys
+
+ENFORCED_PREFIXES = __ENFORCED_PREFIXES__
+
+
+def parse_config(text):
+    values = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("# ") and line.endswith(" is not set"):
+            values[line[2:-len(" is not set")]] = None
+            continue
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
+def enforced(key):
+    return any(key.startswith(prefix) for prefix in ENFORCED_PREFIXES)
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.stderr.write("usage: check-buildroot-config.py REQUESTED_CONFIG RESOLVED_CONFIG\n")
+        return 2
+    requested_path, resolved_path = argv[1], argv[2]
+    with open(requested_path, "r", encoding="utf-8") as handle:
+        requested_text = handle.read()
+    with open(resolved_path, "r", encoding="utf-8") as handle:
+        resolved_text = handle.read()
+
+    resolved = parse_config(resolved_text)
+    dropped = []
+    seen = set()
+    for raw in requested_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not enforced(key) or key in seen:
+            continue
+        seen.add(key)
+        actual = resolved.get(key, "<absent>")
+        if actual != value:
+            dropped.append((key, value, actual))
+
+    if not dropped:
+        return 0
+
+    sys.stderr.write(
+        "\n"
+        "ERROR: Buildroot dropped %d requested package symbol(s) during `make olddefconfig`.\n"
+        "Their Kconfig dependencies are unmet for this architecture/toolchain, so the\n"
+        "packages would be silently missing from the image. Fix the dependency (add the\n"
+        "enabling symbol) or stop requesting the package for this platform.\n\n"
+        % len(dropped)
+    )
+    for key, wanted, actual in dropped:
+        shown = "not present in .config" if actual == "<absent>" else (
+            "explicitly disabled" if actual is None else "resolved to %s" % actual
+        )
+        sys.stderr.write("  %s=%s  ->  %s\n" % (key, wanted, shown))
+    sys.stderr.write(
+        "\nRequested config: %s\nResolved config:  %s\n" % (requested_path, resolved_path)
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+'''.replace("__ENFORCED_PREFIXES__", repr(BUILDROOT_ENFORCED_CONFIG_PREFIXES))
 BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH = "/usr/sbin/frameos-expand-sd-card"
 BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME = "frameos-expand-sd-card.service"
 BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
@@ -180,6 +270,18 @@ BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR = "/srv/frameos/state/NetworkMan
 BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
     f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
     "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
+)
+# armv6 (Pi Zero W) images have no NetworkManager - its Kconfig deps do not
+# resolve on ARM1176 - so frameos drives wpa_supplicant/hostapd there instead
+# (frameos/src/frameos/network/supplicant.nim). Its generated
+# wpa_supplicant-<iface>.conf needs to survive reboots and image upgrades the
+# same way the .nmconnection files do, so /etc/wpa_supplicant gets the same
+# bind mount onto the state partition.
+BUILDROOT_WPA_SUPPLICANT_DIR = "/etc/wpa_supplicant"
+BUILDROOT_WPA_SUPPLICANT_STATE_DIR = "/srv/frameos/state/wpa_supplicant"
+BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE = (
+    f"{BUILDROOT_WPA_SUPPLICANT_STATE_DIR} {BUILDROOT_WPA_SUPPLICANT_DIR} none "
+    "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=wpa_supplicant.service 0 0"
 )
 # /boot carries one-time provisioning secrets (frameos-setup.json until the
 # first boot consumes it, frameos-cloud.txt claim tokens), so it is mounted
@@ -194,6 +296,7 @@ BUILDROOT_FSTAB_CONTENT = (
             "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2",
             "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0",
             BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
+            BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE,
         ]
     )
     + "\n"
@@ -486,7 +589,7 @@ def render_systemd_service(
     return "\n".join(rendered_lines) + "\n"
 
 
-def render_buildroot_frameos_service() -> str:
+def render_buildroot_frameos_service(uses_network_manager: bool = True) -> str:
     service = render_systemd_service(
         REPO_ROOT / "frameos" / "frameos.service",
         user="root",
@@ -495,6 +598,13 @@ def render_buildroot_frameos_service() -> str:
             "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
         },
     )
+    # Platforms without NetworkManager (armv6 runs wpa_supplicant + hostapd
+    # instead) must not name the unit at all: a Wants= pointing at a unit
+    # that does not exist logs a failed dependency on every boot and buys
+    # nothing. wpa_supplicant.service is enabled in the base image and
+    # ordered before network.target already.
+    if not uses_network_manager:
+        return service
     return service.replace(
         "After=network.target\n",
         "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n",
@@ -502,12 +612,14 @@ def render_buildroot_frameos_service() -> str:
     )
 
 
-def stage_buildroot_frameos_service(root: Path) -> None:
+def stage_buildroot_frameos_service(root: Path, uses_network_manager: bool = True) -> None:
     systemd_dir = root / "etc" / "systemd" / "system"
     wants_dir = systemd_dir / "multi-user.target.wants"
     systemd_dir.mkdir(parents=True, exist_ok=True)
     wants_dir.mkdir(parents=True, exist_ok=True)
-    (systemd_dir / "frameos.service").write_text(render_buildroot_frameos_service(), encoding="utf-8")
+    (systemd_dir / "frameos.service").write_text(
+        render_buildroot_frameos_service(uses_network_manager), encoding="utf-8"
+    )
     link = wants_dir / "frameos.service"
     if link.exists() or link.is_symlink():
         link.unlink()
@@ -515,12 +627,18 @@ def stage_buildroot_frameos_service(root: Path) -> None:
 
 
 def stage_buildroot_network_manager_state(root: Path) -> None:
-    state_dir = root / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
-    connections_dir = root / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
-    state_dir.mkdir(parents=True, exist_ok=True)
-    connections_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(state_dir, 0o700)
-    os.chmod(connections_dir, 0o700)
+    for state_path, etc_path in (
+        (BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR, BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR),
+        # Mount point for the wpa_supplicant backend used by images without
+        # NetworkManager; empty on a NetworkManager image, harmless there.
+        (BUILDROOT_WPA_SUPPLICANT_STATE_DIR, BUILDROOT_WPA_SUPPLICANT_DIR),
+    ):
+        state_dir = root / state_path.lstrip("/")
+        connections_dir = root / etc_path.lstrip("/")
+        state_dir.mkdir(parents=True, exist_ok=True)
+        connections_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(state_dir, 0o700)
+        os.chmod(connections_dir, 0o700)
 
 
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
@@ -1535,6 +1653,19 @@ class BuildrootImageBuilder:
             raise NotImplementedError(
                 f"Buildroot config generation is not implemented for the {platform.family} family"
             )
+        # NetworkManager needs kernel headers >= 4.20; boards pinned to a Bootlin
+        # "stable" external toolchain (4.19 headers) cannot have it and use the
+        # wpa_supplicant + hostapd stack instead.
+        # (BR2_PACKAGE_NETWORK_MANAGER_WIFI does not exist in Buildroot — NM gets
+        # Wi-Fi from wpa_supplicant being installed — so asking for it was a no-op.)
+        network_manager_lines = (
+            [
+                "BR2_PACKAGE_NETWORK_MANAGER=y",
+                "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
+            ]
+            if platform.uses_network_manager
+            else []
+        )
         path.write_text(
             "\n".join(
                 [
@@ -1575,7 +1706,6 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_IPROUTE2=y",
                     "BR2_PACKAGE_IPTABLES=y",
                     "BR2_PACKAGE_IPTABLES_NFTABLES=y",
-                    "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y",
                     "BR2_PACKAGE_NFTABLES=y",
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
@@ -1585,14 +1715,20 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_FFMPEG_FFPROBE=y",
                     "BR2_PACKAGE_FFMPEG_SWSCALE=y",
                     "BR2_PACKAGE_HOSTAPD=y",
+                    "BR2_PACKAGE_HOSTAPD_WPA3=y",
                     "BR2_PACKAGE_DNSMASQ=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y",
+                    *network_manager_lines,
                     "BR2_PACKAGE_WPA_SUPPLICANT=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y",
+                    # wpa_cli (implies the /var/run/wpa_supplicant control
+                    # socket) and wpa_passphrase are how the FrameOS portal
+                    # scans, joins and persists Wi-Fi without NetworkManager.
+                    "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_WPA3=y",
                     "BR2_PACKAGE_IW=y",
                     "BR2_PACKAGE_WIRELESS_TOOLS=y",
                     "BR2_PACKAGE_WIRELESS_REGDB=y",
@@ -1869,6 +2005,12 @@ make -C /build/buildroot O=/build/output {platform.defconfig}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
+phase_end
+
+phase_start verify_buildroot_config
+python3 - /work/frameos-buildroot.config /build/output/.config <<'FRAMEOS_CONFIG_CHECK_PY'
+{BUILDROOT_CONFIG_CHECK_SCRIPT}
+FRAMEOS_CONFIG_CHECK_PY
 phase_end
 
 phase_start buildroot_make
@@ -2185,7 +2327,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         if compose_dir.exists():
             shutil.rmtree(compose_dir)
         compose_dir.mkdir(parents=True, exist_ok=True)
-        stage_buildroot_frameos_service(service_root)
+        stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up
@@ -2984,13 +3126,18 @@ fi
 mkdir -p "$frameos_root/state/NetworkManager/system-connections"
 chown 0:0 "$frameos_root/state/NetworkManager" "$frameos_root/state/NetworkManager/system-connections"
 chmod 700 "$frameos_root/state/NetworkManager/system-connections"
-mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections"
+mkdir -p "$frameos_root/state/wpa_supplicant"
+chown 0:0 "$frameos_root/state/wpa_supplicant"
+chmod 700 "$frameos_root/state/wpa_supplicant"
+mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections" "$target_dir/etc/wpa_supplicant"
 chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
 chmod 700 "$target_dir/etc/NetworkManager/system-connections"
+chown 0:0 "$target_dir/etc/wpa_supplicant"
+chmod 700 "$target_dir/etc/wpa_supplicant"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections|/etc/wpa_supplicant)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 __FRAMEOS_FSTAB_CONTENT__EOF
 mv "$tmp_fstab" "$fstab"

@@ -5,6 +5,7 @@ import gzip
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -16,11 +17,15 @@ import pytest
 from app.models.assets import Assets
 from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import (
+    BUILDROOT_CONFIG_CHECK_SCRIPT,
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
+    BUILDROOT_WPA_SUPPLICANT_DIR,
+    BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE,
+    BUILDROOT_WPA_SUPPLICANT_STATE_DIR,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
     PrecompiledBuildrootSdImageResult,
@@ -30,6 +35,7 @@ from app.tasks.buildroot_image import (
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
     precompiled_buildroot_sd_image_release_url,
+    render_buildroot_frameos_service,
     stage_buildroot_frameos_service,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
@@ -349,20 +355,118 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
     assert "BR2_PACKAGE_IPTABLES=y" in config
     assert "BR2_PACKAGE_IPTABLES_NFTABLES=y" in config
-    assert "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y" in config
+    # BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT does not exist in Buildroot; asking
+    # for it made `make olddefconfig` drop it silently on every build.
+    assert "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT" not in config
     assert "BR2_PACKAGE_NFTABLES=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
-    assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
+    assert "BR2_PACKAGE_NETWORK_MANAGER_CLI=y" in config
+    # BR2_PACKAGE_NETWORK_MANAGER_WIFI is not a Buildroot symbol either.
+    assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI" not in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y" in config
+    assert "BR2_PACKAGE_HOSTAPD_WPA3=y" in config
     assert "BR2_PACKAGE_WIRELESS_REGDB=y" in config
     assert "BR2_CCACHE=y" in config
     assert 'BR2_CCACHE_DIR="/cache/ccache"' in config
     assert 'BR2_CCACHE_INITIAL_SETUP="--max-size=10G"' in config
     assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
     assert "/work/partition-post-build.sh" in config
+
+
+def _run_buildroot_config_check(tmp_path, requested: str, resolved: str):
+    """Run the checker exactly as the Buildroot container does."""
+    script_path = tmp_path / "check-buildroot-config.py"
+    script_path.write_text(BUILDROOT_CONFIG_CHECK_SCRIPT, encoding="utf-8")
+    requested_path = tmp_path / "frameos-buildroot.config"
+    resolved_path = tmp_path / ".config"
+    requested_path.write_text(requested, encoding="utf-8")
+    resolved_path.write_text(resolved, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(script_path), str(requested_path), str(resolved_path)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_buildroot_config_check_passes_when_every_package_survives(tmp_path):
+    requested = "BR2_PACKAGE_DNSMASQ=y\nBR2_PACKAGE_IW=y\nBR2_TARGET_GENERIC_HOSTNAME=\"frameos\"\n"
+    resolved = (
+        "BR2_PACKAGE_DNSMASQ=y\n"
+        "BR2_PACKAGE_IW=y\n"
+        "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"\n"
+        "# BR2_PACKAGE_IWD is not set\n"
+    )
+
+    result = _run_buildroot_config_check(tmp_path, requested, resolved)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_buildroot_config_check_fails_on_silently_dropped_packages(tmp_path):
+    """The exact regression that shipped a Zero W image with no nmcli: Buildroot
+    deletes symbols with unmet dependencies during olddefconfig without a word."""
+    requested = (
+        "BR2_PACKAGE_DNSMASQ=y\n"
+        "BR2_PACKAGE_NETWORK_MANAGER=y\n"
+        "BR2_PACKAGE_NETWORK_MANAGER_CLI=y\n"
+        "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y\n"
+    )
+    resolved = "BR2_PACKAGE_DNSMASQ=y\n"
+
+    result = _run_buildroot_config_check(tmp_path, requested, resolved)
+
+    assert result.returncode == 1
+    assert "BR2_PACKAGE_NETWORK_MANAGER=y" in result.stderr
+    assert "BR2_PACKAGE_NETWORK_MANAGER_CLI=y" in result.stderr
+    assert "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y" in result.stderr
+    assert "BR2_PACKAGE_DNSMASQ" not in result.stderr
+    assert "3 requested package symbol" in result.stderr
+
+
+def test_buildroot_config_check_flags_explicitly_disabled_packages(tmp_path):
+    requested = "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y\n"
+    resolved = "# BR2_PACKAGE_WPA_SUPPLICANT_CLI is not set\n"
+
+    result = _run_buildroot_config_check(tmp_path, requested, resolved)
+
+    assert result.returncode == 1
+    assert "explicitly disabled" in result.stderr
+
+
+def test_buildroot_config_check_ignores_host_dependent_toolchain_symbols(tmp_path):
+    """Bootlin toolchains only exist for some hosts; falling back to the
+    from-source Buildroot toolchain is intentional, not a dropped package."""
+    requested = (
+        "BR2_TOOLCHAIN_EXTERNAL=y\n"
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_STABLE=y\n"
+        "BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y\n"
+        "BR2_PACKAGE_IW=y\n"
+    )
+    resolved = "BR2_TOOLCHAIN_BUILDROOT=y\nBR2_PACKAGE_IW=y\n"
+
+    result = _run_buildroot_config_check(tmp_path, requested, resolved)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_buildroot_build_script_verifies_config_after_olddefconfig(tmp_path):
+    script_path = tmp_path / "buildroot-build.sh"
+
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_W)
+    script = script_path.read_text(encoding="utf-8")
+
+    olddefconfig_at = script.index("olddefconfig")
+    check_at = script.index("python3 - /work/frameos-buildroot.config /build/output/.config")
+    make_at = script.index("phase_start buildroot_make")
+    # The check has to run after the config is resolved but before anything is built.
+    assert olddefconfig_at < check_at < make_at
+    assert "phase_start verify_buildroot_config" in script
+    assert "requested package symbol" in script
 
 
 def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path):
@@ -436,9 +540,13 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
     assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in partition_post_build
     assert (
-        "[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]"
+        "[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections"
+        "|/etc/wpa_supplicant)[[:space:]]"
         in partition_post_build
     )
+    assert BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE in partition_post_build
+    assert 'mkdir -p "$frameos_root/state/wpa_supplicant"' in partition_post_build
+    assert 'chmod 700 "$target_dir/etc/wpa_supplicant"' in partition_post_build
     assert 'mkdir -p "$frameos_root/state/NetworkManager/system-connections"' in partition_post_build
     assert (
         'chown 0:0 "$frameos_root/state/NetworkManager" '
@@ -596,8 +704,13 @@ def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkey
     nm_state_dir = overlay / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
     assert nm_state_dir.is_dir()
     assert oct(nm_state_dir.stat().st_mode & 0o777) == "0o700"
+    assert (overlay / BUILDROOT_WPA_SUPPLICANT_DIR.lstrip("/")).is_dir()
+    wpa_state_dir = overlay / BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")
+    assert wpa_state_dir.is_dir()
+    assert oct(wpa_state_dir.stat().st_mode & 0o777) == "0o700"
     fstab_text = (overlay / "etc" / "fstab").read_text(encoding="utf-8")
     assert BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE in fstab_text
+    assert BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE in fstab_text
     # /boot must be root-only: it can hold one-time provisioning secrets.
     assert "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0" in fstab_text
     assert "umask=000 0 0\nLABEL=FRAMEOS" not in fstab_text
@@ -1934,9 +2047,35 @@ def test_buildroot_config_for_zero_w_selects_bootlin_armv6_toolchain(tmp_path):
 
     assert "BR2_TOOLCHAIN_EXTERNAL=y" in config
     assert "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_STABLE=y" in config
-    # Shared FrameOS package selection stays identical across platforms.
-    assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y" in config
+
+
+def test_buildroot_config_for_zero_w_uses_wpa_supplicant_instead_of_network_manager(tmp_path):
+    """The Bootlin ARMv6 toolchain ships 4.19 kernel headers, below
+    NetworkManager's `depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_20`, so
+    Buildroot dropped it silently and the board shipped with no nmcli at all."""
+    zero_w_path = tmp_path / "zero-w.config"
+    zero_2_w_path = tmp_path / "zero-2-w.config"
+
+    BuildrootImageBuilder._write_buildroot_config(zero_w_path, RASPBERRY_PI_ZERO_W)
+    BuildrootImageBuilder._write_buildroot_config(zero_2_w_path, RASPBERRY_PI_ZERO_2_W)
+    zero_w = zero_w_path.read_text(encoding="utf-8")
+    zero_2_w = zero_2_w_path.read_text(encoding="utf-8")
+
+    assert "BR2_PACKAGE_NETWORK_MANAGER" not in zero_w
+    assert "BR2_PACKAGE_NETWORK_MANAGER=y" in zero_2_w
+
+    # Both boards get the full wpa_supplicant/hostapd stack the portal drives.
+    for config in (zero_w, zero_2_w):
+        assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
+        assert "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y" in config
+        assert "BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y" in config
+        assert "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y" in config
+        assert "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y" in config
+        assert "BR2_PACKAGE_HOSTAPD=y" in config
+        assert "BR2_PACKAGE_DNSMASQ=y" in config
+        assert "BR2_PACKAGE_IW=y" in config
+        assert "BR2_PACKAGE_WIRELESS_REGDB=y" in config
 
 
 def test_buildroot_build_script_uses_platform_defconfig(tmp_path):
@@ -2041,3 +2180,15 @@ def test_resolve_base_entry_reports_missing_platform_when_remote_also_lacks_it(t
 
     with pytest.raises(RuntimeError, match="No Buildroot base image is available for raspberry-pi-zero-w"):
         asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-zero-w"))
+
+
+def test_frameos_service_names_network_manager_only_where_it_exists():
+    # A Wants= pointing at a unit Buildroot never built logs a failed
+    # dependency on every boot; armv6 runs wpa_supplicant instead.
+    with_nm = render_buildroot_frameos_service(True)
+    assert "Wants=NetworkManager.service" in with_nm
+    assert "After=network.target NetworkManager.service" in with_nm
+
+    without_nm = render_buildroot_frameos_service(False)
+    assert "NetworkManager" not in without_nm
+    assert "After=network.target" in without_nm

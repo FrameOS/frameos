@@ -426,7 +426,7 @@ def legacy_local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / raw_frameos_version()
 
 
-def write_base_bootstrap_overlay(overlay: Path) -> None:
+def write_base_bootstrap_overlay(overlay: Path, platform: BuildrootPlatform | None = None) -> None:
     systemd = overlay / "etc" / "systemd" / "system"
     wants = systemd / "multi-user.target.wants"
     local_fs_pre_wants = systemd / "local-fs-pre.target.wants"
@@ -436,7 +436,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
     os.chmod(script_path, 0o755)
-    stage_buildroot_frameos_service(overlay)
+    stage_buildroot_frameos_service(overlay, platform is None or platform.uses_network_manager)
     (systemd / SETUP_JSON_RESET_SERVICE_NAME).write_text(
         render_setup_json_reset_service(
             "/boot/frameos-setup.json",
@@ -449,7 +449,12 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to(f"../{service}")
-    for service in ("NetworkManager.service", "dropbear.service", "dcron.service", "systemd-timesyncd.service"):
+    enabled_services = ["dropbear.service", "dcron.service", "systemd-timesyncd.service"]
+    # Only enable NetworkManager where Buildroot actually builds it — otherwise
+    # the image boots with an enabled unit that does not exist.
+    if platform is None or platform.uses_network_manager:
+        enabled_services.insert(0, "NetworkManager.service")
+    for service in enabled_services:
         link = wants / service
         if link.exists() or link.is_symlink():
             link.unlink()
@@ -497,7 +502,7 @@ def build(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="frameos-buildroot-base-") as tmp:
         tmp_path = Path(tmp)
         overlay = tmp_path / "overlay"
-        write_base_bootstrap_overlay(overlay)
+        write_base_bootstrap_overlay(overlay, platform)
         config_path = tmp_path / "frameos-buildroot.config"
         kernel_fragment_path = tmp_path / "linux-fragment.config"
         post_build_path = tmp_path / "post-build.sh"

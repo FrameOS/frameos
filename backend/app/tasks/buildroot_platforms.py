@@ -42,7 +42,16 @@ class BuildrootPlatform:
     # Lines whose dependencies are unmet on the build host are dropped by
     # `make olddefconfig` (e.g. Bootlin toolchains only exist for x86_64
     # hosts; other hosts fall back to a from-source Buildroot toolchain).
+    # Note: BR2_PACKAGE_* lines are guarded — see BUILDROOT_CONFIG_CHECK_SCRIPT
+    # in buildroot_image.py — so a silently dropped package fails the build.
     extra_config_lines: tuple[str, ...] = ()
+    # Whether the shared config asks Buildroot for NetworkManager + nmcli.
+    # NetworkManager's Kconfig entry `depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_20`,
+    # and every Bootlin "stable" external toolchain ships 4.19 kernel headers, so
+    # NetworkManager is silently dropped from any build that uses one. Boards that
+    # stay on a stable toolchain therefore get the wpa_supplicant + hostapd network
+    # stack instead; see frameos/src/frameos/portal.nim.
+    uses_network_manager: bool = True
     # Extra lines appended to the shared kernel config fragment.
     kernel_fragment_lines: tuple[str, ...] = ()
     # Lines merged into the Raspberry Pi boot config.txt.
@@ -104,6 +113,15 @@ RASPBERRY_PI_ZERO_2_W = BuildrootPlatform(
     ),
     needs_zero_2_w_wifi_firmware=True,
     default_runner_label="depot-ubuntu-24.04-arm-32",
+    # raspberrypizero2w_64_defconfig pins the Bootlin aarch64 *stable* toolchain,
+    # which ships 4.19 kernel headers — below NetworkManager's
+    # `depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_20`, so `make olddefconfig`
+    # silently dropped NetworkManager. (Shipped images still had nmcli only
+    # because Buildroot never deletes an already-installed package from a reused
+    # output/ directory; the first cache-cold rebuild would have lost it.)
+    # The bleeding-edge Bootlin toolchain is the same 2024.05-1 release with
+    # gcc 14 and 5.15 headers, which NetworkManager accepts.
+    extra_config_lines=("BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_BLEEDING_EDGE=y",),
 )
 
 RASPBERRY_PI_ZERO_W = BuildrootPlatform(
@@ -135,6 +153,16 @@ RASPBERRY_PI_ZERO_W = BuildrootPlatform(
         "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y",
         "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_STABLE=y",
     ),
+    # The *stable* Bootlin toolchain above ships 4.19 kernel headers, below
+    # NetworkManager's `depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_20`, so
+    # NetworkManager/nmcli was silently dropped and the board shipped with no
+    # way to join Wi-Fi or start its setup hotspot. Wi-Fi and the hotspot run on
+    # wpa_supplicant + hostapd here instead (see frameos/src/frameos/portal.nim).
+    #
+    # This is a product decision, not a hard limit: swapping the toolchain line
+    # above to BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_BLEEDING_EDGE
+    # (gcc 14, 5.15 headers) makes NetworkManager + nmcli resolve on ARMv6 too.
+    uses_network_manager=False,
     # Same 512MB split as the Zero 2 W.
     default_boot_config_lines=("gpu_mem=32",),
     wifi_firmware_models=("raspberrypi,model-zero-w",),
