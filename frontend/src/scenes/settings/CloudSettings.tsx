@@ -102,6 +102,10 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
   const providerHost = providerUrl.replace(/^https?:\/\//, '')
   const connection = cloudStatus?.connection
   const link = cloudStatus?.link
+  // The server decides when the URL may change (only a live link blocks it).
+  // Follow its answer instead of guessing, so the pencil is never offered for
+  // an edit that would come back as a 409.
+  const canEditProvider = cloudStatus?.can_edit_provider ?? true
   const expiresLabel = connection ? expiresInLabel(connection.expires_at) : null
 
   return (
@@ -475,7 +479,7 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
               <div className="@md:w-1/3 @md:shrink-0">
                 <Label>Cloud server</Label>
               </div>
-              {providerEditorOpen ? (
+              {providerEditorOpen && canEditProvider ? (
                 <Form
                   logic={cloudLogic}
                   formKey="providerUrl"
@@ -509,9 +513,14 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                   <button
                     type="button"
                     onClick={() => setProviderEditorOpen(true)}
-                    title="Edit cloud server URL"
+                    disabled={!canEditProvider}
+                    title={
+                      canEditProvider
+                        ? 'Edit cloud server URL'
+                        : 'Disconnect from FrameOS Cloud before changing the server URL'
+                    }
                     aria-label="Edit cloud server URL"
-                    className="frameos-muted inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent !px-0 !py-0 transition hover:bg-slate-500/10 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    className="frameos-muted inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent !px-0 !py-0 transition hover:bg-slate-500/10 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                   >
                     <PencilSquareIcon className="h-4 w-4" />
                   </button>

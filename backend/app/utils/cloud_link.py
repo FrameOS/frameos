@@ -67,7 +67,10 @@ def normalize_cloud_provider_url(value: str | None) -> str | None:
         return DEFAULT_CLOUD_PROVIDER_URL
     parsed = urlparse(normalized)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("The FrameOS Cloud server must be an http(s) URL")
+        raise ValueError(
+            "The FrameOS Cloud server must be a full http(s) URL, including the "
+            "scheme — e.g. https://cloud.frameos.net"
+        )
     if parsed.scheme == "http" and not _is_local_host(parsed.hostname or ""):
         raise ValueError(
             "The FrameOS Cloud server must use https (http is allowed only for "

@@ -186,6 +186,28 @@ def _upgrade_pending(link: CloudBackendLink | None) -> bool:
     return link is not None and link.status == "connected" and bool(link.device_code)
 
 
+def _can_edit_provider(link: CloudBackendLink | None) -> bool:
+    """Whether the server URL may be changed right now.
+
+    Only a link that is actually alive — connected, or a device grant still
+    waiting for approval — has anything to disconnect from first. Anything
+    else (never linked, revoked, expired, errored, or a status this version
+    does not know) is a dead link, and refusing to repoint it would leave the
+    install stuck on a server it can no longer reach with no way back short of
+    editing the database. This is the same rule /cloud/provider enforces, so
+    the UI never offers an edit that cannot succeed.
+    """
+    if link is None:
+        return True
+    if link.status == "connected":
+        return False
+    if link.status == "connecting":
+        # A grant still in flight blocks the change; an expired or code-less
+        # one is over, and the user can just repoint the URL.
+        return link_is_expired(link, _now()) or not link.device_code
+    return True
+
+
 def _status_payload(db: Session, link: CloudBackendLink | None, user: User | None = None) -> dict:
     default_url = cloud.default_cloud_provider_url()
     enabled = default_url is not None
@@ -202,7 +224,7 @@ def _status_payload(db: Session, link: CloudBackendLink | None, user: User | Non
         "provider_url": _effective_provider_url(link),
         "default_provider_url": default_url,
         "status": status,
-        "can_edit_provider": status == "disconnected",
+        "can_edit_provider": _can_edit_provider(link),
         "poll_error": link.poll_error if link else None,
         "local_fallback_enabled": link.local_fallback_enabled if link else True,
         "backup_scenes_enabled": link.backup_scenes_enabled if link else False,
@@ -331,7 +353,7 @@ async def _update_provider(data: CloudProviderUpdateRequest, db: Session) -> dic
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Enter a server URL")
 
     link = current_cloud_backend_link(db)
-    if link is not None and link.status != "disconnected":
+    if not _can_edit_provider(link):
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail="Disconnect from FrameOS Cloud before changing the server URL",
@@ -340,6 +362,11 @@ async def _update_provider(data: CloudProviderUpdateRequest, db: Session) -> dic
         link = CloudBackendLink(provider_url=provider_url, status="disconnected")
         db.add(link)
     else:
+        # Repointing means the old link is over: clear whatever it still holds
+        # for the server we are leaving, so its failure is not reported against
+        # the new one.
+        if link.status != "disconnected":
+            _reset_link(link)
         link.provider_url = provider_url
         link.poll_error = None
         link.updated_at = _now()

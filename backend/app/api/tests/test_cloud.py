@@ -102,6 +102,99 @@ async def test_set_provider_url(async_client):
 
 
 @pytest.mark.asyncio
+async def test_set_provider_url_without_a_scheme_explains_itself(async_client):
+    """The most common typo. The message has to name the fix — it is the only
+    thing the user sees under the field."""
+    response = await async_client.post("/api/cloud/provider", json={"provider_url": "localhost:3000"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "http" in detail and "https://" in detail
+
+
+@pytest.mark.asyncio
+async def test_can_change_provider_after_the_link_was_revoked(async_client, db):
+    """A revoked link is not a connection: "disconnect first" would be
+    nonsense, and would leave the install pinned to a dead server."""
+    db.add(CloudBackendLink(provider_url=PROVIDER, status="disconnected", poll_error="revoked"))
+    db.commit()
+
+    status = await async_client.get("/api/cloud/status")
+    assert status.json()["can_edit_provider"] is True
+
+    response = await async_client.post("/api/cloud/provider", json={"provider_url": "http://localhost:3000"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["provider_url"] == "http://localhost:3000"
+    # The old server's failure must not be reported against the new one.
+    assert data["poll_error"] is None
+    assert data["can_edit_provider"] is True
+
+
+@pytest.mark.asyncio
+async def test_can_change_provider_from_an_unknown_dead_status(async_client, db):
+    """Any status that is not a live link (older schema, half-written row,
+    hand-edited database) must still be recoverable through the UI."""
+    db.add(CloudBackendLink(provider_url=PROVIDER, status="error", poll_error="revoked"))
+    db.commit()
+
+    status = await async_client.get("/api/cloud/status")
+    assert status.json()["can_edit_provider"] is True
+
+    response = await async_client.post("/api/cloud/provider", json={"provider_url": "https://other.example"})
+    assert response.status_code == 200
+    assert response.json()["provider_url"] == "https://other.example"
+    # Repointing clears everything that belonged to the old server.
+    link = db.query(CloudBackendLink).first()
+    db.refresh(link)
+    assert link.status == "disconnected"
+    assert link.poll_error is None
+
+
+@pytest.mark.asyncio
+async def test_can_change_provider_after_the_grant_expired(async_client, db):
+    """An abandoned device grant expires; it is not something to disconnect from."""
+    import datetime
+
+    db.add(
+        CloudBackendLink(
+            provider_url=PROVIDER,
+            status="connecting",
+            device_code="dc-1",
+            expires_at=datetime.datetime.utcnow() - datetime.timedelta(minutes=5),
+        )
+    )
+    db.commit()
+
+    response = await async_client.post("/api/cloud/provider", json={"provider_url": "https://other.example"})
+    assert response.status_code == 200
+    assert response.json()["provider_url"] == "https://other.example"
+
+
+@pytest.mark.asyncio
+async def test_cannot_change_provider_while_connected(async_client, db):
+    db.add(CloudBackendLink(provider_url=PROVIDER, status="connected", scope="backend:link"))
+    db.commit()
+
+    status = await async_client.get("/api/cloud/status")
+    assert status.json()["can_edit_provider"] is False
+
+    response = await async_client.post("/api/cloud/provider", json={"provider_url": "https://other.example"})
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dead_link_can_reconnect_without_disconnecting_first(async_client, cloud_calls, db):
+    """The sibling trap: /cloud/connect must also work off a revoked link."""
+    db.add(CloudBackendLink(provider_url=PROVIDER, status="disconnected", poll_error="revoked"))
+    db.commit()
+
+    response = await async_client.post("/api/cloud/connect", json={})
+    assert response.status_code == 200
+    assert response.json()["status"] == "connecting"
+    assert response.json()["poll_error"] is None
+
+
+@pytest.mark.asyncio
 async def test_connect_starts_device_flow(async_client, cloud_calls):
     calls, _ = cloud_calls
     response = await async_client.post("/api/cloud/connect", json={})
