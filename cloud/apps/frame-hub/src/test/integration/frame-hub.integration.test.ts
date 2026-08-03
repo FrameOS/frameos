@@ -157,16 +157,25 @@ async function createFrameForAccount(
   return { frame, linkedClient, privateKey, token };
 }
 
-async function createBrowserSession(accountId: string) {
+// Mirrors auth-web's createSession: a token minted for the absolute ceiling,
+// with the row carrying the sliding idle deadline. Overrides let a test age a
+// session past either deadline.
+async function createBrowserSession(
+  accountId: string,
+  overrides: { absoluteExpiresAt?: Date; expiresAt?: Date } = {},
+) {
   const token = await new SignJWT({ profile: { accountId } })
     .setProtectedHeader({ alg: "HS256" })
     .setJti(randomUUID())
     .setIssuedAt()
-    .setExpirationTime("8h")
+    .setExpirationTime("90d")
     .sign(derivedSigningKey("session"));
+  const now = Date.now();
   await db.insert(sessions).values({
+    absoluteExpiresAt:
+      overrides.absoluteExpiresAt ?? new Date(now + 90 * 24 * 60 * 60 * 1000),
     accountId,
-    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+    expiresAt: overrides.expiresAt ?? new Date(now + 30 * 24 * 60 * 60 * 1000),
     tokenHash: hashSecret(token),
   });
   return token;
@@ -1159,6 +1168,48 @@ describe("browser socket", () => {
     browser.sendRaw("ping");
     await browser.next((msg) => msg.event === "pong", "pong for raw ping");
     browser.ws.close();
+  });
+
+  // Sessions slide, so the hub must honour both deadlines auth-web keeps: the
+  // idle one it pushes forward, and the ceiling it never pushes past.
+  it("rejects sessions past either deadline, however fresh the JWT", async () => {
+    const { account, frame } = await createFrameFixture();
+
+    const idled = await createBrowserSession(account.id, {
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    expect(
+      await expectUpgradeRejected(`/api/frames/${frame.id}/updates`, {
+        cookie: `frameos_cloud_session=${idled}`,
+      }),
+    ).toBe(401);
+
+    // Used seconds ago — the idle deadline is wide open — but the session has
+    // simply existed for too long.
+    const capped = await createBrowserSession(account.id, {
+      absoluteExpiresAt: new Date(Date.now() - 1000),
+    });
+    expect(
+      await expectUpgradeRejected(`/api/frames/${frame.id}/updates`, {
+        cookie: `frameos_cloud_session=${capped}`,
+      }),
+    ).toBe(401);
+  });
+
+  it("closes a browser socket whose session hits its absolute ceiling", async () => {
+    const { account, frame } = await createFrameFixture();
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken);
+    const fleet = await openFleetBrowser(sessionToken);
+
+    await db
+      .update(sessions)
+      .set({ absoluteExpiresAt: new Date(Date.now() - 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+    await hub.sweep();
+
+    expect(await browser.closed).toBe(4401);
+    expect(await fleet.closed).toBe(4401);
   });
 
   it("streams all the account's frames over the account-wide fleet socket", async () => {

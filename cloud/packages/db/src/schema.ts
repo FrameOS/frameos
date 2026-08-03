@@ -255,6 +255,12 @@ export const auditEvents = pgTable(
 // Server-side session records backing the session cookie JWT. A session is
 // valid only while its row is unrevoked and unexpired, which makes logout and
 // account-compromise revocation effective immediately.
+//
+// Sessions slide: expires_at is an *idle* deadline that activity pushes
+// forward (see refreshSessionRow in apps/auth-web), while
+// absolute_expires_at is the hard ceiling a session can never outlive no
+// matter how active it is. last_used_at throttles the refresh so a busy tab
+// does not rewrite the row on every request.
 export const sessions = pgTable(
   "sessions",
   {
@@ -262,7 +268,13 @@ export const sessions = pgTable(
     accountId: uuid("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
+    absoluteExpiresAt: timestamp("absolute_expires_at", {
+      withTimezone: true,
+    }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     tokenHash: text("token_hash").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

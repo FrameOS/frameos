@@ -3,36 +3,25 @@ import { and, eq, isNull } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
 import { createDb, sessions } from "@frameos-cloud/db";
-import { getSessionCookieDomain, hasDatabaseUrl } from "./env";
+import { hasDatabaseUrl } from "./env";
 import { derivedSigningKey } from "./keys";
 import { hashSecret } from "./secrets";
+import {
+  sessionAbsoluteMaxAgeSeconds,
+  sessionCookieName,
+  sessionIdleMaxAgeSeconds,
+} from "./session-cookie";
 
-// Single source of truth for session lifetime: used for the JWT expiry, the
-// cookie maxAge, and the server-side session row so they can never drift.
-export const sessionMaxAgeSeconds = 8 * 60 * 60;
-
-// Split production uses a parent-domain cookie so cloud.frameos.net and
-// scenes.frameos.net share one login. Domain cookies cannot use __Host-, so
-// retain the __Secure- prefix there; single-origin production keeps the more
-// restrictive __Host- prefix. Plain-HTTP development uses the bare name.
-export const sessionCookieName =
-  process.env.NODE_ENV === "production"
-    ? getSessionCookieDomain()
-      ? "__Secure-frameos_cloud_session"
-      : "__Host-frameos_cloud_session"
-    : "frameos_cloud_session";
-
-export function sessionCookieOptions() {
-  const domain = getSessionCookieDomain();
-  return {
-    ...(domain ? { domain } : {}),
-    httpOnly: true,
-    maxAge: sessionMaxAgeSeconds,
-    path: "/",
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-  };
-}
+// Cookie naming and lifetime live in ./session-cookie so proxy.ts can refresh
+// sessions without importing next/headers. Re-exported here because this
+// module is the front door every route handler already imports.
+export {
+  sessionAbsoluteMaxAgeSeconds,
+  sessionCookieName,
+  sessionCookieOptions,
+  sessionIdleMaxAgeSeconds,
+  sessionRefreshIntervalSeconds,
+} from "./session-cookie";
 
 export type SessionProfile = {
   accountId?: string | undefined;
@@ -50,6 +39,12 @@ function secretKey() {
 // Mints the session JWT and records a server-side session row keyed on the
 // token hash. The row makes the session revocable: logout (or an operator)
 // can invalidate the token before its JWT expiry.
+//
+// The token itself is minted for the absolute ceiling and never rotates —
+// rotating it on refresh would break every request already in flight with the
+// old cookie, and the frame hub's long-lived browser sockets, which remember
+// the token hash they were opened with. The idle deadline is enforced by the
+// row instead, which is where revocation already lives.
 export async function createSession(
   db: ReturnType<typeof createDb>,
   profile: SessionProfile & { accountId: string },
@@ -61,12 +56,15 @@ export async function createSession(
     .setProtectedHeader({ alg: "HS256" })
     .setJti(randomUUID())
     .setIssuedAt()
-    .setExpirationTime(`${sessionMaxAgeSeconds}s`)
+    .setExpirationTime(`${sessionAbsoluteMaxAgeSeconds}s`)
     .sign(secretKey());
 
+  const now = Date.now();
   await db.insert(sessions).values({
+    absoluteExpiresAt: new Date(now + sessionAbsoluteMaxAgeSeconds * 1000),
     accountId: profile.accountId,
-    expiresAt: new Date(Date.now() + sessionMaxAgeSeconds * 1000),
+    expiresAt: new Date(now + sessionIdleMaxAgeSeconds * 1000),
+    lastUsedAt: new Date(now),
     tokenHash: hashSecret(token),
   });
 
@@ -88,6 +86,8 @@ export async function revokeSessionByToken(
     );
 }
 
+// Read-only on purpose: this runs inside React Server Components, where
+// cookies().set() throws. Extending a session is proxy.ts's job.
 export async function readSession() {
   try {
     const cookieStore = await cookies();
@@ -106,6 +106,7 @@ export async function readSession() {
     if (sessionProfile.accountId && hasDatabaseUrl()) {
       const [row] = await createDb()
         .select({
+          absoluteExpiresAt: sessions.absoluteExpiresAt,
           expiresAt: sessions.expiresAt,
           revokedAt: sessions.revokedAt,
         })
@@ -113,7 +114,13 @@ export async function readSession() {
         .where(eq(sessions.tokenHash, hashSecret(token)))
         .limit(1);
 
-      if (!row || row.revokedAt || row.expiresAt <= new Date()) {
+      const now = new Date();
+      if (
+        !row ||
+        row.revokedAt ||
+        row.expiresAt <= now ||
+        row.absoluteExpiresAt <= now
+      ) {
         return undefined;
       }
     }

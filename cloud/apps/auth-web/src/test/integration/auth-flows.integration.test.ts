@@ -24,7 +24,15 @@ import { confirmEmailVerification } from "../../lib/email-verification";
 import { resolveGoogleSignIn } from "../../lib/google-account";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../lib/secrets";
-import { createSession, sessionCookieName } from "../../lib/session";
+import {
+  createSession,
+  readSession,
+  sessionAbsoluteMaxAgeSeconds,
+  sessionCookieName,
+  sessionIdleMaxAgeSeconds,
+  sessionRefreshIntervalSeconds,
+} from "../../lib/session";
+import { proxy } from "../../../proxy";
 
 // Route handlers read the session cookie through next/headers, which only
 // works inside a real Next.js request scope. Replace it with a jar the tests
@@ -660,5 +668,207 @@ describe("admin panel APIs", () => {
       .from(accounts)
       .where(eq(accounts.id, target.accountId));
     expect(remaining).toHaveLength(0);
+  });
+});
+
+// Sessions slide: activity pushes the idle deadline forward (throttled to one
+// write an hour) up to an absolute ceiling, and the row stays the single
+// enforcement point so revocation is still instant. The refresh itself lives
+// in proxy.ts, the only place in Next 16 that may set cookies for an RSC
+// navigation, so these drive the real proxy.
+describe("sliding sessions", () => {
+  const hour = 60 * 60 * 1000;
+  const day = 24 * hour;
+
+  async function sessionRow(token: string) {
+    const [row] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.tokenHash, hashSecret(token)));
+    if (!row) {
+      throw new Error("session row missing");
+    }
+    return row;
+  }
+
+  function ageSession(token: string, values: Partial<typeof sessions.$inferInsert>) {
+    return db
+      .update(sessions)
+      .set(values)
+      .where(eq(sessions.tokenHash, hashSecret(token)));
+  }
+
+  function visit(token: string | undefined, path = "/account") {
+    return proxy(
+      new NextRequest(new URL(path, baseUrl), {
+        headers: {
+          host: "localhost:3000",
+          ...(token ? { cookie: `${sessionCookieName}=${token}` } : {}),
+        },
+      }),
+    );
+  }
+
+  function maxAgeOf(response: Response) {
+    const header = response.headers.get("set-cookie");
+    if (!header?.includes(`${sessionCookieName}=`)) {
+      return undefined;
+    }
+    const match = /max-age=(\d+)/i.exec(header);
+    return match ? Number(match[1]) : undefined;
+  }
+
+  async function establishAgedSession() {
+    const { accountId, email } = await signUpUser();
+    const token = await establishSession(accountId, email);
+    // Older than the throttle window, and with an idle deadline well short of
+    // a full window so an extension is visible.
+    await ageSession(token, {
+      expiresAt: new Date(Date.now() + day),
+      lastUsedAt: new Date(Date.now() - 2 * hour),
+    });
+    return { accountId, email, token };
+  }
+
+  it("stamps a new session with both deadlines", async () => {
+    const { accountId, email } = await signUpUser();
+    const token = await establishSession(accountId, email);
+    const row = await sessionRow(token);
+
+    expect(row.expiresAt.getTime() - Date.now()).toBeGreaterThan(
+      sessionIdleMaxAgeSeconds * 1000 - 60_000,
+    );
+    expect(row.absoluteExpiresAt.getTime() - Date.now()).toBeGreaterThan(
+      sessionAbsoluteMaxAgeSeconds * 1000 - 60_000,
+    );
+    expect(row.absoluteExpiresAt.getTime()).toBeGreaterThan(
+      row.expiresAt.getTime(),
+    );
+  });
+
+  it("extends the row and re-issues the cookie when a stale session is used", async () => {
+    const { token } = await establishAgedSession();
+    const before = await sessionRow(token);
+
+    const response = await visit(token);
+
+    expect(maxAgeOf(response)).toBe(sessionIdleMaxAgeSeconds);
+    // The refreshed cookie carries the same token: rotating it would break
+    // in-flight requests and the hub's open browser sockets.
+    expect(response.headers.get("set-cookie")).toContain(
+      `${sessionCookieName}=${token}`,
+    );
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+
+    const after = await sessionRow(token);
+    expect(after.expiresAt.getTime()).toBeGreaterThan(before.expiresAt.getTime());
+    expect(after.expiresAt.getTime() - Date.now()).toBeGreaterThan(
+      sessionIdleMaxAgeSeconds * 1000 - 60_000,
+    );
+    expect(after.lastUsedAt.getTime()).toBeGreaterThan(
+      before.lastUsedAt.getTime(),
+    );
+    // Sliding never moves the ceiling.
+    expect(after.absoluteExpiresAt.getTime()).toBe(
+      before.absoluteExpiresAt.getTime(),
+    );
+    // And the session is still readable — the whole point of the exercise.
+    expect(await readSession()).toMatchObject({ accountId: after.accountId });
+  });
+
+  it("skips the write inside the throttle window", async () => {
+    const { accountId, email } = await signUpUser();
+    const token = await establishSession(accountId, email);
+    await ageSession(token, {
+      // Used recently: well inside the once-an-hour refresh window.
+      lastUsedAt: new Date(Date.now() - sessionRefreshIntervalSeconds * 500),
+    });
+    const before = await sessionRow(token);
+
+    const response = await visit(token);
+
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const after = await sessionRow(token);
+    expect(after.expiresAt.getTime()).toBe(before.expiresAt.getTime());
+    expect(after.lastUsedAt.getTime()).toBe(before.lastUsedAt.getTime());
+  });
+
+  it("rejects a session left idle past the idle window", async () => {
+    const { accountId, email } = await signUpUser();
+    const token = await establishSession(accountId, email);
+    await ageSession(token, {
+      expiresAt: new Date(Date.now() - 1000),
+      lastUsedAt: new Date(Date.now() - sessionIdleMaxAgeSeconds * 1000),
+    });
+
+    expect(await readSession()).toBeUndefined();
+    // And no amount of traffic brings it back.
+    const response = await visit(token);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect((await sessionRow(token)).expiresAt.getTime()).toBeLessThan(
+      Date.now(),
+    );
+  });
+
+  it("rejects a session past the absolute cap however recently it was used", async () => {
+    const { accountId, email } = await signUpUser();
+    const token = await establishSession(accountId, email);
+    await ageSession(token, {
+      absoluteExpiresAt: new Date(Date.now() - 1000),
+      // Idle deadline wide open, last used a moment ago: only the ceiling
+      // ends this session.
+      expiresAt: new Date(Date.now() + day),
+      lastUsedAt: new Date(Date.now() - 2 * hour),
+    });
+
+    expect(await readSession()).toBeUndefined();
+    const response = await visit(token);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("shrinks the last window rather than sliding past the ceiling", async () => {
+    const { token } = await establishAgedSession();
+    await ageSession(token, {
+      absoluteExpiresAt: new Date(Date.now() + hour),
+    });
+
+    const response = await visit(token);
+
+    const maxAge = maxAgeOf(response);
+    expect(maxAge).toBeGreaterThan(3_000);
+    expect(maxAge).toBeLessThanOrEqual(3_600);
+    const after = await sessionRow(token);
+    expect(after.expiresAt.getTime()).toBe(after.absoluteExpiresAt.getTime());
+  });
+
+  it("lets revocation win immediately, refresh or not", async () => {
+    const { token } = await establishAgedSession();
+    await ageSession(token, { revokedAt: new Date() });
+
+    expect(await readSession()).toBeUndefined();
+    const response = await visit(token);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect((await sessionRow(token)).lastUsedAt.getTime()).toBeLessThan(
+      Date.now() - hour,
+    );
+  });
+
+  it("keeps its hands off the routes that mint and clear the cookie", async () => {
+    const { token } = await establishAgedSession();
+    const before = await sessionRow(token);
+
+    for (const path of ["/api/auth/logout", "/logout", "/api/auth/login"]) {
+      const response = await visit(token, path);
+      expect(response.headers.get("set-cookie")).toBeNull();
+    }
+
+    const after = await sessionRow(token);
+    expect(after.lastUsedAt.getTime()).toBe(before.lastUsedAt.getTime());
+  });
+
+  it("ignores requests without a session cookie, including device traffic", async () => {
+    const response = await visit(undefined, "/api/frames/enroll");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 });

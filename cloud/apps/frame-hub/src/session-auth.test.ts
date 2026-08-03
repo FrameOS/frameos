@@ -31,16 +31,17 @@ describe("parseCookieHeader", () => {
 });
 
 describe("sessionCookieCandidates", () => {
-  // Cross-check against the real source of truth. auth-web's session.ts
-  // imports next/headers and cannot be imported from this service, so the
-  // declaration is read from disk instead — an added, removed, or renamed
-  // cookie name in auth-web fails here rather than silently leaving the hub
-  // unable to authenticate browser sockets.
-  it("matches every cookie name auth-web's session.ts can mint", () => {
+  // Cross-check against the real source of truth: auth-web's
+  // session-cookie.ts, which is where the cookie name is declared (session.ts
+  // re-exports it). Reading it from disk rather than importing keeps this
+  // service free of auth-web's Next dependencies — and an added, removed, or
+  // renamed cookie name fails here rather than silently leaving the hub unable
+  // to authenticate browser sockets.
+  it("matches every cookie name auth-web's session-cookie.ts can mint", () => {
     const sessionSource = readFileSync(
       path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
-        "../../auth-web/src/lib/session.ts",
+        "../../auth-web/src/lib/session-cookie.ts",
       ),
       "utf8",
     );

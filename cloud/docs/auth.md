@@ -76,6 +76,19 @@ light/dark preference uses a separate script-readable parent-domain cookie so
 the theme follows navigation between sites. Local development keeps host-only
 cookies because every surface uses the same `http://localhost:3000` origin.
 
+Sessions slide. `sessions.expires_at` is an *idle* deadline (30 days) that the
+Next proxy (`apps/auth-web/proxy.ts`) pushes forward as the browser makes
+requests, so continuous use never logs anyone out; `sessions.absolute_expires_at`
+(90 days) is the ceiling activity can never push past, at which point the user
+signs in again. The refresh is throttled by `sessions.last_used_at` to one row
+update per session per hour, re-issues the *same* token (rotation would break
+in-flight requests and the frame hub's open browser sockets), and re-issues the
+cookie with a fresh `Max-Age`. The proxy is the only legal place for it: Next 16
+always runs the proxy on the Node.js runtime, while `readSession()` runs inside
+React Server Components where `cookies().set()` throws. The row remains the
+single enforcement point, so logout, a password change, and the admin "revoke
+sessions" button all still take effect on the very next request.
+
 ## Google OAuth Client
 
 Create an OAuth 2.0 Client ID (type "Web application") in the Google Cloud

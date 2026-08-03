@@ -1,8 +1,9 @@
 // Browser-socket auth: verify the auth-web session cookie without Next.
-// Replicates cloud/apps/auth-web/src/lib/session.ts (the source of truth for
-// cookie naming and verification): an HS256 JWT signed with
-// derivedSigningKey("session"), valid only while its sessions row (keyed by
-// the sha256-base64url token hash) is unrevoked and unexpired.
+// Replicates cloud/apps/auth-web/src/lib/session.ts and its companion
+// session-cookie.ts (the source of truth for cookie naming and verification):
+// an HS256 JWT signed with derivedSigningKey("session"), valid only while its
+// sessions row (keyed by the sha256-base64url token hash) is unrevoked and
+// inside both its idle deadline and its absolute ceiling.
 import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { jwtVerify } from "jose";
 import { createDb, sessions } from "@frameos-cloud/db";
@@ -70,6 +71,7 @@ export async function verifySessionToken(
     const tokenHash = hashSecret(token);
     const [row] = await db
       .select({
+        absoluteExpiresAt: sessions.absoluteExpiresAt,
         accountId: sessions.accountId,
         expiresAt: sessions.expiresAt,
         revokedAt: sessions.revokedAt,
@@ -77,10 +79,12 @@ export async function verifySessionToken(
       .from(sessions)
       .where(eq(sessions.tokenHash, tokenHash))
       .limit(1);
+    const now = new Date();
     if (
       !row ||
       row.revokedAt ||
-      row.expiresAt <= new Date() ||
+      row.expiresAt <= now ||
+      row.absoluteExpiresAt <= now ||
       row.accountId !== accountId
     ) {
       return undefined;
@@ -114,6 +118,11 @@ export async function authenticateBrowserSession(
 // The subset of the given session token hashes that are still live. Used by
 // the sweep to close browser sockets whose session was revoked or expired
 // after the upgrade — devices are kicked on revocation, browsers must be too.
+//
+// Sessions slide (auth-web pushes expires_at forward as the browser makes
+// requests), so a socket held open by an active user keeps passing this; both
+// the idle deadline and the absolute ceiling are checked, exactly as at
+// upgrade time.
 export async function liveSessionHashes(
   db: ReturnType<typeof createDb>,
   tokenHashes: string[],
@@ -121,6 +130,7 @@ export async function liveSessionHashes(
   if (tokenHashes.length === 0) {
     return new Set();
   }
+  const now = new Date();
   const rows = await db
     .select({ tokenHash: sessions.tokenHash })
     .from(sessions)
@@ -128,7 +138,8 @@ export async function liveSessionHashes(
       and(
         inArray(sessions.tokenHash, tokenHashes),
         isNull(sessions.revokedAt),
-        gt(sessions.expiresAt, new Date()),
+        gt(sessions.expiresAt, now),
+        gt(sessions.absoluteExpiresAt, now),
       ),
     );
   return new Set(rows.map((row) => row.tokenHash));
