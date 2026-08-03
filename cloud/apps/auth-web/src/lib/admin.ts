@@ -14,6 +14,7 @@ import {
   accounts,
   clientBackups,
   createDb,
+  frames,
   linkedClients,
   sessions,
   storeSceneReports,
@@ -62,6 +63,7 @@ export type AdminUserRow = {
     emailSnapshot: string | null;
     emailVerified: boolean;
   }[];
+  frameCount: number;
   isSuperadmin: boolean;
   linkedBackends: number;
   primaryEmail: string | null;
@@ -224,6 +226,17 @@ export async function listAccountsForAdmin(
     .where(inArray(clientBackups.accountId, accountIds))
     .groupBy(clientBackups.accountId);
 
+  // Every frame row the user still sees in their workspace counts, revoked
+  // included — deletion removes the row outright, so "gone" means gone.
+  const frameCounts = await db
+    .select({
+      accountId: frames.accountId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(frames)
+    .where(inArray(frames.accountId, accountIds))
+    .groupBy(frames.accountId);
+
   const sessionCounts = await db
     .select({
       accountId: sessions.accountId,
@@ -258,6 +271,9 @@ export async function listAccountsForAdmin(
   const sessionMap = new Map(
     sessionCounts.map((row) => [row.accountId, row.count]),
   );
+  const frameMap = new Map(
+    frameCounts.map((row) => [row.accountId, row.count]),
+  );
 
   return rows.map((row) => ({
     activeSessions: sessionMap.get(row.id) ?? 0,
@@ -265,6 +281,7 @@ export async function listAccountsForAdmin(
     backupCount: backupMap.get(row.id)?.count ?? 0,
     createdAt: row.createdAt,
     displayName: row.displayName,
+    frameCount: frameMap.get(row.id) ?? 0,
     id: row.id,
     identities: identityMap.get(row.id) ?? [],
     isSuperadmin: row.isSuperadmin,

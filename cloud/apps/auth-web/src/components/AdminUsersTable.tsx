@@ -10,6 +10,7 @@ export type AdminUser = {
   backupCount: number;
   createdAt: string;
   displayName: string | null;
+  frameCount: number;
   id: string;
   identities: {
     providerKey: string;
@@ -127,6 +128,7 @@ export function AdminUsersTable({
               <th>User</th>
               <th>Sign-in methods</th>
               <th>Backends</th>
+              <th>Frames</th>
               <th>Backups</th>
               <th>Sessions</th>
               <th>Created</th>
@@ -171,6 +173,7 @@ export function AdminUsersTable({
                     )}
                   </td>
                   <td>{user.linkedBackends}</td>
+                  <td>{user.frameCount}</td>
                   <td>
                     {user.backupCount > 0
                       ? `${user.backupCount} · ${formatBytes(user.backupBytes)}`
