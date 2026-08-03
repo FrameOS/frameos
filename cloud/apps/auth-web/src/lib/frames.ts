@@ -12,6 +12,7 @@ import {
   frameCommands,
   frameEnrollmentTokens,
   frameLogs,
+  frameMetrics,
   frames,
   frameSceneAssignments,
   linkedClients,
@@ -816,4 +817,62 @@ export async function countFramesForAccount(
       ),
     );
   return row?.count ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Metrics retention (scope telemetry:metrics)
+// ---------------------------------------------------------------------------
+
+// Hard per-frame retention cap for stored metrics samples, mirroring the
+// backend's METRICS_RETAINED_PER_FRAME so the SPA's Metrics panel sees the
+// same depth of history in cloud mode.
+export const maxMetricsPerFrame = 1000;
+// Per-sample size ceiling. Must match the hub's maxMetricsBytes
+// (apps/frame-hub/src/protocol.ts) — the hub rejects oversized samples before
+// they get here; this re-check keeps the helper safe for any other caller.
+export const maxMetricsSampleBytes = 16 * 1024;
+
+// Store one metrics sample, enforcing the per-frame retention cap in the same
+// transaction (the storeFrameLogs pattern). Returns the inserted row's id (so
+// the hub can broadcast a new_metrics event carrying the same id/timestamp the
+// /metrics routes will later serve), or null when the sample is oversized.
+export async function storeFrameMetrics(
+  db: FramesDatabase,
+  frameId: string,
+  metrics: unknown,
+  timestamp: Date,
+): Promise<number | null> {
+  const serialized = JSON.stringify(metrics ?? null);
+  const sizeBytes = Buffer.byteLength(serialized, "utf8");
+  if (sizeBytes > maxMetricsSampleBytes) {
+    return null;
+  }
+  let insertedId: number | null = null;
+  await db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(frameMetrics)
+      .values({ frameId, payload: metrics, sizeBytes, timestamp })
+      .returning({ id: frameMetrics.id });
+    insertedId = inserted?.id ?? null;
+    // Prune beyond the cap: cheap because frame_metrics_frame_idx is
+    // (frame_id, id).
+    const [cutoff] = await tx
+      .select({ id: frameMetrics.id })
+      .from(frameMetrics)
+      .where(eq(frameMetrics.frameId, frameId))
+      .orderBy(desc(frameMetrics.id))
+      .offset(maxMetricsPerFrame)
+      .limit(1);
+    if (cutoff) {
+      await tx
+        .delete(frameMetrics)
+        .where(
+          and(
+            eq(frameMetrics.frameId, frameId),
+            lt(frameMetrics.id, cutoff.id + 1),
+          ),
+        );
+    }
+  });
+  return insertedId;
 }

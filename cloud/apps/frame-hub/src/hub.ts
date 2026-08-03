@@ -42,9 +42,11 @@ import {
   storeFrameAssetFile,
   storeFrameAssetListing,
   storeFrameLogs,
+  storeFrameMetrics,
   verifyFrameSignature,
 } from "../../auth-web/src/lib/frames";
 import {
+  allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
   getMaxConnections,
   isAllowedBrowserOrigin,
@@ -61,6 +63,7 @@ import {
   maxSceneIdChars,
   maxStateBytes,
   newLogEvent,
+  newMetricsEvent,
   parseJsonMessage,
   parseLogEntries,
   uuidPattern,
@@ -768,11 +771,24 @@ export async function startFrameHub(
       .update(frames)
       .set({ lastMetrics: metrics, lastSeenAt: now, updatedAt: now })
       .where(eq(frames.id, session.frame.id));
-    broadcastToBrowsers(session.frame, "new_metrics", {
-      frame_id: session.frame.id,
+    // Retain the sample for the Metrics panel's history (storeFrameMetrics
+    // caps per-frame retention in-transaction), then broadcast it with the
+    // stored id/timestamp so the live event matches what /metrics serves.
+    const storedId = await storeFrameMetrics(
+      db,
+      session.frame.id,
       metrics,
-      timestamp: now.toISOString(),
-    });
+      now,
+    );
+    broadcastToBrowsers(
+      session.frame,
+      "new_metrics",
+      newMetricsEvent(session.frame.id, {
+        id: storedId,
+        metrics,
+        timestamp: now,
+      }),
+    );
   }
 
   async function handleAssets(
@@ -1138,6 +1154,8 @@ export async function startFrameHub(
   const wss = new WebSocketServer({ maxPayload: maxPayloadBytes, noServer: true });
 
   const allowedBrowserOrigins = getAllowedBrowserOrigins();
+  // Dev-only loosening for LAN-IP origins; always false in production.
+  const allowPrivateOrigins = allowsPrivateNetworkOrigins();
   const maxConnections = getMaxConnections();
   let openConnections = 0;
 
@@ -1230,7 +1248,9 @@ export async function startFrameHub(
       pathname === browserAccountPath || browserFramePathPattern.test(pathname);
     if (browserPath) {
       const origin = req.headers.origin;
-      if (!isAllowedBrowserOrigin(origin, allowedBrowserOrigins)) {
+      if (
+        !isAllowedBrowserOrigin(origin, allowedBrowserOrigins, allowPrivateOrigins)
+      ) {
         logWarn("browser.upgrade_bad_origin", { origin });
         rejectUpgrade(socket, 403, "forbidden_origin");
         return;

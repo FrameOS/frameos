@@ -176,6 +176,23 @@ export function newLogEvent(
   };
 }
 
+// new_metrics event in the MetricsType shape the SPA's Metrics panel expects
+// (frontend/src/types.tsx) — the same row the /metrics and /metrics/recent
+// routes serve, so a live sample and its later refetch dedupe cleanly on
+// timestamp. id is stringified to match the backend's uuid-string ids; a
+// sample that was not retained (store failure) is broadcast without one.
+export function newMetricsEvent(
+  frameId: string,
+  row: { id: number | null; timestamp: Date; metrics: unknown },
+) {
+  return {
+    frame_id: frameId,
+    ...(row.id === null ? {} : { id: String(row.id) }),
+    metrics: row.metrics,
+    timestamp: row.timestamp.toISOString(),
+  };
+}
+
 // update_frame event data: the summary the frames API serves, extended with
 // the live state the hub owns.
 export function frameUpdateEvent(frame: FrameRow) {

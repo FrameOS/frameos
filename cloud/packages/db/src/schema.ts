@@ -779,3 +779,28 @@ export const frameLogs = pgTable(
     frameIdx: index("frame_logs_frame_idx").on(table.frameId, table.id),
   }),
 );
+
+// Retained metrics samples (scope telemetry:metrics) — the history behind the
+// SPA's Metrics panel (/metrics + /metrics/recent), while frames.last_metrics
+// keeps only the newest sample. Same shape and retention doctrine as
+// frame_logs: size_bytes precomputed, per-frame cap pruned on insert.
+export const frameMetrics = pgTable(
+  "frame_metrics",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    insertedAt: timestamp("inserted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    frameIdx: index("frame_metrics_frame_idx").on(table.frameId, table.id),
+  }),
+);

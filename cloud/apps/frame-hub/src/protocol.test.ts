@@ -12,6 +12,7 @@ import {
   maxSceneIdChars,
   maxStateBytes,
   newLogEvent,
+  newMetricsEvent,
   parseJsonMessage,
   parseLogEntries,
   parseLogTimestamp,
@@ -262,6 +263,30 @@ describe("browser event shaping", () => {
       timestamp: "2026-08-01T12:00:00.000Z",
       type: "render:done",
     });
+  });
+
+  it("maps a stored metrics row to the SPA's MetricsType shape", () => {
+    const event = newMetricsEvent("frame-uuid", {
+      id: 7,
+      metrics: { load: [0.5] },
+      timestamp: new Date("2026-08-01T12:00:00.000Z"),
+    });
+    expect(event).toEqual({
+      frame_id: "frame-uuid",
+      id: "7",
+      metrics: { load: [0.5] },
+      timestamp: "2026-08-01T12:00:00.000Z",
+    });
+  });
+
+  it("omits the id when the sample was not retained", () => {
+    const event = newMetricsEvent("frame-uuid", {
+      id: null,
+      metrics: { load: [0.5] },
+      timestamp: new Date("2026-08-01T12:00:00.000Z"),
+    });
+    expect("id" in event).toBe(false);
+    expect(event.frame_id).toBe("frame-uuid");
   });
 
   it("falls back to serialized payload and type 'log'", () => {

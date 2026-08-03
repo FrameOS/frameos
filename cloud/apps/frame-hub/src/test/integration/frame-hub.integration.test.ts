@@ -17,6 +17,7 @@ import {
   createDb,
   frameCommands,
   frameLogs,
+  frameMetrics,
   frames,
   linkedClients,
   sessions,
@@ -1295,6 +1296,20 @@ describe("browser socket", () => {
     expect(metricsData.frame_id).toBe(frame.id);
     expect(metricsData.metrics).toEqual({ cpu_percent: 12.5 });
     expect(typeof metricsData.timestamp).toBe("string");
+
+    // The sample is also retained for the Metrics panel's history, and the
+    // broadcast carries the stored row's id/timestamp so live samples and
+    // /metrics refetches dedupe cleanly in the SPA.
+    const storedMetrics = await db
+      .select()
+      .from(frameMetrics)
+      .where(eq(frameMetrics.frameId, frame.id));
+    expect(storedMetrics).toHaveLength(1);
+    expect(storedMetrics[0]!.payload).toEqual({ cpu_percent: 12.5 });
+    expect(metricsData.id).toBe(String(storedMetrics[0]!.id));
+    expect(metricsData.timestamp).toBe(
+      storedMetrics[0]!.timestamp.toISOString(),
+    );
 
     // Device disconnect → update_frame with connected: false.
     device.ws.close();
