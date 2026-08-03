@@ -7,11 +7,14 @@
 ##
 ## The restricted profile is structural: this module implements the complete
 ## verb list from the wire spec and nothing else. There is no shell verb, no
-## file read/write verb, no SSH anything, no compiled-scene deploy — the code
-## for those capabilities simply does not exist here, so no provider-side
-## compromise or configuration flag can reach them. Anything outside the verb
-## table is answered with `unknown_verb` and audit-logged through the normal
-## log pipeline (`cloud:audit`).
+## arbitrary file read/write verb, no SSH anything, no compiled-scene deploy —
+## the code for those capabilities simply does not exist here, so no
+## provider-side compromise or configuration flag can reach them. The only
+## file access is `assets_list`/`asset_get`: read-only, resolved and bounded
+## on-device inside the assets directory (admin_api_assets_routes'
+## resolveAssetPath — the same guard the local Assets panel uses). Anything
+## outside the verb table is answered with `unknown_verb` and audit-logged
+## through the normal log pipeline (`cloud:audit`).
 ##
 ## Frames keep working when the provider is down: this thread only ever pushes
 ## data out and reacts to messages; rendering, schedules and the local admin
@@ -44,6 +47,7 @@ import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/scenes
 import frameos/server/api
+import frameos/server/routes/admin_api_assets_routes
 import frameos/server/state
 import frameos/types
 import frameos/upgrade
@@ -81,6 +85,17 @@ const
   HubMinNonceBytes = 32
   # Hub close codes (cloud/apps/frame-hub/src/hub.ts).
   HubCloseAuthFailed = 4401
+  # Asset verbs (docs/cloud-frames.md): the reference provider stores at most
+  # this much per file, so reading more would only be thrown away — refuse
+  # with `too_large` instead. Chunks stay comfortably inside the hub's 4 MiB
+  # frame cap even after the ~4/3 base64 inflation.
+  HubMaxAssetFileBytes* = 8 * 1024 * 1024
+  HubAssetChunkRawBytes = 1024 * 1024
+  # Listing bound. The provider caps the stored listing JSON at 256 KiB; 5000
+  # entries of typical paths sit under that while covering any sane assets
+  # folder. Over the cap the listing says `truncated: true` — never a silent
+  # stop (a partial listing that looks complete is worse than none).
+  HubMaxAssetListEntries* = 5000
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
@@ -114,6 +129,16 @@ const CLOUD_REFUSED_APP_KEYWORDS* = [
 type
   CloudHubAuthError* = object of CatchableError
 
+  AssetReadResult* = object
+    ## One asset read for `asset_get`. `error` is empty on success and one of
+    ## the wire contract's per-verb errors otherwise (invalid_path, not_found,
+    ## is_directory, too_large, read_failed). `data` holds the raw bytes —
+    ## base64 happens at chunking time, never here.
+    error*: string
+    data*: string
+    contentType*: string
+    mtime*: BiggestInt
+
   CloudVerbContext* = ref object
     ## Everything handleCloudVerb needs, injected so tests can stub the side
     ## effects and assert on them.
@@ -128,6 +153,13 @@ type
     getLogsFn*: proc(): JsonNode {.gcsafe.}
     getMetricsFn*: proc(): JsonNode {.gcsafe.}
     getStateFn*: proc(): JsonNode {.gcsafe.}
+    ## Returns {"assets": [{path,size,mtime,is_dir}…], "truncated": bool} with
+    ## paths relative to the assets directory (docs/cloud-frames.md).
+    listAssetsFn*: proc(): JsonNode {.gcsafe.}
+    readAssetFn*: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.}
+    ## The current rendered image for `image_get` (error "no_image" until the
+    ## first render).
+    getImageFn*: proc(): AssetReadResult {.gcsafe.}
     rebootFn*: proc() {.gcsafe.}
     auditFn*: proc(payload: JsonNode) {.gcsafe.}
 
@@ -263,6 +295,63 @@ proc defaultReboot() {.gcsafe.} =
     let command = "(sleep 2; systemctl reboot || reboot) >/dev/null 2>&1 &"
     discard runShellCapture(privilegedCommand("sh -c " & shellQuote(command)), timeoutMs = 10_000)
 
+proc hiddenAssetPath(relPath: string): bool =
+  ## Dotfiles and dot-directories (".thumbs" above all) are local plumbing the
+  ## admin panel does not list either — keep them off the wire.
+  for component in relPath.split('/'):
+    if component.len > 0 and component[0] == '.':
+      return true
+  false
+
+proc defaultListAssets(): JsonNode {.gcsafe.} =
+  ## The `assets_list` payload: the admin panel's listing, with paths made
+  ## relative to the assets directory — the provider must never learn (or be
+  ## asked to echo back) the device's filesystem layout.
+  {.gcsafe.}:
+    var entries = newJArray()
+    var truncated = false
+    for item in frameAssetsPayload():
+      let relPath = relativeAssetPath(item{"path"}.getStr(""))
+      if relPath.len == 0 or hiddenAssetPath(relPath):
+        continue
+      if entries.len >= HubMaxAssetListEntries:
+        truncated = true
+        break
+      var entry = copy(item)
+      entry["path"] = %relPath
+      entries.add(entry)
+    result = %*{"assets": entries}
+    if truncated:
+      result["truncated"] = %true
+
+proc defaultReadAsset(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
+  {.gcsafe.}:
+    var fullPath: string
+    try:
+      fullPath = resolveAssetPath(path)
+    except CatchableError:
+      return AssetReadResult(error: "invalid_path")
+    if dirExists(fullPath):
+      return AssetReadResult(error: "is_directory")
+    if not fileExists(fullPath):
+      return AssetReadResult(error: "not_found")
+    # Pre-read size gate for originals. Thumbnails are generated small, and
+    # getAssetPayload's own 50 MiB ceiling still bounds a pathological one.
+    if not thumb and getFileSize(fullPath) > HubMaxAssetFileBytes:
+      return AssetReadResult(error: "too_large")
+    let (status, _, body) = getAssetPayload(path, thumb)
+    if status != Http200:
+      return AssetReadResult(
+        error: if status == Http413: "too_large" else: "read_failed")
+    if body.len > HubMaxAssetFileBytes:
+      return AssetReadResult(error: "too_large")
+    AssetReadResult(
+      data: body,
+      # Thumbnails are always the generated 320x320 JPEG; originals go by
+      # extension (same table getAssetPayload uses for its own header).
+      contentType: if thumb: "image/jpeg" else: contentTypeForFilePath(fullPath),
+      mtime: getFileInfo(fullPath).lastWriteTime.toUnix())
+
 proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
                               scenesChecksum: string): CloudVerbContext {.gcsafe.} =
   {.gcsafe.}:
@@ -290,6 +379,19 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
         getUiMetrics(),
       getStateFn: proc(): JsonNode {.gcsafe.} =
         helloStatePayload(config, snapshotLink().scenesChecksum),
+      listAssetsFn: proc(): JsonNode {.gcsafe.} =
+        {.gcsafe.}:
+          defaultListAssets(),
+      readAssetFn: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
+        {.gcsafe.}:
+          defaultReadAsset(path, thumb),
+      getImageFn: proc(): AssetReadResult {.gcsafe.} =
+        {.gcsafe.}:
+          try:
+            AssetReadResult(data: getLastImagePng(), contentType: "image/png",
+                            mtime: epochTime().BiggestInt)
+          except CatchableError:
+            AssetReadResult(error: "no_image"),
       rebootFn: proc() {.gcsafe.} =
         defaultReboot(),
       auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -378,9 +480,15 @@ proc refusedCloudAppKeyword*(scenes: JsonNode): string {.gcsafe.} =
           return keyword
   ""
 
-proc expectedUploadedSceneId(scenes: JsonNode): string =
-  ## updateUploadedScenesFromPayload prefixes every scene id with "uploaded/".
+proc expectedUploadedSceneId(scenes: JsonNode, requestedSceneId = ""): string =
+  ## updateUploadedScenesFromPayload prefixes every scene id with "uploaded/",
+  ## and activates the payload's `sceneId` when it names one of the pushed
+  ## scenes (the first scene otherwise) — mirror that choice here.
   if scenes.kind == JArray and scenes.len > 0 and scenes[0].kind == JObject:
+    if requestedSceneId.len > 0:
+      for scene in scenes:
+        if scene.kind == JObject and scene{"id"}.getStr("") == requestedSceneId:
+          return "uploaded/" & requestedSceneId
     let firstId = scenes[0]{"id"}.getStr("")
     if firstId.len > 0:
       return "uploaded/" & firstId
@@ -421,7 +529,17 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
   if refused.len > 0:
     ctx.audit("set_scenes", false, "app_not_allowed: " & refused)
     return CloudVerbReply(ack: ackError(id, "app_not_allowed"))
-  if not ctx.sendEventFn("uploadScenes", %*{"scenes": scenes}):
+  # The workspace's "preview on frame" flow names which pushed scene to
+  # activate and seeds its public state; the runtime's uploadScenes handler
+  # honors both keys (runner.nim), so pass them through untouched.
+  var eventPayload = %*{"scenes": scenes}
+  let requestedSceneId = msg{"scene_id"}.getStr("")
+  if requestedSceneId.len > 0:
+    eventPayload["sceneId"] = %requestedSceneId
+  let state = msg{"state"}
+  if state != nil and state.kind == JObject:
+    eventPayload["state"] = copy(state)
+  if not ctx.sendEventFn("uploadScenes", eventPayload):
     # The runtime queue was full, so the deploy never happened. Acking ok here
     # (and persisting the checksum) would tell the provider the frame is up to
     # date forever; a retryable error makes it push again instead.
@@ -432,7 +550,7 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     ctx.persistChecksumFn(checksum)
   ctx.audit("set_scenes", true)
   var sceneAck = %*{"type": "scene_ack", "checksum": checksum,
-                    "active_scene": expectedUploadedSceneId(scenes)}
+                    "active_scene": expectedUploadedSceneId(scenes, requestedSceneId)}
   if id != nil and id.kind != JNull:
     sceneAck["id"] = id
   CloudVerbReply(ack: ackOk(id), extra: @[sceneAck])
@@ -481,9 +599,104 @@ proc handleSetCurrentScene(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): 
   if sceneId.len == 0:
     ctx.audit("set_current_scene", false, "invalid_scene_id")
     return CloudVerbReply(ack: ackError(id, "invalid_scene_id"))
-  discard ctx.sendEventFn("setCurrentScene", %*{"sceneId": sceneId})
+  var payload = %*{"sceneId": sceneId}
+  # Optional public scene-state values, same shape the local setCurrentScene
+  # event carries (docs/cloud-frames.md).
+  let state = msg{"state"}
+  if state != nil and state.kind == JObject:
+    payload["state"] = copy(state)
+  discard ctx.sendEventFn("setCurrentScene", payload)
   ctx.audit("set_current_scene", true)
   CloudVerbReply(ack: ackOk(id))
+
+proc handleAssetsList(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  if ctx.listAssetsFn.isNil:
+    ctx.audit("assets_list", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let listing =
+    try:
+      ctx.listAssetsFn()
+    except CatchableError as error:
+      ctx.audit("assets_list", false, "read_failed: " & error.msg)
+      return CloudVerbReply(ack: ackError(id, "read_failed"))
+  var reply = %*{"type": "assets"}
+  if id != nil and id.kind != JNull:
+    reply["id"] = id
+  reply["assets"] =
+    if listing != nil and listing.kind == JObject and listing{"assets"} != nil:
+      listing["assets"]
+    else:
+      newJArray()
+  if listing != nil and listing.kind == JObject and listing{"truncated"}.getBool(false):
+    reply["truncated"] = %true
+  ctx.audit("assets_list", true)
+  CloudVerbReply(ack: ackOk(id), extra: @[reply])
+
+proc assetChunkExtras(id: JsonNode, asset: AssetReadResult): seq[JsonNode] =
+  ## The full payload is in memory and validated: every chunk below will
+  ## exist, so the ok-ack the wire contract sends before the stream is
+  ## honest. Chunks are independently base64-decodable; the provider
+  ## concatenates the raw bytes. Shared by asset_get and image_get.
+  result = @[]
+  var seqNumber = 0
+  var offset = 0
+  let total = asset.data.len
+  while true:
+    let chunkLen = min(HubAssetChunkRawBytes, total - offset)
+    let done = offset + chunkLen >= total
+    var chunk = %*{
+      "type": "asset_chunk",
+      "seq": seqNumber,
+      "data": encode(asset.data[offset ..< offset + chunkLen]),
+      "done": done,
+    }
+    if id != nil and id.kind != JNull:
+      chunk["id"] = id
+    if seqNumber == 0:
+      chunk["size"] = %total
+      chunk["mtime"] = %asset.mtime
+      chunk["content_type"] = %asset.contentType
+    result.add(chunk)
+    offset += chunkLen
+    inc seqNumber
+    if done:
+      break
+
+proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.readAssetFn.isNil:
+    ctx.audit("asset_get", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let path = msg{"path"}.getStr("")
+  if path.len == 0:
+    ctx.audit("asset_get", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  let thumb = msg{"thumb"}.getBool(false)
+  let asset =
+    try:
+      ctx.readAssetFn(path, thumb)
+    except CatchableError as error:
+      ctx.audit("asset_get", false, "read_failed: " & error.msg)
+      return CloudVerbReply(ack: ackError(id, "read_failed"))
+  if asset.error.len > 0:
+    ctx.audit("asset_get", false, asset.error)
+    return CloudVerbReply(ack: ackError(id, asset.error))
+  ctx.audit("asset_get", true)
+  CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, asset))
+
+proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  if ctx.getImageFn.isNil:
+    ctx.audit("image_get", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let image =
+    try:
+      ctx.getImageFn()
+    except CatchableError:
+      AssetReadResult(error: "no_image")
+  if image.error.len > 0:
+    ctx.audit("image_get", false, image.error)
+    return CloudVerbReply(ack: ackError(id, image.error))
+  ctx.audit("image_get", true)
+  CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, image))
 
 proc handleGetLogs(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if not ctx.hasScope("telemetry:logs"):
@@ -544,6 +757,12 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleGetLogs(ctx, id, msg)
   of "get_metrics":
     result = handleGetMetrics(ctx, id)
+  of "assets_list":
+    result = handleAssetsList(ctx, id)
+  of "asset_get":
+    result = handleAssetGet(ctx, id, msg)
+  of "image_get":
+    result = handleImageGet(ctx, id)
   of "render":
     discard ctx.sendEventFn("render", %*{})
     result = CloudVerbReply(ack: ackOk(id))

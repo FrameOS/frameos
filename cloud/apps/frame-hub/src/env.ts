@@ -106,9 +106,52 @@ export function getAllowedBrowserOrigins(): Set<string> {
   return origins;
 }
 
+// Development cannot enumerate its own browser origins up front: `pnpm dev`
+// is reached as http://localhost:3000, but also as http://<lan-ip>:3000 when
+// the workspace is opened from a phone or a second machine on the network —
+// and the FRAMEOS_*_APP_URL defaults only ever name localhost. So outside
+// production the hub additionally accepts Origins whose host is loopback or
+// private-network address space (the auth-web shell route points the fleet
+// socket at http://<lan-ip>:3100 in exactly that case, and the dev session
+// cookie — bare name, host-only, no Secure flag — is sent to the hub port on
+// the same host). Never in production: docs/deployment.md's frame-hub.env
+// sets NODE_ENV=production, and there the allowlist stays exactly the
+// configured app origins plus FRAME_HUB_ALLOWED_ORIGINS.
+export function allowsPrivateNetworkOrigins() {
+  return process.env.NODE_ENV !== "production";
+}
+
+// Loopback plus RFC1918 and IPv4 link-local space — the hosts a dev machine
+// is reachable as on its own LAN. Only complete IPv4 literals qualify (a
+// prefix test would wave through the public hostname "10.4.evil.example");
+// hostnames other than localhost are never matched, so a deployment behind a
+// real name must be listed explicitly.
+export function isPrivateNetworkHostname(hostname: string) {
+  if (hostname === "localhost" || hostname === "[::1]") {
+    return true;
+  }
+  const match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!match) {
+    return false;
+  }
+  const octets = match.slice(1).map(Number);
+  if (octets.some((octet) => octet > 255)) {
+    return false;
+  }
+  const [a, b] = octets as [number, number, number, number];
+  return (
+    a === 127 ||
+    a === 10 ||
+    (a === 192 && b === 168) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 169 && b === 254)
+  );
+}
+
 export function isAllowedBrowserOrigin(
   origin: string | undefined,
   allowed: Set<string>,
+  allowPrivateNetwork = false,
 ) {
   if (origin === undefined || origin === "") {
     return true;
@@ -118,7 +161,15 @@ export function isAllowedBrowserOrigin(
     return false;
   }
   try {
-    return allowed.has(new URL(origin).origin);
+    const url = new URL(origin);
+    if (allowed.has(url.origin)) {
+      return true;
+    }
+    return (
+      allowPrivateNetwork &&
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      isPrivateNetworkHostname(url.hostname)
+    );
   } catch {
     return false;
   }

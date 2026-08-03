@@ -777,6 +777,40 @@ static const char *TAG = "fos_nim_http";
  * Streamed decodes need well under 200KB of working memory; a bigger
  * reserve starves legitimate downloads when a render is already live. */
 #define FOS_NIM_HTTP_PSRAM_RESERVE (768u * 1024u)
+/* Spill-to-storage: when even the smallest chunk cannot be buffered without
+ * breaching the reserve, the body can stream to a temp file instead of
+ * failing with BODY_OOM (measured on the bench 2026-08-03: a ~3MB gallery
+ * JPEG with 12 scenes resident left ~894KB PSRAM free). The read window is
+ * small and internal-RAM-first so spilling itself adds no PSRAM pressure.
+ *
+ * The path is inert until the firmware registers a spill directory via
+ * fos_nim_http_set_spill_dir() (TODO: wire from main.c — /srv/assets/.cache
+ * when the SD card is mounted, else /state with a low cap; see
+ * cloud/docs/esp32-large-image-spill.md). */
+#define FOS_NIM_HTTP_SPILL_IO_BYTES (16u * 1024u)
+
+static char s_http_spill_dir[128] = "";
+static size_t s_http_spill_max_bytes = 0;
+static uint32_t s_http_spill_seq = 0;
+
+void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
+{
+    if (dir == NULL || dir[0] == '\0') {
+        s_http_spill_dir[0] = '\0';
+        s_http_spill_max_bytes = 0;
+        return;
+    }
+    snprintf(s_http_spill_dir, sizeof(s_http_spill_dir), "%s", dir);
+    s_http_spill_max_bytes = max_spill_bytes;
+}
+
+typedef enum {
+    FOS_NIM_BODY_OK,
+    FOS_NIM_BODY_OOM,
+    FOS_NIM_BODY_TOO_BIG,
+    FOS_NIM_BODY_READ_FAILED,
+    FOS_NIM_BODY_SPILL_FAILED,
+} fos_nim_body_status_t;
 
 void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count)
 {
@@ -895,15 +929,119 @@ static bool set_extra_headers(esp_http_client_handle_t client, const char *heade
     return has_content_type;
 }
 
-fos_nim_http_chunk *fos_nim_http_request_chunked(
+/* Streams the rest of an HTTP body to a temp file after PSRAM buffering
+ * gave out. Takes ownership of `chunks` unconditionally: the already
+ * buffered bytes are written out first and their PSRAM freed as they go.
+ * On success *out_path is a malloc'd file path (caller frees with
+ * fos_nim_http_free) holding the ENTIRE body and *out_total its size. On
+ * failure the partial file is unlinked. */
+static fos_nim_body_status_t http_spill_remaining(
+    esp_http_client_handle_t client, const char *url,
+    fos_nim_http_chunk *chunks, size_t chunk_count,
+    size_t buffered, size_t limit,
+    char **out_path, size_t *out_total)
+{
+    *out_path = NULL;
+    *out_total = 0;
+
+    size_t spill_limit = limit;
+    if (s_http_spill_max_bytes > 0 && s_http_spill_max_bytes < spill_limit) {
+        spill_limit = s_http_spill_max_bytes;
+    }
+    if (buffered > spill_limit) {
+        fos_nim_http_free_chunks(chunks, chunk_count);
+        return FOS_NIM_BODY_TOO_BIG;
+    }
+
+    char path[192];
+    snprintf(path, sizeof(path), "%s/http-spill-%lu.tmp",
+             s_http_spill_dir, (unsigned long)(s_http_spill_seq++));
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        ESP_LOGW(TAG, "%s: cannot open spill file %s (errno=%d)", url, path, errno);
+        fos_nim_http_free_chunks(chunks, chunk_count);
+        return FOS_NIM_BODY_SPILL_FAILED;
+    }
+    ESP_LOGI(TAG, "%s: PSRAM exhausted after %u buffered bytes; spilling body to %s",
+             url, (unsigned)buffered, path);
+
+    bool ok = true;
+    for (size_t i = 0; i < chunk_count; i++) {
+        if (ok && chunks[i].len > 0 &&
+            fwrite(chunks[i].data, 1, chunks[i].len, f) != chunks[i].len) {
+            ok = false;
+        }
+        free(chunks[i].data);
+        chunks[i].data = NULL;
+    }
+    free(chunks);
+
+    fos_nim_body_status_t status = ok ? FOS_NIM_BODY_OK : FOS_NIM_BODY_SPILL_FAILED;
+    uint8_t *io = NULL;
+    if (ok) {
+        /* Internal RAM first: the whole point is that PSRAM is exhausted. */
+        io = heap_caps_malloc(FOS_NIM_HTTP_SPILL_IO_BYTES,
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (io == NULL) io = malloc(FOS_NIM_HTTP_SPILL_IO_BYTES);
+        if (io == NULL) {
+            ok = false;
+            status = FOS_NIM_BODY_SPILL_FAILED;
+        }
+    }
+
+    size_t total = buffered;
+    while (ok) {
+        int r = esp_http_client_read(client, (char *)io, FOS_NIM_HTTP_SPILL_IO_BYTES);
+        if (r < 0) {
+            status = FOS_NIM_BODY_READ_FAILED;
+            break;
+        }
+        if (r == 0) break;
+        if (total + (size_t)r > spill_limit) {
+            status = FOS_NIM_BODY_TOO_BIG;
+            break;
+        }
+        if (fwrite(io, 1, (size_t)r, f) != (size_t)r) {
+            ESP_LOGW(TAG, "%s: spill write failed at %u bytes (errno=%d)",
+                     url, (unsigned)total, errno);
+            status = FOS_NIM_BODY_SPILL_FAILED;
+            break;
+        }
+        total += (size_t)r;
+    }
+    free(io);
+    fclose(f);
+    if (status != FOS_NIM_BODY_OK) {
+        unlink(path);
+        return status;
+    }
+
+    char *dup = strdup(path);
+    if (dup == NULL) {
+        unlink(path);
+        return FOS_NIM_BODY_SPILL_FAILED;
+    }
+    *out_path = dup;
+    *out_total = total;
+    ESP_LOGI(TAG, "%s: spilled %u-byte body to %s", url, (unsigned)total, path);
+    return FOS_NIM_BODY_OK;
+}
+
+fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                               const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
                               int timeout_ms, size_t max_bytes,
-                              int *out_status, size_t *out_count)
+                              int *out_status, size_t *out_count,
+                              char **out_spill_path, size_t *out_spill_len)
 {
     *out_status = 0;
     *out_count = 0;
+    if (out_spill_path != NULL) *out_spill_path = NULL;
+    if (out_spill_len != NULL) *out_spill_len = 0;
+    const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
+                               s_http_spill_dir[0] != '\0';
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
     if (method != NULL) {
@@ -1003,7 +1141,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
     size_t total = 0;
     size_t cur_cap = 0, cur_len = 0;
     uint8_t *cur = NULL;
-    enum { BODY_OK, BODY_OOM, BODY_TOO_BIG, BODY_READ_FAILED } body_status = BODY_OK;
+    fos_nim_body_status_t body_status = FOS_NIM_BODY_OK;
 
     while (true) {
         if (cur == NULL || cur_len == cur_cap) {
@@ -1012,7 +1150,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                 cur = NULL;
             }
             if (total >= limit) {
-                body_status = BODY_TOO_BIG;
+                body_status = FOS_NIM_BODY_TOO_BIG;
                 break;
             }
             if (chunk_count == chunk_capacity) {
@@ -1020,7 +1158,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                 fos_nim_http_chunk *new_chunks =
                     realloc(chunks, new_capacity * sizeof(*new_chunks));
                 if (new_chunks == NULL) {
-                    body_status = BODY_OOM;
+                    body_status = FOS_NIM_BODY_OOM;
                     break;
                 }
                 chunks = new_chunks;
@@ -1041,7 +1179,27 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                 want /= 2;
             }
             if (buf == NULL) {
-                body_status = BODY_OOM;
+                if (spill_allowed) {
+                    /* PSRAM cannot hold another chunk without breaching the
+                     * reserve: stream what we have plus the rest of the body
+                     * to storage. http_spill_remaining owns `chunks` from
+                     * here on, success or not. */
+                    char *spill_path = NULL;
+                    size_t spill_total = 0;
+                    body_status = http_spill_remaining(client, url, chunks,
+                                                       chunk_count, total, limit,
+                                                       &spill_path, &spill_total);
+                    chunks = NULL;
+                    chunk_count = 0;
+                    chunk_capacity = 0;
+                    if (body_status == FOS_NIM_BODY_OK) {
+                        total = spill_total;
+                        *out_spill_path = spill_path;
+                        *out_spill_len = spill_total;
+                    }
+                    break;
+                }
+                body_status = FOS_NIM_BODY_OOM;
                 break;
             }
             chunks[chunk_count].data = buf;
@@ -1057,7 +1215,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                      method ? method : "GET", url,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-            body_status = BODY_READ_FAILED;
+            body_status = FOS_NIM_BODY_READ_FAILED;
             break;
         }
         if (r == 0) break;
@@ -1072,15 +1230,19 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
-    if (body_status != BODY_OK) {
+    if (body_status != FOS_NIM_BODY_OK) {
         fos_nim_http_free_chunks(chunks, chunk_count);
         switch (body_status) {
-        case BODY_TOO_BIG:
+        case FOS_NIM_BODY_TOO_BIG:
             ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
             return chunked_error(out_status, out_count, "response exceeded %u bytes",
                                  (unsigned)limit);
-        case BODY_READ_FAILED:
+        case FOS_NIM_BODY_READ_FAILED:
             return chunked_error(out_status, out_count, "response read failed");
+        case FOS_NIM_BODY_SPILL_FAILED:
+            return chunked_error(out_status, out_count,
+                                 "spilling HTTP response to storage failed after %u bytes",
+                                 (unsigned)total);
         default:
             ESP_LOGW(TAG, "%s: out of memory buffering HTTP response: total=%u internal=%u psram=%u largest_psram=%u",
                      url, (unsigned)total,
@@ -1114,6 +1276,22 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
 
     *out_count = chunk_count;
     return chunks;
+}
+
+fos_nim_http_chunk *fos_nim_http_request_chunked(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_count)
+{
+    /* No spill out-params: this variant never spills, matching the historic
+     * contract (BODY_OOM error chunk when PSRAM runs out). */
+    return fos_nim_http_request_chunked_spill(method, url, body, body_len,
+                                              headers, headers_len,
+                                              timeout_ms, max_bytes,
+                                              out_status, out_count,
+                                              NULL, NULL);
 }
 
 uint8_t *fos_nim_http_request(const char *method, const char *url,

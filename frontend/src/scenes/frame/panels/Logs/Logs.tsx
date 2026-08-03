@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { logsLogic } from './logsLogic'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
@@ -11,7 +11,7 @@ import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } fr
 import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { EMBEDDED_ESP32_S3 } from '../../../../devices'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
-import { frameSupportsUsbSerialConsole } from '../../../workspace/workspaceSurfaces'
+import { frameSupportsUsbSerialConsole, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import {
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
@@ -330,10 +330,29 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
   const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
+  // Full-screen logs are a page-scroll surface. In backend/frameAdmin the
+  // page is the window, so Virtuoso runs with useWindowScroll. The cloud
+  // shell pins the page under the account header (#root is overflow:hidden)
+  // and scrolls the workspace <main> instead — the window never fires a
+  // scroll event there, which left Virtuoso frozen on its first viewport of
+  // items. Hand that <main> to Virtuoso as customScrollParent instead.
+  const scrollsWorkspaceMain = fullScreen && workspaceMode() === 'cloud'
+  const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null)
+  const panelRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!scrollsWorkspaceMain) {
+        return
+      }
+      setCustomScrollParent(element?.closest<HTMLElement>('main[data-workspace-main]') ?? null)
+    },
+    [scrollsWorkspaceMain]
+  )
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
   const visibleBaseLogCount = logs.length
-  const virtuosoKey = compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
+  const virtuosoKey = `${customScrollParent ? 'main' : 'window'}:${
+    compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
+  }`
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   // Two roads to a USB console: a backend/on-device embedded frame, or a
   // cloud-managed esp32 frame (hardware.platform from enrollment). The cloud
@@ -363,8 +382,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
     if (fullScreen && typeof window !== 'undefined') {
-      const scrollElement = document.scrollingElement ?? document.documentElement
-      window.scrollTo({ top: scrollElement.scrollHeight, behavior })
+      if (customScrollParent) {
+        customScrollParent.scrollTo({ top: customScrollParent.scrollHeight, behavior })
+      } else {
+        const scrollElement = document.scrollingElement ?? document.documentElement
+        window.scrollTo({ top: scrollElement.scrollHeight, behavior })
+      }
     }
   }
 
@@ -384,7 +407,11 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (fullScreen) {
-          window.scrollTo({ top: 0, behavior })
+          if (customScrollParent) {
+            customScrollParent.scrollTo({ top: 0, behavior })
+          } else {
+            window.scrollTo({ top: 0, behavior })
+          }
         } else if (visibleLogs.length > 0) {
           virtuosoRef.current?.scrollToIndex({
             index: 0,
@@ -457,6 +484,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
 
   return logsLoading ? (
     <div
+      ref={panelRef}
       className={clsx(
         'frame-tool-panel flex h-full items-center justify-center text-sm frame-tool-muted',
         className,
@@ -467,6 +495,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     </div>
   ) : (
     <div
+      ref={panelRef}
       className={clsx(
         'frame-tool-panel @container relative',
         className,
@@ -577,7 +606,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
       )}
       <Virtuoso
         key={virtuosoKey}
-        useWindowScroll={fullScreen}
+        useWindowScroll={fullScreen && !customScrollParent}
+        customScrollParent={customScrollParent ?? undefined}
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
           fullScreen

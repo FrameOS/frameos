@@ -29,6 +29,12 @@ on:
       - "pnpm-workspace.yaml"
       - ".github/workflows/cloud-ci.yml"
 
+# Superseded runs on the same PR are cancelled; pushes to main always run to
+# completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     runs-on: ubuntu-latest

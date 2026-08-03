@@ -60,3 +60,10 @@ CONFIG_HTTPD_MAX_URI_LEN=1024
 # The Nim render task does real work; don't trip the watchdog on long e-ink
 # refreshes (the busy-wait yields, but first renders can be slow).
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# Long filenames on the SD assets mount. Without this FatFs runs in 8.3 mode
+# and the cloud assets_list reports names like 02_SYS~1 — technically real,
+# humanly useless. Heap allocation (not stack): the lookups run on tasks with
+# tight stacks, and the 255-char buffer only exists while a path op runs.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255

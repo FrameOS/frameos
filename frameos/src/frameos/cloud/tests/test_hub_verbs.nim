@@ -1,4 +1,4 @@
-import std/[json, sequtils, strutils, unittest]
+import std/[base64, json, sequtils, strutils, unittest]
 
 import ../hub_client
 import ../../types
@@ -11,6 +11,8 @@ type
     audits: seq[JsonNode]
     reboots: int
     dropEvents: bool ## simulates a full runtime event queue
+    assetReads: seq[(string, bool)]
+    assetData: string ## what readAssetFn serves for "photos/cat.jpg"
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
@@ -36,6 +38,24 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
       %*[{"metrics": {"load": 0.5}}],
     getStateFn: proc(): JsonNode {.gcsafe.} =
       %*{"frameos_version": "test", "states": {}, "active_scene": "sceneA"},
+    listAssetsFn: proc(): JsonNode {.gcsafe.} =
+      %*{"assets": [
+        {"path": "photos", "size": 0, "mtime": 1700000000, "is_dir": true},
+        {"path": "photos/cat.jpg", "size": 5, "mtime": 1700000001, "is_dir": false},
+      ]},
+    readAssetFn: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
+      recorded.assetReads.add((path, thumb))
+      if path == "photos/cat.jpg":
+        AssetReadResult(
+          data: if recorded.assetData.len > 0: recorded.assetData else: "hello",
+          contentType: "image/jpeg", mtime: 1700000001)
+      else:
+        AssetReadResult(error: "not_found"),
+    getImageFn: proc(): AssetReadResult {.gcsafe.} =
+      if recorded.assetData == "no-image":
+        AssetReadResult(error: "no_image")
+      else:
+        AssetReadResult(data: "png-bytes", contentType: "image/png", mtime: 1700000002),
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -278,6 +298,134 @@ suite "cloud hub verb dispatcher":
       .ack{"error"}.getStr("") == "invalid_scene_id"
     check recorded.events.mapIt(it[0]) == @["render", "setCurrentScene"]
     check recorded.events[1][1]{"sceneId"}.getStr("") == "uploaded/x"
+
+  test "set_current_scene forwards the optional state object":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "type": "set_current_scene", "scene_id": "uploaded/x",
+      "state": {"message": "hi", "count": 3},
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.events.len == 1
+    check recorded.events[0][1]{"state"}{"message"}.getStr("") == "hi"
+    check recorded.events[0][1]{"state"}{"count"}.getInt(0) == 3
+    # A non-object state is dropped, not forwarded.
+    let recorded2 = Recorded()
+    discard handleCloudVerb(makeContext(recorded2), %*{
+      "type": "set_current_scene", "scene_id": "x", "state": "nonsense",
+    })
+    check not recorded2.events[0][1].hasKey("state")
+
+  test "set_scenes forwards scene_id and state to the upload event":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "7", "type": "set_scenes", "checksum": "sum-2",
+      "scene_id": "scene2", "state": {"greeting": "hey"},
+      "scenes": [
+        {"id": "scene1", "name": "One", "nodes": [], "edges": []},
+        {"id": "scene2", "name": "Two", "nodes": [], "edges": []},
+      ],
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.events[0][1]{"sceneId"}.getStr("") == "scene2"
+    check recorded.events[0][1]{"state"}{"greeting"}.getStr("") == "hey"
+    # scene_ack predicts the activation updateUploadedScenesFromPayload makes.
+    check reply.extra[0]{"active_scene"}.getStr("") == "uploaded/scene2"
+    # A scene_id not in the push falls back to the first scene.
+    let recorded2 = Recorded()
+    let reply2 = handleCloudVerb(makeContext(recorded2), %*{
+      "id": "8", "type": "set_scenes", "checksum": "sum-3",
+      "scene_id": "not-there",
+      "scenes": [{"id": "scene1", "name": "One", "nodes": [], "edges": []}],
+    })
+    check reply2.extra[0]{"active_scene"}.getStr("") == "uploaded/scene1"
+
+  test "assets_list replies with the listing":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "a1", "type": "assets_list",
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.extra.len == 1
+    let listing = reply.extra[0]
+    check listing{"type"}.getStr("") == "assets"
+    check listing{"id"}.getStr("") == "a1"
+    check listing{"assets"}.len == 2
+    check listing{"assets"}[1]{"path"}.getStr("") == "photos/cat.jpg"
+    check not listing.hasKey("truncated")
+    check recorded.audits[^1]{"verb"}.getStr("") == "assets_list"
+    check recorded.audits[^1]{"ok"}.getBool(false) == true
+
+  test "asset_get streams one chunk for a small file":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "g1", "type": "asset_get", "path": "photos/cat.jpg", "thumb": true,
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.assetReads == @[("photos/cat.jpg", true)]
+    check reply.extra.len == 1
+    let chunk = reply.extra[0]
+    check chunk{"type"}.getStr("") == "asset_chunk"
+    check chunk{"id"}.getStr("") == "g1"
+    check chunk{"seq"}.getInt(-1) == 0
+    check chunk{"done"}.getBool(false) == true
+    check chunk{"size"}.getInt(0) == 5
+    check chunk{"content_type"}.getStr("") == "image/jpeg"
+    check chunk{"mtime"}.getInt(0) == 1700000001
+    check decode(chunk{"data"}.getStr("")) == "hello"
+
+  test "asset_get chunks large files and reassembles losslessly":
+    let recorded = Recorded()
+    # Just over two chunk sizes so the tail chunk is tiny.
+    recorded.assetData = newString(2 * 1024 * 1024 + 10)
+    for i in 0 ..< recorded.assetData.len:
+      recorded.assetData[i] = char(i mod 251)
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "g2", "type": "asset_get", "path": "photos/cat.jpg",
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.extra.len == 3
+    var reassembled = ""
+    for index, chunk in reply.extra:
+      check chunk{"seq"}.getInt(-1) == index
+      check chunk{"done"}.getBool(false) == (index == 2)
+      check chunk.hasKey("size") == (index == 0)
+      reassembled.add(decode(chunk{"data"}.getStr("")))
+    check reply.extra[0]{"size"}.getInt(0) == recorded.assetData.len
+    check reassembled == recorded.assetData
+
+  test "asset_get failures are plain error acks":
+    let recorded = Recorded()
+    let missing = handleCloudVerb(makeContext(recorded), %*{
+      "id": "g3", "type": "asset_get", "path": "nope.bin",
+    })
+    check missing.ack{"ok"}.getBool(true) == false
+    check missing.ack{"error"}.getStr("") == "not_found"
+    check missing.extra.len == 0
+    let noPath = handleCloudVerb(makeContext(recorded), %*{
+      "id": "g4", "type": "asset_get",
+    })
+    check noPath.ack{"error"}.getStr("") == "invalid_path"
+    # No readAssetFn call for the missing-path refusal.
+    check recorded.assetReads == @[("nope.bin", false)]
+
+  test "image_get streams the current render, no_image before the first one":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "i1", "type": "image_get",
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.extra.len == 1
+    check reply.extra[0]{"type"}.getStr("") == "asset_chunk"
+    check reply.extra[0]{"content_type"}.getStr("") == "image/png"
+    check decode(reply.extra[0]{"data"}.getStr("")) == "png-bytes"
+    let empty = Recorded()
+    empty.assetData = "no-image"
+    let refused = handleCloudVerb(makeContext(empty), %*{
+      "id": "i2", "type": "image_get",
+    })
+    check refused.ack{"error"}.getStr("") == "no_image"
+    check refused.extra.len == 0
 
   test "reboot and restart_runtime use the injected implementations":
     let recorded = Recorded()

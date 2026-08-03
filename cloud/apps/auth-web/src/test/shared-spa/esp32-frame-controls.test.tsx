@@ -6,10 +6,11 @@
 // "esp32" implements only a subset of the management verbs — it answers
 // `unsupported_verb` for set_schedule, set_settings, get_logs, get_metrics
 // and notify_update_available (docs/cloud-frames.md "Device profiles";
-// device-side allowlist in embedded/esp32/main/fos_cloud.c). Rename rides
-// set_settings, so for an esp32 frame the menu shows it DISABLED with the
-// reason as its tooltip — visible, never hidden — while render, reboot and
-// restart (all in the esp32 profile) stay live.
+// device-side allowlist in embedded/esp32/main/fos_cloud.c). Rename used to
+// ride set_settings and was disabled here — but the frame's name is
+// provider-side data (frames.name): the settings route applies `name` in the
+// cloud DB and skips the device push for esp32, so Rename stays live along
+// with render, reboot and restart (all in the esp32 profile).
 //
 // The component lives in frontend/src (the shared SPA), which has no test
 // runner, so it is tested from auth-web's vitest across the package boundary
@@ -95,7 +96,7 @@ afterEach(() => {
 });
 
 describe("FrameActionsMenu in cloud mode", () => {
-  it("disables Rename with an explanation for an esp32 frame and keeps render, restart and reboot live", () => {
+  it("keeps Rename live for an esp32 frame along with render, restart and reboot", () => {
     renderMenu(cloudFrame("esp32"));
 
     const labels = menuLabels();
@@ -104,11 +105,13 @@ describe("FrameActionsMenu in cloud mode", () => {
     expect(labels).toContain("Restart FrameOS");
     expect(labels).toContain("Reboot device");
 
+    // The name lives in the cloud DB (frames.name), not on the device, so
+    // the firmware's missing set_settings verb no longer disables Rename.
     const rename = menuItem("Rename");
-    expect(rename?.className).toContain("cursor-not-allowed");
-    expect(rename?.getAttribute("title")).toContain("ESP32");
+    expect(rename?.className).not.toContain("cursor-not-allowed");
+    expect(rename?.getAttribute("title")).toBe("Rename frame");
 
-    // The live entries carry no disabling and their normal tooltips.
+    // The other live entries carry no disabling and their normal tooltips.
     const rerender = menuItem("Re-render");
     expect(rerender?.className).not.toContain("cursor-not-allowed");
     expect(rerender?.getAttribute("title")).toBe("Render frame now");
@@ -118,7 +121,9 @@ describe("FrameActionsMenu in cloud mode", () => {
     renderMenu(cloudFrame("esp32"));
 
     const labels = menuLabels();
-    for (const backendOnly of ["Deploy", "Build SD card", "Stop FrameOS", "Delete", "Archive"]) {
+    // Delete is NOT in this list: the cloud offers it (DELETE /api/frames/{id},
+    // pinned in workspace-surfaces.test.ts).
+    for (const backendOnly of ["Deploy", "Build SD card", "Stop FrameOS", "Archive"]) {
       expect(labels).not.toContain(backendOnly);
     }
   });

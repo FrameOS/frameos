@@ -25,7 +25,7 @@ import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownM
 import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
-import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { FrameId } from '../../../../types'
@@ -95,6 +95,7 @@ function TreeNode({
   setFrameAssetFolderExpanded,
   showSystemFolders,
   toggleShowSystemFolders,
+  readOnly,
 }: {
   node: AssetNode
   frameId: FrameId
@@ -109,6 +110,10 @@ function TreeNode({
   setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
   showSystemFolders: boolean
   toggleShowSystemFolders: () => void
+  /** Cloud mode: the wire contract is read-only (assets_list/asset_get), so
+   * every mutation affordance disappears — browse, thumbs, download and the
+   * run-image-scene buttons stay. */
+  readOnly: boolean
 }): JSX.Element {
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
@@ -120,6 +125,9 @@ function TreeNode({
     event.preventDefault()
     event.stopPropagation()
     setIsDragOver(false)
+    if (readOnly) {
+      return
+    }
     const files = Array.from(event.dataTransfer.files || [])
     if (!files.length) {
       return
@@ -128,7 +136,7 @@ function TreeNode({
   }
 
   const onDragOver = (event: DragEvent): void => {
-    if (!event.dataTransfer.types.includes('Files')) {
+    if (readOnly || !event.dataTransfer.types.includes('Files')) {
       return
     }
     event.preventDefault()
@@ -182,71 +190,73 @@ function TreeNode({
                 <PlayIcon className="h-4 w-4" />
               </button>
             ) : null}
-            <DropdownMenu
-              horizontal
-              className="w-fit"
-              buttonColor="tertiary"
-              items={
-                [
-                  {
-                    label: 'Upload files',
-                    icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-                    onClick: () => uploadAssets(node.path),
-                  },
-                  {
-                    label: 'New folder',
-                    icon: <FolderPlusIcon className="w-5 h-5" />,
-                    onClick: () => {
-                      const name = window.prompt('Folder name')
-                      if (name) {
-                        const newPath = (node.path ? node.path + '/' : '') + name
-                        createFolder(newPath)
-                      }
+            {(() => {
+              const items = [
+                readOnly
+                  ? null
+                  : {
+                      label: 'Upload files',
+                      icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                      onClick: () => uploadAssets(node.path),
                     },
-                  },
-                  hasPlayableImages
-                    ? {
-                        label: 'Play all images in this folder',
-                        icon: <PlayIcon className="w-5 h-5" />,
-                        onClick: () => createImageFolderScene(node.path),
-                      }
-                    : null,
-                  !node.path
-                    ? {
-                        label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
-                        icon: showSystemFolders ? (
-                          <EyeSlashIcon className="w-5 h-5" />
-                        ) : (
-                          <EyeIcon className="w-5 h-5" />
-                        ),
-                        onClick: toggleShowSystemFolders,
-                      }
-                    : null,
-                  node.path
-                    ? {
-                        label: 'Rename',
-                        icon: <PencilSquareIcon className="w-5 h-5" />,
-                        onClick: () => {
-                          const base = node.path.split('/').slice(0, -1).join('/')
-                          const newName = window.prompt('New name', node.name)
-                          if (newName) {
-                            const newPath = (base ? base + '/' : '') + newName
-                            renameAsset(node.path, newPath)
-                          }
-                        },
-                      }
-                    : null,
-                  node.path
-                    ? {
-                        label: 'Delete',
-                        confirm: 'Are you sure?',
-                        icon: <TrashIcon className="w-5 h-5" />,
-                        onClick: () => deleteAsset(node.path),
-                      }
-                    : null,
-                ].filter(Boolean) as DropdownMenuItem[]
-              }
-            />
+                readOnly
+                  ? null
+                  : {
+                      label: 'New folder',
+                      icon: <FolderPlusIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const name = window.prompt('Folder name')
+                        if (name) {
+                          const newPath = (node.path ? node.path + '/' : '') + name
+                          createFolder(newPath)
+                        }
+                      },
+                    },
+                hasPlayableImages
+                  ? {
+                      label: 'Play all images in this folder',
+                      icon: <PlayIcon className="w-5 h-5" />,
+                      onClick: () => createImageFolderScene(node.path),
+                    }
+                  : null,
+                !node.path
+                  ? {
+                      label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
+                      icon: showSystemFolders ? (
+                        <EyeSlashIcon className="w-5 h-5" />
+                      ) : (
+                        <EyeIcon className="w-5 h-5" />
+                      ),
+                      onClick: toggleShowSystemFolders,
+                    }
+                  : null,
+                node.path && !readOnly
+                  ? {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    }
+                  : null,
+                node.path && !readOnly
+                  ? {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      onClick: () => deleteAsset(node.path),
+                    }
+                  : null,
+              ].filter(Boolean) as DropdownMenuItem[]
+              return items.length > 0 ? (
+                <DropdownMenu horizontal className="w-fit" buttonColor="tertiary" items={items} />
+              ) : null
+            })()}
           </div>
         </div>
         {expanded && (
@@ -275,6 +285,7 @@ function TreeNode({
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
                 showSystemFolders={showSystemFolders}
                 toggleShowSystemFolders={toggleShowSystemFolders}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -366,24 +377,28 @@ function TreeNode({
                   icon: <CloudArrowDownIcon className="w-4 h-4 inline-block" />,
                   onClick: () => openFrameAsset(frameId, node.path, node.name),
                 },
-                {
-                  label: 'Rename',
-                  icon: <PencilSquareIcon className="w-4 h-4" />,
-                  onClick: () => {
-                    const base = node.path.split('/').slice(0, -1).join('/')
-                    const newName = window.prompt('New name', node.name)
-                    if (newName) {
-                      const newPath = (base ? base + '/' : '') + newName
-                      renameAsset(node.path, newPath)
-                    }
-                  },
-                },
-                {
-                  label: 'Delete',
-                  confirm: 'Are you sure?',
-                  icon: <TrashIcon className="w-4 h-4" />,
-                  onClick: () => deleteAsset(node.path),
-                },
+                readOnly
+                  ? null
+                  : {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-4 h-4" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    },
+                readOnly
+                  ? null
+                  : {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-4 h-4" />,
+                      onClick: () => deleteAsset(node.path),
+                    },
               ].filter(Boolean) as DropdownMenuItem[]
             }
           />
@@ -581,7 +596,11 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     useActions(assetsLogic(assetsLogicProps))
   const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const showSyncAction = !isInFrameAdminMode()
+  // Font sync pulls from the backend's own store; the on-device panel and the
+  // cloud have nothing to sync from. Cloud is read-only wholesale — its wire
+  // contract is assets_list/asset_get and nothing else.
+  const readOnly = workspaceMode() === 'cloud'
+  const showSyncAction = workspaceMode() === 'backend'
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
@@ -655,6 +674,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
             showSystemFolders={showSystemFolders}
             toggleShowSystemFolders={toggleShowSystemFolders}
+            readOnly={readOnly}
           />
         </div>
       )}

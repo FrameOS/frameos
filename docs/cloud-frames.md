@@ -209,10 +209,10 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 
 | Verb | Payload | Device behavior |
 |---|---|---|
-| `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum"}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack once the payload is accepted and persisted, then `scene_ack` once it is actually live (no `scene_ack` if the hot-load fails — the frame is then genuinely out of sync) |
+| `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum", "scene_id"?: "…", "state"?: {…}}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack once the payload is accepted and persisted, then `scene_ack` once it is actually live (no `scene_ack` if the hot-load fails — the frame is then genuinely out of sync). The optional `scene_id` names which of the pushed scenes to activate (default: the first) and `state` carries its initial public scene-state values — the shape the workspace's "preview on frame" flow produces |
 | `set_schedule` | `{"schedule": {…}}` | replace the scene schedule |
 | `set_settings` | `{"settings": {…}}` | allowlisted declarative keys only (`name`, `rotate`, `interval`, `scaling_mode`, `timezone`, `debug`; `brightness` joins the list once the runtime grows a brightness setting); unknown or non-allowlisted keys → the whole verb is refused (`error: "setting_not_allowed"`) |
-| `set_current_scene` | `{"scene_id": "…"}` | switch active scene |
+| `set_current_scene` | `{"scene_id": "…", "state"?: {…}}` | switch active scene; the optional `state` object carries public scene-state field values, forwarded to the scene exactly as the local `setCurrentScene` event would |
 | `get_state` | `{}` | bare ack, then a separate `{"id", "type": "state", …}` message with the same `id` carrying the `hello`-shaped state |
 | `get_logs` | `{"since"?: iso-ts, "limit"?: N}` | bare ack, then a `log_batch` message with the same `id` carrying the buffered lines (requires `telemetry:logs`; device caps `limit` at 1000) |
 | `get_metrics` | `{}` | bare ack, then a `metrics` message with the same `id` carrying the buffered samples (requires `telemetry:metrics`) |
@@ -220,10 +220,17 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `reboot` | `{}` | reboot the device |
 | `restart_runtime` | `{}` | restart the FrameOS process |
 | `notify_update_available` | `{"version": "…"}` | advisory only — the device fetches release metadata from its own configured archive and verifies signatures itself; the provider supplies no URLs and no binaries |
+| `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping |
+| `image_get` | `{}` | the frame's current rendered image. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same caps); the first chunk's `content_type` says what the device produces (the Linux runtime sends `image/png` of its last render, the ESP32 packs `image/bmp` from its framebuffer). `ok: false` ack with `no_image` when nothing has rendered yet, `busy` on a small device already streaming |
+| `asset_get` | `{"path": "…", "thumb"?: true}` | read one file from the assets directory. Failure is an ordinary `ok: false` ack: `invalid_path` (traversal, absolute, or outside the assets directory), `not_found`, `is_directory`, `too_large` (the reference cap is **8 MiB** raw), `busy` (a small device already streaming another file). Success is a bare ack followed by one or more `{"id", "type": "asset_chunk", "seq": 0…N, "data": "<base64>", "done": bool}` messages with the same `id`, in order; the first chunk also carries `"size"` (total raw bytes), `"mtime"` and `"content_type"`. A read that fails after the ack ends the stream with `{"type": "asset_chunk", "id", "error": "…", "done": true}` and the provider discards the partial file. With `thumb`, a device that can generate thumbnails (Linux) returns a small preview; a device that cannot (ESP32) returns the original bytes |
 
 Explicitly absent, by design (see `cloud/docs/cloud-frames.md`): shell/exec,
-PTY, file read/write, SSH anything, network/WiFi config, admin credentials,
-update URLs, agent/profile state, compiled scene deploys.
+PTY, arbitrary file read/write, SSH anything, network/WiFi config, admin
+credentials, update URLs, agent/profile state, compiled scene deploys. The
+`assets_list`/`asset_get` verbs are deliberately not a file API: they are
+read-only, confined to the assets directory (the same user-content directory
+the local admin's Assets panel serves), and the device — not the provider —
+resolves and bounds every path.
 
 ### Device profiles
 
@@ -237,7 +244,7 @@ drains either way.
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
 | Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
-| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available` |
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `assets_list`, `asset_get` (both only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned), `image_get` (`image/bmp`) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available` |
 
 The ESP32 profile is a subset because the firmware has no scheduler, no log
 buffer and no metrics buffer to expose, and updates itself from its own
@@ -253,6 +260,8 @@ enqueueing commands that will come back refused.
 | `log_batch` | `{"logs": [{"timestamp", "scene"?, "payload"}…]}` | only with `telemetry:logs`; batched (device: ≤2 s / ≤100 lines); provider stores with a hard per-frame retention cap and counts retained bytes toward the account's storage usage |
 | `metrics` | `{"metrics": {…}}` | only with `telemetry:metrics` |
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state |
+| `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
+| `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
 
 A provider must tolerate unknown frame→provider types (forward compatibility).
 

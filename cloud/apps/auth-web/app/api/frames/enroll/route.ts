@@ -15,6 +15,8 @@ import {
 import {
   countFramesForAccount,
   frameManagedScope,
+  frameTelemetryLogsScope,
+  frameTelemetryMetricsScope,
   isValidEd25519PublicKey,
   maxFramesPerAccount,
   redeemClaimToken,
@@ -210,7 +212,17 @@ async function enrollWithClaimToken(
           clientKind: "frame",
           providerClientMetadata: {
             enrolledVia: "claim_token",
-            requestedScopes: [frameManagedScope],
+            // Telemetry comes with the claim-token grant: the owner minted
+            // this token to manage the frame from the workspace, and a Logs
+            // panel that stays empty until a separate scope dance is a trap
+            // (the hub refuses every log_batch with insufficient_scope and
+            // nothing in the UI says why). The LOCAL switch on the device
+            // (send_logs) remains the privacy control.
+            requestedScopes: [
+              frameManagedScope,
+              frameTelemetryLogsScope,
+              frameTelemetryMetricsScope,
+            ],
           },
           publicDisplayName: name,
           tokenReference: accessToken.tokenReference,

@@ -62,3 +62,7 @@ uint8_t *fos_nim_http_request(const char *method, const char *url,
     return 0;
 }
 void fos_nim_http_free(void *ptr) { (void)ptr; }
+void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
+{
+    (void)dir; (void)max_spill_bytes;
+}

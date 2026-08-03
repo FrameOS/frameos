@@ -55,7 +55,10 @@ const pollIntervalMs = 5000
 const hintAfterMs = 2 * 60 * 1000
 
 export interface EnrollmentWatchState {
-  enrolledFrame?: FrameListEntry
+  // `| undefined` explicitly: auth-web type-checks this file with
+  // exactOptionalPropertyTypes, and the hook returns the useState value
+  // (FrameListEntry | undefined) as this property.
+  enrolledFrame?: FrameListEntry | undefined
   /** Waited long enough (~2 min) that the UI should show a troubleshooting hint. */
   hintDue: boolean
 }

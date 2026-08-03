@@ -8,6 +8,7 @@ import { socketLogic } from '../../../socketLogic'
 import type { metricsLogicType } from './metricsLogicType'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { urls } from '../../../../urls'
+import { isCloudMode } from '../../../../utils/cloudMode'
 
 export interface metricsLogicProps {
   frameId: FrameId
@@ -990,6 +991,14 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     metrics: {
       [socketLogic.actionTypes.newLog]: (state, { log }) => {
+        // Cloud mode has a dedicated live stream: the hub broadcasts every
+        // stored sample as new_metrics (handled below) with the exact row the
+        // /metrics routes serve. The device ALSO forwards its `event:
+        // "metrics"` log lines when telemetry:logs is granted — merging those
+        // too would plot every sample twice at slightly different timestamps.
+        if (isCloudMode()) {
+          return state
+        }
         try {
           const { event, ...metrics } = JSON.parse(log.line)
           if (event === 'metrics' && log.frame_id === props.frameId) {
@@ -997,6 +1006,27 @@ export const metricsLogic = kea<metricsLogicType>([
           }
         } catch (error) {}
         return state
+      },
+      [socketLogic.actionTypes.newMetrics]: (
+        state: MetricsType[],
+        { metrics: sample }: { metrics: Record<string, any> }
+      ): MetricsType[] => {
+        // Cloud hub's new_metrics carries a MetricsType-shaped row
+        // ({frame_id, id, timestamp, metrics}); its timestamp equals the
+        // stored row's, so the reconnect since-refetch dedupes against it.
+        // Non-cloud keeps the historical new_log merge above (the backend
+        // broadcasts both events per sample — consuming both would double up).
+        if (!isCloudMode() || !sample || sample.frame_id !== props.frameId) {
+          return state
+        }
+        const { frame_id, id, timestamp, metrics } = sample
+        if (typeof timestamp !== 'string' || !metrics || typeof metrics !== 'object') {
+          return state
+        }
+        if (state.some((existing: MetricsType) => existing.timestamp === timestamp)) {
+          return state
+        }
+        return [...state, { frame_id, id: String(id ?? timestamp), timestamp, metrics }]
       },
     },
     apiRebootMarkers: [

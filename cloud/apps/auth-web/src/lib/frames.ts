@@ -7,9 +7,12 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   createDb,
+  frameAssetFiles,
+  frameAssets,
   frameCommands,
   frameEnrollmentTokens,
   frameLogs,
+  frameMetrics,
   frames,
   frameSceneAssignments,
   linkedClients,
@@ -501,6 +504,153 @@ export async function storeFrameLogs(
   return batch.length;
 }
 
+// ---------------------------------------------------------------------------
+// Asset browsing (docs/cloud-frames.md `assets_list` / `asset_get`)
+// ---------------------------------------------------------------------------
+
+// A listing bigger than this is rejected, never truncated (the device already
+// bounds itself and says `truncated: true` when it does — see the protocol's
+// reject-don't-truncate doctrine in apps/frame-hub/src/protocol.ts).
+export const maxAssetListingBytes = 256 * 1024;
+// Per cached file; matches the device-side HubMaxAssetFileBytes refusal.
+export const maxAssetFileBytes = 8 * 1024 * 1024;
+export const maxAssetPathChars = 1024;
+// Where image_get replies live in the frame_asset_files cache. A dot-path on
+// purpose: devices never include dotfiles in assets_list, so no real asset
+// can collide with (or shadow) the current-image slot.
+export const frameImageAssetPath = ".frame/image";
+// Per-frame blob-cache LRU bounds. Thumbnails dominate (a few tens of KiB
+// each); the byte bound is what really matters for full-size downloads.
+export const maxAssetFilesPerFrame = 64;
+export const maxAssetCacheBytesPerFrame = 24 * 1024 * 1024;
+
+export interface FrameAssetEntry {
+  path: string;
+  size: number;
+  mtime: number;
+  is_dir?: boolean;
+}
+
+// Sanitize a device-reported listing: keep only the wire contract's fields
+// (a compromised device must not get arbitrary jsonb persisted and replayed
+// to every browser), require relative paths, drop malformed entries.
+export function parseAssetEntries(value: unknown): FrameAssetEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const entries: FrameAssetEntry[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const path = typeof record.path === "string" ? record.path : "";
+    if (
+      path.length === 0 ||
+      path.length > maxAssetPathChars ||
+      path.startsWith("/") ||
+      path.split("/").includes("..")
+    ) {
+      continue;
+    }
+    const size = typeof record.size === "number" && Number.isFinite(record.size) ? record.size : 0;
+    const mtime =
+      typeof record.mtime === "number" && Number.isFinite(record.mtime) ? record.mtime : 0;
+    entries.push({
+      ...(record.is_dir === true ? { is_dir: true } : {}),
+      mtime,
+      path,
+      size,
+    });
+  }
+  return entries;
+}
+
+export async function storeFrameAssetListing(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  entries: FrameAssetEntry[],
+  truncated: boolean,
+) {
+  const sizeBytes = Buffer.byteLength(JSON.stringify(entries), "utf8");
+  if (sizeBytes > maxAssetListingBytes) {
+    return false;
+  }
+  const now = new Date();
+  await db
+    .insert(frameAssets)
+    .values({
+      frameId,
+      payload: entries,
+      sizeBytes,
+      truncated,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      set: { payload: entries, sizeBytes, truncated, updatedAt: now },
+      target: frameAssets.frameId,
+    });
+  return true;
+}
+
+// Upsert one fetched file into the per-frame LRU cache, pruning past the
+// count/byte caps in the same transaction (the storeFrameLogs pattern).
+export async function storeFrameAssetFile(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  file: { path: string; thumb: boolean; contentType: string; content: Buffer },
+) {
+  if (file.content.length > maxAssetFileBytes) {
+    return false;
+  }
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(frameAssetFiles)
+      .values({
+        content: file.content,
+        contentType: file.contentType,
+        frameId,
+        path: file.path,
+        sizeBytes: file.content.length,
+        thumb: file.thumb,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        set: {
+          content: file.content,
+          contentType: file.contentType,
+          sizeBytes: file.content.length,
+          updatedAt: now,
+        },
+        target: [frameAssetFiles.frameId, frameAssetFiles.path, frameAssetFiles.thumb],
+      });
+    // LRU prune: walk newest-first, keep rows while under both caps, delete
+    // the rest. One frame's cache is at most a few dozen small rows, so
+    // selecting the metadata (never the bytes) stays cheap.
+    const rows = await tx
+      .select({
+        id: frameAssetFiles.id,
+        sizeBytes: frameAssetFiles.sizeBytes,
+      })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frameId))
+      .orderBy(desc(frameAssetFiles.updatedAt), desc(frameAssetFiles.id));
+    let total = 0;
+    const evict: number[] = [];
+    rows.forEach((row, index) => {
+      total += row.sizeBytes;
+      if (index >= maxAssetFilesPerFrame || total > maxAssetCacheBytesPerFrame) {
+        evict.push(row.id);
+      }
+    });
+    if (evict.length > 0) {
+      await tx.delete(frameAssetFiles).where(inArray(frameAssetFiles.id, evict));
+    }
+  });
+  return true;
+}
+
 // Revoking a frame revokes the underlying linked client (the device sees a
 // 401 and demotes itself to standalone) and marks the frame row.
 export async function revokeFrame(
@@ -667,4 +817,62 @@ export async function countFramesForAccount(
       ),
     );
   return row?.count ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Metrics retention (scope telemetry:metrics)
+// ---------------------------------------------------------------------------
+
+// Hard per-frame retention cap for stored metrics samples, mirroring the
+// backend's METRICS_RETAINED_PER_FRAME so the SPA's Metrics panel sees the
+// same depth of history in cloud mode.
+export const maxMetricsPerFrame = 1000;
+// Per-sample size ceiling. Must match the hub's maxMetricsBytes
+// (apps/frame-hub/src/protocol.ts) — the hub rejects oversized samples before
+// they get here; this re-check keeps the helper safe for any other caller.
+export const maxMetricsSampleBytes = 16 * 1024;
+
+// Store one metrics sample, enforcing the per-frame retention cap in the same
+// transaction (the storeFrameLogs pattern). Returns the inserted row's id (so
+// the hub can broadcast a new_metrics event carrying the same id/timestamp the
+// /metrics routes will later serve), or null when the sample is oversized.
+export async function storeFrameMetrics(
+  db: FramesDatabase,
+  frameId: string,
+  metrics: unknown,
+  timestamp: Date,
+): Promise<number | null> {
+  const serialized = JSON.stringify(metrics ?? null);
+  const sizeBytes = Buffer.byteLength(serialized, "utf8");
+  if (sizeBytes > maxMetricsSampleBytes) {
+    return null;
+  }
+  let insertedId: number | null = null;
+  await db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(frameMetrics)
+      .values({ frameId, payload: metrics, sizeBytes, timestamp })
+      .returning({ id: frameMetrics.id });
+    insertedId = inserted?.id ?? null;
+    // Prune beyond the cap: cheap because frame_metrics_frame_idx is
+    // (frame_id, id).
+    const [cutoff] = await tx
+      .select({ id: frameMetrics.id })
+      .from(frameMetrics)
+      .where(eq(frameMetrics.frameId, frameId))
+      .orderBy(desc(frameMetrics.id))
+      .offset(maxMetricsPerFrame)
+      .limit(1);
+    if (cutoff) {
+      await tx
+        .delete(frameMetrics)
+        .where(
+          and(
+            eq(frameMetrics.frameId, frameId),
+            lt(frameMetrics.id, cutoff.id + 1),
+          ),
+        );
+    }
+  });
+  return insertedId;
 }

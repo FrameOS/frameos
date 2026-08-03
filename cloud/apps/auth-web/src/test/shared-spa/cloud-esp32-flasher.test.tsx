@@ -282,9 +282,14 @@ describe("Esp32CloudFlasher", () => {
     mockCloudApi();
     const port = createHealthyPort();
     stubSerial(port);
-    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} frameName="Kitchen" />);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
 
+    // The flasher owns its own name field (each enrollment path names its own
+    // frame); the value must reach the claim-token mint.
+    fireEvent.change(screen.getByLabelText("Frame name (optional)"), {
+      target: { value: "Kitchen" },
+    });
     fireEvent.change(screen.getByLabelText("WiFi network"), {
       target: { value: "My Home WiFi" },
     });
@@ -326,9 +331,14 @@ describe("Esp32CloudFlasher", () => {
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
     // The claim token is minted once, and only after the flash succeeded.
-    expect(
-      fetchedUrls().filter((url) => url === "/api/frames/claim-tokens"),
-    ).toHaveLength(1);
+    const mintCalls = fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/frames/claim-tokens",
+    );
+    expect(mintCalls).toHaveLength(1);
+    // The name typed into the flasher's own field rides along with the mint.
+    expect(JSON.parse(String(mintCalls[0]![1]?.body))).toEqual({
+      name: "Kitchen",
+    });
   });
 
   it("hands off to the enrolled frame once it appears in the account", async () => {
@@ -351,9 +361,7 @@ describe("Esp32CloudFlasher", () => {
           ];
     });
     stubSerial(createHealthyPort());
-    render(
-      <Esp32CloudFlasher cloudOrigin={window.location.origin} frameName="Kitchen" />,
-    );
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
     await screen.findByRole("button", { name: /connect & flash/i });
     clickFlash();
 

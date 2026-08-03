@@ -707,6 +707,55 @@ export const frameCommands = pgTable(
   }),
 );
 
+// Cached per-frame asset listing (the `assets` reply to an `assets_list`
+// verb, docs/cloud-frames.md). One row per frame — latest listing only; the
+// hub rejects oversized listings instead of storing truncated ones.
+export const frameAssets = pgTable("frame_assets", {
+  frameId: uuid("frame_id")
+    .primaryKey()
+    .references(() => frames.id, { onDelete: "cascade" }),
+  // [{path, size, mtime, is_dir}…] with device-relative paths.
+  payload: jsonb("payload").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  // The device bounded the listing (its cap, not ours): the UI may say
+  // "showing the first N files" but must never present it as complete.
+  truncated: boolean("truncated").default(false).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// Cached asset bytes (reassembled `asset_chunk` streams). A small per-frame
+// LRU so thumbnails and repeat downloads stop round-tripping to the device;
+// storeFrameAssetFile prunes past the per-frame caps in the same transaction.
+export const frameAssetFiles = pgTable(
+  "frame_asset_files",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    // Device-relative path, exactly as sent in the asset_get payload.
+    path: text("path").notNull(),
+    thumb: boolean("thumb").default(false).notNull(),
+    contentType: text("content_type").notNull(),
+    content: bytea("content").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    frameAssetIdx: uniqueIndex("frame_asset_files_frame_path_thumb_idx").on(
+      table.frameId,
+      table.path,
+      table.thumb,
+    ),
+  }),
+);
+
 // Retained device logs (scope telemetry:logs). size_bytes is precomputed so
 // storage-usage sums stay cheap; retention is capped per frame on insert and
 // in db-cleanup.sh. Retained bytes count toward the account's storage usage.
@@ -728,5 +777,30 @@ export const frameLogs = pgTable(
   },
   (table) => ({
     frameIdx: index("frame_logs_frame_idx").on(table.frameId, table.id),
+  }),
+);
+
+// Retained metrics samples (scope telemetry:metrics) — the history behind the
+// SPA's Metrics panel (/metrics + /metrics/recent), while frames.last_metrics
+// keeps only the newest sample. Same shape and retention doctrine as
+// frame_logs: size_bytes precomputed, per-frame cap pruned on insert.
+export const frameMetrics = pgTable(
+  "frame_metrics",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    insertedAt: timestamp("inserted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    frameIdx: index("frame_metrics_frame_idx").on(table.frameId, table.id),
   }),
 );

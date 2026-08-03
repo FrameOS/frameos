@@ -590,6 +590,33 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     return url
 
 when defined(frameosEmbedded):
+  proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,
+      fit: ScaledDecodeFit): Image =
+    ## Decodes an image whose HTTP body was spilled to storage (SD/SPIFFS)
+    ## because PSRAM could not buffer it. JPEGs stream from the file through
+    ## pixie's windowed decoder — neither the compressed body nor a full-size
+    ## RGBA intermediate ever lives in RAM. Formats without a file-backed
+    ## streaming decoder fail with a clear error: buffering the file back
+    ## would recreate the OOM the spill just avoided.
+    var file: File
+    if not file.open(path):
+      raise newException(PixieError, "Cannot open spilled image file: " & path)
+    defer: file.close()
+    var header = newString(64)
+    let got = file.readBuffer(addr header[0], header.len)
+    header.setLen(max(0, got))
+    let format = embeddedImageFormat(header.cstring, header.len)
+    if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Progressive JPEGs raise here; the buffered retry other paths use is
+        # exactly the allocation that could not be made, so let it surface.
+        decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    raise newException(PixieError,
+      &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")
+
   proc decodeImageChunks(chunks: seq[HttpBodyChunk], totalLen: int,
       target: Image, fit: ScaledDecodeFit): Image =
     ## Decodes an image whose bytes arrived in multiple download chunks.
@@ -625,7 +652,9 @@ when defined(frameosEmbedded):
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
       let image =
-        if response.chunks.len > 1:
+        if response.spillPath.len > 0:
+          decodeSpilledImageInto(response.spillPath, response.bodyLen, target, fit)
+        elif response.chunks.len > 1:
           decodeImageChunks(response.chunks, response.bodyLen, target, fit)
         elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)

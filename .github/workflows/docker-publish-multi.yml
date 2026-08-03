@@ -163,6 +163,15 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
+      # Cache pip's wheel cache: installing backend requirements from a warm
+      # cache saves ~35-45s on each of the 11 matrix jobs.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
       - name: Install backend dependencies
         run: |
           pip install -r backend/requirements.txt
@@ -311,8 +320,23 @@ jobs:
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+
+      # Depot keeps a persistent layer cache per project, so the esp32-ci
+      # target (ESP-IDF toolchain + Nim) is only rebuilt when its layers
+      # actually change. load: true pulls the image into the local Docker
+      # daemon for the `docker run` below.
       - name: Build ESP32 CI Docker image
-        run: docker build --target esp32-ci -t frameos-esp32-ci .
+        uses: depot/build-push-action@v1
+        with:
+          project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
+          push: false
 
       - name: Build firmware
         timeout-minutes: 60
@@ -353,77 +377,11 @@ jobs:
             release-assets/*-esp32-s3-epd7in5v2.bin
           if-no-files-found: error
 
-  build:
-    needs: update-versions
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - platform: linux/amd64
-            dockerfile: Dockerfile
-          - platform: linux/arm64/v8
-            dockerfile: Dockerfile
-      fail-fast: false
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ needs.update-versions.outputs.release_sha }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-        with:
-          version: latest
-          install: true
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ needs.update-versions.outputs.release_sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.platform }}-
-
-      - name: Extract branch name
-        shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
-
-      - name: Short SHA
-        shell: bash
-        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-      - name: Read Docker version tags
-        shell: bash
-        run: |
-          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
-          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
-
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
-
-      # Build each platform without pushing
-      - name: Build (without push) for ${{ matrix.platform }}
-        uses: depot/build-push-action@v1
-        with:
-          project: rsbh2wrlkj
-          token: ${{ secrets.DEPOT_TOKEN }}
-          context: .
-          file: ./${{ matrix.dockerfile }}
-          push: false
-          platforms: ${{ matrix.platform }}
-          tags: frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
-
+  # Depot builds both platforms remotely with its own persistent layer cache,
+  # so there is no separate warm-up build job: push-multiarch is the only
+  # image build and pushes the multi-arch manifest directly.
   push-multiarch:
-    needs: [update-versions, build, build-prebuilt-cross, build-buildroot-release-image]
+    needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

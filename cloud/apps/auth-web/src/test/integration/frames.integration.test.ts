@@ -1128,6 +1128,138 @@ describe("frame management API", () => {
     expect(brightness.status).toBe(400);
   });
 
+  // The frame's name is provider-side data (frames.name, what frameSummary
+  // returns) — the device never has to accept it. The ESP32 firmware answers
+  // `unsupported_verb` for set_settings, so the route applies `name` directly
+  // to the row and skips the enqueue for esp32 platforms; anything else in
+  // the payload is refused up front so nothing is half-applied.
+  it("renames an esp32 frame in the DB without enqueueing set_settings", async () => {
+    const accountId = await signIn();
+    const keys = deviceKeypair();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "esp32", width: 800 },
+    });
+    expect(enrolled.status).toBe(200);
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const renamed = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { name: "Hallway epaper" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { status: string }).status).toBe(
+      "applied",
+    );
+
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.accountId).toBe(accountId);
+    expect(frame?.name).toBe("Hallway epaper");
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.filter((c) => c.type === "set_settings")).toHaveLength(0);
+  });
+
+  it("refuses a mixed esp32 settings payload without applying the name", async () => {
+    const keys = deviceKeypair();
+    await signIn();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    expect(enrolled.status).toBe(200);
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const [before] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+
+    const refused = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { name: "Half-applied", rotate: 90 } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "settings_not_supported_by_device",
+    );
+
+    // Nothing was applied: not the name, and no command either.
+    const [after] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(after?.name).toBe(before?.name);
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(0);
+  });
+
+  it("renames a non-esp32 frame in the DB AND pushes set_settings to the device", async () => {
+    // enrolledFrame() enrolls with platform "pi-zero2w".
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const renamed = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { name: "Kitchen, renamed" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(renamed.status).toBe(200);
+    const payload = (await renamed.json()) as {
+      command_id: string | null;
+      status: string;
+    };
+    expect(payload.status).toBe("queued");
+    expect(payload.command_id).toBeTruthy();
+
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.name).toBe("Kitchen, renamed");
+
+    // The device's local config stays in sync: the push carries the name.
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const setSettings = commands.filter((c) => c.type === "set_settings");
+    expect(setSettings).toHaveLength(1);
+    expect(setSettings[0]!.payload).toEqual({
+      settings: { name: "Kitchen, renamed" },
+    });
+  });
+
   it("refuses JS prototype keys cleanly instead of crashing or passing them", async () => {
     const { frame_id } = await enrolledFrame();
     await confirmFrame(

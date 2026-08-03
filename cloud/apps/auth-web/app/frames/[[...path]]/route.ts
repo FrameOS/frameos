@@ -25,6 +25,22 @@ export const runtime = "nodejs";
 //     hardcoded "24 hours" in the panel would lie on a tuned install.
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
+// RFC1918 space, shared by enrollmentOrigin (picking this machine's LAN
+// address) and the hub-origin injection below (recognizing that a request
+// arrived through that address).
+const rfc1918Prefix = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+
+// A complete private IPv4 literal — the hostname a dev machine is browsed
+// through from elsewhere on its LAN (a phone, a second laptop). Requires the
+// full dotted-quad shape, not just the prefix: "10.4.evil.example" is a
+// public hostname.
+function isPrivateLanIPv4(hostname: string) {
+  return (
+    /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) &&
+    rfc1918Prefix.test(hostname)
+  );
+}
+
 // The enrollment origin is written into ESP32 NVS and SD images — a frame on
 // the WiFi then dials it. On a dev server reached as localhost that origin is
 // useless (the frame would dial itself and never connect), so substitute this
@@ -43,9 +59,7 @@ function enrollmentOrigin(accountOrigin: string): string {
   // Prefer RFC1918 space: a machine can also hold carrier or VPN addresses a
   // frame on the home network cannot reach.
   const lan =
-    addresses.find((address) =>
-      /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(address),
-    ) ?? addresses[0];
+    addresses.find((address) => rfc1918Prefix.test(address)) ?? addresses[0];
   if (!lan) {
     return accountOrigin;
   }
@@ -145,9 +159,15 @@ export async function GET(request: NextRequest) {
   //
   // The "am I in dev" test is the request's own hostname, not NODE_ENV: this
   // has to hold for however the server was started, and a localhost request is
-  // exactly the case that needs the second port. Behind a real hostname we
-  // never guess — there nginx proxies the WS paths on the same origin, and
-  // pointing the fleet socket at localhost would break every browser.
+  // exactly the case that needs the second port. A private LAN IP is the same
+  // dev server reached from elsewhere on the network (a phone, a second
+  // laptop) — the hub is still a sibling process on this machine, so the
+  // socket goes to the same host on the hub's port; anything else (localhost
+  // itself included) would not resolve to this machine from that browser, and
+  // the hub accepts private-network origins outside production (frame-hub
+  // env.ts allowsPrivateNetworkOrigins). Behind a real hostname we never
+  // guess — there nginx proxies the WS paths on the same origin, and pointing
+  // the fleet socket at localhost would break every browser.
   //
   // Empty counts as unset: FRAME_HUB_PUBLIC_URL= in a .env would otherwise be
   // an empty string, which ?? happily keeps and which silently disables the
@@ -156,11 +176,14 @@ export async function GET(request: NextRequest) {
     /\/$/,
     "",
   );
+  const requestHostname = new URL(request.url).hostname;
   const hubOrigin =
     configuredHub ||
-    (localHosts.has(new URL(request.url).hostname)
+    (localHosts.has(requestHostname)
       ? "http://localhost:3100"
-      : undefined);
+      : isPrivateLanIPv4(requestHostname)
+        ? `http://${requestHostname}:3100`
+        : undefined);
   if (hubOrigin) {
     const injected = injectAtAnchor(html, wsOriginAnchor, [
       `cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,

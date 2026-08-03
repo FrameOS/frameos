@@ -92,6 +92,33 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                               int *out_status, size_t *out_chunk_count);
 void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count);
 
+/* Spill-capable variant. Behaves exactly like fos_nim_http_request_chunked
+ * until PSRAM buffering would breach the free-memory reserve; then, if a
+ * spill directory has been registered (fos_nim_http_set_spill_dir) and both
+ * out_spill_path/out_spill_len are non-NULL, the ENTIRE body is streamed to
+ * a temp file instead of failing with an OOM error. On spill the returned
+ * chunk array holds a single empty chunk, *out_spill_path is a malloc'd
+ * path (free with fos_nim_http_free; the caller also owns deleting the
+ * file) and *out_spill_len is the body size. Passing NULL spill out-params
+ * disables spilling for that request. */
+fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_chunk_count,
+                              char **out_spill_path, size_t *out_spill_len);
+
+/* Registers where oversized HTTP bodies may spill (empty/NULL disables —
+ * the boot default, keeping the feature off until the firmware wires it).
+ * max_spill_bytes additionally caps a single spilled body, on top of the
+ * request's own max_bytes; 0 = no extra cap (SD card). Intended wiring:
+ * /srv/assets/.cache when the SD card mounts, else /state (SPIFFS) with a
+ * small cap derived from esp_spiffs_info free space. Call from one task
+ * before renders start; leftover http-spill-*.tmp files from a crash should
+ * be swept at boot. */
+void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes);
+
 #ifdef __cplusplus
 }
 #endif

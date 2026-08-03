@@ -73,6 +73,33 @@ describe("frames SPA shell", () => {
     ).toHaveLength(0);
   });
 
+  it("points a LAN-IP request at the dev hub on the same host", async () => {
+    // Browsing `pnpm dev` from another device on the network: the shell must
+    // send the socket to this machine's LAN address (localhost would resolve
+    // to the phone itself), on the hub's own port. The hub side accepts the
+    // private-network Origin outside production — frame-hub env.ts
+    // allowsPrivateNetworkOrigins — and the dev session cookie is host-only
+    // for the LAN IP, so it reaches port 3100 too (cookies ignore ports).
+    const body = await (await get("http://10.4.0.47:3000/frames")).text();
+    expect(body).toContain('cloud_ws_origin: "http://10.4.0.47:3100"');
+  });
+
+  it("does not treat a public IP or private-prefixed hostname as a LAN dev server", async () => {
+    for (const origin of [
+      "http://203.0.113.5:3000",
+      "http://10.4.evil.example:3000",
+    ]) {
+      const body = await (await get(`${origin}/frames`)).text();
+      expect(body).not.toContain("cloud_ws_origin");
+    }
+  });
+
+  it("prefers an explicit FRAME_HUB_PUBLIC_URL over the LAN-IP guess", async () => {
+    process.env.FRAME_HUB_PUBLIC_URL = "https://hub.frameos.net";
+    const body = await (await get("http://10.4.0.47:3000/frames")).text();
+    expect(body).toContain('cloud_ws_origin: "https://hub.frameos.net"');
+  });
+
   it("leaves a real hostname same-origin, where nginx proxies the socket", async () => {
     const body = await (
       await get("https://account.frameos.net/frames")

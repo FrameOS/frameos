@@ -9,6 +9,12 @@ on:
       - buildroot-images.json
       - cross-toolchain-images.json
 
+# Superseded runs on the same PR are cancelled; pushes to main always run to
+# completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docker_image:
     name: Build Docker Image
@@ -59,11 +65,41 @@ jobs:
   esp32_firmware_image:
     name: Build and boot ESP32 firmware image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Token auth, same as the release workflow: OIDC would spare us the
+      # secret, but it needs a trust relationship configured in the Depot
+      # project first (until then the exchange dies with permission_denied).
+      # Secrets are absent on forked PRs, so those fall back to a plain
+      # docker build below.
+      DEPOT_AVAILABLE: ${{ secrets.DEPOT_TOKEN != '' && 'true' || 'false' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Build ESP32 CI Docker image
+      - name: Set up Depot CLI
+        if: env.DEPOT_AVAILABLE == 'true'
+        uses: depot/setup-action@v1
+
+      # Depot keeps a persistent layer cache per project, so the esp32-ci
+      # target (ESP-IDF toolchain + Nim) only rebuilds layers that changed.
+      # load: true pulls the image into the local Docker daemon for the
+      # `docker run` below.
+      - name: Build ESP32 CI Docker image (Depot)
+        if: env.DEPOT_AVAILABLE == 'true'
+        uses: depot/build-push-action@v1
+        with:
+          project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
+          push: false
+
+      - name: Build ESP32 CI Docker image (forked PR fallback)
+        if: env.DEPOT_AVAILABLE != 'true'
         run: |
           docker build --target esp32-ci -t frameos-esp32-ci .
 

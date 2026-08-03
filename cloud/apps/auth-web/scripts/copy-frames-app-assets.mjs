@@ -9,7 +9,7 @@
 // deploy ships prebuilt assets), existing assets in public/ are kept and
 // nothing fails.
 /* global console, process */
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,8 +28,41 @@ try {
 }
 const target = join(appDir, "public", "frames-app");
 
-if (!framesAppDist || !existsSync(join(framesAppDist, "index.html"))) {
-  if (existsSync(join(target, "index.html"))) {
+// An interrupted `cloud-frontend dev` (watch) run leaves a dist with an
+// index.html but an empty static/ — build.mjs clears dist before esbuild's
+// first emit. Copying that shell would serve a /frames page whose main.js
+// 404s (and whose main.css comes back as Next's text/html 404 page, which
+// strict MIME checking then refuses). Treat a shell whose referenced entry
+// assets are missing as "not built".
+function distIsComplete(dist) {
+  const html = readFileSync(join(dist, "index.html"), "utf8");
+  const referenced = [
+    ...html.matchAll(/\/frames-app\/(static\/[^"']+\.(?:js|css))/g),
+  ].map((match) => match[1]);
+  if (referenced.length === 0) {
+    console.warn(
+      `Build at ${dist} references no /frames-app/static assets; ignoring it.`,
+    );
+    return false;
+  }
+  const missing = referenced.filter((file) => !existsSync(join(dist, file)));
+  if (missing.length > 0) {
+    console.warn(
+      `Build at ${dist} is incomplete (index.html references ${missing.join(", ")} ` +
+        "which do not exist — likely an interrupted watch build). " +
+        "Re-run `turbo run build --filter=@frameos/cloud-frontend`.",
+    );
+    return false;
+  }
+  return true;
+}
+
+if (
+  !framesAppDist ||
+  !existsSync(join(framesAppDist, "index.html")) ||
+  !distIsComplete(framesAppDist)
+) {
+  if (existsSync(join(target, "index.html")) && distIsComplete(target)) {
     console.log(
       `No cloud-frontend build at ${framesAppDist}; keeping existing assets in ${target}`,
     );

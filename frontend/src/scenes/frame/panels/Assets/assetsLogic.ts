@@ -9,6 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
@@ -292,6 +293,13 @@ export const assetsLogic = kea<assetsLogicType>([
               throw new Error('Failed to refresh assets')
             }
             const data = (await response.json()) as FrameAssetsResponse
+            if (data.cache?.refreshing) {
+              // The listing is being fetched (cloud: an assets_list command is
+              // on its way to the device) — poll until it lands, exactly like
+              // the initial load does.
+              const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
+              cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
+            }
             actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
             return data.assets as AssetType[]
           } catch (error) {
@@ -306,7 +314,9 @@ export const assetsLogic = kea<assetsLogicType>([
       false,
       {
         syncAssets: async () => {
-          if (isInFrameAdminMode()) {
+          // Font sync is a backend feature; the on-device panel and the cloud
+          // (read-only asset verbs) have nothing to sync from.
+          if (workspaceMode() !== 'backend') {
             return true
           }
           const taskId = `asset-sync:${props.frameId}:${Date.now()}`

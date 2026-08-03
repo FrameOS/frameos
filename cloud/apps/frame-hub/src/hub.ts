@@ -34,12 +34,19 @@ import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src
 import {
   frameCommandsNotifyChannel,
   frameForLinkedClient,
+  frameImageAssetPath,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
+  maxAssetFileBytes,
+  parseAssetEntries,
+  storeFrameAssetFile,
+  storeFrameAssetListing,
   storeFrameLogs,
+  storeFrameMetrics,
   verifyFrameSignature,
 } from "../../auth-web/src/lib/frames";
 import {
+  allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
   getMaxConnections,
   isAllowedBrowserOrigin,
@@ -56,6 +63,7 @@ import {
   maxSceneIdChars,
   maxStateBytes,
   newLogEvent,
+  newMetricsEvent,
   parseJsonMessage,
   parseLogEntries,
   uuidPattern,
@@ -135,8 +143,24 @@ const upgradeRateLimit = { limit: 120, windowMs: 60_000 };
 // memory. Past this much unflushed data the consumer is hopeless: drop it.
 const maxBufferedBytes = 4 * 1024 * 1024;
 
+// One in-flight asset_get reply stream (docs/cloud-frames.md `asset_chunk`),
+// keyed by the command id it answers. In-memory only: a partial file is
+// worthless, so a dropped socket simply forgets it and the command's
+// at-least-once redelivery re-streams from scratch.
+interface AssetStream {
+  chunks: Buffer[];
+  contentType: string;
+  nextSeq: number;
+  receivedBytes: number;
+}
+
+// Devices stream one file at a time (both reference firmwares serialize verb
+// handling), so this is a protocol-violation bound, not a throughput knob.
+const maxAssetStreamsPerSession = 4;
+
 interface DeviceSession {
   alive: boolean;
+  assetStreams: Map<string, AssetStream>;
   authTimeout: NodeJS.Timeout | undefined;
   authed: boolean;
   closed: boolean;
@@ -747,10 +771,158 @@ export async function startFrameHub(
       .update(frames)
       .set({ lastMetrics: metrics, lastSeenAt: now, updatedAt: now })
       .where(eq(frames.id, session.frame.id));
-    broadcastToBrowsers(session.frame, "new_metrics", {
-      frame_id: session.frame.id,
+    // Retain the sample for the Metrics panel's history (storeFrameMetrics
+    // caps per-frame retention in-transaction), then broadcast it with the
+    // stored id/timestamp so the live event matches what /metrics serves.
+    const storedId = await storeFrameMetrics(
+      db,
+      session.frame.id,
       metrics,
-      timestamp: now.toISOString(),
+      now,
+    );
+    broadcastToBrowsers(
+      session.frame,
+      "new_metrics",
+      newMetricsEvent(session.frame.id, {
+        id: storedId,
+        metrics,
+        timestamp: now,
+      }),
+    );
+  }
+
+  async function handleAssets(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    const entries = parseAssetEntries(msg.assets);
+    const stored = await storeFrameAssetListing(
+      db,
+      session.frame.id,
+      entries,
+      msg.truncated === true,
+    );
+    if (!stored) {
+      // Reject, never truncate: a listing that looks complete but is not
+      // would quietly lie in the Assets panel forever.
+      logWarn("device.assets_listing_too_large", {
+        entries: entries.length,
+        frameId: session.frame.id,
+      });
+    }
+  }
+
+  async function handleAssetChunk(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    const commandId =
+      typeof msg.id === "string" && uuidPattern.test(msg.id)
+        ? msg.id
+        : undefined;
+    if (!commandId) {
+      return;
+    }
+    const seq =
+      typeof msg.seq === "number" && Number.isInteger(msg.seq) && msg.seq >= 0
+        ? msg.seq
+        : undefined;
+    // A chunk carrying `error` aborts the stream; the partial file is useless.
+    if (typeof msg.error === "string" || seq === undefined) {
+      session.assetStreams.delete(commandId);
+      return;
+    }
+    let stream = session.assetStreams.get(commandId);
+    if (!stream || seq === 0) {
+      if (seq !== 0) {
+        // Mid-stream chunk for a stream we are not tracking (hub restarted,
+        // or an earlier chunk was dropped): ignore; redelivery will re-stream.
+        session.assetStreams.delete(commandId);
+        return;
+      }
+      if (
+        !stream &&
+        session.assetStreams.size >= maxAssetStreamsPerSession
+      ) {
+        logWarn("device.asset_stream_limit", { frameId: session.frame.id });
+        return;
+      }
+      // seq 0 always restarts: at-least-once delivery may re-send the whole
+      // asset_get, and the device then re-streams from scratch.
+      stream = {
+        chunks: [],
+        contentType:
+          typeof msg.content_type === "string" &&
+          msg.content_type.length > 0 &&
+          msg.content_type.length <= 256
+            ? msg.content_type
+            : "application/octet-stream",
+        nextSeq: 0,
+        receivedBytes: 0,
+      };
+      session.assetStreams.set(commandId, stream);
+    }
+    if (seq !== stream.nextSeq) {
+      logWarn("device.asset_chunk_out_of_order", {
+        expected: stream.nextSeq,
+        frameId: session.frame.id,
+        got: seq,
+      });
+      session.assetStreams.delete(commandId);
+      return;
+    }
+    const chunk = Buffer.from(
+      typeof msg.data === "string" ? msg.data : "",
+      "base64",
+    );
+    stream.receivedBytes += chunk.length;
+    if (stream.receivedBytes > maxAssetFileBytes) {
+      logWarn("device.asset_stream_too_large", {
+        frameId: session.frame.id,
+        limit: maxAssetFileBytes,
+      });
+      session.assetStreams.delete(commandId);
+      return;
+    }
+    stream.chunks.push(chunk);
+    stream.nextSeq += 1;
+    if (msg.done !== true) {
+      return;
+    }
+    session.assetStreams.delete(commandId);
+    // The command row is the authority on what was requested: a device must
+    // not be able to poison the cache for a path the provider never asked for.
+    // image_get replies land under a reserved dot-path — devices never list
+    // dotfiles, so it cannot collide with a real asset.
+    const [command] = await db
+      .select({ payload: frameCommands.payload, type: frameCommands.type })
+      .from(frameCommands)
+      .where(
+        and(
+          eq(frameCommands.id, commandId),
+          eq(frameCommands.frameId, session.frame.id),
+          inArray(frameCommands.type, ["asset_get", "image_get"]),
+        ),
+      )
+      .limit(1);
+    if (!command) {
+      return;
+    }
+    const payload = isRecord(command.payload) ? command.payload : undefined;
+    const path =
+      command.type === "image_get"
+        ? frameImageAssetPath
+        : typeof payload?.path === "string"
+          ? payload.path
+          : "";
+    if (!path) {
+      return;
+    }
+    await storeFrameAssetFile(db, session.frame.id, {
+      content: Buffer.concat(stream.chunks),
+      contentType: stream.contentType,
+      path,
+      thumb: command.type === "asset_get" && payload?.thumb === true,
     });
   }
 
@@ -814,6 +986,12 @@ export async function startFrameHub(
       case "metrics":
         await handleMetrics(session, msg);
         break;
+      case "assets":
+        await handleAssets(session, msg);
+        break;
+      case "asset_chunk":
+        await handleAssetChunk(session, msg);
+        break;
       default:
         // Forward compatibility: unknown frame → provider types are ignored.
         break;
@@ -823,6 +1001,7 @@ export async function startFrameHub(
   function attachDeviceSocket(ws: WebSocket, frame: FrameRow, scopes: string[]) {
     const session: DeviceSession = {
       alive: true,
+      assetStreams: new Map(),
       authTimeout: undefined,
       authed: false,
       closed: false,
@@ -975,6 +1154,8 @@ export async function startFrameHub(
   const wss = new WebSocketServer({ maxPayload: maxPayloadBytes, noServer: true });
 
   const allowedBrowserOrigins = getAllowedBrowserOrigins();
+  // Dev-only loosening for LAN-IP origins; always false in production.
+  const allowPrivateOrigins = allowsPrivateNetworkOrigins();
   const maxConnections = getMaxConnections();
   let openConnections = 0;
 
@@ -1067,7 +1248,9 @@ export async function startFrameHub(
       pathname === browserAccountPath || browserFramePathPattern.test(pathname);
     if (browserPath) {
       const origin = req.headers.origin;
-      if (!isAllowedBrowserOrigin(origin, allowedBrowserOrigins)) {
+      if (
+        !isAllowedBrowserOrigin(origin, allowedBrowserOrigins, allowPrivateOrigins)
+      ) {
         logWarn("browser.upgrade_bad_origin", { origin });
         rejectUpgrade(socket, 403, "forbidden_origin");
         return;

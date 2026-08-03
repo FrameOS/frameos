@@ -61,15 +61,17 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
   // The on-device panel is the frame: no SSH shell, and pinging yourself is
   // pointless.
   frameAdmin: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets', 'debug'],
-  // The cloud protocol has no shell, file, or diagnostic verbs.
-  cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics'],
+  // The cloud protocol has no shell or diagnostic verbs. Assets are the
+  // read-only assets_list/asset_get pair (docs/cloud-frames.md) — the panel
+  // itself drops every mutation affordance in cloud mode.
+  cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets'],
 }
 
 /** The scene-tool shortcut row on the frame dashboard. Same verbs, same rules. */
 export const allowedSceneToolPanels: Record<WorkspaceMode, readonly WorkspaceUtilityPanel[]> = {
   backend: ['settings', 'schedule', 'logs', 'metrics', 'assets', 'terminal', 'ping'],
   frameAdmin: ['settings', 'schedule', 'logs', 'metrics', 'assets'],
-  cloud: ['settings', 'schedule', 'logs', 'metrics'],
+  cloud: ['settings', 'schedule', 'logs', 'metrics', 'assets'],
 }
 
 /** Per-scene utility panels in the scene workspace. */
@@ -119,7 +121,9 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
     'stop',
   ],
   frameAdmin: ['localDeploy', 'rename', 'render'],
-  cloud: ['reboot', 'rename', 'render', 'restart'],
+  // `delete` = DELETE /api/frames/{id}: revoke the link, then drop the row
+  // and everything cascaded to it. The device demotes to standalone.
+  cloud: ['delete', 'reboot', 'rename', 'render', 'restart'],
 }
 
 /**
@@ -293,12 +297,14 @@ const panelCapabilities: Partial<Record<WorkspaceUtilityPanel, FrameCapability>>
   metrics: 'metrics', // get_metrics / telemetry:metrics
 }
 
-/** Which capability a gated "…" menu action rides on. */
-const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {
-  // Renaming a cloud frame is a `set_settings` push of `name` (framesModel
-  // renameFrame → pushCloudFrameSettings), so it follows that verb's profile.
-  rename: 'settings',
-}
+/**
+ * Which capability a gated "…" menu action rides on. Currently empty: rename
+ * used to ride `settings`, but the frame's name is provider-side data
+ * (frames.name) — the cloud updates its own row and only enqueues
+ * set_settings for devices that accept it, so renaming works on every
+ * platform, ESP32 included.
+ */
+const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {}
 
 /**
  * Tooltip shown on a control its frame's device profile cannot serve. One

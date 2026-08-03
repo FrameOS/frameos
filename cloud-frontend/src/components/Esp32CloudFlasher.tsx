@@ -424,14 +424,16 @@ const controlClassName =
 
 export function Esp32CloudFlasher({
   cloudOrigin,
-  frameName,
 }: {
   // Provisioned into the board's NVS as cloud_url, so it must be the
   // deployment's public URL, not whatever host the browser is pointed at.
   cloudOrigin: string
-  frameName?: string | undefined
 }): ReactElement {
   const [phase, setPhase] = useState<FlashPhase>('idle')
+  // Each enrollment path names its own frame — the SD builder keeps its own
+  // field too — so the name sits next to the flash button that uses it,
+  // instead of floating at the top of the panel.
+  const [frameName, setFrameName] = useState('')
   const [lines, setLines] = useState<string[]>([])
   const [progress, setProgress] = useState(0)
   const cloudUrl = cloudOrigin
@@ -750,6 +752,15 @@ export function Esp32CloudFlasher({
         account automatically.
       </p>
       <div className="grid gap-2">
+        <input
+          aria-label="Frame name (optional)"
+          className={controlClassName}
+          disabled={busy}
+          maxLength={256}
+          onChange={(event) => setFrameName(event.target.value)}
+          placeholder="Frame name (optional)"
+          value={frameName}
+        />
         {!panelSelectable ? (
           <p className="frameos-muted text-xs">
             This release&apos;s firmware drives the Waveshare 7.5&quot; V2 panel; picking a different e-paper panel at

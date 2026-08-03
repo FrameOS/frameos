@@ -37,14 +37,16 @@ function isFrameToolPanel(panel: unknown): panel is (typeof frameToolPanels)[num
 }
 
 function searchValue(search: Record<string, unknown>, key: string): string | null {
-  const value = search[key]
-  if (typeof value === 'string') {
-    return value
+  const value = Array.isArray(search[key]) ? (search[key] as unknown[])[0] : search[key]
+  // kea-router's decodeParams() number-ifies numeric query values, so a
+  // backend frame's `?frameId=39` arrives here as the number 39 — returning
+  // null for it made every ?drawer=…&frameId=<n> URL self-close on the home
+  // page (the drawer opened, read null, and immediately reset the URL).
+  // Values stay opaque strings here; parseRouteFrameId() re-types ids.
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
   }
-  if (Array.isArray(value) && typeof value[0] === 'string') {
-    return value[0]
-  }
-  return null
+  return typeof value === 'string' ? value : null
 }
 
 function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityPanel {
