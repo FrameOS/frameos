@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { frames } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
@@ -57,14 +59,40 @@ export async function POST(
   if (validated.error || !validated.settings) {
     return jsonError(validated.error ?? "invalid_settings", 400);
   }
+  const settings = validated.settings;
 
-  await supersedePendingCommands(db, frame.id, "set_settings");
-  const command = await enqueueFrameCommand(db, {
-    createdByAccountId: session.accountId,
-    frameId: frame.id,
-    payload: { settings: validated.settings },
-    type: "set_settings",
-  });
+  // The frame's NAME is provider-side data (frames.name, what frameSummary
+  // returns) — the device never has to accept it. The ESP32 firmware answers
+  // `unsupported_verb` for set_settings, so for esp32 platforms the name is
+  // the ONLY settable key and nothing is enqueued; refuse mixed payloads up
+  // front so nothing is half-applied.
+  const platform = (frame.hardware as { platform?: unknown } | null)?.platform;
+  const isEsp32 =
+    typeof platform === "string" &&
+    platform.toLowerCase().startsWith("esp32");
+  if (isEsp32 && Object.keys(settings).some((key) => key !== "name")) {
+    return jsonError("settings_not_supported_by_device", 400);
+  }
+
+  if (typeof settings.name === "string") {
+    await db
+      .update(frames)
+      .set({ name: settings.name, updatedAt: new Date() })
+      .where(eq(frames.id, frame.id));
+  }
+
+  // Non-esp32 devices still get the push (name included) so their local
+  // config stays in sync with what the cloud now shows.
+  let command: Awaited<ReturnType<typeof enqueueFrameCommand>> | undefined;
+  if (!isEsp32) {
+    await supersedePendingCommands(db, frame.id, "set_settings");
+    command = await enqueueFrameCommand(db, {
+      createdByAccountId: session.accountId,
+      frameId: frame.id,
+      payload: { settings },
+      type: "set_settings",
+    });
+  }
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
@@ -73,9 +101,12 @@ export async function POST(
       providerSubject: session.providerSubject,
     },
     eventType: "frame.settings_pushed",
-    metadata: { keys: Object.keys(validated.settings) },
+    metadata: { keys: Object.keys(settings) },
     target: { commandId: command?.id, frameId: frame.id },
   });
 
-  return NextResponse.json({ command_id: command?.id, status: "queued" });
+  return NextResponse.json({
+    command_id: command?.id ?? null,
+    status: command ? "queued" : "applied",
+  });
 }

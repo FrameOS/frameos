@@ -160,12 +160,12 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("keeps Rename visible but disabled (it rides set_settings); render, reboot, restart stay live", () => {
-    expect(frameMenuActionIsAllowed("cloud", "rename")).toBe(true);
-    expect(frameMenuActionDisabledReason("cloud", "rename", esp32Frame)).toEqual(
-      expect.stringContaining("ESP32"),
-    );
-    for (const action of ["reboot", "render", "restart"] as const) {
+  it("keeps Rename live (the name is provider-side data, no set_settings needed); render, reboot, restart stay live", () => {
+    // Renaming updates frames.name in the cloud DB — the device never has to
+    // accept anything — so the esp32 profile's missing set_settings verb no
+    // longer gates it (POST /api/frames/{id}/settings applies `name`
+    // server-side and skips the enqueue for esp32).
+    for (const action of ["reboot", "rename", "render", "restart"] as const) {
       expect(frameMenuActionIsAllowed("cloud", action)).toBe(true);
       expect(frameMenuActionDisabledReason("cloud", action, esp32Frame)).toBeNull();
     }

@@ -297,12 +297,14 @@ const panelCapabilities: Partial<Record<WorkspaceUtilityPanel, FrameCapability>>
   metrics: 'metrics', // get_metrics / telemetry:metrics
 }
 
-/** Which capability a gated "…" menu action rides on. */
-const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {
-  // Renaming a cloud frame is a `set_settings` push of `name` (framesModel
-  // renameFrame → pushCloudFrameSettings), so it follows that verb's profile.
-  rename: 'settings',
-}
+/**
+ * Which capability a gated "…" menu action rides on. Currently empty: rename
+ * used to ride `settings`, but the frame's name is provider-side data
+ * (frames.name) — the cloud updates its own row and only enqueues
+ * set_settings for devices that accept it, so renaming works on every
+ * platform, ESP32 included.
+ */
+const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {}
 
 /**
  * Tooltip shown on a control its frame's device profile cannot serve. One
