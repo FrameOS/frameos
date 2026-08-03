@@ -3217,8 +3217,22 @@ async def api_frame_update_endpoint(
 
     old_mode = frame.mode
     old_device = frame.device
+    previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     for field, value in update_data.items():
         setattr(frame, field, value)
+
+    if "buildroot" in update_data:
+        # buildroot.sdImage is build output owned by the backend (written by the
+        # SD image worker), not frame configuration. Clients echo back whatever
+        # copy they loaded with the form, so accepting it here would revert the
+        # record to a stale image the moment anyone saves the frame after a
+        # rebuild. Keep the server-side record authoritative.
+        buildroot = dict(frame.buildroot or {})
+        if previous_sd_image is not None:
+            buildroot["sdImage"] = previous_sd_image
+        else:
+            buildroot.pop("sdImage", None)
+        frame.buildroot = buildroot
 
     if "timezone" in update_data:
         frame.timezone = stored_timezone(frame.timezone) or None

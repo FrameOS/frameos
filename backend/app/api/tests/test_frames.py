@@ -21,7 +21,11 @@ from app.models.scene_image import SceneImage
 from app.models.settings import Settings
 from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
-from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
+from app.tasks.buildroot_image import (
+    BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+    buildroot_sd_image_config_fingerprint,
+    ensure_buildroot_frame_defaults,
+)
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import (
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
@@ -1294,6 +1298,85 @@ async def test_api_frame_update_name(async_client, db, redis):
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == "Updated Name"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_keeps_server_side_sd_image_record(async_client, db, redis):
+    # The SD image record is build output owned by the backend. Clients echo
+    # back the buildroot dict they loaded with the form, so a save made after
+    # a rebuild must not revert sdImage to the stale copy the client holds.
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    ensure_buildroot_frame_defaults(frame)
+    db.add(frame)
+    db.commit()
+
+    fresh_sd_image = {
+        'status': 'ready',
+        'buildId': 'freshbuild',
+        'frameosVersion': '2026.8.2',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    stale_sd_image = {
+        'status': 'ready',
+        'buildId': 'stalebuild',
+        'frameosVersion': '2026.8.0',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    buildroot = dict(frame.buildroot)
+    buildroot['sdImage'] = fresh_sd_image
+    frame.buildroot = buildroot
+    set_buildroot_sd_image_config_fingerprint(frame)
+    fresh_sd_image = frame.buildroot['sdImage']
+    db.add(frame)
+    db.commit()
+
+    client_buildroot = {
+        **{key: value for key, value in frame.buildroot.items() if key != 'sdImage'},
+        'sdImage': stale_sd_image,
+    }
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'buildroot': client_buildroot})
+    assert resp.status_code == 200
+    db.expire_all()
+    stored = db.get(Frame, frame.id).buildroot['sdImage']
+    assert stored['buildId'] == 'freshbuild'
+    assert stored == fresh_sd_image
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_clears_sd_image_when_config_changes(async_client, db, redis):
+    # Config changes that alter the SD image fingerprint must still clear the
+    # record (the preserved server-side copy no longer matches the config).
+    frame = await new_frame(db, redis, 'BuildrootFrame2', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    ensure_buildroot_frame_defaults(frame)
+    db.add(frame)
+    db.commit()
+
+    buildroot = dict(frame.buildroot)
+    buildroot['sdImage'] = {
+        'status': 'ready',
+        'buildId': 'freshbuild',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    frame.buildroot = buildroot
+    set_buildroot_sd_image_config_fingerprint(frame)
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'name': 'RenamedBuildrootFrame'})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated = db.get(Frame, frame.id)
+    assert updated.name == 'RenamedBuildrootFrame'
+    assert 'sdImage' not in (updated.buildroot or {})
 
 
 @pytest.mark.asyncio

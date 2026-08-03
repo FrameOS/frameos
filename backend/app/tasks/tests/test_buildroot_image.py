@@ -645,6 +645,7 @@ def test_precompiled_sd_image_status_does_not_require_cached_base_metadata(tmp_p
                 "path": str(image_path),
                 "compilationMode": "precompiled",
                 "customizationVersion": buildroot_image_module.BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "frameosVersion": buildroot_image_module.current_frameos_version(),
                 "precompiledSdImage": {
                     "releaseUrl": "https://example.test/releases/v2026.6.3/frameos.img.gz",
                     "cacheHit": False,
@@ -659,6 +660,79 @@ def test_precompiled_sd_image_status_does_not_require_cached_base_metadata(tmp_p
         {
             "object_key": "buildroot-images/new-base.img.gz",
             "sha256": "new-base-sha256",
+        },
+    )
+
+    assert sd_image is not None
+    assert sd_image["status"] == "ready"
+
+
+def test_precompiled_sd_image_goes_stale_when_release_version_moves_on(tmp_path):
+    # A precompiled SD image embeds the release binaries pinned by
+    # versions.json at build time. After the backend updates to a newer
+    # release, the old image must not keep advertising itself as "ready" —
+    # flashing it would boot outdated (possibly broken) binaries.
+    image_path = tmp_path / "frameos.img.gz"
+    image_path.write_bytes(b"image")
+    frame = SimpleNamespace(
+        mode="buildroot",
+        buildroot={
+            "compilationMode": "precompiled",
+            "sdImage": {
+                "status": "ready",
+                "path": str(image_path),
+                "compilationMode": "precompiled",
+                "customizationVersion": buildroot_image_module.BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "frameosVersion": "2026.8.0",
+                "precompiledSdImage": {
+                    "releaseUrl": "https://example.test/releases/v2026.8.0/frameos.img.gz",
+                    "cacheHit": False,
+                },
+            },
+        },
+        scenes=[],
+    )
+
+    current = buildroot_image_module.current_frameos_version()
+    assert current != "2026.8.0"
+
+    sd_image = buildroot_image_module.latest_buildroot_sd_image(frame)
+
+    assert sd_image is not None
+    assert sd_image["status"] == "stale"
+    assert "2026.8.0" in sd_image["error"]
+
+
+def test_base_composed_sd_image_is_not_marked_stale_by_version_pin(tmp_path):
+    # Images composed from a Buildroot base plus a locally built binary are
+    # governed by the base-image staleness check, not the precompiled release
+    # pin: a locally built binary is not tied to versions.json.
+    image_path = tmp_path / "frameos.img.gz"
+    image_path.write_bytes(b"image")
+    frame = SimpleNamespace(
+        mode="buildroot",
+        buildroot={
+            "compilationMode": "shared",
+            "sdImage": {
+                "status": "ready",
+                "path": str(image_path),
+                "compilationMode": "shared",
+                "customizationVersion": buildroot_image_module.BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "frameosVersion": "2026.8.0",
+                "baseImage": {
+                    "objectKey": "buildroot-images/base.img.gz",
+                    "sha256": "base-sha256",
+                },
+            },
+        },
+        scenes=[],
+    )
+
+    sd_image = buildroot_image_module.latest_buildroot_sd_image(
+        frame,
+        {
+            "object_key": "buildroot-images/base.img.gz",
+            "sha256": "base-sha256",
         },
     )
 

@@ -725,6 +725,23 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
         }
     if (
         sd_image.get("status") == "ready"
+        and sd_image.get("precompiledSdImage")
+        and sd_image.get("frameosVersion") != current_frameos_version()
+    ):
+        # A precompiled SD image embeds the FrameOS release binaries matching
+        # the versions.json pin at build time. Once the backend moves to a new
+        # release, the old image would boot outdated (possibly broken)
+        # binaries, so surface it as stale instead of "ready".
+        return {
+            **sd_image,
+            "status": "stale",
+            "error": (
+                f"The generated image embeds FrameOS release {sd_image.get('frameosVersion') or 'unknown'}, "
+                f"but this backend now targets {current_frameos_version() or 'unknown'}"
+            ),
+        }
+    if (
+        sd_image.get("status") == "ready"
         and not sd_image.get("precompiledSdImage")
         and not _sd_image_base_matches_current(sd_image, current_base_entry)
     ):
