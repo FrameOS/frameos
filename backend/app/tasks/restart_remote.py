@@ -25,7 +25,7 @@ async def restart_remote_task(ctx: dict[str, Any], id: int, transport: RemoteTra
         return
 
     try:
-        resolved_transport = resolve_remote_task_transport(frame, transport)
+        resolved_transport = await resolve_remote_task_transport(frame, transport, redis)
         await log(db, redis, id, "stdout", f"Restarting FrameOS Remote via {resolved_transport}")
         commands = (
             [delayed_remote_restart_command("manual")]

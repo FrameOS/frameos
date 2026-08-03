@@ -141,6 +141,7 @@ from app.tasks.embedded_firmware import (
     with_embedded_firmware_layout,
 )
 from app.tasks.buildroot_image import (
+    buildroot_agent_defaults,
     buildroot_sd_image_no_build_environment_message,
     buildroot_sd_image_config_fingerprint,
     can_use_precompiled_buildroot_sd_image,
@@ -3362,6 +3363,14 @@ async def api_frame_new(
             frame.network = {
                 **(frame.network or {}),
                 **(data.network or {}),
+            }
+            # Remote on by default for a flashed card, but the add-frame form
+            # can turn it off for an SSH-only frame. Applied here, at creation,
+            # so nothing later re-imposes it.
+            frame.agent = {
+                **(frame.agent or {}),
+                **buildroot_agent_defaults(),
+                **(data.agent or {}),
             }
             ensure_buildroot_frame_defaults(frame, data.platform)
             validate_buildroot_wifi_credentials(frame)

@@ -752,6 +752,17 @@ def _boot_setup_payload_path(boot_overlay_dir: Path, setup_file_path: str) -> Pa
     return boot_overlay_dir / relative_path
 
 
+def buildroot_agent_defaults() -> dict[str, bool]:
+    """
+    What FrameOS Remote should look like on a brand new buildroot frame.
+
+    A freshly flashed card usually lands on a network the backend cannot SSH
+    into, so Remote is on by default — but it is a *default*, applied once at
+    creation, not re-imposed on every later save.
+    """
+    return {"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True}
+
+
 def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -> None:
     normalized_platform = normalize_buildroot_platform(platform or (frame.buildroot or {}).get("platform"))
 
@@ -769,12 +780,17 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
     https_proxy["enable"] = False
     frame.https_proxy = https_proxy
 
+    # Only the shared secret is guaranteed here. Whether FrameOS Remote is
+    # enabled at all is the user's call, made when the frame is added (see
+    # buildroot_agent_defaults) and editable afterwards in frame settings —
+    # this function runs on every save, SD rebuild, deploy-plan preview and
+    # sync-apply, so forcing the flags on here would silently undo that
+    # choice and leave "Connect via SSH" unable to stick. Keeping the secret
+    # present costs nothing and means turning Remote back on later needs no
+    # re-provisioning.
     agent = dict(frame.agent or {})
     if not agent.get("agentSharedSecret"):
         agent["agentSharedSecret"] = secure_token(32)
-    agent["agentEnabled"] = True
-    agent["agentRunCommands"] = True
-    agent["deployWithAgent"] = True
     frame.agent = agent
 
     network = dict(frame.network or {})

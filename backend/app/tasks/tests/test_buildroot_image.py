@@ -31,6 +31,7 @@ from app.tasks.buildroot_image import (
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
     PrecompiledBuildrootSdImageResult,
+    buildroot_agent_defaults,
     ensure_buildroot_frame_defaults,
     _buildroot_setup_payload,
     _frame_boot_config_lines,
@@ -402,6 +403,61 @@ def test_buildroot_defaults_remove_setup_json_reset_file_path():
 
     assert "setupJsonResetFilePath" not in frame.buildroot
     assert setup_json_reset_file_path(frame) == DEFAULT_SETUP_JSON_RESET_FILE_PATH
+
+
+def _buildroot_agent_frame(agent: dict[str, Any]) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=7,
+        frame_host="",
+        buildroot={"platform": "raspberry-pi-zero-2-w"},
+        https_proxy={},
+        agent=agent,
+        network={},
+    )
+
+
+def test_buildroot_defaults_keep_an_explicit_ssh_only_choice():
+    # ensure_buildroot_frame_defaults runs on every save, SD rebuild, deploy
+    # preview and sync-apply. Forcing the agent flags on there is what made
+    # "Connect via SSH" impossible to keep on a buildroot frame: the UI wrote
+    # the choice and the very same request put it back.
+    frame = _buildroot_agent_frame(
+        {"agentEnabled": False, "agentRunCommands": False, "deployWithAgent": False}
+    )
+
+    ensure_buildroot_frame_defaults(frame)
+
+    assert frame.agent["agentEnabled"] is False
+    assert frame.agent["agentRunCommands"] is False
+    assert frame.agent["deployWithAgent"] is False
+    # A secret is still kept around so Remote can be switched back on later
+    # without re-flashing or re-provisioning the frame.
+    assert frame.agent["agentSharedSecret"]
+
+
+def test_buildroot_defaults_do_not_disturb_a_remote_driven_frame():
+    frame = _buildroot_agent_frame(
+        {"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True, "agentSharedSecret": "keep-me"}
+    )
+
+    ensure_buildroot_frame_defaults(frame)
+
+    assert frame.agent == {
+        "agentEnabled": True,
+        "agentRunCommands": True,
+        "deployWithAgent": True,
+        "agentSharedSecret": "keep-me",
+    }
+
+
+def test_buildroot_agent_defaults_turn_remote_on_for_new_frames():
+    # The new-frame path applies these once; a flashed card usually lands
+    # somewhere the backend cannot SSH into.
+    assert buildroot_agent_defaults() == {
+        "agentEnabled": True,
+        "agentRunCommands": True,
+        "deployWithAgent": True,
+    }
 
 
 def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
