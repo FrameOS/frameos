@@ -17,29 +17,39 @@ engine = create_engine(
 )
 
 if is_sqlite:
+    # Warn at most once per process: the check runs per connection, and a
+    # pooled engine opens many.
+    _journal_mode_warned = False
+
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        global _journal_mode_warned
         cursor = dbapi_connection.cursor()
         # WAL lets concurrent readers proceed while one connection writes,
         # which is essential with a pooled engine + a separate worker process.
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # `PRAGMA journal_mode=WAL` reports the mode actually in force, so the
+        # verification below costs nothing extra.
+        journal_row = cursor.execute("PRAGMA journal_mode=WAL").fetchone()
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
-    # WAL silently falls back to another journal mode on filesystems that
-    # don't support it; surface that in the logs instead of guessing later.
-    try:
-        with engine.connect() as _conn:
-            _journal_mode = _conn.exec_driver_sql("PRAGMA journal_mode").scalar()
-        if _journal_mode != "wal":
-            # stderr: this module is imported by CLI tools whose stdout is
-            # captured (e.g. the release workflow's platform listing).
-            print(f"🔴 SQLite journal_mode is {_journal_mode!r} (expected 'wal'); "
+        # WAL silently falls back to another journal mode on filesystems that
+        # don't support it; surface that instead of guessing later. This is
+        # deliberately checked HERE rather than by opening a connection at
+        # import time: this module is imported by CLI tools that never touch
+        # the database (`backend/bin/cross matrix` in the release workflow,
+        # for one), and eagerly connecting made every such invocation print a
+        # scary "unable to open database file" in CI. A connection that is
+        # actually needed and actually fails still raises normally.
+        mode = (journal_row[0] if journal_row else "") or ""
+        if mode.lower() != "wal" and not _journal_mode_warned:
+            _journal_mode_warned = True
+            # stderr: some callers capture stdout (the release workflow's
+            # platform listing parses it as JSON).
+            print(f"🔴 SQLite journal_mode is {mode!r} (expected 'wal'); "
                   "concurrent writes may fail with 'database is locked'",
                   file=sys.stderr)
-    except Exception as e:
-        print(f"🔴 Could not verify SQLite journal mode: {e}", file=sys.stderr)
 
 SessionLocal = sessionmaker(
     autocommit=False,
