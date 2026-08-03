@@ -3,16 +3,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
   getHubPort,
   getMaxConnections,
   isAllowedBrowserOrigin,
+  isPrivateNetworkHostname,
   loadLocalEnv,
 } from "./env";
 
 // Every test mutates process.env; snapshot and restore the keys it touches so
 // the suite stays order-independent.
 const touchedKeys = [
+  "NODE_ENV",
   "FRAMEOS_ACCOUNT_APP_URL",
   "FRAMEOS_CLOUD_APP_URL",
   "FRAMEOS_SCENES_APP_URL",
@@ -151,5 +154,70 @@ describe("isAllowedBrowserOrigin", () => {
     );
     expect(isAllowedBrowserOrigin("null", allowed)).toBe(false);
     expect(isAllowedBrowserOrigin("not-a-url", allowed)).toBe(false);
+  });
+
+  // The dev loosening: `pnpm dev` browsed via the machine's LAN IP presents
+  // Origin http://<lan-ip>:3000, which no FRAMEOS_*_APP_URL ever names. With
+  // allowPrivateNetwork the hub accepts loopback/private-network hosts —
+  // gaps-doc item 7, the fleet socket from a LAN-IP workspace.
+  it("accepts private-network origins only when allowPrivateNetwork is set", () => {
+    for (const origin of [
+      "http://10.4.0.47:3000",
+      "http://192.168.1.5:3000",
+      "http://172.16.0.9:3000",
+      "http://172.31.255.1",
+      "http://169.254.10.20:3000",
+      "http://127.0.0.1:8080",
+      "http://localhost:5173",
+      "https://192.168.0.2",
+    ]) {
+      expect(isAllowedBrowserOrigin(origin, allowed, true)).toBe(true);
+      // Without the flag (production) nothing changes.
+      expect(isAllowedBrowserOrigin(origin, allowed)).toBe(false);
+    }
+  });
+
+  it("never treats public or malformed hosts as private, flag or no flag", () => {
+    for (const origin of [
+      "https://evil.example",
+      "http://11.0.0.1:3000", // just outside 10/8
+      "http://172.32.0.1:3000", // just outside 172.16/12
+      "http://192.169.0.1:3000", // just outside 192.168/16
+      "http://10.4.evil.example:3000", // private-looking prefix, public name
+      "null",
+      "not-a-url",
+    ]) {
+      expect(isAllowedBrowserOrigin(origin, allowed, true)).toBe(false);
+    }
+    // The allowlist itself still works with the flag on.
+    expect(
+      isAllowedBrowserOrigin("https://cloud.frameos.net", allowed, true),
+    ).toBe(true);
+  });
+});
+
+describe("isPrivateNetworkHostname", () => {
+  it("requires complete in-range IPv4 literals (or localhost)", () => {
+    expect(isPrivateNetworkHostname("localhost")).toBe(true);
+    expect(isPrivateNetworkHostname("[::1]")).toBe(true);
+    expect(isPrivateNetworkHostname("10.0.0.1")).toBe(true);
+    expect(isPrivateNetworkHostname("10.4")).toBe(false);
+    expect(isPrivateNetworkHostname("10.0.0.999")).toBe(false);
+    expect(isPrivateNetworkHostname("frameos.net")).toBe(false);
+    expect(isPrivateNetworkHostname("sub.localhost")).toBe(false);
+  });
+});
+
+describe("allowsPrivateNetworkOrigins", () => {
+  it("is on for anything but production", () => {
+    process.env.NODE_ENV = "development";
+    expect(allowsPrivateNetworkOrigins()).toBe(true);
+    delete process.env.NODE_ENV;
+    expect(allowsPrivateNetworkOrigins()).toBe(true);
+  });
+
+  it("is off in production — deployment.md's frame-hub.env sets NODE_ENV", () => {
+    process.env.NODE_ENV = "production";
+    expect(allowsPrivateNetworkOrigins()).toBe(false);
   });
 });
