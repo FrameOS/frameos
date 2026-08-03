@@ -213,7 +213,11 @@ download_file() {{
 detect_arch() {{
   case "$(uname -m)" in
     aarch64|arm64|armv8) echo arm64 ;;
-    armv8l|armv7l|armv6l|armhf) echo armhf ;;
+    armv8l|armv7l|armhf) echo armhf ;;
+    # ARMv6 (Pi Zero W / Pi 1) must never fall back to armhf: those release
+    # artifacts are built for ARMv7 and SIGILL on the ARM1176. Mirrors the
+    # mapping in app/tasks/prebuilt_deps.py:resolve_prebuilt_target.
+    armv6l|armv6) echo armv6 ;;
     x86_64|amd64) echo amd64 ;;
     *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;;
   esac

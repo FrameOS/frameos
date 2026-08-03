@@ -22,6 +22,11 @@ requires "linuxfb >= 0.1.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 requires "ws >= 0.5.0"
+# zippy is imported directly (config.nim, scenes, logger); pin the floor here
+# too: 0.10.16's gzip uncompress divides by zero on 32-bit targets
+# (gzip.nim `dst.len mod (1 shl 32)`), which crashed every armv6/armhf build
+# at startup while decompressing the embedded frame_web assets.
+requires "zippy >= 0.10.19"
 
 before build:
   exec "nimble assets"
