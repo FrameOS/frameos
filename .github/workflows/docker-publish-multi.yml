@@ -13,8 +13,14 @@ permissions:
   contents: write
 
 jobs:
+  # Runner sizing: every job runs on Depot. The bookkeeping jobs (version
+  # bump, npm dispatch, release notes, matrix, addon repo, GitHub release) are
+  # I/O bound and take the default Depot size; only the two jobs that actually
+  # compute (Buildroot images, ESP32 firmware) take 16 cores. The one
+  # exception is the armhf leg of build-prebuilt-cross, which stays on
+  # GitHub's ARM runners — see backend/bin/cross for the measurements.
   update-versions:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     outputs:
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
       docker_version: ${{ steps.release-ref.outputs.docker_version }}
@@ -71,7 +77,7 @@ jobs:
   publish-npm:
     name: Publish FrameOS npm packages
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
@@ -90,7 +96,7 @@ jobs:
   release-notes:
     name: Generate Release Notes
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -120,7 +126,7 @@ jobs:
 
   determine-release-targets:
     needs: update-versions
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     outputs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
@@ -229,7 +235,7 @@ jobs:
   build-buildroot-release-image:
     name: Build Buildroot Release Image
     needs: [update-versions, build-prebuilt-cross]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -242,6 +248,15 @@ jobs:
           pattern: frameos-${{ needs.update-versions.outputs.docker_version }}-*
           path: release-assets
           merge-multiple: true
+
+      # Same warm pip cache as the cross matrix: this job's requirements
+      # install spent ~31s of its ~150s wall clock building cffi from sdist.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
         run: |
@@ -280,14 +295,42 @@ jobs:
             echo "No Buildroot platforms with cached base images found." >&2
             exit 1
           fi
+          # One platform per background job. Each build works in its own
+          # tempdir and writes its own frameos-<version>-<platform>-* files,
+          # so the only shared state is the read-mostly Buildroot base image
+          # cache (one distinct file per platform). Sequentially the two
+          # platforms cost 55s + 38s; in parallel the step is as long as the
+          # slowest one. Output is captured per platform and replayed in
+          # order afterwards so the log stays readable.
+          pids=()
+          names=()
           for platform in $platforms; do
+            echo "Building release image for ${platform}"
             python3 tools/buildroot-images/buildroot_images.py \
               --platform "$platform" \
               release-image \
               --prebuilt-cross-dir release-assets \
               --release-assets-dir release-assets \
-              --version "$DOCKER_VERSION"
+              --version "$DOCKER_VERSION" \
+              > "buildroot-release-${platform}.log" 2>&1 &
+            pids+=("$!")
+            names+=("$platform")
           done
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[$index]}"; then
+              echo "Buildroot release image failed for ${names[$index]}" >&2
+              status=1
+            fi
+          done
+          for platform in "${names[@]}"; do
+            echo "::group::Buildroot release image ${platform}"
+            cat "buildroot-release-${platform}.log"
+            echo "::endgroup::"
+          done
+          if [ "$status" -ne 0 ]; then
+            exit 1
+          fi
           ls -lh release-assets/*.img.gz release-assets/*.metadata.json
 
       - name: Upload Buildroot release images
@@ -313,7 +356,7 @@ jobs:
   build-esp32-generic-firmware:
     name: Build ESP32 firmware (generic, all panels)
     needs: [update-versions]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -382,24 +425,21 @@ jobs:
   # image build and pushes the multi-arch manifest directly.
   push-multiarch:
     needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
-    runs-on: ubuntu-latest
+    # The image itself is built on Depot's remote builders, so this runner only
+    # orchestrates: the default size is plenty.
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-        with:
-          version: latest
-          install: true
-
+      # No QEMU or local buildx setup: depot/build-push-action runs the build
+      # on Depot's remote amd64 and arm64 builders, so nothing is emulated or
+      # built on this runner. Only the registry login is still needed, because
+      # Depot pushes with this runner's Docker credentials.
       - name: Login to Docker Hub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -441,7 +481,7 @@ jobs:
   update-addon-repo:
     name: Update Home Assistant Addon
     needs: [update-versions, push-multiarch, release-notes]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Checkout frameos
         uses: actions/checkout@v4
@@ -450,7 +490,7 @@ jobs:
           path: frameos
 
       - name: Checkout frameos-home-assistant-addon
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: frameos/frameos-home-assistant-addon
           token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
@@ -520,13 +560,16 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, update-addon-repo, release-notes]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
+      # Shallow: this job only needs a working directory for `gh` and the
+      # downloaded artifacts. Release notes come from an artifact and the tag
+      # is created from RELEASE_SHA, so no history is read here.
       - name: Checkout release commit
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Download prebuilt cross artifacts
         uses: actions/download-artifact@v4
