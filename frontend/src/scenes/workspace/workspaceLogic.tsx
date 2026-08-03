@@ -491,7 +491,12 @@ function isSceneRoutePath(pathname: string = router.values.location.pathname): b
   return pathname === scenesPath || pathname.startsWith(`${scenesPath}/`)
 }
 
-function sceneMatchesSearch(scene: FrameScene, search: string): boolean {
+/**
+ * Exported so components that render a *live* (unsaved) scene list can reuse
+ * the exact predicate the `overviewFrameSections` selector uses. `search` must
+ * already be trimmed and lower-cased.
+ */
+export function sceneMatchesSearch(scene: FrameScene, search: string): boolean {
   if (!search) {
     return true
   }
@@ -1189,6 +1194,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
         )
       },
     ],
+    // `scenes` here is the *saved* scene list, matched against the search. It
+    // decides whether a frame's section is shown at all; it is NOT the list the
+    // tiles render — FrameSection reads the live (unsaved) list off frameLogic,
+    // because a keyed logic's values cannot be reached reactively from here.
     overviewFrameSections: [
       (s) => [s.orderedActiveFramesList, s.orderedArchivedFramesList, s.search],
       (orderedActiveFramesList, orderedArchivedFramesList, search): OverviewFrameSection[] => {

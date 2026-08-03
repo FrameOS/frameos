@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
@@ -35,7 +35,7 @@ import {
 import { urls } from '../../urls'
 import { FrameScene, FrameType, FrameId } from '../../types'
 import { FrameosShell } from './FrameosShell'
-import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
@@ -564,11 +564,13 @@ function NewBlankSceneModal({
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
-  const hasScenes = (frame.scenes?.length ?? 0) > 0
+  // Live list, so "Split screen" unlocks as soon as the first scene is added.
+  const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
   const installableFavouriteTemplateCount = installableFavouriteTemplates.length
 
@@ -721,13 +723,26 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
-  const { frame, scenes, archived, frameMatchesSearch } = section
+  const { frame, archived, frameMatchesSearch } = section
+  // `section.scenes` comes from framesModel's *saved* frame, so a scene added,
+  // renamed or deleted here (all of which only touch `frameForm.scenes`) would
+  // not show until "Save changes". A kea selector in workspaceLogic cannot read
+  // a keyed frameLogic reactively, so the live list is read here instead —
+  // frameLogic is already mounted for every rendered frame by
+  // FrameDashboardSurface, so this adds no extra logic mount.
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
+  const { search } = useValues(workspaceLogic)
+  const normalizedSearch = search.trim().toLowerCase()
+  const visibleScenes = useMemo(
+    () => (normalizedSearch ? liveScenes.filter((scene) => sceneMatchesSearch(scene, normalizedSearch)) : liveScenes),
+    [liveScenes, normalizedSearch]
+  )
 
   return (
     <FrameDashboardSurface
       frame={frame}
-      scenes={scenes}
-      totalScenes={frame.scenes?.length ?? scenes.length}
+      scenes={visibleScenes}
+      totalScenes={liveScenes.length}
       archived={archived}
       frameMatchesSearch={frameMatchesSearch}
       sectionId={`workspace-frame-${frame.id}`}

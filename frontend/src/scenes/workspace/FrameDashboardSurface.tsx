@@ -616,7 +616,10 @@ function FrameScenesBlock({
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
+  // `frameLogic.scenes` is `frameForm.scenes ?? frame.scenes ?? []` — unsaved
+  // edits first, then the saved frame (which is what cloud mode hydrates), so
+  // an empty/absent form never blanks the list.
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
@@ -652,12 +655,13 @@ function FrameScenesBlock({
     ) {
       return
     }
-    const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
-    setFrameFormValues({ scenes: currentScenes.filter((candidate) => !selectedSceneIds.has(candidate.id)) })
+    setFrameFormValues({ scenes: liveScenes.filter((candidate) => !selectedSceneIds.has(candidate.id)) })
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
-  const allScenes = searchIsActive ? frame.scenes ?? scenes : scenes
+  // While searching, `scenes` is only the matching subset; dependency grouping
+  // needs the full (live) list so parents of a match still render.
+  const allScenes = searchIsActive ? liveScenes : scenes
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -704,7 +708,7 @@ function FrameScenesBlock({
     }
 
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
-    if (!sceneId || !frame.scenes?.some((scene) => scene.id === sceneId)) {
+    if (!sceneId || !liveScenes.some((scene) => scene.id === sceneId)) {
       return
     }
     event.preventDefault()
