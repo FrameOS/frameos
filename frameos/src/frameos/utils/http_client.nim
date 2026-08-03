@@ -49,8 +49,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       code*: int
       status*: string
       body*: pointer # Contiguous view; nil when the body spans >1 chunk
-      bodyLen*: int  # Total length across all chunks
+      bodyLen*: int  # Total length across all chunks (or the spill file size)
       chunks*: seq[HttpBodyChunk]
+      spillPath*: string # Non-empty when the body was spilled to a temp file
+                         # (SD/SPIFFS) because PSRAM could not buffer it; the
+                         # chunks are then empty and bodyLen is the file size.
+                         # freeHttpBufferResponse deletes the file.
       when defined(frameosEmbedded):
         rawChunks: pointer
         rawChunkCount: csize_t
@@ -72,15 +76,18 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       data: pointer
       len: csize_t
 
-    proc fos_nim_http_request_chunked(httpMethod: cstring, url: cstring,
+    proc fos_nim_http_request_chunked_spill(httpMethod: cstring, url: cstring,
                             body: pointer, bodyLen: csize_t,
                             headers: pointer, headersLen: csize_t,
                             timeoutMs: cint, maxBytes: csize_t,
-                            outStatus: ptr cint, outChunkCount: ptr csize_t):
+                            outStatus: ptr cint, outChunkCount: ptr csize_t,
+                            outSpillPath: ptr cstring, outSpillLen: ptr csize_t):
                             ptr UncheckedArray[FosNimHttpChunk]
-                            {.importc: "fos_nim_http_request_chunked", cdecl.}
+                            {.importc: "fos_nim_http_request_chunked_spill", cdecl.}
     proc fos_nim_http_free_chunks(chunks: pointer, count: csize_t)
                             {.importc: "fos_nim_http_free_chunks", cdecl.}
+    proc c_remove(path: cstring): cint
+                            {.importc: "remove", header: "<stdio.h>".}
 
   proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
     for header in headers:
@@ -98,6 +105,11 @@ when defined(frameosEmbedded) or defined(frameosWasm):
 
   proc freeHttpBufferResponse*(response: var BoundedHttpBufferResponse) =
     when defined(frameosEmbedded):
+      if response.spillPath.len > 0:
+        # Spilled bodies are single-use temp files; remove as soon as the
+        # consumer is done. Boot-time sweeps catch crash leftovers.
+        discard c_remove(response.spillPath.cstring)
+        response.spillPath = ""
       if response.rawChunks != nil:
         fos_nim_http_free_chunks(response.rawChunks, response.rawChunkCount)
         response.rawChunks = nil
@@ -134,12 +146,18 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
     when defined(frameosEmbedded):
       var chunkCount: csize_t = 0
-      let rawChunks = fos_nim_http_request_chunked(httpMethod.cstring, url.cstring,
+      var spillPath: cstring = nil
+      var spillLen: csize_t = 0
+      let rawChunks = fos_nim_http_request_chunked_spill(httpMethod.cstring, url.cstring,
                                      bodyPtr, body.len.csize_t,
                                      headerPtr, headerBlock.len.csize_t,
                                      timeoutMs.cint, maxBytes.csize_t,
-                                     addr status, addr chunkCount)
+                                     addr status, addr chunkCount,
+                                     addr spillPath, addr spillLen)
       if rawChunks == nil and status == 0:
+        if spillPath != nil:
+          discard c_remove(spillPath)
+          fos_nim_http_free(spillPath)
         raise newException(IOError, &"HTTP request failed: {url}")
       result.code = status.int
       result.status = $status
@@ -152,9 +170,16 @@ when defined(frameosEmbedded) or defined(frameosWasm):
           result.chunks[i] = HttpBodyChunk(
             data: rawChunks[i].data, len: rawChunks[i].len.int)
           total += rawChunks[i].len.int
-      result.bodyLen = total
-      if result.chunks.len == 1:
-        result.body = result.chunks[0].data
+      if spillPath != nil:
+        # The whole body lives in a temp file; the chunk array is a single
+        # empty placeholder. Leave `body` nil so nobody misreads it.
+        result.spillPath = $spillPath
+        fos_nim_http_free(spillPath)
+        result.bodyLen = spillLen.int
+      else:
+        result.bodyLen = total
+        if result.chunks.len == 1:
+          result.body = result.chunks[0].data
     else:
       var outLen: csize_t = 0
       let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
@@ -194,6 +219,13 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       headers = headers
     )
     try:
+      if response.spillPath.len > 0:
+        # The body only exists because it did NOT fit in memory; copying it
+        # into a Nim string would recreate the OOM this path avoids. Only
+        # buffer-aware consumers (image decode) handle spilled bodies.
+        raise newException(IOError,
+          &"HTTP response ({response.bodyLen} bytes) was spilled to storage; " &
+          "it is too large to load into memory")
       result.code = response.code
       result.status = response.status
       if response.bodyLen > 0:

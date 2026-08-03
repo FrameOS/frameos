@@ -12,7 +12,22 @@
 > Item 4 shipped as the
 > `POST /api/frames/{id}/event/{name}` shim (render / setCurrentScene /
 > uploadScenes → queue verbs), so "preview on frame" and the Assets panel's
-> run-image-scene buttons work unchanged. Known cosmetic issue: the ESP32
+> run-image-scene buttons work unchanged. Item **2** shipped (scene_images
+> serves store covers, resolving runtime scene ids through the assigned
+> versions' scenes.json). Item **3** shipped client-side: cloud
+> Save & Deploy pushes the frame form's scenes through the uploadScenes
+> shim — /deploy and /fast_deploy are never called in cloud — and the scene
+> editor opens for cloud frame scenes (the "Open editor" row no longer
+> requires a backend-saved scene; controlLogic derives state from
+> last_state instead of the backend-only /states route). Item **7** shipped
+> (dev-only: the shell injects the LAN hub origin and the hub accepts
+> private-network browser origins outside production). Item **9** shipped
+> (frame_metrics retention + /metrics and /metrics/recent in the panel's
+> shape; live samples merge from new_metrics in cloud). Item **6** (signed
+> OTA) remains the one open item — blocked on the signing design in
+> CLOUD-TODO.md. The gallery-OOM fix has a design doc + inert prototype in
+> cloud/docs/esp32-large-image-spill.md (main.c wiring + hardware
+> validation left). Known cosmetic issue: the ESP32
 > reports 8.3 FAT short names (`02_SYS~1`) — enable long filenames in the FAT
 > config. Separate bench finding: the PhotoPainter's gallery scene now OOMs
 > downloading a ~3 MB image (`total=2686976 psram_free≈894k` at failure, 12
