@@ -347,6 +347,14 @@ proc supRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
   {.gcsafe.}:
     supCommands.add(cmd)
 
+    # Listing the NetworkManager keyfiles an SD image may have baked in.
+    if cmd.contains(".nmconnection"):
+      var found: seq[string] = @[]
+      for path in supFiles.keys:
+        if path.endsWith(".nmconnection"):
+          found.add(path)
+      return (found.join("\n") & "\n", 0)
+
     # No nmcli in the probe output: this is the armv6 image.
     if cmd.contains("command -v nmcli"):
       var tools = @["wpa_supplicant", "wpa_cli", "hostapd", "iw", "dnsmasq", "udhcpc"]
@@ -524,3 +532,36 @@ suite "portal supplicant backend":
   test "an explicit override pins the backend for debugging":
     setNetworkBackendOverride("networkManager")
     check activeNetworkBackend() == nbNetworkManager
+
+  test "Wi-Fi baked into the SD image is imported and joined at startup":
+    # The Pi Zero W bug: the image installs credentials only as a
+    # NetworkManager keyfile, and nothing on an image without NetworkManager
+    # ever read it, so the frame booted with no network.
+    supFiles["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] =
+      "[connection]\nid=frameos-wifi\ntype=wifi\nautoconnect=true\n\n" &
+      "[wifi]\nmode=infrastructure\nssid=home-wifi\n\n" &
+      "[wifi-security]\nkey-mgmt=wpa-psk\npsk=pw12345678\n\n" &
+      "[ipv4]\nmethod=auto\n"
+    let frame = makeFrameOS()
+    ensureNetworkBackendReady(frame)
+
+    let confPath = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+    check supFiles.hasKey(confPath)
+    check supFiles[confPath].contains("ssid=\"home-wifi\"")
+    check supFiles[confPath].contains("psk=\"pw12345678\"")
+    check supRan("wpa_supplicant -B -i 'wlan0' -c '" & confPath & "' -D nl80211")
+    check supRan("udhcpc -i 'wlan0' -f -n -q")
+
+  test "the setup hotspot still comes up when there really are no credentials":
+    # The user's safety net: no wpa_supplicant.conf, no keyfile, no network.
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    ensureNetworkBackendReady(frame)
+    check not supFiles.hasKey("/etc/wpa_supplicant/wpa_supplicant-wlan0.conf")
+
+    startAp(frame)
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    check supRan("hostapd -B -P '/run/frameos/hostapd.pid'")
+
+    let (ok, ev) = eventChannel.tryRecv()
+    check ok
+    check ev[2]["sceneId"].getStr() == "system/wifiHotspot"

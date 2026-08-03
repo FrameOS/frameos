@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[json, sequtils, strutils, tables, unittest]
 
 import ../network/backend
 import ../network/supplicant
@@ -309,3 +309,326 @@ network={
     check generated.conf.contains("psk=\"hunter2hunter2\"")
     check mergeWpaPassphraseOutput("network={\n\tpsk=abc\n}\n", "", false).conf.contains("psk=abc")
     check not mergeWpaPassphraseOutput("network={\n\tpsk=abc\n}\n", "", false).conf.contains("ctrl_interface")
+
+# ---------------------------------------------------------------------------
+# NetworkManager keyfiles as a credential source.
+#
+# An SD image flashed with Wi-Fi credentials only ever delivers them as
+# /etc/NetworkManager/system-connections/*.nmconnection (buildroot_image.py
+# bakes the file, setup_json_reset.py installs it). Nothing on an image without
+# NetworkManager reads those, so this backend imports them.
+# ---------------------------------------------------------------------------
+
+const wpaKeyfile = """
+[connection]
+id=frameos-wifi
+type=wifi
+autoconnect=true
+
+[wifi]
+mode=infrastructure
+ssid=Home Wifi
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=hunter2hunter2
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+"""
+
+const openKeyfile = """
+[connection]
+id=frameos-cloud-wifi
+type=wifi
+autoconnect=true
+
+[wifi]
+mode=infrastructure
+ssid=Cafe Open
+
+[ipv4]
+method=auto
+"""
+
+suite "NetworkManager keyfile parsing":
+  test "a keyfile written by the image builder yields SSID and PSK":
+    let credentials = parseNmWifiKeyfile(wpaKeyfile)
+    check credentials.usable
+    check credentials.id == "frameos-wifi"
+    check credentials.ssid == "Home Wifi"
+    check credentials.psk == "hunter2hunter2"
+    check credentials.keyMgmt == "wpa-psk"
+    check credentials.skipReason == ""
+
+  test "keyfile values are unescaped the way the writers escaped them":
+    # backend/app/tasks/buildroot_image.py `_nm_keyfile_value` and
+    # setup_json_reset.py `nm_keyfile_escape` both double backslashes.
+    check unescapeNmKeyfileValue("back\\\\slash") == "back\\slash"
+    check unescapeNmKeyfileValue("  leading") == "leading"
+    check unescapeNmKeyfileValue("trailing\r") == "trailing"
+    # The rest of GKeyFile's escapes, which NetworkManager itself writes.
+    check unescapeNmKeyfileValue("a\\sb") == "a b"
+    check unescapeNmKeyfileValue("a\\tb") == "a\tb"
+    check unescapeNmKeyfileValue("a\\nb") == "a\nb"
+    check unescapeNmKeyfileValue("semi\\;colon") == "semi;colon"
+    check unescapeNmKeyfileValue("trailing\\") == "trailing\\"
+
+    let credentials = parseNmWifiKeyfile(
+      "[connection]\ntype=wifi\n[wifi]\nssid=back\\\\slash\n" &
+      "[wifi-security]\nkey-mgmt=wpa-psk\npsk=p\\\\ss\\sword\n")
+    check credentials.usable
+    check credentials.ssid == "back\\slash"
+    check credentials.psk == "p\\ss word"
+
+  test "a keyfile without [wifi-security] is an open network":
+    let credentials = parseNmWifiKeyfile(openKeyfile)
+    check credentials.usable
+    check credentials.ssid == "Cafe Open"
+    check credentials.psk == ""
+    check credentials.keyMgmt == "none"
+
+  test "an explicit key-mgmt=none is an open network too":
+    let credentials = parseNmWifiKeyfile(
+      "[connection]\ntype=wifi\n[wifi]\nssid=Open\n[wifi-security]\nkey-mgmt=none\n")
+    check credentials.usable
+    check credentials.psk == ""
+
+  test "profiles this backend cannot join are skipped with a reason":
+    # A PSK profile with no stored secret must NOT be read as an open network:
+    # it would never associate and would suppress the setup hotspot.
+    let agentOwned = parseNmWifiKeyfile(
+      "[connection]\ntype=wifi\n[wifi]\nssid=Home\n" &
+      "[wifi-security]\nkey-mgmt=wpa-psk\npsk-flags=1\n")
+    check not agentOwned.usable
+    check agentOwned.skipReason.contains("psk-flags=1")
+
+    let hotspot = parseNmWifiKeyfile(
+      "[connection]\ntype=wifi\n[wifi]\nmode=ap\nssid=FrameOS-Setup\n" &
+      "[wifi-security]\nkey-mgmt=wpa-psk\npsk=frame1234\n")
+    check not hotspot.usable
+    check hotspot.skipReason.contains("mode ap")
+
+    let wired = parseNmWifiKeyfile("[connection]\ntype=ethernet\nid=eth\n")
+    check not wired.usable
+    check wired.skipReason.contains("not a Wi-Fi")
+
+    let enterprise = parseNmWifiKeyfile(
+      "[connection]\ntype=wifi\n[wifi]\nssid=Campus\n[wifi-security]\nkey-mgmt=wpa-eap\n")
+    check not enterprise.usable
+    check enterprise.skipReason.contains("enterprise")
+
+    let noSsid = parseNmWifiKeyfile("[connection]\ntype=wifi\n[wifi]\nmode=infrastructure\n")
+    check not noSsid.usable
+    check noSsid.skipReason.contains("no SSID")
+
+  test "no skip reason ever carries the PSK":
+    for content in [wpaKeyfile, openKeyfile,
+                    "[connection]\ntype=wifi\n[wifi]\nmode=ap\nssid=X\n" &
+                    "[wifi-security]\nkey-mgmt=wpa-psk\npsk=supersecret\n"]:
+      check not parseNmWifiKeyfile(content).skipReason.contains("supersecret")
+
+suite "importing keyfiles into wpa_supplicant.conf":
+  test "SSIDs already in a config are recognised in both encodings":
+    let conf = buildWpaSupplicantConf("Home Wifi", "hunter2hunter2").conf &
+               buildWpaNetworkBlock("caf\xc3\xa9", "").conf &
+               buildWpaNetworkBlock("say \"hi\"", "").conf
+    let ssids = parseWpaConfSsids(conf)
+    check "Home Wifi" in ssids
+    check "caf\xc3\xa9" in ssids  # hex encoded in the file
+    check "say \"hi\"" in ssids
+
+  test "an empty config gets a header plus one block per keyfile":
+    let merged = mergeImportedNetworks(
+      "", [parseNmWifiKeyfile(wpaKeyfile), parseNmWifiKeyfile(openKeyfile)])
+    check merged.changed
+    check merged.imported == @["Home Wifi", "Cafe Open"]
+    check merged.conf.contains("update_config=1")
+    check merged.conf.contains("ssid=\"Home Wifi\"")
+    check merged.conf.contains("psk=\"hunter2hunter2\"")
+    check merged.conf.contains("ssid=\"Cafe Open\"")
+    check merged.conf.contains("key_mgmt=NONE")
+    check merged.conf.count("network={") == 2
+
+  test "re-importing the same keyfiles changes nothing":
+    let first = mergeImportedNetworks(
+      "", [parseNmWifiKeyfile(wpaKeyfile), parseNmWifiKeyfile(openKeyfile)])
+    let second = mergeImportedNetworks(
+      first.conf, [parseNmWifiKeyfile(wpaKeyfile), parseNmWifiKeyfile(openKeyfile)])
+    check not second.changed
+    check second.imported.len == 0
+    check second.conf == first.conf
+    check second.conf.count("network={") == 2
+
+  test "a config the portal wrote keeps its own block and gains the new one":
+    # The portal may have stored a hashed PSK; an imported keyfile must not
+    # overwrite it.
+    let existing = mergeWpaPassphraseOutput(
+      "network={\n\tssid=\"Home Wifi\"\n\tpsk=deadbeef\n}\n").conf
+    let merged = mergeImportedNetworks(
+      existing, [parseNmWifiKeyfile(wpaKeyfile), parseNmWifiKeyfile(openKeyfile)])
+    check merged.imported == @["Cafe Open"]
+    check merged.conf.contains("psk=deadbeef")
+    check not merged.conf.contains("hunter2hunter2")
+
+  test "unusable keyfiles are reported, not written":
+    let merged = mergeImportedNetworks("", [
+      parseNmWifiKeyfile("[connection]\ntype=wifi\nid=campus\n[wifi]\nssid=Campus\n" &
+                         "[wifi-security]\nkey-mgmt=wpa-eap\n")])
+    check not merged.changed
+    check merged.conf == ""
+    check merged.skipped.len == 1
+    check merged.skipped[0].contains("Campus")
+
+  test "the ctrl_interface line follows the wpa_cli probe":
+    let withCli = mergeImportedNetworks("", [parseNmWifiKeyfile(wpaKeyfile)])
+    check withCli.conf.contains("ctrl_interface=")
+    let withoutCli = mergeImportedNetworks(
+      "", [parseNmWifiKeyfile(wpaKeyfile)], "ee", withCtrlInterface = false)
+    check not withoutCli.conf.contains("ctrl_interface")
+    check withoutCli.conf.contains("country=EE")
+
+# ---------------------------------------------------------------------------
+# The same import through NetworkContext: every command, read and write is
+# stubbed, so nothing here spawns a process or touches the filesystem.
+# ---------------------------------------------------------------------------
+
+type StubNetwork = ref object
+  files: Table[string, string]
+  modes: Table[string, int]
+  dirs: seq[string]
+  commands: seq[string]
+  events: seq[string]
+
+proc newStubNetwork(): StubNetwork =
+  StubNetwork(files: initTable[string, string](), modes: initTable[string, int](),
+              dirs: @["/etc/wpa_supplicant"])
+
+proc stubContext(stub: StubNetwork): NetworkContext =
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      stub.commands.add(cmd)
+      if cmd.contains(".nmconnection"):
+        var found: seq[string] = @[]
+        for path in stub.files.keys:
+          if path.endsWith(".nmconnection"):
+            found.add(path)
+        # Deterministic order: the shell glob is sorted too.
+        for i in 0 ..< found.len:
+          for j in i + 1 ..< found.len:
+            if found[j] < found[i]:
+              swap(found[i], found[j])
+        return (output: found.join("\n") & "\n", rc: 0)
+      if cmd.contains("pkill -0") or cmd.contains("kill -0"):
+        return (output: "", rc: 1)
+      (output: "", rc: 0),
+    sleep: proc(ms: int) {.gcsafe.} = discard,
+    log: proc(ev: string, extra: JsonNode) {.gcsafe.} = stub.events.add(ev),
+    writeFile: proc(path, content: string, mode: int): bool {.gcsafe.} =
+      stub.files[path] = content
+      stub.modes[path] = mode
+      true,
+    readFile: proc(path: string): string {.gcsafe.} =
+      stub.files.getOrDefault(path, ""),
+    pathExists: proc(path: string): bool {.gcsafe.} =
+      path in stub.dirs or stub.files.hasKey(path),
+  )
+
+const importedConfPath = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+
+suite "supplicant credential import through NetworkContext":
+  test "a baked-in keyfile becomes a persisted wpa_supplicant config":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+
+    let res = importNmKeyfiles(ctx, "wlan0")
+    check res.changed
+    check res.imported == @["Home Wifi"]
+    check res.error == ""
+    check res.path == importedConfPath
+    check stub.files[importedConfPath].contains("ssid=\"Home Wifi\"")
+    check stub.files[importedConfPath].contains("psk=\"hunter2hunter2\"")
+    # 0600 on the state partition, same as everything else this backend writes.
+    check stub.modes[importedConfPath] == 0o600
+    # Logged once, and never with the PSK in it.
+    check stub.events.count("portal:supplicant:nmImport") == 1
+
+    # Second run: nothing to do, nothing written, nothing logged again.
+    let again = importNmKeyfiles(ctx, "wlan0")
+    check not again.changed
+    check again.imported.len == 0
+    check stub.events.count("portal:supplicant:nmImport") == 1
+
+  test "several keyfiles all end up in one config":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/a-frameos-wifi.nmconnection"] = wpaKeyfile
+    stub.files["/etc/NetworkManager/system-connections/b-frameos-cloud-wifi.nmconnection"] = openKeyfile
+    let ctx = stubContext(stub)
+
+    let res = importNmKeyfiles(ctx, "wlan0")
+    check res.imported == @["Home Wifi", "Cafe Open"]
+    check stub.files[importedConfPath].count("network={") == 2
+
+  test "the same keyfile seen through the bind mount is imported once":
+    # /etc/NetworkManager/system-connections is a bind mount of the state
+    # directory on FrameOS images, so both paths list the same file.
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    stub.files["/srv/frameos/state/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+
+    check importNmKeyfiles(ctx, "wlan0").imported == @["Home Wifi"]
+    check stub.files[importedConfPath].count("network={") == 1
+
+  test "anyWifiConfigured sees credentials that are only in a keyfile":
+    let stub = newStubNetwork()
+    let ctx = stubContext(stub)
+    # Nothing at all: the frame must raise its setup hotspot.
+    check not anyWifiConfigured(ctx, "wlan0")
+
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    # This is the bug the Pi Zero W hit: credentials on the card, but the
+    # frame reported "no Wi-Fi configured" and gave up on them.
+    check anyWifiConfigured(ctx, "wlan0")
+
+  test "an unusable keyfile does not fake a configured network":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/hotspot.nmconnection"] =
+      "[connection]\ntype=wifi\nid=hotspot\n[wifi]\nmode=ap\nssid=FrameOS-Setup\n"
+    let ctx = stubContext(stub)
+    check not anyWifiConfigured(ctx, "wlan0")
+    let res = importNmKeyfiles(ctx, "wlan0")
+    check not res.changed
+    check res.skipped.len == 1
+    check "portal:supplicant:nmImport:skipped" in stub.events
+
+  test "ensureStation imports before deciding there is nothing to join":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+    let probe = parseToolProbe("wpa_supplicant\nwpa_cli\nhostapd\niw\ndnsmasq\nudhcpc\n")
+
+    let res = ensureStation(ctx, "wlan0", probe)
+    check stub.files.hasKey(importedConfPath)
+    var startedSupplicant = false
+    for cmd in stub.commands:
+      if cmd.contains("wpa_supplicant -B -i 'wlan0' -c '" & importedConfPath & "'"):
+        startedSupplicant = true
+    check startedSupplicant
+    # No association in the stub, so it stops there - but it did try.
+    check not res.ok
+    check res.message == "not associated"
+
+  test "ensureStation still reports nothing to join when no keyfile exists":
+    # The setup hotspot is the user's only way back in; it must stay reachable.
+    let stub = newStubNetwork()
+    let ctx = stubContext(stub)
+    let probe = parseToolProbe("wpa_supplicant\nwpa_cli\nhostapd\niw\ndnsmasq\nudhcpc\n")
+    let res = ensureStation(ctx, "wlan0", probe)
+    check not res.ok
+    check res.message == "no saved Wi-Fi configuration"
+    check not anyWifiConfigured(ctx, "wlan0")

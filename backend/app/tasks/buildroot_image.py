@@ -279,6 +279,10 @@ BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
 # bind mount onto the state partition.
 BUILDROOT_WPA_SUPPLICANT_DIR = "/etc/wpa_supplicant"
 BUILDROOT_WPA_SUPPLICANT_STATE_DIR = "/srv/frameos/state/wpa_supplicant"
+# Interface name and control socket the supplicant backend uses; keep in sync
+# with confFileName / wpaCtrlDir in frameos/src/frameos/network/supplicant.nim.
+BUILDROOT_WPA_SUPPLICANT_CONF_NAME = "wpa_supplicant-wlan0.conf"
+BUILDROOT_WPA_SUPPLICANT_CTRL_DIR = "/var/run/wpa_supplicant"
 BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE = (
     f"{BUILDROOT_WPA_SUPPLICANT_STATE_DIR} {BUILDROOT_WPA_SUPPLICANT_DIR} none "
     "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=wpa_supplicant.service 0 0"
@@ -1525,7 +1529,12 @@ class BuildrootImageBuilder:
             script_path = overlay_dir / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
             script_path.parent.mkdir(parents=True, exist_ok=True)
             wants_dir.mkdir(parents=True, exist_ok=True)
-            script_path.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
+            script_path.write_text(
+                render_setup_json_reset_script(
+                    setup_file_path, uses_network_manager=self.platform.uses_network_manager
+                ),
+                encoding="utf-8",
+            )
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(
                 render_setup_json_reset_service(
@@ -1541,6 +1550,7 @@ class BuildrootImageBuilder:
 
         (boot_overlay_dir / Path(BOOT_HOSTNAME_FILE).name).write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
+        self._write_state_wpa_supplicant_conf(overlay_dir)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
         self._write_boot_root_password(boot_overlay_dir / Path(BOOT_ROOT_PASSWORD_FILE).name)
@@ -1636,6 +1646,27 @@ class BuildrootImageBuilder:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_network_manager_wifi_connection(ssid, password), encoding="utf-8")
         os.chmod(path, 0o600)
+
+    def _write_state_wpa_supplicant_conf(self, overlay_dir: Path) -> None:
+        """Bake the credentials in wpa_supplicant form on non-NetworkManager platforms.
+
+        A .nmconnection keyfile is read by nothing on the armv6 image (no
+        NetworkManager), so a card flashed with WiFi credentials came up with no
+        network. The first-boot script mirrors the same file, but writing it
+        here too means the credentials are on the state partition from the very
+        first boot, before any service has run.
+        """
+        if self.platform.uses_network_manager:
+            return
+        ssid, password = validate_buildroot_wifi_credentials(self.frame)
+        if not ssid:
+            return
+        conf_dir = overlay_dir / BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(conf_dir, 0o700)
+        conf_path = conf_dir / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
+        conf_path.write_text(_wpa_supplicant_conf(ssid, password), encoding="utf-8")
+        os.chmod(conf_path, 0o600)
 
     @staticmethod
     def _relative_symlink(target: str, link: Path) -> None:
@@ -2336,7 +2367,12 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
         firstboot_script = service_root / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
         firstboot_script.parent.mkdir(parents=True, exist_ok=True)
-        firstboot_script.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
+        firstboot_script.write_text(
+            render_setup_json_reset_script(
+                setup_file_path, uses_network_manager=self.platform.uses_network_manager
+            ),
+            encoding="utf-8",
+        )
         os.chmod(firstboot_script, 0o755)
         (service_root / "etc" / "systemd" / "system" / SETUP_JSON_RESET_SERVICE_NAME).write_text(
             render_setup_json_reset_service(setup_file_path, script_path=SETUP_JSON_RESET_SCRIPT_PATH),
@@ -3713,6 +3749,46 @@ def _nm_keyfile_value(value: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError("NetworkManager keyfile values cannot contain line breaks")
     return value.replace("\\", "\\\\")
+
+
+def _wpa_quote(value: str) -> str:
+    """wpa_supplicant quoted string: backslash and double quote are escaped."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _wpa_supplicant_conf(ssid: str, password: str) -> str:
+    """Byte-for-byte the config frameos/src/frameos/network/supplicant.nim writes.
+
+    Used on platforms without NetworkManager (armv6 / Pi Zero W), where the
+    .nmconnection keyfile has no reader at all.
+    """
+    if "\n" in ssid or "\r" in ssid:
+        raise ValueError("WiFi network cannot contain line breaks")
+    if "\n" in password or "\r" in password:
+        raise ValueError("WiFi password cannot contain line breaks")
+    lines = [
+        "# Generated by FrameOS. Edits are overwritten on the next Wi-Fi setup.",
+        # The armv6 image builds wpa_supplicant with BR2_PACKAGE_WPA_SUPPLICANT_CLI,
+        # so the control interface exists and FrameOS can drive it with wpa_cli.
+        f"ctrl_interface={BUILDROOT_WPA_SUPPLICANT_CTRL_DIR}",
+        "ctrl_interface_group=0",
+        "update_config=1",
+        "network={",
+        f"    ssid={_wpa_quote(ssid)}",
+        "    scan_ssid=1",
+    ]
+    if not password:
+        # Open network: any key management makes wpa_supplicant wait forever
+        # for a handshake that never comes.
+        lines.append("    key_mgmt=NONE")
+    else:
+        lines.append("    key_mgmt=WPA-PSK")
+        if len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
+            lines.append(f"    psk={password.lower()}")
+        else:
+            lines.append(f"    psk={_wpa_quote(password)}")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 async def _set_sd_image_status(

@@ -27,7 +27,7 @@ from app.tasks.setup_json_reset import (
 
 
 class Sandbox:
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, uses_network_manager: bool = True):
         self.root = tmp_path
         self.boot = tmp_path / "boot"
         self.srv = tmp_path / "srv"
@@ -38,7 +38,9 @@ class Sandbox:
             path.mkdir(parents=True, exist_ok=True)
         self.script = tmp_path / "frameos-setup-reset.sh"
         self.script.write_text(
-            render_setup_json_reset_script(DEFAULT_SETUP_JSON_RESET_FILE_PATH),
+            render_setup_json_reset_script(
+                DEFAULT_SETUP_JSON_RESET_FILE_PATH, uses_network_manager=uses_network_manager
+            ),
             encoding="utf-8",
         )
         self.script.chmod(0o755)
@@ -99,6 +101,19 @@ class Sandbox:
     @property
     def cloud_wifi_file(self) -> Path:
         return self.etc / "NetworkManager" / "system-connections" / "frameos-cloud-wifi.nmconnection"
+
+    @property
+    def wifi_file(self) -> Path:
+        return self.etc / "NetworkManager" / "system-connections" / "frameos-wifi.nmconnection"
+
+    @property
+    def wpa_supplicant_file(self) -> Path:
+        return self.srv / "frameos" / "state" / "wpa_supplicant" / "wpa_supplicant-wlan0.conf"
+
+    def write_boot_wifi_keyfile(self, content: str) -> Path:
+        path = self.boot / "frameos-wifi.nmconnection"
+        path.write_text(content, encoding="utf-8")
+        return path
 
     @property
     def log_file(self) -> Path:
@@ -523,3 +538,122 @@ def test_service_condition_fires_on_setup_json_or_cloud_file():
     assert BOOT_CLOUD_CONFIG_FILE == "/boot/frameos-cloud.txt"
     # The pending-enroll file must exist before frameos starts.
     assert "Before=dropbear.service frameos.service frameos-remote.service" in service
+
+
+# --- WiFi on platforms without NetworkManager (armv6 / Pi Zero W) ------------
+#
+# There, a .nmconnection keyfile has no reader at all: FrameOS drives
+# wpa_supplicant + hostapd instead. A card flashed with WiFi credentials came up
+# with no network, because the credentials only ever existed in keyfile form.
+
+_BOOT_WIFI_KEYFILE = (
+    "[connection]\n"
+    "id=frameos-wifi\n"
+    "type=wifi\n"
+    "autoconnect=true\n"
+    "\n"
+    "[wifi]\n"
+    "mode=infrastructure\n"
+    # Backslashes are doubled by _nm_keyfile_value / nm_keyfile_escape.
+    'ssid=Home \\\\ WiFi "quoted"\n'
+    "\n"
+    "[wifi-security]\n"
+    "key-mgmt=wpa-psk\n"
+    "psk=hunter2\\\\pass\n"
+    "\n"
+    "[ipv4]\n"
+    "method=auto\n"
+)
+
+
+def test_boot_wifi_keyfile_is_mirrored_into_wpa_supplicant_without_network_manager(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_boot_wifi_keyfile(_BOOT_WIFI_KEYFILE)
+    sandbox.add_fake_frameos()
+    (sandbox.boot / "frameos-setup.json").write_text("{}\n", encoding="utf-8")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The keyfile is still installed, unchanged.
+    assert sandbox.wifi_file.exists()
+    # ...and now also exists in the form the supplicant backend reads.
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    assert "update_config=1" in conf
+    assert "network={" in conf
+    # Keyfile escaping is reversed, then wpa_supplicant escaping is applied.
+    assert 'ssid="Home \\\\ WiFi \\"quoted\\""' in conf
+    assert 'psk="hunter2\\\\pass"' in conf
+    assert "key_mgmt=WPA-PSK" in conf
+    assert _mode(sandbox.wpa_supplicant_file) == 0o600
+    assert _mode(sandbox.wpa_supplicant_file.parent) == 0o700
+
+
+def test_boot_wifi_keyfile_is_not_mirrored_on_network_manager_platforms(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    sandbox.write_boot_wifi_keyfile(_BOOT_WIFI_KEYFILE)
+    sandbox.add_fake_frameos()
+    (sandbox.boot / "frameos-setup.json").write_text("{}\n", encoding="utf-8")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sandbox.wifi_file.exists()
+    assert not sandbox.wpa_supplicant_file.exists()
+
+
+def test_cloud_wifi_is_mirrored_into_wpa_supplicant_without_network_manager(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-abc\nwifi_ssid=Home Network\nwifi_password=hunter=two\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sandbox.cloud_wifi_file.exists()
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    assert 'ssid="Home Network"' in conf
+    assert 'psk="hunter=two"' in conf
+    assert _mode(sandbox.wpa_supplicant_file) == 0o600
+    # The personalization file still gets shredded once the secrets landed.
+    assert not (sandbox.boot / "frameos-cloud.txt").exists()
+
+
+def test_cloud_open_wifi_is_mirrored_as_an_open_wpa_supplicant_network(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file("claim_token=FRCT-abc\nwifi_ssid=Cafe Open\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    assert 'ssid="Cafe Open"' in conf
+    # No key management at all, or wpa_supplicant waits forever for a
+    # handshake that never comes.
+    assert "key_mgmt=NONE" in conf
+    assert "psk" not in conf
+
+
+def test_no_wifi_credentials_leaves_the_wpa_supplicant_config_absent(tmp_path):
+    # Nothing to mirror means no config, which is what makes the frame raise
+    # its setup hotspot instead of waiting on a network it was never given.
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.add_fake_frameos()
+    (sandbox.boot / "frameos-setup.json").write_text("{}\n", encoding="utf-8")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not sandbox.wpa_supplicant_file.exists()
+
+
+def test_wpa_supplicant_config_is_never_written_with_a_plaintext_psk_in_the_log(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file("claim_token=FRCT-abc\nwifi_ssid=Home\nwifi_password=topsecret123\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "topsecret123" not in result.stdout
+    assert "topsecret123" not in sandbox.log_file.read_text(encoding="utf-8")

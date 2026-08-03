@@ -18,6 +18,16 @@ const
   ## survives a reboot and is what wpa_supplicant@<iface>.service reads.
   supplicantConfDir* = "/etc/wpa_supplicant"
   supplicantStateConfDir* = "/srv/frameos/state/wpa_supplicant"
+  ## Credentials baked into an SD image arrive as NetworkManager keyfiles
+  ## (backend/app/tasks/buildroot_image.py writes /boot/frameos-wifi.nmconnection,
+  ## and the first-boot script installs it below). Nothing on a non-NM image
+  ## reads those, so this backend imports them into its own config - see
+  ## importNmKeyfiles. Both locations are listed because the state dir is the
+  ## bind-mount source for the /etc one and the mount may not be up yet.
+  nmConnectionDirs* = [
+    "/etc/NetworkManager/system-connections",
+    "/srv/frameos/state/NetworkManager/system-connections",
+  ]
   ## Generated daemon configs live on the state partition too. The image ships
   ## a 142 KB upstream sample as /etc/hostapd.conf; we never touch it.
   networkStateDir* = "/srv/frameos/state/network"
@@ -63,6 +73,27 @@ type
     ssid*: string
     ipAddress*: string
     state*: string
+
+  NmWifiCredentials* = object
+    ## One NetworkManager keyfile, reduced to what wpa_supplicant needs.
+    id*: string
+    ssid*: string
+    psk*: string
+    ## Lowercase NM spelling ("wpa-psk", "sae", "none", ...); "" when the
+    ## keyfile has no [wifi-security] section at all, i.e. an open network.
+    keyMgmt*: string
+    usable*: bool
+    ## Why an otherwise-parsed keyfile was not turned into a network block.
+    ## Never contains the PSK.
+    skipReason*: string
+
+  ImportResult* = object
+    ## Outcome of folding NetworkManager keyfiles into wpa_supplicant.conf.
+    imported*: seq[string]
+    skipped*: seq[string]
+    changed*: bool
+    path*: string
+    error*: string
 
 proc shq(s: string): string =
   ## Shell-safe single-quote wrapper (POSIX), same as portal.nim's.
@@ -162,6 +193,118 @@ proc parseIpv4Address*(output: string): string =
   ""
 
 # ---------------------------------------------------------------------------
+# NetworkManager keyfile parsing
+#
+# Why: an SD image flashed with Wi-Fi credentials only ever gets them as a
+# NetworkManager keyfile - buildroot_image.py bakes
+# /boot/frameos-wifi.nmconnection and setup_json_reset.py's first-boot script
+# installs it into /etc/NetworkManager/system-connections. On a board without
+# NetworkManager (armv6 / Pi Zero W) nothing reads that file, so the frame
+# booted with credentials it could not see. These helpers turn a keyfile into
+# the wpa_supplicant network block it describes.
+# ---------------------------------------------------------------------------
+
+proc unescapeNmKeyfileValue*(raw: string): string =
+  ## Reverse of the escaping in buildroot_image.py's `_nm_keyfile_value` and
+  ## setup_json_reset.py's `nm_keyfile_escape` (both double backslashes), plus
+  ## the rest of GKeyFile's escapes, which a keyfile written by NetworkManager
+  ## itself can contain. Leading whitespace after `=` is not part of the value
+  ## (GKeyFile skips it); a trailing CR from a CRLF file is dropped.
+  var value = raw
+  while value.len > 0 and (value[0] == ' ' or value[0] == '\t'):
+    value = value[1 .. ^1]
+  if value.len > 0 and value[^1] == '\r':
+    value = value[0 ..< ^1]
+  var i = 0
+  while i < value.len:
+    if value[i] != '\\' or i == value.high:
+      result.add(value[i])
+      inc i
+      continue
+    let escaped = value[i + 1]
+    case escaped
+    of '\\': result.add('\\')
+    of 'n': result.add('\n')
+    of 't': result.add('\t')
+    of 'r': result.add('\r')
+    of 's': result.add(' ')
+    # Anything else keeps the escaped character verbatim, which is what
+    # GKeyFile does for e.g. "\;".
+    else: result.add(escaped)
+    i += 2
+
+proc parseNmWifiKeyfile*(content: string): NmWifiCredentials =
+  ## Reads one .nmconnection file. `usable` is false (with a `skipReason`) for
+  ## anything this backend cannot express: non-Wi-Fi profiles, hotspot (AP)
+  ## profiles, enterprise auth, and PSK profiles whose secret is not stored in
+  ## the file. `skipReason` never contains the PSK.
+  var section = ""
+  var connType = ""
+  var mode = ""
+  var hasSecuritySection = false
+  var pskFlags = ""
+  for rawLine in content.splitLines():
+    let line = rawLine.strip()
+    if line.len == 0 or line.startsWith("#") or line.startsWith(";"):
+      continue
+    if line.startsWith("["):
+      let close = line.find(']')
+      section = if close > 0: line[1 ..< close].strip().toLowerAscii() else: ""
+      if section in ["wifi-security", "802-11-wireless-security"]:
+        hasSecuritySection = true
+      continue
+    let idx = line.find('=')
+    if idx <= 0:
+      continue
+    let key = line[0 ..< idx].strip().toLowerAscii()
+    let value = unescapeNmKeyfileValue(line[idx + 1 .. ^1])
+    case section
+    of "connection":
+      case key
+      of "type": connType = value.strip().toLowerAscii()
+      of "id": result.id = value
+      else: discard
+    of "wifi", "802-11-wireless":
+      case key
+      of "ssid": result.ssid = value
+      of "mode": mode = value.strip().toLowerAscii()
+      else: discard
+    of "wifi-security", "802-11-wireless-security":
+      case key
+      of "psk": result.psk = value
+      of "key-mgmt": result.keyMgmt = value.strip().toLowerAscii()
+      of "psk-flags": pskFlags = value.strip()
+      else: discard
+    else: discard
+
+  if connType.len > 0 and connType notin ["wifi", "802-11-wireless"]:
+    result.skipReason = "not a Wi-Fi connection"
+    return
+  if result.ssid.len == 0:
+    result.skipReason = "no SSID"
+    return
+  if mode.len > 0 and mode != "infrastructure":
+    # "ap" / "adhoc": a hotspot profile is not a credential we can join.
+    result.skipReason = "mode " & mode
+    return
+  if result.keyMgmt in ["wpa-eap", "ieee8021x", "wpa-eap-suite-b-192"]:
+    result.skipReason = "enterprise key management (" & result.keyMgmt & ")"
+    return
+  if result.psk.len == 0:
+    # An open network omits [wifi-security] entirely (that is what
+    # setup_json_reset.py writes). A PSK profile with no stored secret is a
+    # different thing: NetworkManager would prompt an agent for it, and
+    # pretending it is an open network would both fail to associate and
+    # suppress the setup hotspot, which is the user's only way back in.
+    if hasSecuritySection and result.keyMgmt.len > 0 and result.keyMgmt != "none":
+      result.skipReason =
+        if pskFlags.len > 0 and pskFlags != "0": "PSK is not stored in the keyfile (psk-flags=" & pskFlags & ")"
+        else: "no PSK for key-mgmt " & result.keyMgmt
+      return
+    result.keyMgmt = "none"
+  result.usable = true
+
+# ---------------------------------------------------------------------------
 # Pure config generation
 # ---------------------------------------------------------------------------
 
@@ -215,10 +358,9 @@ proc wpaSupplicantHeader*(countryCode = "", withCtrlInterface = true): string =
   if country.len == 2:
     result.add("country=" & country & "\n")
 
-proc buildWpaSupplicantConf*(ssid, password: string, countryCode = "",
-                            withCtrlInterface = true): ConfResult =
-  ## Generates the whole wpa_supplicant.conf for a single network. Used when
-  ## `wpa_passphrase` is unavailable, and as the open-network path.
+proc buildWpaNetworkBlock*(ssid, password: string): ConfResult =
+  ## One `network={ ... }` block. Split out of buildWpaSupplicantConf so
+  ## imported NetworkManager keyfiles produce byte-identical blocks.
   if ssid.len == 0:
     return ConfResult(error: "Wi-Fi SSID is empty.")
   if ssid.len > 32:
@@ -242,7 +384,86 @@ proc buildWpaSupplicantConf*(ssid, password: string, countryCode = "",
     else:
       netBlock.add("    psk=" & wpaQuote(password) & "\n")
   netBlock.add("}\n")
-  ConfResult(conf: wpaSupplicantHeader(countryCode, withCtrlInterface) & netBlock)
+  ConfResult(conf: netBlock)
+
+proc buildWpaSupplicantConf*(ssid, password: string, countryCode = "",
+                            withCtrlInterface = true): ConfResult =
+  ## Generates the whole wpa_supplicant.conf for a single network. Used when
+  ## `wpa_passphrase` is unavailable, and as the open-network path.
+  result = buildWpaNetworkBlock(ssid, password)
+  if result.error.len > 0:
+    return
+  result.conf = wpaSupplicantHeader(countryCode, withCtrlInterface) & result.conf
+
+proc unquoteWpaValue(value: string): string =
+  ## Reverse of wpaQuote for a `"..."` value.
+  var i = 1
+  while i < value.high:
+    if value[i] == '\\' and i + 1 < value.high:
+      result.add(value[i + 1])
+      i += 2
+    else:
+      result.add(value[i])
+      inc i
+
+proc fromHex(value: string): string =
+  for i in countup(0, value.len - 2, 2):
+    var byte = 0
+    for j in 0 .. 1:
+      let c = value[i + j]
+      let digit =
+        if c in {'0'..'9'}: int(c) - int('0')
+        elif c in {'a'..'f'}: int(c) - int('a') + 10
+        else: int(c) - int('A') + 10
+      byte = byte * 16 + digit
+    result.add(char(byte))
+
+proc parseWpaConfSsids*(conf: string): seq[string] =
+  ## Every SSID already present in a wpa_supplicant.conf, decoded from both
+  ## the quoted and the hex form. This is what makes re-importing idempotent.
+  for rawLine in conf.splitLines():
+    let line = rawLine.strip()
+    if not line.startsWith("ssid="):
+      continue
+    let value = line["ssid=".len .. ^1].strip()
+    if value.len == 0:
+      continue
+    let decoded =
+      if value.len >= 2 and value[0] == '"' and value[^1] == '"': unquoteWpaValue(value)
+      elif value.len mod 2 == 0 and isHexString(value): fromHex(value)
+      else: value
+    if decoded.len > 0 and decoded notin result:
+      result.add(decoded)
+
+proc mergeImportedNetworks*(existingConf: string, credentials: openArray[NmWifiCredentials],
+                            countryCode = "", withCtrlInterface = true):
+                            tuple[conf: string, imported: seq[string], skipped: seq[string], changed: bool] =
+  ## Appends a network block for every importable keyfile whose SSID is not in
+  ## `existingConf` yet. Existing blocks are never rewritten: a config the
+  ## portal wrote (possibly with a hashed PSK) outranks a baked-in keyfile,
+  ## and re-running this is a no-op.
+  var conf = existingConf
+  var known = parseWpaConfSsids(existingConf)
+  for cred in credentials:
+    if not cred.usable:
+      if cred.skipReason.len > 0:
+        result.skipped.add((if cred.ssid.len > 0: cred.ssid else: cred.id) & ": " & cred.skipReason)
+      continue
+    if cred.ssid in known:
+      continue
+    let generated = buildWpaNetworkBlock(cred.ssid, cred.psk)
+    if generated.error.len > 0:
+      result.skipped.add(cred.ssid & ": " & generated.error)
+      continue
+    if conf.strip().len == 0:
+      conf = wpaSupplicantHeader(countryCode, withCtrlInterface)
+    elif not conf.endsWith("\n"):
+      conf.add("\n")
+    conf.add(generated.conf)
+    known.add(cred.ssid)
+    result.imported.add(cred.ssid)
+  result.conf = conf
+  result.changed = result.imported.len > 0
 
 proc mergeWpaPassphraseOutput*(output: string, countryCode = "",
                               withCtrlInterface = true): ConfResult =
@@ -387,6 +608,87 @@ proc scanCachePath*(): string =
 
 proc ensureDir(ctx: NetworkContext, dir: string) =
   discard ctx.run("sudo install -d -m 700 " & shq(dir) & " 2>/dev/null || true", "")
+
+# ---------------------------------------------------------------------------
+# Importing NetworkManager keyfiles as a credential source
+# ---------------------------------------------------------------------------
+
+proc nmKeyfileListCommand*(): string =
+  ## Lists *.nmconnection in every directory an image may have dropped them
+  ## in. A glob that matches nothing expands to itself, which the -f test
+  ## rejects, so the output only ever holds real files.
+  var parts: seq[string] = @[]
+  for dir in nmConnectionDirs:
+    parts.add("for f in " & shq(dir) & "/*.nmconnection; do [ -f \"$f\" ] && echo \"$f\"; done")
+  "{ " & parts.join("; ") & "; } 2>/dev/null || true"
+
+proc readNmWifiCredentials*(ctx: NetworkContext): seq[NmWifiCredentials] =
+  ## Every NetworkManager keyfile on the image, parsed. Files are deduplicated
+  ## by name because /etc/NetworkManager/system-connections is a bind mount of
+  ## the state directory on FrameOS images, so both paths list the same files.
+  let (output, _) = ctx.run(nmKeyfileListCommand(), "")
+  var seenNames: seq[string] = @[]
+  for rawLine in output.splitLines():
+    let path = rawLine.strip()
+    if path.len == 0 or not path.endsWith(".nmconnection"):
+      continue
+    let name = path[path.rfind('/') + 1 .. ^1]
+    if name in seenNames:
+      continue
+    seenNames.add(name)
+    var content = ctx.readFile(path)
+    if content.len == 0:
+      # Keyfiles are 0600 and root-owned; fall back to a privileged read for
+      # the (Debian) case where FrameOS does not run as root.
+      let (catOutput, _) = ctx.run("sudo cat " & shq(path) & " 2>/dev/null || true", "")
+      content = catOutput
+    if content.strip().len == 0:
+      continue
+    var credentials = parseNmWifiKeyfile(content)
+    if credentials.id.len == 0:
+      credentials.id = name
+    if not credentials.usable and credentials.skipReason.len == 0:
+      continue
+    result.add(credentials)
+
+proc anyImportableWifi*(ctx: NetworkContext): bool =
+  for credentials in readNmWifiCredentials(ctx):
+    if credentials.usable:
+      return true
+  false
+
+proc importNmKeyfiles*(ctx: NetworkContext, device: string, countryCode = "",
+                       withCtrlInterface = true): ImportResult =
+  ## Folds every importable keyfile into this backend's own
+  ## wpa_supplicant-<iface>.conf on the state partition, so credentials baked
+  ## into an SD image survive the reboot exactly like portal-entered ones.
+  ## Idempotent: SSIDs already in the config are left alone, so the second run
+  ## writes nothing and logs nothing.
+  result.path = supplicantConfPath(ctx, device)
+  let credentials = readNmWifiCredentials(ctx)
+  if credentials.len == 0:
+    return
+  let existing = if ctx.pathExists(result.path): ctx.readFile(result.path) else: ""
+  let merged = mergeImportedNetworks(existing, credentials, countryCode, withCtrlInterface)
+  result.imported = merged.imported
+  result.skipped = merged.skipped
+  if not merged.changed:
+    if result.skipped.len > 0 and result.imported.len == 0:
+      ctx.log("portal:supplicant:nmImport:skipped", %*{"skipped": result.skipped})
+    return
+  ensureDir(ctx, result.path[0 ..< result.path.rfind('/')])
+  if not ctx.writeFile(result.path, merged.conf, 0o600):
+    result.error = "Could not write " & result.path & "."
+    ctx.log("portal:supplicant:nmImport:error", %*{"path": result.path, "error": result.error})
+    return
+  result.changed = true
+  # Once: the SSIDs are in the config now, so the next call is a no-op. The
+  # payload deliberately carries SSIDs only - never the PSK.
+  ctx.log("portal:supplicant:nmImport", %*{
+    "path": result.path,
+    "ssids": result.imported,
+    "skipped": result.skipped,
+  })
 
 proc detectWifiDevice*(ctx: NetworkContext): string =
   ## `iw dev` first (it is the tool that definitely exists when this backend
@@ -597,11 +899,14 @@ proc status*(ctx: NetworkContext, device: string, probe: NetworkToolProbe): Wifi
     result.ipAddress = parseIpv4Address(ipOutput)
 
 proc anyWifiConfigured*(ctx: NetworkContext, device: string): bool =
-  ## Equivalent of the nmcli "any connection profile exists" check.
+  ## Equivalent of the nmcli "any connection profile exists" check. A
+  ## NetworkManager keyfile we have not imported yet counts: the frame does
+  ## have credentials, so it must keep retrying rather than raise the setup
+  ## hotspot as if it had been handed none.
   let path = supplicantConfPath(ctx, device)
-  if not ctx.pathExists(path):
-    return false
-  ctx.readFile(path).contains("network={")
+  if ctx.pathExists(path) and ctx.readFile(path).contains("network={"):
+    return true
+  anyImportableWifi(ctx)
 
 proc pidAlive(ctx: NetworkContext, pidPath: string): bool =
   let (_, rc) = ctx.run("sudo kill -0 \"$(cat " & shq(pidPath) & " 2>/dev/null)\" 2>/dev/null", "")
@@ -695,8 +1000,15 @@ proc ensureStation*(ctx: NetworkContext, device: string, probe: NetworkToolProbe
     return SupplicantOpResult(ok: true, message: "hotspot")
   if supplicantRunning(ctx, device, probe):
     return SupplicantOpResult(ok: true, message: "already running")
+  # An SD image flashed with Wi-Fi credentials delivers them as a
+  # NetworkManager keyfile, which nothing on a non-NetworkManager image reads.
+  # Fold those in before deciding there is nothing to join.
+  discard importNmKeyfiles(ctx, device, "", probe.hasWpaCli)
   let path = supplicantConfPath(ctx, device)
-  if not anyWifiConfigured(ctx, device):
+  # wpa_supplicant needs a real config file here, so this checks the file
+  # rather than anyWifiConfigured (which also counts not-yet-imported
+  # keyfiles).
+  if not ctx.pathExists(path) or not ctx.readFile(path).contains("network={"):
     return SupplicantOpResult(ok: false, message: "no saved Wi-Fi configuration")
   if not startSupplicant(ctx, device, path, probe):
     return SupplicantOpResult(ok: false, message: "wpa_supplicant failed to start on " & device & ".")
