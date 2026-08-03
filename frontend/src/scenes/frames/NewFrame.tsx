@@ -119,7 +119,7 @@ function RemoteControlField({
           <Switch value={enabled} onChange={onChange} />
           <div className="min-w-0 flex-1 text-sm text-slate-700">
             {enabled
-              ? 'Enabled — the frame connects back to this backend'
+              ? 'Enabled — the frame connects back to this backend and waits for commands'
               : 'Disabled — this backend reaches the frame'}
           </div>
         </div>
