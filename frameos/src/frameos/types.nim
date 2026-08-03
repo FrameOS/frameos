@@ -92,6 +92,10 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+    # "auto" (default), "networkManager" or "supplicant". Frames without
+    # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
+    # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.
+    networkBackend*: string
     # Local-presence override for the cloud-managed default-deny on private
     # network HTTP (docs/cloud-frames.md). Settable only through the local
     # admin settings path — deliberately absent from the cloud set_settings

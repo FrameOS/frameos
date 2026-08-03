@@ -1,6 +1,7 @@
-import std/[json, strutils, unittest]
+import std/[json, strutils, tables, unittest]
 
 import ../channels
+import ../network/backend
 import ../portal
 import ../types
 
@@ -53,6 +54,11 @@ proc resetHookState() =
   lastSleepMs = -1
 
 proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
+  # Backend detection: this suite pins the NetworkManager path.
+  if cmd.contains("command -v nmcli"):
+    return ("nmcli\nwpa_supplicant\nhostapd\niw\ndnsmasq\nudhcpc\n", 0)
+  if cmd.contains("nmcli -t -f RUNNING general status"):
+    return ("running\n", 0)
   if cmd.contains("nmcli --terse --fields SSID device wifi list"):
     inc runWifiListCalls
     return ("wifi-a\n\nwifi-b\nwifi-a\n", 0)
@@ -306,3 +312,215 @@ suite "portal network orchestration":
     check nmcliConnectCalls == 2
     check sawFallbackNmcliArgs
     check sleepCallCount == 0
+
+# ---------------------------------------------------------------------------
+# The wpa_supplicant backend (armv6 buildroot images have no NetworkManager).
+# Every command and every file write is stubbed, so nothing here spawns a
+# process or touches the real filesystem.
+# ---------------------------------------------------------------------------
+
+type SupplicantMode = enum
+  smIdle
+  smHotspotUp
+  smAssociateFails
+  smNoDhcpLease
+  smScanEmpty
+
+var supMode {.global.}: SupplicantMode
+var supHasWpaPassphrase {.global.}: bool
+var supCommands {.global.}: seq[string]
+var supFiles {.global.}: Table[string, string]
+
+proc resetSupplicantState() =
+  supMode = smIdle
+  supHasWpaPassphrase = false
+  supCommands = @[]
+  supFiles = initTable[string, string]()
+
+proc supRan(fragment: string): bool =
+  for cmd in supCommands:
+    if cmd.contains(fragment):
+      return true
+  false
+
+proc supRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
+  {.gcsafe.}:
+    supCommands.add(cmd)
+
+    # No nmcli in the probe output: this is the armv6 image.
+    if cmd.contains("command -v nmcli"):
+      var tools = @["wpa_supplicant", "wpa_cli", "hostapd", "iw", "dnsmasq", "udhcpc"]
+      if supHasWpaPassphrase:
+        tools.add("wpa_passphrase")
+      return (tools.join("\n") & "\n", 0)
+
+    if cmd.contains("iw dev 'wlan0' scan"):
+      if supMode == smScanEmpty:
+        return ("", 1)
+      return ("BSS 11:22:33:44:55:66(on wlan0)\n\tSSID: wifi-b\n" &
+              "BSS 11:22:33:44:55:67(on wlan0)\n\tSSID: wifi-a\n" &
+              "BSS 11:22:33:44:55:68(on wlan0)\n\tSSID: wifi-a\n", 0)
+    if cmd.contains("iw dev 2>/dev/null"):
+      return ("phy#0\n\tInterface wlan0\n\t\ttype managed\n", 0)
+    if cmd.contains("wpa_cli -p /var/run/wpa_supplicant -i 'wlan0' ping"):
+      return ("", 0) # no control socket yet: scanning goes through iw
+    if cmd.contains("wpa_cli -p /var/run/wpa_supplicant -i 'wlan0' status"):
+      if supMode == smAssociateFails:
+        return ("wpa_state=SCANNING\n", 0)
+      return ("ssid=home-wifi\nwpa_state=COMPLETED\n", 0)
+    if cmd.contains("wpa_passphrase 'home-wifi'"):
+      return ("network={\n\tssid=\"home-wifi\"\n\t#psk=\"pw12345678\"\n\tpsk=deadbeef\n}\n", 0)
+    if cmd.contains("ip -4 addr show"):
+      if supMode == smNoDhcpLease:
+        return ("", 0)
+      return ("    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0\n", 0)
+
+    # Liveness probes must fail unless the hotspot is meant to be up,
+    # otherwise the default rc 0 would read as "already running".
+    if cmd.contains("kill -0") or cmd.contains("pkill -0"):
+      return ("", (if supMode == smHotspotUp: 0 else: 1))
+
+    ("", 0)
+
+proc supWriteFileHook(path, content: string, mode: int): bool {.gcsafe, nimcall.} =
+  {.gcsafe.}:
+    supFiles[path] = content
+    true
+
+proc supReadFileHook(path: string): string {.gcsafe, nimcall.} =
+  {.gcsafe.}:
+    supFiles.getOrDefault(path, "")
+
+proc supPathExistsHook(path: string): bool {.gcsafe, nimcall.} =
+  {.gcsafe.}:
+    path == "/etc/wpa_supplicant" or supFiles.hasKey(path)
+
+suite "portal supplicant backend":
+  setup:
+    resetPortalHooksForTest()
+    resetHookState()
+    resetSupplicantState()
+    setPortalHooksForTest(
+      runHook = supRunHook,
+      sleepHook = sleepHook,
+      autoTimeoutEnabledHook = autoTimeoutDisabled,
+      writeFileHook = supWriteFileHook,
+      readFileHook = supReadFileHook,
+      pathExistsHook = supPathExistsHook,
+    )
+    drainEventChannel()
+
+  teardown:
+    resetPortalHooksForTest()
+    resetHookState()
+    resetSupplicantState()
+    drainEventChannel()
+
+  test "a frame without nmcli picks the supplicant backend":
+    check activeNetworkBackend() == nbSupplicant
+
+  test "availableNetworks scans with iw and returns the nmcli-shaped list":
+    let networks = availableNetworks(makeFrameOS())
+    check networks == @["wifi-a", "wifi-b"]
+    check supRan("iw dev 'wlan0' scan")
+    # Cached on the state partition for when hostapd owns the radio.
+    check supFiles["/srv/frameos/state/wpa_supplicant/last-scan.txt"].contains("wifi-a")
+
+  test "availableNetworks falls back to the cached scan when the radio is busy":
+    discard availableNetworks(makeFrameOS()) # populate the cache
+    supMode = smScanEmpty
+    check availableNetworks(makeFrameOS()) == @["wifi-a", "wifi-b"]
+
+  test "attemptConnect writes a persistent wpa_supplicant.conf and takes a lease":
+    let frame = makeFrameOS()
+    let ok = attemptConnect(frame, "home-wifi", "pw12345678")
+
+    check ok
+    check frame.network.status == NetworkStatus.connected
+    let confPath = "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+    check supFiles.hasKey(confPath)
+    check supFiles[confPath].contains("ssid=\"home-wifi\"")
+    check supFiles[confPath].contains("psk=\"pw12345678\"")
+    check supRan("wpa_supplicant -B -i 'wlan0' -c '" & confPath & "' -D nl80211")
+    check supRan("udhcpc -i 'wlan0' -f -n -q")
+    # busybox udhcpc quits once bound, so a renewing daemon has to stay behind
+    check supRan("sudo udhcpc -i 'wlan0' -t 5 -T 3 -A 20")
+
+    let (hasEvent, ev) = eventChannel.tryRecv()
+    check hasEvent
+    check ev[1] == "setCurrentScene"
+
+  test "attemptConnect hashes the passphrase when wpa_passphrase exists":
+    supHasWpaPassphrase = true
+    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
+    check conf.contains("psk=deadbeef")
+    check not conf.contains("pw12345678") # the plaintext comment is stripped
+
+  test "attemptConnect reports an actionable error when association stalls":
+    supMode = smAssociateFails
+    let frame = makeFrameOS()
+    let ok = attemptConnect(frame, "home-wifi", "pw12345678")
+
+    check not ok
+    check frame.network.status == NetworkStatus.error
+    check getLastError().contains("association did not complete")
+
+  test "attemptConnect fails loudly when no DHCP lease arrives":
+    supMode = smNoDhcpLease
+    check not attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check getLastError().contains("no DHCP lease")
+
+  test "startAp raises hostapd with a static IP and a DHCP server":
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    startAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    # Generated into the state dir; the image's own /etc/hostapd.conf sample
+    # is never touched.
+    check supFiles["/srv/frameos/state/network/hostapd.conf"].contains("ssid=FrameOS-Setup")
+    check supFiles["/srv/frameos/state/network/hostapd.conf"].contains("wpa_passphrase=secret1234")
+    check supRan("hostapd -B -P '/run/frameos/hostapd.pid'")
+    check supRan("ip addr add 10.42.0.1/24 dev 'wlan0'")
+    check supRan("dnsmasq --conf-file=/dev/null --interface='wlan0'")
+    # The scan has to happen before the radio flips to AP mode.
+    check supRan("iw dev 'wlan0' scan")
+
+    let (ok, ev) = eventChannel.tryRecv()
+    check ok
+    check ev[1] == "setCurrentScene"
+    check ev[2]["sceneId"].getStr() == "system/wifiHotspot"
+
+  test "startAp reports the hotspot as failed when hostapd is missing":
+    # Same shape as the nmcli failure path: status error, no scene event.
+    let frame = makeFrameOS()
+    frame.frameConfig.network.wifiHotspotPassword = "short"
+    startAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.error
+    check getLastError().contains("8-63")
+    let (ok, _) = eventChannel.tryRecv()
+    check not ok
+
+  test "stopAp kills the daemons and restores station mode":
+    supMode = smHotspotUp
+    let frame = makeFrameOS()
+    frame.network.hotspotStatus = HotspotStatus.enabled
+    stopAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.disabled
+    check supRan("hostapd.pid")
+    check supRan("dnsmasq.pid")
+    check supRan("ip link set 'wlan0' down")
+    check supRan("ip link set 'wlan0' up")
+
+  test "activeConnectionStatus reports the joined network in the shared shape":
+    let status = activeConnectionStatus(makeFrameOS())
+    check status["connected"].getBool()
+    check status["ssid"].getStr() == "home-wifi"
+    check status["state"].getStr() == "COMPLETED"
+    check status["ip"].getStr() == "192.168.1.42"
+
+  test "an explicit override pins the backend for debugging":
+    setNetworkBackendOverride("networkManager")
+    check activeNetworkBackend() == nbNetworkManager

@@ -180,6 +180,9 @@ proc start*(self: FrameOS) {.async.} =
     message["reboot"] = rebootInfo
   self.logger.log(message)
   netportal.setLogger(self.logger)
+  # Decide (and log) NetworkManager vs wpa_supplicant before anything touches
+  # the radio, and let the supplicant backend rejoin its saved network.
+  netportal.ensureNetworkBackendReady(self)
 
   var firstSceneId: Option[SceneId] = none(SceneId)
   # The boot hotspot needs a connectivity probe to decide whether to start,

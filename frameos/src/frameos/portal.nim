@@ -6,6 +6,8 @@ import frameos/scenes
 import frameos/channels
 import frameos/setup_proxy
 import frameos/utils/process
+import frameos/network/backend as netbackend
+import frameos/network/supplicant as wpa
 import drivers/drivers as frameDrivers
 
 const
@@ -30,6 +32,12 @@ type
   PortalNmcliConnectHook = proc(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.}
   PortalSleepHook = proc(ms: int) {.gcsafe, nimcall.}
   PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.}
+  # The supplicant backend writes/reads config files; injecting them keeps the
+  # tests off the real filesystem the same way the run hook keeps them off
+  # real processes.
+  PortalWriteFileHook = proc(path, content: string, mode: int): bool {.gcsafe, nimcall.}
+  PortalReadFileHook = proc(path: string): string {.gcsafe, nimcall.}
+  PortalPathExistsHook = proc(path: string): bool {.gcsafe, nimcall.}
 
   PortalSetupOptions* = object
     ssid*: string
@@ -72,12 +80,46 @@ proc defaultPortalNmcliConnectHook(args: seq[string]): tuple[rc: int, output: st
                             maxOutputBytes = 1024 * 1024)
   (rc: res.exitCode, output: res.output & res.errorOutput)
 
+proc permissionsFromMode(mode: int): set[FilePermission] =
+  if (mode and 0o400) != 0: result.incl(fpUserRead)
+  if (mode and 0o200) != 0: result.incl(fpUserWrite)
+  if (mode and 0o100) != 0: result.incl(fpUserExec)
+  if (mode and 0o040) != 0: result.incl(fpGroupRead)
+  if (mode and 0o020) != 0: result.incl(fpGroupWrite)
+  if (mode and 0o010) != 0: result.incl(fpGroupExec)
+  if (mode and 0o004) != 0: result.incl(fpOthersRead)
+  if (mode and 0o002) != 0: result.incl(fpOthersWrite)
+  if (mode and 0o001) != 0: result.incl(fpOthersExec)
+
+proc defaultPortalWriteFileHook(path, content: string, mode: int): bool {.gcsafe, nimcall.} =
+  try:
+    let dir = parentDir(path)
+    if dir.len > 0 and not dirExists(dir):
+      createDir(dir)
+    writeFile(path, content)
+    setFilePermissions(path, permissionsFromMode(mode))
+    true
+  except CatchableError:
+    false
+
+proc defaultPortalReadFileHook(path: string): string {.gcsafe, nimcall.} =
+  try:
+    readFile(path)
+  except CatchableError:
+    ""
+
+proc defaultPortalPathExistsHook(path: string): bool {.gcsafe, nimcall.} =
+  fileExists(path) or dirExists(path)
+
 proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.}
 
 var portalRunHook: PortalRunHook = defaultPortalRunHook
 var portalNmcliConnectHook: PortalNmcliConnectHook = defaultPortalNmcliConnectHook
 var portalSleepHook: PortalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
 var portalAutoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true
+var portalWriteFileHook: PortalWriteFileHook = defaultPortalWriteFileHook
+var portalReadFileHook: PortalReadFileHook = defaultPortalReadFileHook
+var portalPathExistsHook: PortalPathExistsHook = defaultPortalPathExistsHook
 
 proc getLastError*(): string =
   {.gcsafe.}:
@@ -122,6 +164,109 @@ proc run(cmd: string, loggedCmd: string = ""): (string, int) {.gcsafe.} =
   let (output, rc) = portalRunHook(cmd)
   pLog("portal:exec", %*{"cmd": (if loggedCmd.len > 0: loggedCmd else: cmd), "rc": rc, "output": output.strip()})
   (output, rc)
+
+# ---------------------------------------------------------------------------
+# Network backend selection
+#
+# 64-bit frames run NetworkManager; the armv6 buildroot image (Pi Zero W) has
+# no NetworkManager at all, so nmcli is missing and the same code has to drive
+# wpa_supplicant/hostapd instead. The backend is detected once, logged once,
+# and can be pinned for debugging.
+# ---------------------------------------------------------------------------
+
+var networkBackendLock: Lock
+initLock(networkBackendLock)
+var networkBackendResolved = false
+var networkBackendKind = nbUnknown
+var networkBackendProbe: NetworkToolProbe
+var networkBackendOverride = ""
+var networkWifiDevice = ""
+
+proc networkContext(): NetworkContext {.gcsafe.} =
+  ## Wires the backends to the portal's bounded runner and its hooks, so every
+  ## child process still goes through frameos/utils/process.nim.
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      let res = run(cmd, loggedCmd)
+      (output: res[0], rc: res[1]),
+    sleep: proc(ms: int) {.gcsafe.} =
+      {.gcsafe.}: portalSleepHook(ms),
+    log: proc(ev: string, extra: JsonNode) {.gcsafe.} =
+      pLog(ev, extra),
+    writeFile: proc(path, content: string, mode: int): bool {.gcsafe.} =
+      {.gcsafe.}: portalWriteFileHook(path, content, mode),
+    readFile: proc(path: string): string {.gcsafe.} =
+      {.gcsafe.}: portalReadFileHook(path),
+    pathExists: proc(path: string): bool {.gcsafe.} =
+      {.gcsafe.}: portalPathExistsHook(path),
+  )
+
+proc setNetworkBackendOverride*(value: string) =
+  ## Config-level pin (frameos.json network.networkBackend). The
+  ## FRAMEOS_NETWORK_BACKEND env var wins over it.
+  {.gcsafe.}:
+    withLock networkBackendLock:
+      networkBackendOverride = value.strip()
+
+proc effectiveBackendOverride(): string =
+  {.gcsafe.}:
+    let fromEnv = getEnv("FRAMEOS_NETWORK_BACKEND", "").strip()
+    if fromEnv.len > 0:
+      return fromEnv
+    withLock networkBackendLock:
+      return networkBackendOverride & ""
+
+proc resolveNetworkBackend(): NetworkBackendKind {.gcsafe.} =
+  {.gcsafe.}:
+    withLock networkBackendLock:
+      if networkBackendResolved:
+        return networkBackendKind
+
+    let ctx = networkContext()
+    let probe = probeNetworkTools(ctx)
+    let choice = chooseNetworkBackend(effectiveBackendOverride(), probe)
+
+    withLock networkBackendLock:
+      networkBackendProbe = probe
+      # nbUnknown means nothing was detected at all. Keep driving the nmcli
+      # path (historical behaviour) but shout about it: a raw
+      # "sh: nmcli: not found" explains nothing.
+      networkBackendKind = if choice.kind == nbUnknown: nbNetworkManager else: choice.kind
+      networkBackendResolved = true
+      result = networkBackendKind
+
+    pLog("portal:networkBackend", %*{
+      "backend": $result,
+      "detected": $choice.kind,
+      "reason": choice.reason,
+      "override": effectiveBackendOverride(),
+      "nmcli": probe.hasNmcli,
+      "networkManagerRunning": probe.nmRunning,
+      "wpaSupplicant": probe.hasWpaSupplicant,
+      "hostapd": probe.hasHostapd,
+      "dhcpClients": probe.dhcpClients,
+    })
+    if choice.error.len > 0:
+      pLog("portal:networkBackend:error", %*{"error": choice.error})
+      rememberError(choice.error)
+
+proc activeNetworkBackend*(): NetworkBackendKind {.gcsafe.} =
+  resolveNetworkBackend()
+
+proc networkToolProbe(): NetworkToolProbe {.gcsafe.} =
+  discard resolveNetworkBackend()
+  {.gcsafe.}:
+    withLock networkBackendLock:
+      result = networkBackendProbe
+
+proc resetNetworkBackendForTest*() =
+  {.gcsafe.}:
+    withLock networkBackendLock:
+      networkBackendResolved = false
+      networkBackendKind = nbUnknown
+      networkBackendProbe = NetworkToolProbe()
+      networkBackendOverride = ""
+      networkWifiDevice = ""
 
 proc parseIntParam(value: string, fallback: int): int =
   try:
@@ -794,7 +939,7 @@ proc parseWifiInterfaceFromNmcli(output: string): string =
       return parts[0]
   return ""
 
-proc getWifiDevice*(): string =
+proc nmGetWifiDevice(): string =
   let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
   if rc != 0:
     return "wlan0"
@@ -812,7 +957,27 @@ proc getWifiDevice*(): string =
     return parts[0]
   return "wlan0"
 
+proc supplicantWifiDevice(): string {.gcsafe.} =
+  ## `iw dev` output does not change while the frame runs, so detect once.
+  {.gcsafe.}:
+    withLock networkBackendLock:
+      if networkWifiDevice.len > 0:
+        return networkWifiDevice & ""
+    let device = wpa.detectWifiDevice(networkContext())
+    withLock networkBackendLock:
+      networkWifiDevice = device
+      return networkWifiDevice & ""
+
+proc getWifiDevice*(): string =
+  case activeNetworkBackend()
+  of nbSupplicant: supplicantWifiDevice()
+  else: nmGetWifiDevice()
+
 proc getReadyWifiDevice(): string =
+  if activeNetworkBackend() == nbSupplicant:
+    # There is no "managed and ready" concept without NetworkManager: the
+    # interface either exists or it does not.
+    return supplicantWifiDevice()
   let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
   if rc != 0:
     return ""
@@ -829,7 +994,11 @@ proc waitForReadyWifiDevice(): string =
       portalSleepHook(hotspotDeviceWaitDelayMs)
 
 proc availableNetworks*(frameOS: FrameOS): seq[string] =
-  ## Return a list of nearby Wi-Fi SSIDs using nmcli
+  ## Return a list of nearby Wi-Fi SSIDs. Same shape from either backend: the
+  ## portal UI must not care which one is active.
+  if activeNetworkBackend() == nbSupplicant:
+    return wpa.availableNetworks(networkContext(), supplicantWifiDevice(), networkToolProbe())
+
   let (output, rc) = run("sudo nmcli --terse --fields SSID device wifi list 2>/dev/null || true")
   if rc != 0:
     return @[]
@@ -839,14 +1008,37 @@ proc availableNetworks*(frameOS: FrameOS): seq[string] =
       result.add ssid
 
 proc hotspotRunning(frameOS: FrameOS): bool =
-  let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
-                     nmHotspotName & "$' || true")
-  result = output.strip().len > 0
+  if activeNetworkBackend() == nbSupplicant:
+    result = wpa.hotspotRunning(networkContext())
+  else:
+    let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | grep '^" &
+                       nmHotspotName & "$' || true")
+    result = output.strip().len > 0
   frameOS.network.hotspotStatus = if result: HotspotStatus.enabled else: HotspotStatus.disabled
 
 proc anyWifiConfigured(frameOS: FrameOS): bool =
+  if activeNetworkBackend() == nbSupplicant:
+    return wpa.anyWifiConfigured(networkContext(), supplicantWifiDevice())
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep -v '^lo$' || true")
   result = output.strip().len > 0
+
+proc activeConnectionStatus*(frameOS: FrameOS): JsonNode =
+  ## Current SSID / connection state, in one shape for both backends.
+  if activeNetworkBackend() == nbSupplicant:
+    return wpa.logJson(wpa.status(networkContext(), supplicantWifiDevice(), networkToolProbe()))
+  let (nameOutput, _) = run("sudo nmcli --colors no -t -f NAME connection show --active | head -n1 || true")
+  let (ssidOutput, _) = run(
+    "sudo nmcli --colors no -t -f ACTIVE,SSID device wifi list 2>/dev/null | grep '^yes:' | head -n1 || true")
+  let connectionName = nameOutput.strip()
+  var ssid = ssidOutput.strip()
+  if ssid.startsWith("yes:"):
+    ssid = ssid["yes:".len .. ^1]
+  %*{
+    "connected": connectionName.len > 0 and connectionName != nmHotspotName,
+    "ssid": ssid,
+    "state": (if connectionName.len > 0: "COMPLETED" else: ""),
+    "ip": "",
+  }
 
 proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
   ## Tear down the hotspot
@@ -855,11 +1047,54 @@ proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
     return
   pLog("portal:stopAp")
   frameOS.network.hotspotStatus = HotspotStatus.stopping
-  discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
-  discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
+  if activeNetworkBackend() == nbSupplicant:
+    wpa.stopHotspot(networkContext(), supplicantWifiDevice())
+  else:
+    discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
+    discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
   frameOS.network.hotspotStatus = HotspotStatus.disabled
   stopSetupProxy()
   pLog("portal:stopAp:done")
+
+proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
+  ## Shared by both backends: once the AP is up the rest of the portal
+  ## (setup proxy, hotspot scene, auto-timeout) behaves identically.
+  frameOS.network.hotspotStatus = HotspotStatus.enabled
+  startSetupProxy(frameOS.frameConfig)
+  pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
+  let hotspotStarted = getMonoTime()
+  frameOS.network.hotspotStartedAt = epochTime()
+  pLog("portal:startAp:done")
+  sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
+  if portalAutoTimeoutEnabledHook():
+    spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
+  true
+
+proc startApSupplicant(frameOS: FrameOS) {.gcsafe.} =
+  let device = supplicantWifiDevice()
+  if device.len == 0:
+    frameOS.network.hotspotStatus = HotspotStatus.error
+    pLog("portal:startAp:noWifiDevice")
+    pLog("portal:startAp:error")
+    return
+
+  for attempt in 1..hotspotStartAttempts:
+    let res = wpa.startHotspot(networkContext(), device,
+                               frameOS.frameConfig.network.wifiHotspotSsid,
+                               frameOS.frameConfig.network.wifiHotspotPassword,
+                               networkToolProbe())
+    if res.ok:
+      pLog("portal:startAp:supplicant", %*{"device": device, "dhcp": res.message})
+      discard finishStartedHotspot(frameOS)
+      return
+    rememberError(res.message)
+    pLog("portal:startAp:supplicantFailed",
+         %*{"device": device, "error": res.message, "attempt": attempt, "attempts": hotspotStartAttempts})
+    if attempt < hotspotStartAttempts:
+      portalSleepHook(hotspotStartRetryDelayMs)
+
+  frameOS.network.hotspotStatus = HotspotStatus.error
+  pLog("portal:startAp:error")
 
 proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw
@@ -869,6 +1104,11 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   pLog("portal:startAp")
   frameOS.network.hotspotStatus = HotspotStatus.starting
   discard run("sudo rfkill unblock wifi || true")
+
+  if activeNetworkBackend() == nbSupplicant:
+    startApSupplicant(frameOS)
+    return
+
   discard run("sudo nmcli radio wifi on || true")
 
   let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
@@ -888,20 +1128,6 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
 
   proc buildHotspotUpCmd(): string =
     fmt"sudo nmcli --wait 15 connection up {shQuote(nmHotspotName)}"
-
-  proc finishStartedHotspot(): bool =
-    discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
-
-    frameOS.network.hotspotStatus = HotspotStatus.enabled
-    startSetupProxy(frameOS.frameConfig)
-    pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
-    let hotspotStarted = getMonoTime()
-    frameOS.network.hotspotStartedAt = epochTime()
-    pLog("portal:startAp:done")
-    sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
-    if portalAutoTimeoutEnabledHook():
-      spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
-    true
 
   proc startConfiguredHotspot(wifiDevice: string): bool =
     if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
@@ -923,7 +1149,8 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
       pLog("portal:startAp:activateFailed", %*{"device": wifiDevice})
       return false
 
-    return finishStartedHotspot()
+    discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
+    return finishStartedHotspot(frameOS)
 
   for attempt in 1..hotspotStartAttempts:
     discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
@@ -959,8 +1186,26 @@ proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nim
       stopAp(frameOS)
       sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
+proc attemptConnectSupplicant(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
+  ## No post-connect grace sleep here (unlike the nmcli path): wpa.connect
+  ## only returns once the DHCP client has actually produced an address.
+  let device = supplicantWifiDevice()
+  let res = wpa.connect(networkContext(), device, ssid, password, "", networkToolProbe())
+  pLog("portal:connect:supplicant",
+       %*{"device": device, "ssid": ssid, "ok": res.ok, "detail": res.message})
+  if not res.ok:
+    rememberError(res.message)
+  res.ok
+
 proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
   frameOS.network.status = NetworkStatus.connecting
+
+  if activeNetworkBackend() == nbSupplicant:
+    result = attemptConnectSupplicant(frameOS, ssid, password)
+    frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
+    sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
+    return
+
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
   let wifiDevice = getWifiDevice()
 
@@ -1121,22 +1366,43 @@ proc checkNetwork*(self: FrameOS): bool =
     attempt += 1
   return false
 
+proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
+  ## Called once at startup: pins the configured backend, logs which one won,
+  ## and - on the supplicant backend - does what NetworkManager autoconnect
+  ## would have done, i.e. brings the saved network back up after a reboot.
+  if frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
+    setNetworkBackendOverride(frameOS.frameConfig.network.networkBackend)
+  if activeNetworkBackend() != nbSupplicant:
+    return
+  let res = wpa.ensureStation(networkContext(), supplicantWifiDevice(), networkToolProbe())
+  pLog("portal:networkBackend:station", %*{"ok": res.ok, "detail": res.message})
+
 proc setPortalHooksForTest*(
   runHook: PortalRunHook = nil,
   nmcliConnectHook: PortalNmcliConnectHook = nil,
   sleepHook: PortalSleepHook = nil,
-  autoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = nil
+  autoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = nil,
+  writeFileHook: PortalWriteFileHook = nil,
+  readFileHook: PortalReadFileHook = nil,
+  pathExistsHook: PortalPathExistsHook = nil
 ) =
   if runHook != nil: portalRunHook = runHook
   if nmcliConnectHook != nil: portalNmcliConnectHook = nmcliConnectHook
   if sleepHook != nil: portalSleepHook = sleepHook
   if autoTimeoutEnabledHook != nil: portalAutoTimeoutEnabledHook = autoTimeoutEnabledHook
+  if writeFileHook != nil: portalWriteFileHook = writeFileHook
+  if readFileHook != nil: portalReadFileHook = readFileHook
+  if pathExistsHook != nil: portalPathExistsHook = pathExistsHook
 
 proc resetPortalHooksForTest*() =
   portalRunHook = defaultPortalRunHook
   portalNmcliConnectHook = defaultPortalNmcliConnectHook
   portalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
   portalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true
+  portalWriteFileHook = defaultPortalWriteFileHook
+  portalReadFileHook = defaultPortalReadFileHook
+  portalPathExistsHook = defaultPortalPathExistsHook
+  resetNetworkBackendForTest()
 
 proc htmlEscape(input: string): string =
   result = input.replace("&", "&amp;")
