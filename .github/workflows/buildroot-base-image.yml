@@ -16,6 +16,11 @@ on:
         required: false
         default: ""
         type: string
+      next_version:
+        description: "Version to stamp the image with; empty computes the next CalVer (base images are published FOR the release that follows them)"
+        required: false
+        default: ""
+        type: string
       bucket:
         description: "R2 bucket"
         required: true
@@ -144,6 +149,21 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r backend/requirements.txt boto3
 
+      # Resolve the stamped version ONCE and pin it for every later step.
+      # Base images are published FOR the release that follows them (publish
+      # bases -> merge manifest -> bump versions -> release), so the stamp is
+      # the next CalVer, not the current one. Recomputing it per step would
+      # also let a build that runs across a month boundary stamp and verify
+      # two different versions.
+      - name: Resolve target version
+        env:
+          NEXT_VERSION_INPUT: ${{ inputs.next_version }}
+        run: |
+          set -euo pipefail
+          version="$(FRAMEOS_NEXT_VERSION="${NEXT_VERSION_INPUT}" python3 -c "import sys; sys.path.insert(0, 'tools/buildroot-images'); import buildroot_images; print(buildroot_images.next_frameos_version())")"
+          echo "FRAMEOS_NEXT_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Publishing base image as FrameOS ${version}"
+
       - name: Validate configuration
         env:
           BUILDROOT_DOCKER_IMAGE_OVERRIDE: ${{ inputs.buildroot_docker_image }}
@@ -216,7 +236,9 @@ jobs:
           from pathlib import Path
 
           platform = os.environ["PLATFORM"]
-          version = json.loads(Path("versions.json").read_text(encoding="utf-8"))["frameos"].split("+", 1)[0]
+          # The version the image was stamped with (Resolve target version),
+          # not whatever versions.json currently says.
+          version = os.environ["FRAMEOS_NEXT_VERSION"]
           manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
           matches = [
               entry
@@ -238,7 +260,10 @@ jobs:
           set -euo pipefail
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          version="$(python3 -c "import json; print(json.load(open('versions.json'))['frameos'].split('+', 1)[0])")"
+          # Pinned by the Resolve target version step — the next release's
+          # version, which is what the entry was written under. Asking
+          # versions.json here would look up an entry that was never written.
+          version="${FRAMEOS_NEXT_VERSION}"
           # The manifest's source of truth is R2 — `upload` already upserted
           # this build's entry there. The repo copy is a mirror, so parallel
           # platform builds must NOT rebase their local mutations onto each
