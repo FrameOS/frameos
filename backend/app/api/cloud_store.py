@@ -3,8 +3,9 @@
 The payload is the same template interchange zip the backups use; the cloud
 keeps immutable versions per scene. Publishing needs the ``store:publish``
 scope on the cloud link. Browsing the public store needs nothing at all —
-it is a plain scenes repository at ``{provider}/api/store/repository.json``
-(auto-added per project in app/api/repositories.py).
+it is a plain scenes repository at
+``{provider}/api/store/{frameosVersion}/repository.json`` (auto-added per
+project in app/api/repositories.py).
 
 "Private cloud scenes" is the account's own scenes, private ones included. The
 browser cannot attach the link token to <img> tags, so this module proxies

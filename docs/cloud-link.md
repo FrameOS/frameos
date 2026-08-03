@@ -390,10 +390,14 @@ formats FrameOS already speaks, so **browsing and installing needs no new
 protocol at all**: the public store is a plain scenes repository —
 
 ```http
-GET {provider}/api/store/repository.json         # public, standard repository JSON
-GET {provider}/api/store/scenes/{id}/download    # public; ?version=N; the template zip
-GET {provider}/api/store/scenes/{id}/image       # public; preview image
+GET {provider}/api/store/repository.json               # public, standard repository JSON
+GET {provider}/api/store/{frameosVersion}/repository.json  # same, filtered to scenes that run on that release
+GET {provider}/api/store/scenes/{id}/download          # public; ?version=N; the template zip
+GET {provider}/api/store/scenes/{id}/image             # public; preview image
 ```
+
+The versioned index lives one directory deeper, so it emits absolute image and
+zip URLs (a `./scenes/…` would resolve inside the version folder).
 
 Repository entries may carry extra fields older installs simply ignore:
 `author` (publisher display name, rendered as "by {name}" in the Templates
@@ -430,8 +434,11 @@ frameos.net's website runs these previews with the
 (built from `frameos/wasm` in this repo; its version always equals the
 FrameOS release the runtime was built from).
 
-A backend with a connected link seeds `{provider}/api/store/repository.json`
-as a normal repository once per project (deleting it is respected).
+A backend with a connected link seeds
+`{provider}/api/store/{frameosVersion}/repository.json` as a normal repository
+once per project (deleting it is respected). Upgrading FrameOS re-points that
+one row at the new version's index; a store the user deleted is not brought
+back, and a URL the user edited by hand is left alone.
 
 **Private cloud scenes** — the account's own scenes, private ones included — is the
 same repository format behind the link token:

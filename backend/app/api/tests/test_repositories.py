@@ -1,8 +1,24 @@
+import asyncio
 import json
+from datetime import datetime, timedelta
+
 import pytest
+from app.api.repositories import cloud_store_repository_url
 from app.models import Repository
 from app.models.user import User
+from app.utils.versions import current_frameos_version
 from sqlalchemy.exc import InvalidRequestError
+
+
+async def _drain_background_refreshes():
+    """Wait for the refresh tasks GET /api/repositories schedules."""
+    from app.api.repositories import background_refresh_tasks
+
+    for _ in range(100):
+        if not background_refresh_tasks:
+            break
+        await asyncio.gather(*list(background_refresh_tasks), return_exceptions=True)
+    await asyncio.sleep(0)
 
 @pytest.mark.asyncio
 async def test_create_repository(async_client, db):
@@ -81,6 +97,40 @@ async def test_get_system_repository_template_scenes_not_found(async_client):
 
     response = await async_client.get('/api/repositories/system/%2e%2e/templates/Calendar/scenes.json')
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_persists_the_daily_refresh(async_client, db, monkeypatch):
+    """A stale repository is refreshed *and the refresh is written back*.
+
+    The picker renders `template.image` straight from this cached copy, so a
+    refresh that never lands leaves the UI pointing at scene images the store
+    has long since dropped — every card renders blank.
+    """
+    async def fake_update(self):
+        self.templates = [{"name": "New", "image": "https://example.com/new/image"}]
+        self.last_updated_at = datetime.utcnow()
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    repo = Repository(
+        project_id=async_client.project_id,
+        name="Stale store",
+        url="https://example.com/repository.json",
+        templates=[{"name": "Old", "image": "https://example.com/old/image"}],
+        last_updated_at=datetime.utcnow() - timedelta(days=3),
+    )
+    db.add(repo)
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    await _drain_background_refreshes()
+
+    db.expire_all()
+    refreshed = db.query(Repository).filter_by(id=repo.id).one()
+    assert refreshed.templates == [{"name": "New", "image": "https://example.com/new/image"}]
+    assert refreshed.last_updated_at > datetime.utcnow() - timedelta(minutes=1)
 
 
 @pytest.mark.asyncio
@@ -176,7 +226,11 @@ async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeyp
     db.add(link)
     db.commit()
 
-    store_url = "https://cloud.frameos.net/api/store/repository.json"
+    # The seeded index is the version-filtered one: it only lists scenes that
+    # run on the FrameOS this backend ships.
+    store_url = cloud_store_repository_url("https://cloud.frameos.net")
+    assert store_url == f"https://cloud.frameos.net/api/store/{current_frameos_version()}/repository.json"
+
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
     assert store_url in [r["url"] for r in response.json()]
@@ -197,7 +251,7 @@ async def test_get_repositories_seeds_cloud_store_once(async_client, db, monkeyp
     # records its URL, even when the previous provider's store was deleted.
     link.provider_url = "https://cloud.example.com"
     db.commit()
-    next_store_url = "https://cloud.example.com/api/store/repository.json"
+    next_store_url = cloud_store_repository_url("https://cloud.example.com")
     response = await async_client.get('/api/repositories')
     assert next_store_url in [r["url"] for r in response.json()]
     db.refresh(marker)
@@ -233,7 +287,7 @@ async def test_get_repositories_migrates_legacy_marker_after_provider_change(asy
     db.add(Repository(project_id=async_client.project_id, name="Old cloud store", url=old_store_url))
     db.commit()
 
-    new_store_url = "https://cloud.example.com/api/store/repository.json"
+    new_store_url = cloud_store_repository_url("https://cloud.example.com")
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
     urls = [repository["url"] for repository in response.json()]
@@ -245,8 +299,149 @@ async def test_get_repositories_migrates_legacy_marker_after_provider_change(asy
     assert marker.value == new_store_url
 
 
+def _connected_link(provider_url: str, client_id: str):
+    from app.models.cloud import CloudBackendLink
+
+    return CloudBackendLink(
+        provider_url=provider_url,
+        status="connected",
+        linked_client_id=client_id,
+        scope="backend:link backend:read",
+        local_origin="http://test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_repositories_migrates_unversioned_store_to_versioned(async_client, db, monkeypatch):
+    """An install seeded before versioned indexes moves over, in place, once."""
+    from app.models.settings import Settings
+
+    async def fake_update(self):
+        self.templates = [{"name": "Versioned", "image": "https://cloud.example.com/api/store/scenes/x/image"}]
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    unversioned_url = "https://cloud.example.com/api/store/repository.json"
+    db.add(_connected_link("https://cloud.example.com", "lc-versioned"))
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value=unversioned_url,
+        )
+    )
+    seeded = Repository(project_id=async_client.project_id, name="FrameOS Cloud store", url=unversioned_url)
+    db.add(seeded)
+    db.commit()
+    seeded_id = seeded.id
+
+    versioned_url = cloud_store_repository_url("https://cloud.example.com")
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    store_repositories = [r for r in response.json() if "/api/store/" in (r["url"] or "")]
+    # Migrated, not duplicated, and the row (and its id, which installed scenes
+    # remember) survives so its templates refresh in place.
+    assert [r["url"] for r in store_repositories] == [versioned_url]
+    assert store_repositories[0]["id"] == seeded_id
+    assert store_repositories[0]["templates"][0]["name"] == "Versioned"
+
+    marker = db.query(Settings).filter_by(
+        project_id=async_client.project_id, key="@system/cloud_store_repository_added"
+    ).one()
+    assert marker.value == versioned_url
+
+    # Idempotent: a second listing changes nothing.
+    response = await async_client.get('/api/repositories')
+    assert [r["url"] for r in response.json() if "/api/store/" in (r["url"] or "")] == [versioned_url]
+
+
+@pytest.mark.asyncio
+async def test_version_bump_does_not_resurrect_a_deleted_store(async_client, db, monkeypatch):
+    """Deleting the store is respected across FrameOS upgrades."""
+    from app.models.settings import Settings
+
+    async def fake_update(self):
+        self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    db.add(_connected_link("https://cloud.example.com", "lc-deleted"))
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value="https://cloud.example.com/api/store/2000.1.1/repository.json",
+        )
+    )
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    assert [r for r in response.json() if "/api/store/" in (r["url"] or "")] == []
+    marker = db.query(Settings).filter_by(
+        project_id=async_client.project_id, key="@system/cloud_store_repository_added"
+    ).one()
+    assert marker.value == cloud_store_repository_url("https://cloud.example.com")
+
+
+@pytest.mark.asyncio
+async def test_version_bump_leaves_a_user_edited_store_row_alone(async_client, db, monkeypatch):
+    """A row the user re-pointed by hand is neither migrated nor duplicated."""
+    from app.models.settings import Settings
+
+    async def fake_update(self):
+        self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    custom_url = "https://scenes.example.org/my/repository.json"
+    db.add(_connected_link("https://cloud.example.com", "lc-custom"))
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value="https://cloud.example.com/api/store/2000.1.1/repository.json",
+        )
+    )
+    db.add(Repository(project_id=async_client.project_id, name="My own store", url=custom_url))
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    assert [r["url"] for r in response.json()] == [custom_url]
+
+
+@pytest.mark.asyncio
+async def test_version_bump_drops_the_duplicate_when_the_user_added_the_new_index(async_client, db, monkeypatch):
+    from app.models.settings import Settings
+
+    async def fake_update(self):
+        self.templates = []
+
+    monkeypatch.setattr(Repository, "update_templates", fake_update)
+
+    old_url = "https://cloud.example.com/api/store/2000.1.1/repository.json"
+    versioned_url = cloud_store_repository_url("https://cloud.example.com")
+    db.add(_connected_link("https://cloud.example.com", "lc-dupe"))
+    db.add(
+        Settings(
+            project_id=async_client.project_id,
+            key="@system/cloud_store_repository_added",
+            value=old_url,
+        )
+    )
+    db.add(Repository(project_id=async_client.project_id, name="Seeded", url=old_url))
+    db.add(Repository(project_id=async_client.project_id, name="Added by hand", url=versioned_url))
+    db.commit()
+
+    response = await async_client.get('/api/repositories')
+    assert response.status_code == 200
+    urls = [r["url"] for r in response.json()]
+    assert urls == [versioned_url]
+
+
 @pytest.mark.asyncio
 async def test_get_repositories_does_not_seed_store_without_link(async_client, db):
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
-    assert all("api/store/repository.json" not in (r["url"] or "") for r in response.json())
+    assert all("/api/store/" not in (r["url"] or "") for r in response.json())

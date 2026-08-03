@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.api.project_scope import project_get_or_404, project_query
 from app.models.settings import Settings
 from app.models.repository import Repository
@@ -26,14 +26,85 @@ from app.schemas.repositories import (
 )
 from app.config import config
 from app.utils.jwt_tokens import validate_scoped_token
+from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 from . import api_project, api_user, api_open
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
 CLOUD_STORE_REPOSITORY_MARKER = "@system/cloud_store_repository_added"
+CLOUD_STORE_PATH_PREFIX = "/api/store/"
 
 SYSTEM_REPOSITORIES_PATH = Path(__file__).resolve().parents[3] / "repo" / "scenes"
+
+# Strong references to the fire-and-forget refresh tasks, so the event loop
+# does not garbage-collect one mid-flight. Tests await these.
+background_refresh_tasks: set[asyncio.Task] = set()
+_refreshing_repository_ids: set[str] = set()
+
+
+def cloud_store_repository_url(provider_url: str) -> str:
+    """The provider's store index this backend should track.
+
+    The versioned index (``/api/store/{frameosVersion}/repository.json``) only
+    lists scenes that run on the FrameOS version we ship, instead of every
+    public scene. It sits one directory deeper than the unversioned index, so
+    the provider emits absolute image/zip URLs there (a "./" would resolve
+    inside the version folder); ``Repository.update_templates`` handles both.
+    """
+    base = provider_url.rstrip("/")
+    version = current_frameos_version()
+    if not version:
+        # No versions.json (source checkouts, odd packaging): the unversioned
+        # index is the honest fallback rather than a made-up version.
+        return f"{base}{CLOUD_STORE_PATH_PREFIX}repository.json"
+    return f"{base}{CLOUD_STORE_PATH_PREFIX}{version}/repository.json"
+
+
+def _is_same_provider_store_url(url: str | None, provider_url: str) -> bool:
+    """True when `url` is a store index of `provider_url`, any version."""
+    if not isinstance(url, str):
+        return False
+    return url.startswith(provider_url.rstrip("/") + CLOUD_STORE_PATH_PREFIX)
+
+
+async def _refresh_repository(repository_id: str, project_id: int) -> None:
+    """Refresh one repository's cached templates *and persist the result*.
+
+    This used to be ``asyncio.create_task(r.update_templates())`` on the
+    request's ORM object: the fetch happened, but nothing ever committed it, so
+    the cached copy never changed. The scene picker renders `template.image`
+    straight out of this cache, so a store that renames, re-ids or unpublishes
+    scenes left every card pointing at a dead image URL — blank covers forever.
+    """
+    db = SessionLocal()
+    try:
+        repository = db.query(Repository).filter_by(id=repository_id, project_id=project_id).first()
+        if repository is None:
+            return
+        await repository.update_templates()
+        db.commit()
+    except Exception:  # noqa: BLE001 — a background refresh must never take the loop down
+        logging.exception("Failed to refresh repository %s", repository_id)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _schedule_repository_refresh(repository: Repository) -> None:
+    repository_id = repository.id
+    if repository_id in _refreshing_repository_ids:
+        # Listings are polled; one in-flight refresh per repository is plenty.
+        return
+    _refreshing_repository_ids.add(repository_id)
+    task = asyncio.create_task(_refresh_repository(repository_id, repository.project_id))
+    background_refresh_tasks.add(task)
+
+    def _done(finished: asyncio.Task) -> None:
+        background_refresh_tasks.discard(finished)
+        _refreshing_repository_ids.discard(repository_id)
+
+    task.add_done_callback(_done)
 
 
 def _system_template_subject(repository_slug: str, template_slug: str) -> str:
@@ -292,18 +363,33 @@ async def get_repositories(db: Session = Depends(get_db)):
 
         link = current_cloud_backend_link(db)
         if link is not None and link.status == "connected" and link.provider_url:
-            store_url = link.provider_url.rstrip("/") + "/api/store/repository.json"
+            store_url = cloud_store_repository_url(link.provider_url)
             marker = db.query(Settings).filter_by(
                 project_id=project_id, key=CLOUD_STORE_REPOSITORY_MARKER
             ).first()
             marker_url = marker.value if marker is not None and isinstance(marker.value, str) else None
-            should_seed = marker is None or (marker_url is not None and marker_url != store_url)
+            # Upgrading FrameOS moves the version segment of the store URL
+            # (.../api/store/2026.8.3/repository.json). We deliberately follow
+            # it on every release — a stale versioned index advertises scenes
+            # this backend can no longer run — but a version bump is not a
+            # provider change: it migrates the row we seeded and nothing else.
+            # It must never resurrect a store the user deleted, nor duplicate
+            # or overwrite a URL the user typed in by hand.
+            version_migration = (
+                marker_url is not None
+                and marker_url != store_url
+                and _is_same_provider_store_url(marker_url, link.provider_url)
+            )
+            should_seed = marker is None or (
+                marker_url is not None and marker_url != store_url and not version_migration
+            )
 
             if marker is not None and marker_url in (None, "true"):
                 # Migrate the old boolean marker. An absent repository is
                 # ambiguous and may have been explicitly deleted, so preserve
                 # that choice. An old provider repository makes a URL change
-                # observable and safe to migrate.
+                # observable and safe to migrate. Such installs predate
+                # versioned store URLs, so the row is always the unversioned one.
                 legacy_repositories = db.query(Repository).filter(
                     Repository.project_id == project_id,
                     Repository.url.like("%/api/store/repository.json"),
@@ -312,6 +398,23 @@ async def get_repositories(db: Session = Depends(get_db)):
                 for repository in legacy_repositories:
                     if repository.url != store_url:
                         db.delete(repository)
+                marker.value = store_url
+            elif version_migration:
+                # Re-point the row we seeded instead of deleting and re-adding
+                # it: installed scenes remember the repository id (frontend
+                # sceneOrigin), so keeping the row keeps their "update
+                # available" link alive across the upgrade.
+                seeded_repository = db.query(Repository).filter_by(project_id=project_id, url=marker_url).first()
+                if seeded_repository is not None:
+                    if db.query(Repository).filter_by(project_id=project_id, url=store_url).first() is None:
+                        seeded_repository.url = store_url
+                        try:
+                            await seeded_repository.update_templates()
+                        except Exception:  # noqa: BLE001 — provider may be unreachable; the daily refresh retries
+                            pass
+                    else:
+                        # The user already added this exact index by hand.
+                        db.delete(seeded_repository)
                 marker.value = store_url
             elif marker is not None and marker_url != store_url:
                 old_repository = db.query(Repository).filter_by(project_id=project_id, url=marker_url).first()
@@ -337,8 +440,9 @@ async def get_repositories(db: Session = Depends(get_db)):
         for r in repositories:
             # if haven't refreshed in a day
             if not r.last_updated_at or r.last_updated_at < datetime.utcnow() - timedelta(seconds=86400):
-                # schedule updates in the background
-                asyncio.create_task(r.update_templates())
+                # schedule updates in the background (in their own session, and
+                # committed — see _refresh_repository)
+                _schedule_repository_refresh(r)
 
         return [r.to_dict() for r in repositories]
     except SQLAlchemyError as e:
