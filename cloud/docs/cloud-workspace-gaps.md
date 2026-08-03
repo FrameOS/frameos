@@ -6,7 +6,10 @@
 > caching (`frame_assets` + `frame_asset_files`), `GET /api/frames/{id}/assets`
 > + `GET /api/frames/{id}/asset`, and a read-only Assets panel in cloud mode —
 > verified end-to-end against the bench PhotoPainter (51-entry SD listing,
-> 1.1 MB BMP streamed in 24 KiB chunks). Item 4 shipped as the
+> 1.1 MB BMP streamed in 24 KiB chunks). Item **1** shipped as the
+> `image_get` verb + GET /api/frames/{id}/image (device-side verified for
+> the ESP32 BMP pack; awaiting a re-enrolled frame for the full loop).
+> Item 4 shipped as the
 > `POST /api/frames/{id}/event/{name}` shim (render / setCurrentScene /
 > uploadScenes → queue verbs), so "preview on frame" and the Assets panel's
 > run-image-scene buttons work unchanged. Known cosmetic issue: the ESP32

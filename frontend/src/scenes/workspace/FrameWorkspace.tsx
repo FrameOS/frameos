@@ -1324,6 +1324,22 @@ function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
   return activeTool !== 'preview'
 }
 
+// Page-scroll tools: backend and frameAdmin let the window scroll
+// (min-h-screen + overflow-visible), which the full-bleed tools (Logs) and
+// their floating toolbars are built around. The cloud shell pins the page
+// under the account header (#root is overflow:hidden, see
+// cloud-frontend/src/index.css), so the window can never scroll there —
+// <main> itself must scroll, as it does for every other cloud scene. Leaving
+// overflow-visible in the cloud hands scrolling to .frameos-app-shell by
+// accident (overflow-x:hidden computes overflow-y:auto), an element neither
+// the Logs Virtuoso nor frameWorkspaceMainScrollElement() ever looks at.
+function frameToolMainScrollClassName(pageScroll: boolean): string {
+  if (!pageScroll) {
+    return 'h-screen overflow-hidden'
+  }
+  return workspaceMode() === 'cloud' ? 'h-screen overflow-y-auto' : 'min-h-screen overflow-visible'
+}
+
 function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element {
   const frameLogicProps = { frameId }
   const inFrameAdminMode = isInFrameAdminMode()
@@ -1442,7 +1458,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
         topBar={null}
         showAiButton={false}
         mainClassName={clsx(
-          toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          frameToolMainScrollClassName(toolUsesPageScroll),
           'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >
@@ -1480,7 +1496,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
           topBar={toolUsesSearch ? undefined : null}
           showAiButton={false}
           mainClassName={clsx(
-            toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+            frameToolMainScrollClassName(toolUsesPageScroll),
             'frame-workspace-main pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4',
             activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
@@ -1541,7 +1557,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
         topBar={null}
         showAiButton={false}
         mainClassName={clsx(
-          loadingToolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          frameToolMainScrollClassName(loadingToolUsesPageScroll),
           'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >
