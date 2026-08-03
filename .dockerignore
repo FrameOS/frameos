@@ -18,6 +18,14 @@ coverage.xml
 *.cover
 *.log
 .git
+# Local-only working dirs. None of them are ever COPYed, but they can grow to
+# tens of gigabytes and every byte of them is uploaded as build context.
+.claude
+.local
+.pnpm-store
+.tmp
+.tmp-cache
+.turbo
 .mypy_cache
 .pytest_cache
 **/.mypy_cache

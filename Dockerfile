@@ -139,30 +139,27 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml versions.json ./
-COPY frontend/package.json frontend/package.json
-COPY frameos/frontend/package.json frameos/frontend/package.json
-COPY frameos/wasm/package.json frameos/wasm/package.json
-COPY frameos/editor/package.json frameos/editor/package.json
-RUN pnpm install --frozen-lockfile
+# ---------------------------------------------------------------------------
+# Layer ordering note: everything from here down to "COPY frontend frontend"
+# is keyed only on files that change when a *dependency* changes, never on
+# files a release bump rewrites (versions.json, the version field of
+# frameos/wasm/package.json and frameos/editor/package.json). Keep it that
+# way — putting a release-mutated file above these layers invalidates the
+# whole toolchain install on every single release.
+# ---------------------------------------------------------------------------
 
-COPY frameos/frameos.nimble frameos/nimble.lock frameos/nim.cfg frameos/config.nims frameos/
-WORKDIR /app/frameos
-RUN nimble install -d -y && nimble setup
+# Emscripten SDK for the wasm live-preview bundle. Pinned by ARG only, so it
+# never depends on repository content: hoisted above the source COPYs, which
+# used to force a full re-download of the SDK on every source change.
+RUN set -eux; \
+    git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk; \
+    /opt/emsdk/emsdk install "${EMSCRIPTEN_VERSION}"; \
+    /opt/emsdk/emsdk activate "${EMSCRIPTEN_VERSION}"
 
-COPY frameos/remote/frameos_remote.nimble frameos/remote/nimble.lock frameos/remote/config.nims /app/frameos/remote/
-WORKDIR /app/frameos/remote
-RUN nimble install -d -y && nimble setup
-
-WORKDIR /app
-COPY frontend frontend
-COPY repo/apps repo/apps
-COPY repo/scenes repo/scenes
-COPY frameos frameos
-
-WORKDIR /app/frameos
-RUN nimble assets -y
-
+# Native QuickJS. Also pinned by ARG only (version + sha256), and it writes
+# exclusively into /app/frameos/quickjs, which .dockerignore keeps out of the
+# build context — so the later "COPY frameos frameos" merges around it and
+# leaves this directory untouched.
 RUN set -eux; \
     mkdir -p /tmp/quickjs-source /app/frameos/quickjs/include/quickjs; \
     curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/source/vendor/quickjs-${QUICKJS_VERSION}.tar.xz" -o /tmp/quickjs-source.tar.xz; \
@@ -188,16 +185,62 @@ RUN set -eux; \
     /app/frameos/quickjs/qjs -e 'console.log("quickjs ok")'; \
     rm -rf /tmp/quickjs-source /tmp/quickjs-source.tar.xz
 
+# `pnpm fetch` populates the content-addressable store from the lockfile
+# alone — the package manifests are ignored — so the one layer that talks to
+# the npm registry is keyed on pnpm-lock.yaml and nothing else.
+#
+# The node_modules/ that fetch leaves behind is dropped in the same layer, on
+# purpose. Everything `pnpm install` needs is already in the global store, and
+# installing on top of a fetch-populated virtual store makes pnpm skip the
+# NODE_PATH preamble of its bin shims — which would make the published image
+# differ, byte for byte, from the one a plain `pnpm install` produces.
+COPY pnpm-lock.yaml ./
+RUN pnpm fetch && rm -rf /app/node_modules
+
+# Nim dependencies next, still above the package manifests: nimble.lock and
+# friends change only when a Nim dependency changes.
+COPY frameos/frameos.nimble frameos/nimble.lock frameos/nim.cfg frameos/config.nims frameos/
+WORKDIR /app/frameos
+RUN nimble install -d -y && nimble setup
+
+COPY frameos/remote/frameos_remote.nimble frameos/remote/nimble.lock frameos/remote/config.nims /app/frameos/remote/
+WORKDIR /app/frameos/remote
+RUN nimble install -d -y && nimble setup
+
+# The package manifests come last of the dependency inputs, because a release
+# bump rewrites the version field of frameos/wasm/package.json and
+# frameos/editor/package.json. What they invalidate from here on is local and
+# cheap: the store is already populated, so --offline hardlinks out of it and
+# never touches the network.
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml ./
+COPY frontend/package.json frontend/package.json
+COPY frameos/frontend/package.json frameos/frontend/package.json
+COPY frameos/wasm/package.json frameos/wasm/package.json
+COPY frameos/editor/package.json frameos/editor/package.json
+RUN pnpm install --offline --frozen-lockfile
+
+COPY frontend frontend
+COPY repo/apps repo/apps
+COPY repo/scenes repo/scenes
+# build_wasm.sh runs makeapploaders.py, which loads the Nim codegen from
+# backend/app/codegen (self-contained, no backend package imports), so copy
+# just that directory into this stage.
+COPY backend/app/codegen /app/backend/app/codegen
+COPY frameos frameos
+# versions.json is rewritten by every release commit, so it enters the image
+# as late as it possibly can: right above its first consumer. Everything
+# below genuinely depends on it — prepare_assets.py hashes it (it is in
+# REPO_ROOT_FILES), build_wasm.sh bakes it into -d:frameosVersion, and the
+# frontend imports it directly.
+COPY versions.json ./
+
+WORKDIR /app/frameos
+RUN nimble assets -y
+
 # Interpreted-scene runtime compiled to WebAssembly for the frontend's live
 # preview modal; lands in frontend/public/frameos-wasm so the frontend build
-# below copies it into dist. build_wasm.sh runs makeapploaders.py, which loads
-# the Nim codegen from backend/app/codegen (self-contained, no backend
-# package imports), so copy just that directory into this stage.
-COPY backend/app/codegen /app/backend/app/codegen
-RUN set -eux; \
-    git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk; \
-    /opt/emsdk/emsdk install "${EMSCRIPTEN_VERSION}"; \
-    /opt/emsdk/emsdk activate "${EMSCRIPTEN_VERSION}"
+# below copies it into dist.
 RUN bash -c 'source /opt/emsdk/emsdk_env.sh && bash /app/frameos/tools/build_wasm.sh'
 
 WORKDIR /app/frontend
@@ -229,14 +272,17 @@ ENV PATH="/opt/nim/bin:${PATH}"
 WORKDIR /app
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
+
+# Toolchain smoke test, kept directly above the source copies so it stays
+# cached: it only reads /opt/nim and the ESP-IDF export from the base stage.
+RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; export PATH="/opt/nim/bin:${PATH}"; nim --version; qemu-system-xtensa --version'
+
 COPY --from=app-builder /root/.nimble /root/.nimble
-COPY --from=app-builder /app/frameos /app/frameos
 COPY backend/app backend/app
 COPY embedded embedded
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
-
-RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; export PATH="/opt/nim/bin:${PATH}"; nim --version; qemu-system-xtensa --version'
+COPY --from=app-builder /app/frameos /app/frameos
 
 FROM ${PYTHON_IMAGE} AS python-deps
 
@@ -318,12 +364,16 @@ RUN set -eux; \
 
 COPY --from=nim-toolchain /opt/nim /opt/nim
 COPY --from=esp-idf-toolchain /opt/esp /opt/esp
+
+# Only reads /opt/esp, so keep it above the copies that change every build.
+RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
+
+RUN mkdir -p /app/db
+
 COPY --from=app-builder /root/.nimble /root/.nimble
 COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 
-RUN bash -lc 'set -euo pipefail; . "${IDF_PATH}/export.sh" >/dev/null 2>&1; qemu-system-xtensa --version'
-
-COPY docker-entrypoint.sh versions.json ./
+COPY docker-entrypoint.sh ./
 COPY backend backend
 COPY embedded embedded
 COPY repo/apps repo/apps
@@ -332,8 +382,9 @@ COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json
 COPY --from=app-builder /app/frontend/dist frontend/dist
 COPY --from=app-builder /app/frontend/schema frontend/schema
 COPY --from=app-builder /app/frameos frameos
-
-RUN mkdir -p /app/db
+# Last, so a release bump does not invalidate (and force a re-push of) every
+# layer above it.
+COPY versions.json ./
 
 EXPOSE 8989
 

@@ -370,6 +370,13 @@ jobs:
       # target (ESP-IDF toolchain + Nim) is only rebuilt when its layers
       # actually change. load: true pulls the image into the local Docker
       # daemon for the `docker run` below.
+      #
+      # This step must stay byte-identical in its cache-relevant inputs
+      # (project, context, target, build-args, platforms) to the esp32-ci
+      # build in e2e-docker.yml, which runs on every push to main. esp32-ci
+      # pulls in the whole app-builder stage, so that job is what keeps the
+      # release build's toolchain layers warm — diverge them and every
+      # release pays for a cold ESP-IDF/Nim/pnpm/emsdk build again.
       - name: Build ESP32 CI Docker image
         uses: depot/build-push-action@v1
         with:
