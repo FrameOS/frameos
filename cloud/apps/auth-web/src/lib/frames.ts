@@ -514,6 +514,10 @@ export const maxAssetListingBytes = 256 * 1024;
 // Per cached file; matches the device-side HubMaxAssetFileBytes refusal.
 export const maxAssetFileBytes = 8 * 1024 * 1024;
 export const maxAssetPathChars = 1024;
+// Where image_get replies live in the frame_asset_files cache. A dot-path on
+// purpose: devices never include dotfiles in assets_list, so no real asset
+// can collide with (or shadow) the current-image slot.
+export const frameImageAssetPath = ".frame/image";
 // Per-frame blob-cache LRU bounds. Thumbnails dominate (a few tens of KiB
 // each); the byte bound is what really matters for full-size downloads.
 export const maxAssetFilesPerFrame = 64;

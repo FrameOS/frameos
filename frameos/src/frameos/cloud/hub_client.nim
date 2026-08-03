@@ -157,6 +157,9 @@ type
     ## paths relative to the assets directory (docs/cloud-frames.md).
     listAssetsFn*: proc(): JsonNode {.gcsafe.}
     readAssetFn*: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.}
+    ## The current rendered image for `image_get` (error "no_image" until the
+    ## first render).
+    getImageFn*: proc(): AssetReadResult {.gcsafe.}
     rebootFn*: proc() {.gcsafe.}
     auditFn*: proc(payload: JsonNode) {.gcsafe.}
 
@@ -382,6 +385,13 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       readAssetFn: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
         {.gcsafe.}:
           defaultReadAsset(path, thumb),
+      getImageFn: proc(): AssetReadResult {.gcsafe.} =
+        {.gcsafe.}:
+          try:
+            AssetReadResult(data: getLastImagePng(), contentType: "image/png",
+                            mtime: epochTime().BiggestInt)
+          except CatchableError:
+            AssetReadResult(error: "no_image"),
       rebootFn: proc() {.gcsafe.} =
         defaultReboot(),
       auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -622,28 +632,12 @@ proc handleAssetsList(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ctx.audit("assets_list", true)
   CloudVerbReply(ack: ackOk(id), extra: @[reply])
 
-proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
-  if ctx.readAssetFn.isNil:
-    ctx.audit("asset_get", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
-  let path = msg{"path"}.getStr("")
-  if path.len == 0:
-    ctx.audit("asset_get", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
-  let thumb = msg{"thumb"}.getBool(false)
-  let asset =
-    try:
-      ctx.readAssetFn(path, thumb)
-    except CatchableError as error:
-      ctx.audit("asset_get", false, "read_failed: " & error.msg)
-      return CloudVerbReply(ack: ackError(id, "read_failed"))
-  if asset.error.len > 0:
-    ctx.audit("asset_get", false, asset.error)
-    return CloudVerbReply(ack: ackError(id, asset.error))
-  # The full file is in memory and validated: every chunk below will exist, so
-  # the ok-ack the wire contract sends before the stream is honest. Chunks are
-  # independently base64-decodable; the provider concatenates the raw bytes.
-  var extra: seq[JsonNode] = @[]
+proc assetChunkExtras(id: JsonNode, asset: AssetReadResult): seq[JsonNode] =
+  ## The full payload is in memory and validated: every chunk below will
+  ## exist, so the ok-ack the wire contract sends before the stream is
+  ## honest. Chunks are independently base64-decodable; the provider
+  ## concatenates the raw bytes. Shared by asset_get and image_get.
+  result = @[]
   var seqNumber = 0
   var offset = 0
   let total = asset.data.len
@@ -662,13 +656,47 @@ proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
       chunk["size"] = %total
       chunk["mtime"] = %asset.mtime
       chunk["content_type"] = %asset.contentType
-    extra.add(chunk)
+    result.add(chunk)
     offset += chunkLen
     inc seqNumber
     if done:
       break
+
+proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.readAssetFn.isNil:
+    ctx.audit("asset_get", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let path = msg{"path"}.getStr("")
+  if path.len == 0:
+    ctx.audit("asset_get", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  let thumb = msg{"thumb"}.getBool(false)
+  let asset =
+    try:
+      ctx.readAssetFn(path, thumb)
+    except CatchableError as error:
+      ctx.audit("asset_get", false, "read_failed: " & error.msg)
+      return CloudVerbReply(ack: ackError(id, "read_failed"))
+  if asset.error.len > 0:
+    ctx.audit("asset_get", false, asset.error)
+    return CloudVerbReply(ack: ackError(id, asset.error))
   ctx.audit("asset_get", true)
-  CloudVerbReply(ack: ackOk(id), extra: extra)
+  CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, asset))
+
+proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  if ctx.getImageFn.isNil:
+    ctx.audit("image_get", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let image =
+    try:
+      ctx.getImageFn()
+    except CatchableError:
+      AssetReadResult(error: "no_image")
+  if image.error.len > 0:
+    ctx.audit("image_get", false, image.error)
+    return CloudVerbReply(ack: ackError(id, image.error))
+  ctx.audit("image_get", true)
+  CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, image))
 
 proc handleGetLogs(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if not ctx.hasScope("telemetry:logs"):
@@ -733,6 +761,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetsList(ctx, id)
   of "asset_get":
     result = handleAssetGet(ctx, id, msg)
+  of "image_get":
+    result = handleImageGet(ctx, id)
   of "render":
     discard ctx.sendEventFn("render", %*{})
     result = CloudVerbReply(ack: ackOk(id))

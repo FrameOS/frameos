@@ -28,6 +28,7 @@
 #include "fos_assets_sd.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_http.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -768,7 +769,7 @@ static void ws_poll_scene_ack(void)
 
 /* ------------------------------------------------------------- asset verbs */
 
-typedef enum { ASSET_JOB_LIST = 0, ASSET_JOB_GET = 1 } asset_job_kind_t;
+typedef enum { ASSET_JOB_LIST = 0, ASSET_JOB_GET = 1, ASSET_JOB_IMAGE = 2 } asset_job_kind_t;
 
 typedef struct {
     uint8_t kind;
@@ -991,6 +992,75 @@ static void asset_job_run_get(const asset_job_t *job)
     fclose(file);
 }
 
+/* Stream one in-memory payload as asset_chunk frames (image_get). */
+static void asset_stream_buffer(const char *id, const uint8_t *data, size_t total,
+                                const char *content_type)
+{
+    size_t b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8;
+    char *b64 = heap_caps_malloc(b64_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!b64) {
+        asset_chunk_send_error(id, "no_memory");
+        return;
+    }
+    size_t offset = 0;
+    int seq = 0;
+    do {
+        size_t chunk = total - offset;
+        if (chunk > FOS_CLOUD_ASSET_CHUNK_BYTES) chunk = FOS_CLOUD_ASSET_CHUNK_BYTES;
+        size_t b64_len = 0;
+        if (mbedtls_base64_encode((unsigned char *)b64, b64_cap, &b64_len,
+                                  data + offset, chunk) != 0) {
+            asset_chunk_send_error(id, "no_memory");
+            break;
+        }
+        b64[b64_len] = '\0';
+        offset += chunk;
+        bool done = offset >= total;
+        cJSON *msg = cJSON_CreateObject();
+        if (!msg) {
+            asset_chunk_send_error(id, "no_memory");
+            break;
+        }
+        if (id[0]) cJSON_AddStringToObject(msg, "id", id);
+        cJSON_AddStringToObject(msg, "type", "asset_chunk");
+        cJSON_AddNumberToObject(msg, "seq", seq);
+        cJSON_AddStringToObject(msg, "data", b64);
+        cJSON_AddBoolToObject(msg, "done", done);
+        if (seq == 0) {
+            cJSON_AddNumberToObject(msg, "size", (double)total);
+            cJSON_AddNumberToObject(msg, "mtime", (double)(esp_timer_get_time() / 1000000));
+            cJSON_AddStringToObject(msg, "content_type", content_type);
+        }
+        if (!s_ws_client || !s_ws_ready) {
+            cJSON_Delete(msg);
+            break;
+        }
+        ws_send_json(msg);
+        cJSON_Delete(msg);
+        seq++;
+        if (done) break;
+    } while (true);
+    free(b64);
+}
+
+/* image_get: the current render, packed to BMP by the same path the USB
+ * `usb_api image` command uses. Runs on the cloud task; the pack allocates
+ * from PSRAM and is freed before the next job. */
+static void asset_job_run_image(const asset_job_t *job)
+{
+    uint8_t *bmp = NULL;
+    size_t bmp_len = 0;
+    char scene_id[128] = "";
+    if (fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id)) != ESP_OK ||
+        !bmp || bmp_len == 0) {
+        free(bmp);
+        asset_chunk_send_error(job->id, "no_image");
+        return;
+    }
+    asset_stream_buffer(job->id, bmp, bmp_len, "image/bmp");
+    free(bmp);
+}
+
 /* Drain queued asset jobs. Called from the cloud task — file reads over SPI
  * plus multi-frame sends must never run inside the WS event handler. */
 static bool ws_process_asset_jobs(void)
@@ -1002,6 +1072,8 @@ static bool ws_process_asset_jobs(void)
            xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
         if (job.kind == ASSET_JOB_LIST) {
             asset_job_run_list(&job);
+        } else if (job.kind == ASSET_JOB_IMAGE) {
+            asset_job_run_image(&job);
         } else {
             asset_job_run_get(&job);
         }
@@ -1273,6 +1345,8 @@ static void ws_handle_message(const char *data, size_t len)
         ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
     } else if (strcmp(type, "asset_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_GET, root, id);
+    } else if (strcmp(type, "image_get") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
         ws_ack(id, true, NULL);

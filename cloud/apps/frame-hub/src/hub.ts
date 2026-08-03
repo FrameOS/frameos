@@ -34,6 +34,7 @@ import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src
 import {
   frameCommandsNotifyChannel,
   frameForLinkedClient,
+  frameImageAssetPath,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
   maxAssetFileBytes,
@@ -875,19 +876,29 @@ export async function startFrameHub(
     session.assetStreams.delete(commandId);
     // The command row is the authority on what was requested: a device must
     // not be able to poison the cache for a path the provider never asked for.
+    // image_get replies land under a reserved dot-path — devices never list
+    // dotfiles, so it cannot collide with a real asset.
     const [command] = await db
-      .select({ payload: frameCommands.payload })
+      .select({ payload: frameCommands.payload, type: frameCommands.type })
       .from(frameCommands)
       .where(
         and(
           eq(frameCommands.id, commandId),
           eq(frameCommands.frameId, session.frame.id),
-          eq(frameCommands.type, "asset_get"),
+          inArray(frameCommands.type, ["asset_get", "image_get"]),
         ),
       )
       .limit(1);
-    const payload = isRecord(command?.payload) ? command.payload : undefined;
-    const path = typeof payload?.path === "string" ? payload.path : "";
+    if (!command) {
+      return;
+    }
+    const payload = isRecord(command.payload) ? command.payload : undefined;
+    const path =
+      command.type === "image_get"
+        ? frameImageAssetPath
+        : typeof payload?.path === "string"
+          ? payload.path
+          : "";
     if (!path) {
       return;
     }
@@ -895,7 +906,7 @@ export async function startFrameHub(
       content: Buffer.concat(stream.chunks),
       contentType: stream.contentType,
       path,
-      thumb: payload?.thumb === true,
+      thumb: command.type === "asset_get" && payload?.thumb === true,
     });
   }
 

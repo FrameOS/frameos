@@ -51,6 +51,11 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
           contentType: "image/jpeg", mtime: 1700000001)
       else:
         AssetReadResult(error: "not_found"),
+    getImageFn: proc(): AssetReadResult {.gcsafe.} =
+      if recorded.assetData == "no-image":
+        AssetReadResult(error: "no_image")
+      else:
+        AssetReadResult(data: "png-bytes", contentType: "image/png", mtime: 1700000002),
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -403,6 +408,24 @@ suite "cloud hub verb dispatcher":
     check noPath.ack{"error"}.getStr("") == "invalid_path"
     # No readAssetFn call for the missing-path refusal.
     check recorded.assetReads == @[("nope.bin", false)]
+
+  test "image_get streams the current render, no_image before the first one":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "i1", "type": "image_get",
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.extra.len == 1
+    check reply.extra[0]{"type"}.getStr("") == "asset_chunk"
+    check reply.extra[0]{"content_type"}.getStr("") == "image/png"
+    check decode(reply.extra[0]{"data"}.getStr("")) == "png-bytes"
+    let empty = Recorded()
+    empty.assetData = "no-image"
+    let refused = handleCloudVerb(makeContext(empty), %*{
+      "id": "i2", "type": "image_get",
+    })
+    check refused.ack{"error"}.getStr("") == "no_image"
+    check refused.extra.len == 0
 
   test "reboot and restart_runtime use the injected implementations":
     let recorded = Recorded()
