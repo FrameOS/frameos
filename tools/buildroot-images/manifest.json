@@ -12,297 +12,297 @@
         "skip_apt_install": false,
         "source_cache_dir": "/home/runner/work/frameos/frameos/build/buildroot-images/source-cache/buildroot-2025.02.13-bootstrap-6"
       },
-      "created_at": "2026-08-03T09:48:06.405040+00:00",
+      "created_at": "2026-08-03T23:03:12.683895+00:00",
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",
       "frameos_partition_size": "30M",
-      "frameos_version": "2026.8.2",
-      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.8.2/raspberry-pi-zero-2-w-2026.8.2-e21d1ce2fec377a3.img.gz",
+      "frameos_version": "2026.8.4",
+      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.8.4/raspberry-pi-zero-2-w-2026.8.4-de5f600cd5e02db2.img.gz",
       "package_timings": {
         "package_count": 135,
         "top_elapsed": [
           {
-            "build_seconds": 46.609,
-            "configure_seconds": 30.164,
-            "elapsed_seconds": 98.111,
+            "build_seconds": 46.417,
+            "configure_seconds": 30.107,
+            "elapsed_seconds": 97.86,
             "extract_seconds": 20.896,
-            "host_install_seconds": 0.346,
+            "host_install_seconds": 0.343,
             "package": "host-cmake-3.31.9",
             "patch_seconds": 0.096
           },
           {
-            "build_seconds": 30.871,
-            "configure_seconds": 3.648,
-            "elapsed_seconds": 64.632,
-            "extract_seconds": 6.334,
-            "images_install_seconds": 22.499,
+            "build_seconds": 30.847,
+            "configure_seconds": 3.69,
+            "elapsed_seconds": 64.718,
+            "extract_seconds": 6.338,
+            "images_install_seconds": 22.575,
             "package": "linux-custom",
-            "patch_seconds": 1.279,
-            "target_install_seconds": 22.481
+            "patch_seconds": 1.267,
+            "target_install_seconds": 22.557
           },
           {
-            "build_seconds": 0.331,
-            "configure_seconds": 21.92,
-            "elapsed_seconds": 22.634,
+            "build_seconds": 0.334,
+            "configure_seconds": 21.978,
+            "elapsed_seconds": 22.697,
             "extract_seconds": 0.132,
-            "host_install_seconds": 0.223,
+            "host_install_seconds": 0.225,
             "package": "host-m4-1.4.21",
             "patch_seconds": 0.028
           },
           {
-            "build_seconds": 3.492,
-            "configure_seconds": 16.081,
-            "elapsed_seconds": 22.418,
-            "extract_seconds": 1.001,
-            "host_install_seconds": 1.756,
+            "build_seconds": 3.479,
+            "configure_seconds": 15.98,
+            "elapsed_seconds": 22.289,
+            "extract_seconds": 1.0,
+            "host_install_seconds": 1.74,
             "package": "host-python3-3.12.12",
-            "patch_seconds": 0.089
+            "patch_seconds": 0.09
           },
           {
-            "build_seconds": 0.887,
-            "configure_seconds": 18.534,
-            "elapsed_seconds": 20.402,
+            "build_seconds": 0.885,
+            "configure_seconds": 18.485,
+            "elapsed_seconds": 20.353,
             "extract_seconds": 0.343,
             "package": "coreutils-9.5",
             "patch_seconds": 0.036,
-            "target_install_seconds": 0.602
+            "target_install_seconds": 0.604
           },
           {
-            "build_seconds": 1.664,
-            "configure_seconds": 18.165,
-            "elapsed_seconds": 20.173,
+            "build_seconds": 1.661,
+            "configure_seconds": 18.174,
+            "elapsed_seconds": 20.179,
             "extract_seconds": 0.122,
             "host_install_seconds": 0.188,
             "package": "host-tar-1.35",
             "patch_seconds": 0.034
           },
           {
-            "build_seconds": 2.392,
-            "configure_seconds": 15.797,
-            "elapsed_seconds": 19.43,
-            "extract_seconds": 0.453,
+            "build_seconds": 2.355,
+            "configure_seconds": 15.884,
+            "elapsed_seconds": 19.483,
+            "extract_seconds": 0.451,
             "package": "gnutls-3.8.12",
             "patch_seconds": 0.05,
-            "staging_install_seconds": 0.4,
-            "target_install_seconds": 0.738
+            "staging_install_seconds": 0.405,
+            "target_install_seconds": 0.743
           },
           {
-            "build_seconds": 2.386,
-            "configure_seconds": 15.263,
-            "elapsed_seconds": 18.675,
-            "extract_seconds": 0.496,
+            "build_seconds": 2.492,
+            "configure_seconds": 15.367,
+            "elapsed_seconds": 18.88,
+            "extract_seconds": 0.498,
             "package": "util-linux-2.40.2",
             "patch_seconds": 0.049,
-            "staging_install_seconds": 0.261,
-            "target_install_seconds": 0.481
+            "staging_install_seconds": 0.262,
+            "target_install_seconds": 0.474
           },
           {
-            "build_seconds": 0.308,
-            "configure_seconds": 16.185,
-            "elapsed_seconds": 16.847,
+            "build_seconds": 0.313,
+            "configure_seconds": 16.356,
+            "elapsed_seconds": 17.025,
             "extract_seconds": 0.138,
             "package": "tar-1.35",
             "patch_seconds": 0.032,
-            "target_install_seconds": 0.184
+            "target_install_seconds": 0.186
           },
           {
-            "build_seconds": 2.331,
-            "configure_seconds": 12.761,
-            "elapsed_seconds": 16.211,
-            "extract_seconds": 0.501,
-            "host_install_seconds": 0.569,
+            "build_seconds": 6.864,
+            "configure_seconds": 8.777,
+            "elapsed_seconds": 16.339,
+            "extract_seconds": 0.199,
+            "package": "libunistring-1.3",
+            "patch_seconds": 0.035,
+            "staging_install_seconds": 0.257,
+            "target_install_seconds": 0.464
+          },
+          {
+            "build_seconds": 2.494,
+            "configure_seconds": 12.701,
+            "elapsed_seconds": 16.332,
+            "extract_seconds": 0.499,
+            "host_install_seconds": 0.589,
             "package": "host-util-linux-2.40.2",
             "patch_seconds": 0.049
           },
           {
-            "build_seconds": 14.122,
-            "configure_seconds": 1.94,
-            "elapsed_seconds": 16.186,
+            "build_seconds": 13.961,
+            "configure_seconds": 1.927,
+            "elapsed_seconds": 16.014,
             "extract_seconds": 0.041,
-            "host_install_seconds": 0.057,
+            "host_install_seconds": 0.059,
             "package": "host-ccache-4.10.2",
             "patch_seconds": 0.026
           },
           {
-            "build_seconds": 6.665,
-            "configure_seconds": 8.635,
-            "elapsed_seconds": 15.997,
-            "extract_seconds": 0.199,
-            "package": "libunistring-1.3",
-            "patch_seconds": 0.034,
-            "staging_install_seconds": 0.258,
-            "target_install_seconds": 0.464
-          },
-          {
-            "build_seconds": 2.495,
-            "configure_seconds": 12.839,
-            "elapsed_seconds": 15.847,
+            "build_seconds": 2.52,
+            "configure_seconds": 12.867,
+            "elapsed_seconds": 15.904,
             "extract_seconds": 0.13,
             "package": "gmp-6.3.0",
-            "patch_seconds": 0.037,
-            "staging_install_seconds": 0.202,
-            "target_install_seconds": 0.346
+            "patch_seconds": 0.038,
+            "staging_install_seconds": 0.205,
+            "target_install_seconds": 0.349
           },
           {
             "build_seconds": 0.016,
-            "configure_seconds": 0.126,
-            "elapsed_seconds": 15.719,
-            "extract_seconds": 13.559,
-            "images_install_seconds": 1.991,
+            "configure_seconds": 0.127,
+            "elapsed_seconds": 15.816,
+            "extract_seconds": 13.617,
+            "images_install_seconds": 2.029,
             "package": "linux-firmware-20250211",
             "patch_seconds": 0.027,
-            "target_install_seconds": 0.998
+            "target_install_seconds": 1.023
           },
           {
-            "build_seconds": 1.067,
-            "configure_seconds": 13.601,
-            "elapsed_seconds": 15.572,
-            "extract_seconds": 0.182,
-            "host_install_seconds": 0.695,
+            "build_seconds": 1.062,
+            "configure_seconds": 13.572,
+            "elapsed_seconds": 15.553,
+            "extract_seconds": 0.18,
+            "host_install_seconds": 0.711,
             "package": "host-bison-3.8.2",
-            "patch_seconds": 0.027
+            "patch_seconds": 0.028
           },
           {
-            "build_seconds": 3.226,
-            "configure_seconds": 11.064,
-            "elapsed_seconds": 14.67,
-            "extract_seconds": 0.211,
+            "build_seconds": 3.218,
+            "configure_seconds": 11.058,
+            "elapsed_seconds": 14.653,
+            "extract_seconds": 0.209,
             "package": "bash-5.2.37",
-            "patch_seconds": 0.035,
+            "patch_seconds": 0.034,
             "target_install_seconds": 0.134
           },
           {
-            "build_seconds": 1.024,
-            "configure_seconds": 11.342,
-            "elapsed_seconds": 13.709,
+            "build_seconds": 1.014,
+            "configure_seconds": 11.402,
+            "elapsed_seconds": 13.767,
             "extract_seconds": 0.433,
             "package": "systemd-256.17",
-            "patch_seconds": 0.034,
-            "staging_install_seconds": 0.455,
-            "target_install_seconds": 0.876
+            "patch_seconds": 0.033,
+            "staging_install_seconds": 0.46,
+            "target_install_seconds": 0.885
           },
           {
-            "build_seconds": 0.592,
-            "configure_seconds": 12.493,
-            "elapsed_seconds": 13.692,
+            "build_seconds": 0.59,
+            "configure_seconds": 12.412,
+            "elapsed_seconds": 13.611,
             "extract_seconds": 0.144,
             "package": "findutils-4.10.0",
-            "patch_seconds": 0.029,
-            "target_install_seconds": 0.434
+            "patch_seconds": 0.028,
+            "target_install_seconds": 0.437
           },
           {
-            "build_seconds": 0.992,
-            "configure_seconds": 11.635,
-            "elapsed_seconds": 13.305,
-            "extract_seconds": 0.317,
+            "build_seconds": 0.988,
+            "configure_seconds": 11.529,
+            "elapsed_seconds": 13.201,
+            "extract_seconds": 0.316,
             "package": "imagemagick-7.1.2-15",
-            "patch_seconds": 0.035,
-            "staging_install_seconds": 0.204,
-            "target_install_seconds": 0.326
+            "patch_seconds": 0.036,
+            "staging_install_seconds": 0.209,
+            "target_install_seconds": 0.332
           },
           {
-            "build_seconds": 3.507,
-            "configure_seconds": 6.36,
-            "elapsed_seconds": 12.351,
-            "extract_seconds": 0.332,
+            "build_seconds": 3.555,
+            "configure_seconds": 6.461,
+            "elapsed_seconds": 12.549,
+            "extract_seconds": 0.312,
             "package": "busybox-1.37.0",
-            "patch_seconds": 0.063,
-            "target_install_seconds": 2.089
+            "patch_seconds": 0.067,
+            "target_install_seconds": 2.154
           },
           {
-            "build_seconds": 1.707,
-            "configure_seconds": 9.082,
-            "elapsed_seconds": 12.012,
-            "extract_seconds": 0.608,
-            "package": "ffmpeg-6.1.3",
-            "patch_seconds": 0.064,
-            "staging_install_seconds": 0.311,
-            "target_install_seconds": 0.551
-          },
-          {
-            "build_seconds": 2.005,
-            "configure_seconds": 9.121,
-            "elapsed_seconds": 11.935,
+            "build_seconds": 2.082,
+            "configure_seconds": 9.181,
+            "elapsed_seconds": 12.114,
             "extract_seconds": 0.139,
             "package": "sudo-1.9.17p1",
-            "patch_seconds": 0.035,
-            "target_install_seconds": 0.635
+            "patch_seconds": 0.034,
+            "target_install_seconds": 0.678
           },
           {
-            "build_seconds": 0.745,
-            "configure_seconds": 10.185,
-            "elapsed_seconds": 11.865,
-            "extract_seconds": 0.321,
+            "build_seconds": 1.709,
+            "configure_seconds": 9.149,
+            "elapsed_seconds": 12.067,
+            "extract_seconds": 0.614,
+            "package": "ffmpeg-6.1.3",
+            "patch_seconds": 0.065,
+            "staging_install_seconds": 0.297,
+            "target_install_seconds": 0.53
+          },
+          {
+            "build_seconds": 0.761,
+            "configure_seconds": 10.162,
+            "elapsed_seconds": 11.874,
+            "extract_seconds": 0.322,
             "package": "libglib2-2.82.5",
             "patch_seconds": 0.027,
-            "staging_install_seconds": 0.312,
-            "target_install_seconds": 0.587
+            "staging_install_seconds": 0.32,
+            "target_install_seconds": 0.602
           },
           {
-            "build_seconds": 0.962,
-            "configure_seconds": 8.827,
-            "elapsed_seconds": 11.478,
-            "extract_seconds": 0.433,
-            "host_install_seconds": 1.224,
+            "build_seconds": 0.944,
+            "configure_seconds": 8.848,
+            "elapsed_seconds": 11.554,
+            "extract_seconds": 0.435,
+            "host_install_seconds": 1.294,
             "package": "host-systemd-256.17",
-            "patch_seconds": 0.032
+            "patch_seconds": 0.033
           },
           {
-            "build_seconds": 1.066,
-            "configure_seconds": 8.849,
-            "elapsed_seconds": 11.011,
-            "extract_seconds": 0.317,
-            "host_install_seconds": 0.744,
+            "build_seconds": 1.109,
+            "configure_seconds": 8.935,
+            "elapsed_seconds": 11.158,
+            "extract_seconds": 0.316,
+            "host_install_seconds": 0.763,
             "package": "host-imagemagick-7.1.2-15",
             "patch_seconds": 0.035
           },
           {
-            "build_seconds": 2.155,
-            "configure_seconds": 5.567,
-            "elapsed_seconds": 10.451,
-            "extract_seconds": 0.864,
-            "host_install_seconds": 1.824,
+            "build_seconds": 2.203,
+            "configure_seconds": 5.461,
+            "elapsed_seconds": 10.424,
+            "extract_seconds": 0.869,
+            "host_install_seconds": 1.847,
             "package": "host-libopenssl-3.5.6",
-            "patch_seconds": 0.041
+            "patch_seconds": 0.044
           },
           {
-            "build_seconds": 2.032,
-            "configure_seconds": 5.254,
+            "build_seconds": 2.039,
+            "configure_seconds": 5.233,
             "elapsed_seconds": 10.319,
-            "extract_seconds": 0.863,
+            "extract_seconds": 0.866,
             "package": "libopenssl-3.5.6",
-            "patch_seconds": 0.04,
-            "staging_install_seconds": 1.186,
-            "target_install_seconds": 2.13
+            "patch_seconds": 0.039,
+            "staging_install_seconds": 1.196,
+            "target_install_seconds": 2.142
           },
           {
-            "build_seconds": 0.732,
-            "configure_seconds": 8.408,
-            "elapsed_seconds": 10.062,
+            "build_seconds": 0.681,
+            "configure_seconds": 8.341,
+            "elapsed_seconds": 9.942,
             "extract_seconds": 0.498,
             "package": "util-linux-libs-2.40.2",
             "patch_seconds": 0.043,
-            "staging_install_seconds": 0.213,
-            "target_install_seconds": 0.381
+            "staging_install_seconds": 0.211,
+            "target_install_seconds": 0.379
           },
           {
-            "build_seconds": 7.31,
-            "configure_seconds": 2.102,
-            "elapsed_seconds": 9.723,
+            "build_seconds": 7.298,
+            "configure_seconds": 2.119,
+            "elapsed_seconds": 9.728,
             "extract_seconds": 0.064,
             "package": "nettle-3.10.1",
-            "patch_seconds": 0.029,
-            "staging_install_seconds": 0.137,
-            "target_install_seconds": 0.218
+            "patch_seconds": 0.028,
+            "staging_install_seconds": 0.139,
+            "target_install_seconds": 0.219
           },
           {
-            "build_seconds": 0.759,
-            "configure_seconds": 7.677,
-            "elapsed_seconds": 9.621,
-            "extract_seconds": 0.321,
-            "host_install_seconds": 0.838,
+            "build_seconds": 0.757,
+            "configure_seconds": 7.57,
+            "elapsed_seconds": 9.522,
+            "extract_seconds": 0.323,
+            "host_install_seconds": 0.845,
             "package": "host-libglib2-2.82.5",
-            "patch_seconds": 0.026
+            "patch_seconds": 0.027
           }
         ]
       },
@@ -327,11 +327,11 @@
       "phase_timings": [
         {
           "phase": "apt_install",
-          "seconds": 14.367
+          "seconds": 17.334
         },
         {
           "phase": "prepare_buildroot_source",
-          "seconds": 0.324
+          "seconds": 0.326
         },
         {
           "phase": "patch_buildroot_source",
@@ -343,29 +343,29 @@
         },
         {
           "phase": "configure_buildroot",
-          "seconds": 0.9
+          "seconds": 0.893
         },
         {
           "phase": "verify_buildroot_config",
-          "seconds": 0.01
+          "seconds": 0.009
         },
         {
           "phase": "buildroot_make",
-          "seconds": 883.237
+          "seconds": 880.373
         },
         {
           "phase": "summarize_package_timings",
-          "seconds": 0.028
+          "seconds": 0.027
         },
         {
           "phase": "copy_artifact",
-          "seconds": 0.367
+          "seconds": 0.356
         }
       ],
       "platform": "raspberry-pi-zero-2-w",
-      "sha256": "e21d1ce2fec377a3e4ea55ce5c4653ff09336b269c8d0a785602e8593a5311a5",
+      "sha256": "de5f600cd5e02db2ea8de106a1303a6262d741f217ea52443fbba3399e359693",
       "size": 288027136,
-      "updated_at": "2026-08-03T09:48:07.492237+00:00"
+      "updated_at": "2026-08-03T23:03:13.716499+00:00"
     },
     {
       "assets_partition_size": "30M",
