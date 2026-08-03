@@ -13,11 +13,10 @@ import {
 import { ArrowLeftIcon, EllipsisHorizontalIcon, TrashIcon, ViewColumnsIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
-import { entityImagesModel } from '../../models/entityImagesModel'
 import type { FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
-import { apiFetch } from '../../utils/apiFetch'
+import { assignSceneImages } from '../../utils/sceneImages'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
 import { visiblePublicStateFields } from '../../utils/showIf'
 import {
@@ -292,25 +291,14 @@ function SceneSourceStrip({
 async function saveSplitScreenThumbnail(
   frame: FrameType,
   layout: SplitScreenSceneLayout,
-  sceneId: string,
-  updateEntityImage: (entity: string | null, subentity: string, force?: boolean) => void
+  sceneId: string
 ): Promise<void> {
+  // Rendered in the browser, so these bytes really are ours to upload.
   const thumbnail = await buildSplitScreenThumbnail(frame, layout).catch(() => null)
   if (!thumbnail) {
     return
   }
-
-  try {
-    const response = await apiFetch(`/api/frames/${frame.id}/scene_images/${sceneId}`, {
-      method: 'POST',
-      body: thumbnail,
-    })
-    if (response.ok) {
-      updateEntityImage(`frames/${frame.id}`, `scene_images/${sceneId}`)
-    }
-  } catch (error) {
-    console.error('Failed to save generated split scene thumbnail', error)
-  }
+  await assignSceneImages(frame.id, [sceneId], { blob: thumbnail }, { label: 'thumbnail' })
 }
 
 function frameAxisPixels(frame: FrameType): { width: number; height: number } | null {
@@ -922,7 +910,6 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     startResize,
   } = useActions(logic)
   const { updateScene } = useActions(frameKea)
-  const { updateEntityImage } = useActions(entityImagesModel)
   const { openSceneControl } = useActions(workspaceLogic)
   const previewRef = useRef<HTMLDivElement>(null)
   const scenes = sceneById(frame)
@@ -1009,7 +996,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     updateScene(scene.id, scene)
     await frameKea.asyncActions.submitFrameForm()
     openSceneControl(frame.id, scene.id)
-    await saveSplitScreenThumbnail(frame, saveLayout, scene.id, updateEntityImage)
+    await saveSplitScreenThumbnail(frame, saveLayout, scene.id)
     closeGenerator()
   }
 

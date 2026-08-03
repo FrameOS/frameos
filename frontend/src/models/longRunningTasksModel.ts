@@ -9,6 +9,7 @@ export type LongRunningTaskKind =
   | 'preview'
   | 'activate'
   | 'save'
+  | 'sceneImage'
   | 'upload'
   | 'remoteDeploy'
   | 'remoteRestart'

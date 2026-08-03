@@ -27,8 +27,8 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
-import { entityImagesModel } from '../../models/entityImagesModel'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
+import { assignSceneImages, reportSceneImageFailure, type SceneImageSource } from '../../utils/sceneImages'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
@@ -1030,36 +1030,56 @@ function buildUndeployedSummaryItems(
   return items
 }
 
-async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
-  if (template.id) {
-    return await projectApiPath(`/api/templates/${template.id}/image`)
+const SYSTEM_TEMPLATE_IMAGE_PATH = /^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/
+const LOCAL_TEMPLATE_IMAGE_PATH = /^\/api\/(?:projects\/\d+\/)?templates\/([^/]+)\/image$/
+
+/** Where the backend should copy this template's cover image from.
+ *
+ * The bytes must not travel through the browser unless we already hold them:
+ * repository covers live on third-party origins (the FrameOS Cloud store
+ * serves them from scenes.frameos.net with no CORS header), so `fetch()`ing
+ * them to re-upload is blocked and every store install silently ended up with
+ * "no snapshot". Same-origin proxy paths we cannot name to the backend (the
+ * cloud drive proxy) still go through the blob path, which works because they
+ * are same-origin.
+ */
+async function templateImageSource(template: Partial<TemplateType>): Promise<SceneImageSource | null> {
+  if (template.image instanceof Blob) {
+    return { blob: template.image }
   }
 
-  if (typeof template.image === 'string') {
-    const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
-    if (match) {
-      return `/api/${match[1]}/image`
+  // Deliberately keyed off `image`, never off `template.id`: repository
+  // templates carry an id too ("bird-field-journal", a template folder name),
+  // and treating that as a locally saved template's id resolves to a template
+  // that does not exist here.
+  if (typeof template.image === 'string' && template.image) {
+    if (/^https?:\/\//i.test(template.image)) {
+      return { url: template.image }
     }
-    return projectApiPathFromCache(template.image)
+    const systemMatch = template.image.match(SYSTEM_TEMPLATE_IMAGE_PATH)
+    if (systemMatch) {
+      return { url: `/api/${systemMatch[1]}/image` }
+    }
+    const localMatch = template.image.match(LOCAL_TEMPLATE_IMAGE_PATH)
+    if (localMatch) {
+      return { templateId: localMatch[1] }
+    }
+
+    // Same-origin, but not a shape the backend can resolve on its own (e.g.
+    // /api/cloud/store/drive/image/{sceneId}, which the backend proxies with
+    // the cloud link token): fetching it here is safe, no CORS involved.
+    const blob = await fetchSameOriginImageBlob(projectApiPathFromCache(template.image))
+    return blob ? { blob } : null
   }
 
   return null
 }
 
-async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<Blob | null> {
-  if (template.image instanceof Blob) {
-    return template.image
-  }
-
-  const imageUrl = await resolveTemplateImageUrl(template)
-  if (!imageUrl) {
-    return null
-  }
-
+async function fetchSameOriginImageBlob(imageUrl: string): Promise<Blob | null> {
   const basePath = getBasePath()
   const scopedImageUrl = imageUrl.startsWith('/api/') ? await projectApiPath(imageUrl) : imageUrl
   const resolvedUrl = scopedImageUrl.startsWith('/api/') && basePath ? `${basePath}${scopedImageUrl}` : scopedImageUrl
-  const response = await fetch(resolvedUrl)
+  const response = await fetch(resolvedUrl, { credentials: 'include' })
   if (!response.ok) {
     return null
   }
@@ -1097,31 +1117,25 @@ async function saveTemplateSceneImages(
     return
   }
 
-  try {
-    const imageBlob = await fetchTemplateImageBlob(template)
-    if (!imageBlob) {
-      return
-    }
-
-    const targetScenes = getScenesWithoutParents(newScenes)
-    if (!targetScenes.length) {
-      return
-    }
-
-    await Promise.all(
-      targetScenes.map((scene) =>
-        apiFetch(`/api/frames/${frameId}/scene_images/${scene.id}`, {
-          method: 'POST',
-          body: imageBlob,
-        })
-      )
-    )
-    targetScenes.forEach((scene) =>
-      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${scene.id}`)
-    )
-  } catch (error) {
-    console.error('Failed to save template image for scenes', error)
+  const targetScenes = getScenesWithoutParents(newScenes)
+  if (!targetScenes.length) {
+    return
   }
+
+  let source: SceneImageSource | null = null
+  try {
+    source = await templateImageSource(template)
+  } catch (error) {
+    reportSceneImageFailure(frameId, targetScenes[0].id, 'cover image', error)
+    return
+  }
+
+  await assignSceneImages(
+    frameId,
+    targetScenes.map((scene) => scene.id),
+    source,
+    { label: 'cover image' }
+  )
 }
 
 function getScenesWithoutParents(scenes: FrameScene[]): FrameScene[] {

@@ -14,6 +14,7 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
+import { assignSceneImages } from '../../../../utils/sceneImages'
 import { socketLogic } from '../../../socketLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
@@ -817,14 +818,27 @@ export const scenesLogic = kea<scenesLogicType>([
         }),
       })
     },
-    duplicateScene: ({ sceneId }) => {
+    duplicateScene: async ({ sceneId }) => {
       const scene = values.scenes.find((s) => s.id === sceneId)
       if (!scene) {
         return
       }
+      const newSceneId = uuidv4()
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: [...values.scenes, { ...scene, default: false, id: uuidv4() }],
+        scenes: [...values.scenes, { ...scene, default: false, id: newSceneId }],
       })
+      // The copy looks exactly like the original until it is edited, so it
+      // should not sit at "no snapshot" while its twin shows a picture. The
+      // backend copies the stored bytes; nothing goes over the network.
+      await assignSceneImages(
+        props.frameId,
+        [newSceneId],
+        { sourceSceneId: sceneId },
+        {
+          label: 'snapshot',
+          ignoreMissingSource: true,
+        }
+      )
     },
     renameScene: ({ sceneId }) => {
       const scene = values.scenes.find((s) => s.id === sceneId)
