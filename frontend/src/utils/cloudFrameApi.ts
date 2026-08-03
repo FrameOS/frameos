@@ -1,4 +1,4 @@
-import type { FrameType } from '../types'
+import type { FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { cloudFrameSettingKeys, cloudFrameSettingsPayload, type CloudFrameSettingKey } from './cloudFrameSettings'
@@ -66,6 +66,84 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
   })
   await assertOk(response, 'Failed to save the frame settings')
   return true
+}
+
+// ---------------------------------------------------------------------------
+// Cloud deploy: the ad-hoc scene push.
+//
+// The cloud has no POST /api/frames/{id}/deploy — its deploy primitive for
+// the workspace's edited (frameForm) scenes is the event shim
+// POST /api/frames/{id}/event/uploadScenes, which turns {scenes, sceneId?,
+// state?} into a checksummed, durable set_scenes command
+// (cloud/apps/auth-web/app/api/frames/[frameId]/event/[eventName]/route.ts).
+// A push deliberately does NOT touch store-scene assignments: the workspace
+// showing "out of sync" afterwards is the truth about an ad-hoc scene set.
+
+/** Mirrors the shim's maxScenesPerUpload / maxScenesPayloadBytes limits. */
+export const cloudSceneUploadLimit = 20
+const cloudSceneUploadPayloadLimitMb = 3
+
+const uploadedScenePrefix = 'uploaded/'
+
+/**
+ * Which scene a deploy push should activate: the frame's currently active
+ * scene, so deploying updated content never yanks the display to another
+ * scene. The runtime reports ad-hoc scenes as "uploaded/<id>" — strip that.
+ * Activating an id that is not in the pushed set would strand the frame, so
+ * fall back to "let the runtime pick" (payload sceneId or first) instead.
+ */
+export function cloudDeployActiveSceneId(
+  activeSceneId: string | null | undefined,
+  scenes: readonly { id?: string }[]
+): string | undefined {
+  if (!activeSceneId) {
+    return undefined
+  }
+  const sceneId = activeSceneId.startsWith(uploadedScenePrefix)
+    ? activeSceneId.slice(uploadedScenePrefix.length)
+    : activeSceneId
+  return sceneId && scenes.some((scene) => scene.id === sceneId) ? sceneId : undefined
+}
+
+/** The shim's 4xx error codes, translated for the deploy task toast. */
+export function cloudSceneDeployErrorMessage(code: string | null | undefined, status: number): string {
+  switch (code) {
+    case 'scenes_payload_too_large':
+      return `These scenes are too large to push to a cloud frame (${cloudSceneUploadPayloadLimitMb} MB limit)`
+    case 'invalid_scenes':
+      return `A cloud deploy pushes between 1 and ${cloudSceneUploadLimit} scenes`
+    case 'frame_not_active':
+      return 'This frame is still pending — confirm it on its dashboard before deploying to it'
+    default:
+      return code ? `Failed to deploy the scenes (${code})` : `Failed to deploy the scenes (HTTP ${status})`
+  }
+}
+
+/**
+ * Push the workspace's current scene list to a cloud-managed frame. This IS
+ * the cloud's deploy: durable and checksummed, applied when the device syncs
+ * (battery frames spend most of their life asleep). Pass `sceneId` to keep or
+ * set the active scene; without it the runtime activates the first scene.
+ * Throws with a toast-ready message on the shim's size/count/state 4xxs.
+ */
+export async function deployCloudFrameScenes(
+  frameId: FrameId,
+  scenes: readonly Partial<FrameScene>[],
+  options: { sceneId?: string; state?: Record<string, any> } = {}
+): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/event/uploadScenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scenes,
+      ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+      ...(options.state ? { state: options.state } : {}),
+    }),
+  })
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(cloudSceneDeployErrorMessage(detail.error, response.status))
+  }
 }
 
 /**

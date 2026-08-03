@@ -2286,6 +2286,36 @@ export const frameLogic = kea<frameLogicType>([
       )
     }
 
+    // Cloud Save & Deploy. The cloud's "save" is the declarative settings
+    // push (the same call saveFrameForm makes) — but a form whose only
+    // pending changes are scenes maps onto no settings at all, which
+    // saveFrameForm treats as an error on a plain Save. Here it is fine: the
+    // scenes ARE the deploy, pushed by framesModel.deployFrame through the
+    // uploadScenes shim (set_scenes). So push what maps, ignore "nothing
+    // mapped", then hand over to the cloud deploy path.
+    const cloudSaveAndDeploy = async (): Promise<void> => {
+      try {
+        await pushCloudFrameSettings(props.frameId, normalizeFrameForSubmit(values.frameForm))
+        framesModel.actions.loadFrame(props.frameId)
+      } catch (error) {
+        // Same surfacing as submitFrameFormFailure: a silent failure looks
+        // like the click did nothing.
+        const message = error instanceof Error ? error.message : 'Failed to save the frame'
+        const detail = message.includes('frame_not_active')
+          ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
+          : message
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: 'Saving frame',
+          detail: null,
+        })
+        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
+        throw error
+      }
+      framesModel.actions.deployFrame(props.frameId, false)
+    }
+
     return {
       saveFrame: () => actions.submitFrameForm(),
       submitFrameFormSuccess: () => {
@@ -2313,6 +2343,10 @@ export const frameLogic = kea<frameLogicType>([
         longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
       },
       saveAndDeployFrame: async () => {
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
+        }
         const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
         if (frameForm !== values.frameForm) {
           actions.setFrameFormValues({ agent: frameForm.agent })
@@ -2327,6 +2361,10 @@ export const frameLogic = kea<frameLogicType>([
         )
       },
       saveAndFastDeployFrame: async () => {
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
+        }
         const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
         if (frameForm !== values.frameForm) {
           actions.setFrameFormValues({ agent: frameForm.agent })
@@ -2338,6 +2376,10 @@ export const frameLogic = kea<frameLogicType>([
         framesModel.actions.deployFrame(props.frameId, true)
       },
       saveAndFullDeployFrame: async () => {
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
+        }
         const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
         if (frameForm !== values.frameForm) {
           actions.setFrameFormValues({ agent: frameForm.agent })

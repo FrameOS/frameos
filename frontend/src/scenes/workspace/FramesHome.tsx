@@ -39,6 +39,7 @@ import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
 import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
+import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
@@ -834,7 +835,7 @@ function SceneControlPanelContent({
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
   const frameLogicProps = { frameId: sceneControlSelection.frameId }
-  const { frameForm, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
+  const { frameForm } = useValues(frameLogic(frameLogicProps))
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
   const { undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
@@ -942,12 +943,17 @@ function SceneControlPanelContent({
                   </div>
                 ) : null}
               </div>
-              {saved ? (
+              {saved || sceneIsEditable ? (
+                // `saved || sceneIsEditable`, not `saved` alone: a scene that
+                // only exists in the frame form (a fresh blank scene — and on
+                // the cloud EVERY edited scene, since the cloud's save is a
+                // settings push that never persists scene graphs) would
+                // otherwise have no way into the editor at all.
                 <div className="mb-4 flex flex-wrap gap-2">
                   <WorkspaceSceneDropDown
                     frame={frame}
                     scene={scene}
-                    scenes={frame.scenes ?? [scene]}
+                    scenes={editingFrame.scenes ?? frame.scenes ?? [scene]}
                     horizontal
                     buttonColor="none"
                     className="frameos-secondary-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -973,8 +979,6 @@ function SceneControlPanelContent({
               ) : null}
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
-                frameUndeployedChanges={undeployedChanges}
-                frameUnsavedChanges={unsavedChanges}
                 sceneIsUndeployed={sceneIsUndeployed}
                 sceneIsUnsaved={sceneIsUnsaved}
                 onDeploy={saveAndDeployFrame}
@@ -1005,35 +1009,29 @@ function SceneControlPanelModeTitle(): JSX.Element {
 }
 
 function SceneControlChangeNotice({
-  frameUndeployedChanges,
-  frameUnsavedChanges,
   sceneIsUndeployed,
   sceneIsUnsaved,
   onDeploy,
   onSave,
 }: {
-  frameUndeployedChanges: boolean
-  frameUnsavedChanges: boolean
   sceneIsUndeployed: boolean
   sceneIsUnsaved: boolean
   onDeploy: () => void
   onSave: () => void
 }): JSX.Element | null {
-  if (!sceneIsUnsaved && !sceneIsUndeployed) {
+  // Copy and buttons per control plane live in sceneControlNotice.ts (pure,
+  // pinned by the cloud test suite): the cloud has no scene "save", only the
+  // set_scenes deploy push, so it shows one "Deploy to frame" action.
+  const content = sceneControlNoticeContent({ mode: workspaceMode(), sceneIsUnsaved, sceneIsUndeployed })
+  if (!content) {
     return null
   }
 
-  const statusText = sceneIsUnsaved
-    ? sceneIsUndeployed
-      ? 'This scene has unsaved changes that are not deployed to the frame.'
-      : 'This scene has unsaved changes.'
-    : 'This scene is saved but not deployed to the frame.'
-
   return (
     <div className="frameos-warning-button mb-4 rounded-xl border px-3 py-3 shadow-sm">
-      <div className="text-sm font-semibold">{statusText}</div>
+      <div className="text-sm font-semibold">{content.statusText}</div>
       <div className="mt-2 flex flex-wrap gap-2">
-        {sceneIsUnsaved ? (
+        {content.showSaveButton ? (
           <button
             type="button"
             onClick={onSave}
@@ -1042,16 +1040,14 @@ function SceneControlChangeNotice({
             Save changes
           </button>
         ) : null}
-        {sceneIsUnsaved || sceneIsUndeployed || frameUnsavedChanges || frameUndeployedChanges ? (
-          <button
-            type="button"
-            onClick={onDeploy}
-            className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <RocketLaunchIcon className="h-4 w-4" />
-            {sceneIsUnsaved ? 'Save & deploy' : 'Deploy changes'}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={onDeploy}
+          className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <RocketLaunchIcon className="h-4 w-4" />
+          {content.deployLabel}
+        </button>
       </div>
     </div>
   )

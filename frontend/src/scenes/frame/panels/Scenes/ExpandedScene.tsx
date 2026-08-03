@@ -12,6 +12,8 @@ import { FrameScene, FrameId } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
@@ -103,6 +105,42 @@ export function ExpandedScene({
     }
 
     if (sceneHasChanges) {
+      if (isCloudMode()) {
+        // The cloud has no /set_next_scene and no scene "save": deploy +
+        // activate is one durable set_scenes push through the uploadScenes
+        // shim, with this scene as the payload's active scene_id.
+        longRunningTasksModel.actions.startTask({
+          frameId,
+          kind: 'deploy',
+          sceneId,
+          title: 'Deploying scene changes',
+          detail: scene?.name || sceneId,
+        })
+        try {
+          const { frame, frameForm } = frameLogic({ frameId }).values
+          const scenes = frameForm?.scenes ?? frame?.scenes ?? []
+          if (!scenes.length) {
+            throw new Error('This frame has no scenes to deploy')
+          }
+          await deployCloudFrameScenes(frameId, scenes, { sceneId, state: buildNextState() })
+          longRunningTasksModel.actions.finishTask({
+            frameId,
+            kind: 'deploy',
+            sceneId,
+            status: 'success',
+            detail: 'Deployed — the frame activates the scene as soon as it syncs',
+          })
+        } catch (error) {
+          longRunningTasksModel.actions.taskFailed({
+            frameId,
+            kind: 'deploy',
+            sceneId,
+            detail: error instanceof Error ? error.message : 'Failed to deploy scene changes',
+          })
+          throw error
+        }
+        return
+      }
       longRunningTasksModel.actions.startTask({
         frameId,
         kind: 'deploy',

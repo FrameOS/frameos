@@ -4,11 +4,17 @@ import { FrameScene, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
-import { sanitizeScene } from '../scenes/frame/frameLogic'
+import { frameLogic, sanitizeScene } from '../scenes/frame/frameLogic'
 import { compareFrames } from '../utils/frameSort'
 import { apiFetch } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
-import { sendCloudFrameCommand, pushCloudFrameSettings, listCloudFrameScenes } from '../utils/cloudFrameApi'
+import {
+  sendCloudFrameCommand,
+  pushCloudFrameSettings,
+  listCloudFrameScenes,
+  deployCloudFrameScenes,
+  cloudDeployActiveSceneId,
+} from '../utils/cloudFrameApi'
 import {
   activeSceneFromLastState,
   cloudSceneCacheKey,
@@ -856,6 +862,55 @@ export const framesModel = kea<framesModelType>([
       }
     },
     deployFrame: async ({ id, fastDeploy }) => {
+      // Cloud: there is no /deploy or /fast_deploy (both 404). The cloud's
+      // deploy primitive is the uploadScenes event shim — one checksummed,
+      // durable set_scenes push of the workspace's CURRENT scene list
+      // (cloud/docs/cloud-workspace-gaps.md item 3). Fast vs full deploy is a
+      // compile-time distinction that does not exist for interpreted-only
+      // cloud frames, so both flags take the same path.
+      if (isCloudMode()) {
+        const taskId = deployTaskId(id, false)
+        longRunningTasksModel.actions.startTask({
+          id: taskId,
+          frameId: id,
+          kind: 'deploy',
+          title: 'Deploying scenes',
+          detail: 'Pushing scenes to the frame',
+        })
+        try {
+          const frame = values.frames[id]
+          // The edited form when the frame's workspace is open, the stored
+          // scene list otherwise. framesModel cannot connect to a keyed logic,
+          // hence findMounted.
+          const scenes = frameLogic.findMounted({ frameId: id })?.values.frameForm?.scenes ?? frame?.scenes ?? []
+          if (!scenes.length) {
+            throw new Error('This frame has no scenes to deploy')
+          }
+          // Keep the currently active scene active; the runtime otherwise
+          // activates the payload sceneId or the first scene.
+          await deployCloudFrameScenes(id, scenes, {
+            sceneId: cloudDeployActiveSceneId(frame?.active_scene_id, scenes),
+          })
+          longRunningTasksModel.actions.finishTask({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            status: 'success',
+            detail: 'Deployed — the frame applies the scenes as soon as it syncs',
+          })
+        } catch (error) {
+          // No rethrow: deployFrame is dispatched, never awaited, so a throw
+          // here is only an unhandled rejection — the task toast above is
+          // the user-facing surfacing.
+          longRunningTasksModel.actions.taskFailed({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            detail: error instanceof Error ? error.message : 'Failed to deploy scenes',
+          })
+        }
+        return
+      }
       const taskId = deployTaskId(id, fastDeploy)
       longRunningTasksModel.actions.startTask({
         id: taskId,
