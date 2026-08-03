@@ -103,9 +103,6 @@ describe("AddFramePanel", () => {
         onClose={onClose}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Frame name (optional)"), {
-      target: { value: "Kitchen" },
-    });
 
     expect(mintCalls()).toHaveLength(1);
   });

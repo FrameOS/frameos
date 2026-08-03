@@ -57,7 +57,6 @@ export interface AddFramePanelProps {
 }
 
 export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddFramePanelProps): ReactElement {
-  const [name, setName] = useState('')
   const [claimToken, setClaimToken] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [installCopied, setInstallCopied] = useState(false)
@@ -244,20 +243,6 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
         ) : null}
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-        <label className="block">
-          <span className="frameos-muted mb-1 block text-xs font-semibold uppercase tracking-wide">
-            Frame name (optional)
-          </span>
-          <input
-            aria-label="Frame name (optional)"
-            className="frameos-control block w-full rounded-lg border px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-blue-500"
-            maxLength={256}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Kitchen frame"
-            value={name}
-          />
-        </label>
-
         {error ? (
           <p className="frameos-warning-button rounded-xl border px-3 py-2 text-xs" role="alert">
             {mintErrorMessages[error] ?? `Could not prepare the enrollment (${error}) — try again in a moment.`}
@@ -333,7 +318,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             <CpuChipIcon aria-hidden className="h-5 w-5" />
             Flash an ESP32 from this browser
           </h3>
-          <Esp32CloudFlasher cloudOrigin={cloudOrigin} frameName={name || undefined} />
+          <Esp32CloudFlasher cloudOrigin={cloudOrigin} />
         </section>
       </div>
     </div>
