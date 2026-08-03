@@ -19,6 +19,9 @@ export default tseslint.config(
       // file is excluded from that tsconfig — which typed linting requires.
       // Vitest still runs it.
       "**/src/test/shared-spa/esp32-frame-controls.test.tsx",
+      // Same exclusion, same reason: mounts the real framesModel, whose
+      // import graph reaches the legacy workspace components.
+      "**/src/test/shared-spa/cloud-scene-deploy.test.ts",
     ],
   },
   js.configs.recommended,
