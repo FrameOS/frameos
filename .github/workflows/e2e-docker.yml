@@ -65,16 +65,15 @@ jobs:
   esp32_firmware_image:
     name: Build and boot ESP32 firmware image
     runs-on: ubuntu-latest
-    # id-token is needed for Depot's OIDC trust exchange (no DEPOT_TOKEN
-    # secret required). GitHub does not issue OIDC tokens to pull_request
-    # runs from forks, so those fall back to a plain docker build below.
     permissions:
       contents: read
-      id-token: write
     env:
-      # Same-repo runs (pushes and non-fork PRs) can authenticate to Depot
-      # via OIDC; forked PRs cannot.
-      DEPOT_AVAILABLE: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
+      # Token auth, same as the release workflow: OIDC would spare us the
+      # secret, but it needs a trust relationship configured in the Depot
+      # project first (until then the exchange dies with permission_denied).
+      # Secrets are absent on forked PRs, so those fall back to a plain
+      # docker build below.
+      DEPOT_AVAILABLE: ${{ secrets.DEPOT_TOKEN != '' && 'true' || 'false' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -92,6 +91,7 @@ jobs:
         uses: depot/build-push-action@v1
         with:
           project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
           context: .
           target: esp32-ci
           tags: frameos-esp32-ci
