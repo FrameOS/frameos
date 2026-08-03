@@ -1304,17 +1304,6 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
-function preferSshTransportWhenRemoteUnavailable(
-  frame: Partial<FrameType>,
-  remoteConnected: boolean
-): Partial<FrameType> {
-  const agent = frame.agent
-  if (!remoteConnected && isRemoteDeployConfigured(agent) && agent?.deployWithAgent !== false) {
-    return { ...frame, agent: { ...agent, deployWithAgent: false } }
-  }
-  return frame
-}
-
 function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
   return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
 }
@@ -2124,8 +2113,8 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-            ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
-            : firstDeployChangeDetails(frameForm, mode),
+          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, frameForm, mode))
+          : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -2199,9 +2188,9 @@ export const frameLogic = kea<frameLogicType>([
         if (!isRemoteDeployConfigured(agent)) {
           return false
         }
-        if ((frame?.active_connections ?? 0) <= 0) {
-          return false
-        }
+        // Deliberately not clamped to the live connection state: this is the
+        // user's chosen transport, not a reachability report. The dot next to
+        // the Remote button shows whether it is currently connected.
         return agent?.deployWithAgent ?? true
       },
     ],
@@ -2347,14 +2336,11 @@ export const frameLogic = kea<frameLogicType>([
           await cloudSaveAndDeploy()
           return
         }
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
-        }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(
           props.frameId,
           frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
@@ -2365,14 +2351,11 @@ export const frameLogic = kea<frameLogicType>([
           await cloudSaveAndDeploy()
           return
         }
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
-        }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(props.frameId, true)
       },
       saveAndFullDeployFrame: async () => {
@@ -2380,14 +2363,11 @@ export const frameLogic = kea<frameLogicType>([
           await cloudSaveAndDeploy()
           return
         }
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
-        }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(props.frameId, false)
       },
       renderFrame: () => framesModel.actions.renderFrame(props.frameId),

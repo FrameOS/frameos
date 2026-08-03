@@ -8,6 +8,7 @@ import {
   CpuChipIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
+import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_ESP32_S3,
@@ -18,7 +19,7 @@ import {
   embeddedPlatforms,
   rpiOSPlatforms,
 } from '../../devices'
-import { newFrameForm } from './newFrameForm'
+import { defaultRemoteControl, newFrameForm } from './newFrameForm'
 import {
   FrameEmbeddedHardwarePreset,
   FrameInstallMethod,
@@ -33,6 +34,7 @@ import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
 import { Checkbox } from '../../components/Checkbox'
 import { Switch } from '../../components/Switch'
+import { Tooltip } from '../../components/Tooltip'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
@@ -73,6 +75,56 @@ function ModeButton({
       </span>
       <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
     </button>
+  )
+}
+
+// The frame is reachable in one of two directions, and which one decides how
+// every later deploy, restart and screenshot gets to it. Making the choice
+// explicit at add time beats discovering it when a deploy fails: a frame on a
+// network the backend cannot dial needs Remote, and a frame you would rather
+// not have phoning home can stay SSH-only.
+function RemoteControlField({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean
+  onChange: (enabled: boolean) => void
+}): JSX.Element {
+  return (
+    <div className="space-y-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div className="frameos-form-label text-sm font-semibold text-slate-700">FrameOS remote control</div>
+        <Tooltip
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+          titleClassName="w-72"
+          title={
+            <div className="space-y-1">
+              <div>
+                FrameOS Remote is a reverse tunnel: the frame connects out to this backend and holds the connection
+                open, so it works from behind NAT, on another network, or without a reachable address.
+              </div>
+              <div>
+                With it off, this backend has to reach the frame directly on your network — SSH for deploys and
+                commands, HTTP to the frame's own web server for screenshots and events.
+              </div>
+              <div>You can change this later in frame settings.</div>
+            </div>
+          }
+        >
+          <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS remote control help" />
+        </Tooltip>
+      </div>
+      <div className="frame-tool-panel">
+        <div className="flex min-w-0 items-center gap-2">
+          <Switch value={enabled} onChange={onChange} />
+          <div className="min-w-0 flex-1 text-sm text-slate-700">
+            {enabled
+              ? 'Enabled — the frame connects back to this backend'
+              : 'Disabled — this backend reaches the frame'}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -202,9 +254,7 @@ const WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 38, sck: 39, miso: 40, mosi: 41 },
   maxFrequencyKHz: 20000,
 }
-const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<
-  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
-> = {
+const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']> = {
   enabled: true,
   preset: WAVESHARE_13IN3E6_HARDWARE_PRESET,
   mountPath: '/srv/assets',
@@ -455,6 +505,20 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
   const rootPassword = newFrame.ssh_pass ?? ''
+  // Each form states its own default rather than inferring it from the form
+  // value: install_method is not guaranteed to be populated on every route
+  // into this screen, and inferring it wrong silently offers the user the
+  // opposite transport from the one the install method needs.
+  const remoteControlFor = (method: FrameInstallMethod): boolean =>
+    newFrame.agent?.agentEnabled ?? defaultRemoteControl(method)
+  const setRemoteControl = (enabled: boolean): void => {
+    setNewFrameValue('agent', {
+      ...(newFrame.agent ?? {}),
+      agentEnabled: enabled,
+      agentRunCommands: enabled,
+      deployWithAgent: enabled,
+    })
+  }
   const embeddedHardwarePreset = normalizeEmbeddedHardwarePreset(
     newFrame.embedded?.hardwarePreset ?? newFrame.device_config?.hardwarePreset
   )
@@ -649,6 +713,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </select>
           </FormField>
           {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
+          <RemoteControlField enabled={remoteControlFor('ssh')} onChange={setRemoteControl} />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -832,6 +897,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               </div>
             )}
           </div>
+
+          <RemoteControlField enabled={remoteControlFor('sd_card')} onChange={setRemoteControl} />
 
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
             <input

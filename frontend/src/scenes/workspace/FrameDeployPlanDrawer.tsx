@@ -892,8 +892,9 @@ function DeployTransportToggle({
             title={
               <div className="space-y-1">
                 <div>
-                  SSH needs direct network access from the backend to the frame. FrameOS Remote runs on the frame, and
-                  keeps a connection open to the backend.
+                  Without FrameOS Remote the backend reaches the frame directly on your network: SSH for deploys and
+                  commands, HTTP to the frame's web server for screenshots and events. FrameOS Remote instead runs on
+                  the frame and keeps a connection open to the backend, so neither needs a route in.
                 </div>
                 <div>
                   To use FrameOS Remote, enable it under{' '}
@@ -2066,7 +2067,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   <FrameBootstrapAction frame={frame} />
                 </div>
               ) : null}
-              {deployTransportToggleVisible && !firstInstall ? (
+              {/* Shown from the first visit: choosing SSH is exactly what you
+                  need before a frame has ever deployed, and gating it on a
+                  past successful deploy left no way to pick a transport for a
+                  frame whose remote never connects. */}
+              {deployTransportToggleVisible ? (
                 <DeployTransportToggle
                   frameId={frame.id}
                   remoteConnected={remoteDeployConnected}
