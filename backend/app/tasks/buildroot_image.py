@@ -68,6 +68,7 @@ from app.utils.build_host import BuildHostConfig, get_build_executor_config
 from app.utils.build_executor import (
     BuildExecutor,
     DockerMount,
+    LocalBuildExecutor,
     build_executor_display_name,
     create_build_executor,
     ensure_build_executor_configured,
@@ -1320,6 +1321,45 @@ class BuildrootImageBuilder:
             stderr_log_tag=stderr_log_tag,
         )
 
+    async def _run_local_command(
+        self,
+        command: str,
+        *,
+        log_command: str | bool = True,
+        log_output: bool = True,
+        stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
+    ) -> tuple[int, str | None, str | None]:
+        """
+        Run on THIS host, whatever build environment is configured. Used by the
+        partition patches, whose input and output are both the image file
+        sitting in the local artifact directory.
+
+        An executor that already runs here is used as-is, so a local or Modal
+        setup keeps its existing behavior; only a remote build host, which
+        would otherwise need the image shipped to it, gets stepped around.
+        """
+        executor: BuildExecutor | Any = self.executor
+        if executor is None or not getattr(executor, "uses_local_filesystem", True):
+            executor = LocalBuildExecutor(db=self.db, redis=self.redis, frame=self.frame)
+        return await executor.run(
+            command,
+            log_command=log_command,
+            log_output=log_output,
+            stderr_log_tag=stderr_log_tag,
+        )
+
+    def _patches_image_locally(self) -> bool:
+        """
+        Both partition patches are a few kilobytes of debugfs/mtools edits on an
+        image file that already lives on this host. Routing them through a
+        remote build host means scp'ing the whole image up and back for each
+        one — on a Pi Zero W card that is ~1.5GB of transfer to perform ~25ms of
+        work, and it is reported as "Still patching", so it reads as the patch
+        being slow. Do them here whenever the tools exist locally; the build
+        host is for compiling, which is the part that actually wants the CPU.
+        """
+        return self._host_has_boot_patch_tools()
+
     async def _try_compose_precompiled_sd_image(
         self,
         *,
@@ -2556,7 +2596,7 @@ PY
         os.chmod(script_path, 0o755)
 
         try:
-            if image:
+            if image and not self._patches_image_locally():
                 if self.executor is None:
                     raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
                 status, _, err = await self._with_progress_updates(
@@ -2585,7 +2625,7 @@ PY
                 )
                 status, _, err = await self._with_progress_updates(
                     "Still patching Buildroot SD image root partition",
-                    self._run_command(
+                    self._run_local_command(
                         patch_cmd,
                         log_command="buildroot root partition patch",
                         stderr_log_tag="stdout",
@@ -2749,7 +2789,7 @@ step "done"
         )
         os.chmod(script_path, 0o755)
 
-        if image:
+        if image and not self._patches_image_locally():
             if self.executor is None:
                 raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
             status, _, err = await self._with_progress_updates(
@@ -2779,7 +2819,7 @@ step "done"
             log_command = "buildroot boot partition patch"
             status, _, err = await self._with_progress_updates(
                 "Still patching Buildroot SD image boot partition",
-                self._run_command(
+                self._run_local_command(
                     patch_cmd,
                     log_command=log_command,
                     stderr_log_tag="stdout",

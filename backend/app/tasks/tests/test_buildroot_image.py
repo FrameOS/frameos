@@ -1711,6 +1711,10 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
     monkeypatch.setattr("app.tasks.buildroot_image._shrink_data_partitions", fake_shrink_data_partitions)
     monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
     monkeypatch.setattr(builder, "_log", fake_log)
+    # This test is about remapping mounts onto build host paths, so pin the
+    # patches to the build host. A runner that happens to have mtools and
+    # debugfs installed would otherwise patch locally and sync nothing.
+    monkeypatch.setattr(builder, "_patches_image_locally", lambda: False)
 
     await builder._compose_sd_image_from_base(
         temp_dir=temp_dir,
@@ -1741,6 +1745,91 @@ async def test_cached_base_composer_runs_docker_on_build_host_paths(tmp_path, mo
         for local, remote in synced_files
     )
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
+
+
+@pytest.mark.asyncio
+async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_path, monkeypatch):
+    """
+    Both patches are a few kilobytes of edits on an image file that already
+    sits in the local artifact directory. Sending it to a build host means
+    scp'ing the whole image up and back for each patch — on a Zero W card that
+    was ~1.5GB of transfer, minutes of it, reported only as "Still patching".
+    A host that can do the edits itself must not touch the build host.
+    """
+    output_image = tmp_path / "output.img"
+    output_image.write_bytes(b"image")
+    boot_root = tmp_path / "compose" / "roots" / "boot"
+    boot_root.mkdir(parents=True)
+    (boot_root / "frameos-hostname").write_text("kitchen\n", encoding="utf-8")
+
+    synced_files: list[tuple[str, str]] = []
+    docker_runs: list[str] = []
+    local_commands: list[str] = []
+
+    class FakeBuildHostSession:
+        async def run(self, command, **_kwargs):
+            docker_runs.append(command)
+            return 0, "", ""
+
+        async def remove_path(self, _remote_path):
+            return None
+
+        async def ensure_dir(self, _remote_path):
+            return None
+
+        async def sync_file(self, local_path, remote_path):
+            synced_files.append((local_path, remote_path))
+
+        async def sync_dir_tarball(self, local_path, remote_path):
+            synced_files.append((local_path, remote_path))
+
+        async def download_file(self, remote_path, local_path):
+            return None
+
+        async def download_dir_tarball(self, remote_path, local_path):
+            return None
+
+    frame = SimpleNamespace(
+        id=7,
+        project_id=1,
+        mode="buildroot",
+        frame_host="kitchen.local",
+        buildroot={"platform": "raspberry-pi-zero-w"},
+        scenes=[],
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    executor = BuildHostExecutor(BuildHostConfig(host="builder.local", user="ubuntu", ssh_key="dummy-key"))
+    executor.session = FakeBuildHostSession()
+    executor.remote_root = PurePosixPath("/tmp/frameos-buildroot-test")
+    builder.executor = executor
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    async def fake_run_local(command, **_kwargs):
+        local_commands.append(command)
+        return 0, "", ""
+
+    monkeypatch.setattr(builder, "_log", fake_log)
+    monkeypatch.setattr(builder, "_host_has_boot_patch_tools", staticmethod(lambda: True))
+    monkeypatch.setattr(builder, "_run_local_command", fake_run_local)
+
+    partitions = [
+        {"start": 512, "size": 32 * 1024 * 1024},
+        {"start": 33554944, "size": 768 * 1024 * 1024},
+    ]
+    await builder._patch_root_partition(output_image, partitions, image="frameos/frameos-buildroot:test")
+    await builder._patch_boot_partition(output_image, partitions, boot_root, image="frameos/frameos-buildroot:test")
+
+    assert synced_files == []
+    assert docker_runs == []
+    assert len(local_commands) == 2
+    assert "patch-root.sh" in local_commands[0]
+    assert "patch-boot.sh" in local_commands[1]
+    # The scripts must address the image where it actually is, not at a
+    # container mount point that only exists on the build host.
+    assert str(output_image.parent) in local_commands[0]
+    assert str(output_image.parent) in local_commands[1]
 
 
 @pytest.mark.asyncio
