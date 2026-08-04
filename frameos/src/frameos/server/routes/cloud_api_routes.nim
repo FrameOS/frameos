@@ -43,6 +43,11 @@ proc jsonOrNull(node: JsonNode): JsonNode =
 
 proc cloudStatusPayload(state: JsonNode): JsonNode =
   let status = state{"status"}.getStr("disconnected")
+  # Lets the admin UI know whether asking for frame:managed can succeed: a
+  # frame owned by a self-hosted backend refuses managed enrollment.
+  var backendManaged = false
+  {.gcsafe.}:
+    backendManaged = otherControlPlaneActive(globalFrameConfig)
   result = %*{
     "enabled": true,
     "provider_url": providerUrlFromState(state),
@@ -52,6 +57,7 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     "poll_error": jsonOrNull(state{"poll_error"}),
     "connection": newJNull(),
     "link": newJNull(),
+    "backend_managed": backendManaged,
   }
   if status == "connecting":
     result["connection"] = %*{

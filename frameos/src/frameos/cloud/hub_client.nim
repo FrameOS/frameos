@@ -1258,6 +1258,12 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
       # ---- claim-token handoff -------------------------------------------
       # Checked every pass so a pending file written after boot (setup portal,
       # flasher handoff) is picked up too; fileExists keeps the idle cost nil.
+      if takeEnrollmentNudge():
+        # The portal just brought the network up (or queued a fresh claim
+        # token); the current backoff was earned by attempts that could never
+        # have succeeded, so start over.
+        nextEnrollAttemptAt = 0.0
+        enrollBackoff = HubEnrollBackoffMinSeconds
       if epochTime() >= nextEnrollAttemptAt and fileExists(pendingEnrollmentPath()):
         let (resolved, attempted, outcome) = processPendingCloudEnrollment(frameConfig)
         if attempted:

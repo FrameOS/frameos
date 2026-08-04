@@ -8,6 +8,8 @@ import frameos/setup_proxy
 import frameos/utils/process
 import frameos/network/backend as netbackend
 import frameos/network/supplicant as wpa
+import frameos/cloud/enrollment
+import frameos/cloud/link_state
 import drivers/drivers as frameDrivers
 
 const
@@ -42,6 +44,10 @@ type
   PortalSetupOptions* = object
     ssid*: string
     password*: string
+    # "cloud" | "backend" | "none": what controls this frame after setup.
+    controlMode*: string
+    cloudUrl*: string
+    claimToken*: string
     serverHost*: string
     serverPort*: string
     hostname*: string
@@ -751,22 +757,51 @@ proc applyGpioButtonsForDevice(frameConfig: FrameConfig, data: JsonNode, device:
 proc loggableSetupParams*(params: Table[string, string]): JsonNode =
   result = newJObject()
   for key, value in params:
-    if key in ["password", "adminPass"]:
+    if key in ["password", "adminPass", "claimToken"]:
       result[key] = %masked(value)
     else:
       result[key] = %value
+
+proc pendingCloudEnrollment(): JsonNode {.gcsafe.} =
+  ## nil unless a claim-token enrollment is queued (boot personalization or a
+  ## previous portal run).
+  loadPendingEnrollment()
+
+proc cloudLinkIsManaged(): bool {.gcsafe.} =
+  {.gcsafe.}:
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      return state{"mode"}.getStr("") == "managed"
+
+proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
+  ## What the setup form should preselect: a queued (or completed) cloud
+  ## enrollment wins, then a configured self-hosted backend; a frame with
+  ## neither — including the release-image "localhost" placeholder — runs
+  ## standalone until the user picks something.
+  if pendingCloudEnrollment() != nil or cloudLinkIsManaged():
+    return "cloud"
+  if otherControlPlaneActive(frameConfig):
+    return "backend"
+  "none"
 
 proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig): PortalSetupOptions =
   let device = params.getOrDefault("device", frameConfig.device)
   let deviceConfig = ensureDeviceConfig(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
+  var controlMode = params.getOrDefault("controlMode", "").strip().toLowerAscii()
+  if controlMode notin ["cloud", "backend", "none"]:
+    controlMode = defaultControlMode(frameConfig)
+  let pending = pendingCloudEnrollment()
+  let defaultCloudUrl =
+    if pending != nil: pending{"provider_url"}.getStr(DEFAULT_CLOUD_PROVIDER_URL)
+    else: DEFAULT_CLOUD_PROVIDER_URL
   result = PortalSetupOptions(
     ssid: params.getOrDefault("ssid", ""),
     password: params.getOrDefault("password", ""),
-    serverHost: params.getOrDefault(
-      "serverHost",
-      if frameConfig.serverHost.strip().len > 0: frameConfig.serverHost else: "localhost",
-    ),
+    controlMode: controlMode,
+    cloudUrl: params.getOrDefault("cloudUrl", defaultCloudUrl).strip(),
+    claimToken: params.getOrDefault("claimToken", "").strip(),
+    serverHost: params.getOrDefault("serverHost", frameConfig.serverHost),
     serverPort: params.getOrDefault("serverPort", $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)),
     hostname: params.getOrDefault("hostname", setupHostnameValue(frameConfig)),
     device: device,
@@ -845,9 +880,16 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     if data == nil or data.kind != JObject:
       data = newJObject()
 
-    if options.serverHost.strip().len > 0:
-      data["serverHost"] = %options.serverHost.strip()
-      frameConfig.serverHost = options.serverHost.strip()
+    if options.controlMode == "backend":
+      if options.serverHost.strip().len > 0:
+        data["serverHost"] = %options.serverHost.strip()
+        frameConfig.serverHost = options.serverHost.strip()
+    else:
+      # Cloud-enrolled and standalone frames must not carry a serverHost: a
+      # non-loopback value means "a self-hosted backend owns this frame" and
+      # blocks cloud enrollment (enrollment.nim, otherControlPlaneActive).
+      data["serverHost"] = %""
+      frameConfig.serverHost = ""
     data["serverPort"] = %serverPort
     frameConfig.serverPort = serverPort
 
@@ -910,7 +952,18 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
 
     writeFile(filename, pretty(data, indent = 4) & "\n")
     writeHostnameBestEffort(hostnameBase)
+
+    if options.controlMode == "cloud" and options.claimToken.len > 0:
+      # A fresh claim code replaces whatever enrollment was queued; blank
+      # keeps the boot-provisioned one. The hub thread redeems it once the
+      # network is up (connectToWifi nudges it).
+      if not writePendingEnrollment(options.claimToken, options.cloudUrl, hostnameBase):
+        rememberError("Failed to save the cloud claim code.")
+        pLog("portal:setup:cloudEnrollError", %*{"providerUrl": options.cloudUrl})
+        return false
+
     pLog("portal:setup:persisted", %*{
+      "controlMode": options.controlMode,
       "serverHost": frameConfig.serverHost,
       "serverPort": frameConfig.serverPort,
       "frameHost": frameConfig.frameHost,
@@ -1284,6 +1337,9 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
                    "frameHost": frameConfig.frameHost, "device": frameConfig.device})
           log(%*{"event": "networkCheck", "status": "success"})
           rememberError("")
+          # Any cloud enrollment queued before this point failed with network
+          # errors and sits in backoff; the network is provably up now.
+          requestEnrollmentNudge()
           discard runDriverSetupFromSavedConfig(frameOS, options)
           sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
           return
@@ -1478,8 +1534,30 @@ proc setupHtml*(frameOS: FrameOS): string =
   let displayWidth = if frameConfig.width > 0: frameConfig.width elif currentOption.width > 0: currentOption.width else: 800
   let displayHeight = if frameConfig.height > 0: frameConfig.height elif currentOption.height > 0: currentOption.height else: 480
   let framePort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
-  let serverHost = if frameConfig.serverHost.strip().len > 0: frameConfig.serverHost else: "localhost"
+  let serverHost = frameConfig.serverHost
   let serverPort = if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989
+
+  let pending = pendingCloudEnrollment()
+  let hasPendingClaim = pending != nil
+  let controlMode = defaultControlMode(frameConfig)
+  let cloudUrl =
+    if hasPendingClaim: pending{"provider_url"}.getStr(DEFAULT_CLOUD_PROVIDER_URL)
+    else: DEFAULT_CLOUD_PROVIDER_URL
+  let cloudSelected = if controlMode == "cloud": " selected" else: ""
+  let backendSelected = if controlMode == "backend": " selected" else: ""
+  let noneSelected = if controlMode == "none": " selected" else: ""
+  let cloudFieldsClass = if controlMode == "cloud": "" else: " class=\"hidden\""
+  let backendFieldsClass = if controlMode == "backend": "" else: " class=\"hidden\""
+  let serverDetailsOpen = if controlMode == "cloud": " open" else: ""
+  let claimPending = if hasPendingClaim: "1" else: "0"
+  let claimPlaceholder =
+    if hasPendingClaim: "Already provisioned - leave blank to keep"
+    else: "FRCT_..."
+  let pendingNote =
+    if hasPendingClaim:
+      "<p class=\"muted\">A claim code is already on this frame; it enrolls with the cloud below once online.</p>"
+    else:
+      ""
   let partialChecked = if deviceConfig.partial: " checked" else: ""
   let partialArea = if deviceConfig.partialMaxAreaPercent > 0: deviceConfig.partialMaxAreaPercent else: currentOption.partialMaxAreaPercent
   let partialRefreshes =
@@ -1570,19 +1648,40 @@ proc setupHtml*(frameOS: FrameOS): string =
     </label>
   </details>
 
-  <details>
-    <summary>Server connection</summary>
-    <label>Server Host
-      <input type="text" name="serverHost"
-            placeholder="my.frameos.server"
-            value="{htmlEscape(serverHost)}" required>
+  <details{serverDetailsOpen}>
+    <summary>Manage this frame</summary>
+    <label>Manage via
+      <select id="control-mode" name="controlMode">
+        <option value="cloud"{cloudSelected}>FrameOS Cloud</option>
+        <option value="backend"{backendSelected}>Self-hosted backend</option>
+        <option value="none"{noneSelected}>Nothing (standalone)</option>
+      </select>
     </label>
+    <div id="cloud-fields"{cloudFieldsClass}>
+      {pendingNote}
+      <label>Cloud URL
+        <input type="text" name="cloudUrl" value="{htmlEscape(cloudUrl)}">
+      </label>
+      <label>Claim code
+        <input id="claim-token" type="text" name="claimToken" autocomplete="off"
+               data-pending="{claimPending}"
+               placeholder="{htmlEscape(claimPlaceholder)}">
+      </label>
+      <p class="muted">Claim codes come from "Add frame" in your cloud account.</p>
+    </div>
+    <div id="backend-fields"{backendFieldsClass}>
+      <label>Server Host
+        <input id="server-host" type="text" name="serverHost"
+              placeholder="my.frameos.server"
+              value="{htmlEscape(serverHost)}">
+      </label>
 
-    <label>Server Port
-      <input type="number" min="1" max="65535"
-            name="serverPort"
-            value="{serverPort}">
-    </label>
+      <label>Server Port
+        <input type="number" min="1" max="65535"
+              name="serverPort"
+              value="{serverPort}">
+      </label>
+    </div>
   </details>
 
   <button type="submit" style="margin-top:1rem">Save &amp; Connect</button>
@@ -1604,6 +1703,19 @@ const stepsEl = document.getElementById('driver-steps');
 const adminEnabled = document.getElementById('admin-enabled');
 const adminUser = document.getElementById('admin-user');
 const adminPass = document.getElementById('admin-pass');
+const controlModeSel = document.getElementById('control-mode');
+const cloudFields = document.getElementById('cloud-fields');
+const backendFields = document.getElementById('backend-fields');
+const serverHostInput = document.getElementById('server-host');
+const claimTokenInput = document.getElementById('claim-token');
+
+function updateControlUi() {
+  const mode = controlModeSel.value;
+  cloudFields.classList.toggle('hidden', mode !== 'cloud');
+  backendFields.classList.toggle('hidden', mode !== 'backend');
+  serverHostInput.required = mode === 'backend';
+  claimTokenInput.required = mode === 'cloud' && claimTokenInput.dataset.pending !== '1';
+}
 
 function currentDeviceMeta() {
   return displayMeta[deviceSel.value] || {};
@@ -1688,9 +1800,11 @@ setTimeout(updateNetworks, 1000);
 setTimeout(updateNetworks, 4000);
 deviceSel.addEventListener('change', () => updateDriverUi(true));
 adminEnabled.addEventListener('change', updateAdminUi);
+controlModeSel.addEventListener('change', updateControlUi);
 document.getElementById('random-hostname').addEventListener('click', randomHostname);
 updateDriverUi(false);
 updateAdminUi();
+updateControlUi();
 </script>""".replace("__DISPLAY_META__", $displayOptionsJson(options))
   layout(body & script)
 
@@ -1710,10 +1824,17 @@ proc postSetupFrameUrl*(frameOS: FrameOS): string =
 proc confirmHtml*(frameOS: FrameOS): string =
   let frameUrl = postSetupFrameUrl(frameOS)
   let adminUrl = frameUrl & "admin"
+  let cloudNote =
+    if pendingCloudEnrollment() != nil:
+      "<p>A cloud claim code is queued: once online, the frame enrolls itself " &
+      "and appears in your FrameOS Cloud account, usually within a minute.</p>\n"
+    else:
+      ""
   layout(
     "<h1>Saved!</h1>\n" &
     "<p>The frame is now attempting to connect to Wi-Fi. After your computer reconnects to the same network, look for the frame at <a href=\"" &
       htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
+    cloudNote &
     "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
     "<p>If you left display setup enabled, the frame applies driver setup after joining Wi-Fi. If setup requires a reboot, the frame restarts automatically.</p>\n" &
     """

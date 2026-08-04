@@ -510,7 +510,10 @@ Local enrollment surfaces call `POST /api/cloud/enroll` (admin-session-gated)
 with `{"claim_token", "provider_url"?, "name"?}` for flow A; flow B rides the
 existing `/api/cloud/connect` + `/api/cloud/poll` device flow with the
 `frame:managed` scope. Both are refused with `409` while `frame.json` names a
-self-hosted backend (`serverHost`) — one control plane at a time.
+self-hosted backend (`serverHost`) — one control plane at a time. Loopback
+values (`localhost`, `127.0.0.1`, `::1`) do not count as a backend: they are
+placeholders left by generic images and never a reachable control plane, so
+they must not block enrollment.
 
 While managed:
 

@@ -334,7 +334,11 @@ class ReleaseImageFrame:
     ssh_pass: str | None = None
     ssh_port: int = 22
     ssh_keys: list[str] = field(default_factory=list)
-    server_host: str = "localhost"
+    # Empty on purpose: no self-hosted backend controls a generic release
+    # image. A non-empty serverHost blocks cloud enrollment on the frame
+    # (frameos cloud/enrollment.nim, otherControlPlaneActive) and used to make
+    # the setup portal demand a bogus localhost:8989 backend.
+    server_host: str = ""
     server_port: int = 8989
     server_api_key: str = ""
     server_send_logs: bool = False

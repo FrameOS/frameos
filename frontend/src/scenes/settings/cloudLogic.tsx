@@ -312,8 +312,15 @@ export const cloudLogic = kea<cloudLogicType>([
       // Connecting asks for the link plus every included ("safe") feature in
       // one approval; security features (cloud login) are toggled on
       // afterwards. Frames still bundle auth:login (they have no feature
-      // manager yet, and cloud login is their one cloud feature).
-      const scopes = isInFrameAdminMode() ? ['frame:link', 'auth:login'] : [...BASE_SCOPES, ...INCLUDED_FEATURE_SCOPES]
+      // manager yet, and cloud login is their one cloud feature). A frame
+      // that no self-hosted backend controls also asks for frame:managed, so
+      // approving the link enrolls it as a real cloud-managed frame instead
+      // of a bare linked client.
+      const scopes = isInFrameAdminMode()
+        ? values.cloudStatus?.backend_managed
+          ? ['frame:link', 'auth:login']
+          : ['frame:link', 'frame:managed', 'auth:login']
+        : [...BASE_SCOPES, ...INCLUDED_FEATURE_SCOPES]
       const response = await apiFetch('/api/cloud/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

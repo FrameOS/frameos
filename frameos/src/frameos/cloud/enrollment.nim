@@ -41,6 +41,7 @@ import os
 import strutils
 import times
 import httpcore
+import std/atomics
 import std/httpclient
 
 import frameos/types
@@ -77,7 +78,15 @@ proc pendingEnrollmentPath*(): string =
 
 proc otherControlPlaneActive*(frameConfig: FrameConfig): bool =
   ## True when a self-hosted backend manages this frame (frame.json serverHost).
-  frameConfig != nil and frameConfig.serverHost.strip().len > 0
+  ## Loopback hosts don't count: generic SD images have shipped frame.json with
+  ## the placeholder serverHost "localhost", and a backend at the frame's own
+  ## loopback cannot be a real control plane — treating it as one made every
+  ## boot-time claim-token enrollment fail permanently (409 backend_managed)
+  ## and shred the token before a single request left the device.
+  if frameConfig == nil:
+    return false
+  let host = frameConfig.serverHost.strip().toLowerAscii()
+  host.len > 0 and host notin ["localhost", "127.0.0.1", "::1", "[::1]"]
 
 proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   result = %*{
@@ -299,6 +308,38 @@ proc savePendingEnrollment(pending: JsonNode) =
   except CatchableError:
     discard
   moveFile(tempPath, path)
+
+proc writePendingEnrollment*(claimToken, providerUrl, name: string): bool {.gcsafe.} =
+  ## Queues a claim-token enrollment for the hub thread to redeem. Entry point
+  ## for provisioning that happens after boot (the setup portal's claim-code
+  ## field); the boot handoff writes the same file from /boot/frameos-cloud.txt.
+  {.gcsafe.}:
+    let token = claimToken.strip()
+    if token.len == 0:
+      return false
+    var url = normalizeProviderUrl(providerUrl)
+    if url.len == 0:
+      url = DEFAULT_CLOUD_PROVIDER_URL
+    var pending = %*{"claim_token": token, "provider_url": url}
+    if name.strip().len > 0:
+      pending["name"] = %name.strip()
+    try:
+      savePendingEnrollment(pending)
+      true
+    except CatchableError:
+      false
+
+var enrollmentNudge: Atomic[bool]
+
+proc requestEnrollmentNudge*() {.gcsafe.} =
+  ## Asks the hub thread to retry a pending enrollment right away instead of
+  ## waiting out its backoff — the portal calls this once Wi-Fi is up, since
+  ## every pre-network attempt failed with a network error and pushed the next
+  ## try up to HubEnrollBackoffMaxSeconds away.
+  enrollmentNudge.store(true, moRelaxed)
+
+proc takeEnrollmentNudge*(): bool {.gcsafe.} =
+  enrollmentNudge.exchange(false, moRelaxed)
 
 proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
     tuple[resolved: bool, attempted: bool, outcome: EnrollOutcome] {.gcsafe.} =

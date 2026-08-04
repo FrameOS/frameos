@@ -138,6 +138,54 @@ suite "cloud enrollment":
     check recordedRequests()[0].len == 0
     check not isManagedLink(linkState())
 
+  test "a loopback serverHost is a placeholder, not a control plane":
+    # Generic release SD images shipped frame.json with serverHost
+    # "localhost"; treating that as a real backend rejected every boot
+    # enrollment as backend_managed and shredded the claim token.
+    for host in ["localhost", "127.0.0.1", "::1", "[::1]", " Localhost ", ""]:
+      var config = standaloneConfig()
+      config.serverHost = host
+      check not otherControlPlaneActive(config)
+    var config = standaloneConfig()
+    config.serverHost = "backend.example.com"
+    check otherControlPlaneActive(config)
+
+  test "claim-token enrollment succeeds despite the localhost placeholder":
+    clearLinkState()
+    setStubResponse(200, %*{
+      "access_token": "frame-token-lo",
+      "scope": "frame:managed",
+      "frame_id": "frame-lo",
+      "ws_path": "/api/frames/ws",
+    })
+    var config = standaloneConfig()
+    config.serverHost = "localhost"
+    let outcome = enrollManagedFrame(providerUrl, "FRCT-test-lo", "", "", config)
+    check outcome.ok
+    check isManagedLink(linkState())
+
+  test "writePendingEnrollment queues a claim token for the hub thread":
+    discard clearPendingEnrollment()
+    check not writePendingEnrollment("   ", "https://cloud.frameos.net", "")
+    check loadPendingEnrollment() == nil
+    check writePendingEnrollment(" FRCT-portal-1 ", "", "Kitchen frame")
+    let pending = loadPendingEnrollment()
+    check pending != nil
+    check pending{"claim_token"}.getStr("") == "FRCT-portal-1"
+    check pending{"provider_url"}.getStr("") == DEFAULT_CLOUD_PROVIDER_URL
+    check pending{"name"}.getStr("") == "Kitchen frame"
+    when not defined(windows):
+      let permissions = getFilePermissions(pendingEnrollmentPath())
+      for other in [fpGroupRead, fpOthersRead]:
+        check other notin permissions
+    discard clearPendingEnrollment()
+
+  test "enrollment nudge is a one-shot flag":
+    check not takeEnrollmentNudge()
+    requestEnrollmentNudge()
+    check takeEnrollmentNudge()
+    check not takeEnrollmentNudge()
+
   test "provider rejection is surfaced and not retryable":
     clearLinkState()
     setStubResponse(400, %*{"error": "invalid_claim_token"})

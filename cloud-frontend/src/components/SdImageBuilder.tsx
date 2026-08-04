@@ -753,6 +753,11 @@ export function SdImageBuilder({
         <summary className="cursor-pointer">If the frame doesn&apos;t appear here after booting…</summary>
         <ul className="mt-1.5 list-disc space-y-1 pl-4">
           <li>
+            Check the Raspberry Pi&apos;s green activity light: it should flicker while booting. No green light at all
+            usually means the image doesn&apos;t match the board — pick the image built for your Pi model and flash
+            again.
+          </li>
+          <li>
             First boot writes <code>/boot/frameos-setup-reset.log</code> on the card&apos;s FAT partition (readable on
             any computer) — it records exactly what the personalization did.
           </li>

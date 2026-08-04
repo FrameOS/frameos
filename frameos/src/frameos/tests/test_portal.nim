@@ -1,4 +1,4 @@
-import std/[json, strutils, tables, unittest]
+import std/[json, os, strutils, tables, unittest]
 
 import ../channels
 import ../network/backend
@@ -565,3 +565,118 @@ suite "portal supplicant backend":
     let (ok, ev) = eventChannel.tryRecv()
     check ok
     check ev[2]["sceneId"].getStr() == "system/wifiHotspot"
+
+suite "portal setup control mode":
+  # These tests write real files; keep them inside a per-run temp dir and keep
+  # the exec hooks stubbed so writeHostnameBestEffort cannot shell out.
+  let setupDir = getTempDir() / ("frameos-test-portal-setup-" & $getCurrentProcessId())
+
+  setup:
+    resetPortalHooksForTest()
+    resetHookState()
+    setPortalHooksForTest(
+      runHook = runHook,
+      nmcliConnectHook = nmcliHook,
+      sleepHook = sleepHook,
+      autoTimeoutEnabledHook = autoTimeoutDisabled
+    )
+    createDir(setupDir)
+    putEnv("FRAMEOS_CONFIG", setupDir / "frame.json")
+    putEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH", setupDir / "pending.json")
+
+  teardown:
+    resetPortalHooksForTest()
+    resetHookState()
+    removeFile(setupDir / "frame.json")
+    removeFile(setupDir / "pending.json")
+    delEnv("FRAMEOS_CONFIG")
+    delEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH")
+
+  test "the localhost placeholder no longer preselects a self-hosted backend":
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "localhost"
+    check defaultControlMode(frame.frameConfig) == "none"
+    frame.frameConfig.serverHost = ""
+    check defaultControlMode(frame.frameConfig) == "none"
+    frame.frameConfig.serverHost = "backend.example.com"
+    check defaultControlMode(frame.frameConfig) == "backend"
+
+  test "a pending claim token preselects the cloud and prefills its URL":
+    writeFile(setupDir / "pending.json",
+      $(%*{"claim_token": "FRCT-pending", "provider_url": "https://cloud.example.com"}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "localhost"
+    check defaultControlMode(frame.frameConfig) == "cloud"
+    let options = parseSetupOptions(initTable[string, string](), frame.frameConfig)
+    check options.controlMode == "cloud"
+    check options.cloudUrl == "https://cloud.example.com"
+    let html = setupHtml(frame)
+    check html.contains("Manage this frame")
+    check html.contains("value=\"cloud\" selected")
+    check html.contains("https://cloud.example.com")
+    check html.contains("Already provisioned")
+
+  test "the setup form no longer forces a localhost server host":
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = ""
+    let html = setupHtml(frame)
+    check html.contains("value=\"none\" selected")
+    check not html.contains("value=\"localhost\"")
+    let options = parseSetupOptions(initTable[string, string](), frame.frameConfig)
+    check options.serverHost == ""
+    check options.controlMode == "none"
+
+  test "cloud mode clears serverHost and queues the typed claim code":
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": "localhost", "serverPort": 8989}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "localhost"
+    let params = {
+      "ssid": "home-wifi",
+      "hostname": "kitchen",
+      "controlMode": "cloud",
+      "cloudUrl": "https://cloud.example.com",
+      "claimToken": "FRCT-typed",
+    }.toTable
+    let options = parseSetupOptions(params, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    let saved = parseFile(setupDir / "frame.json")
+    check saved{"serverHost"}.getStr("missing") == ""
+    check frame.frameConfig.serverHost == ""
+    let pending = parseFile(setupDir / "pending.json")
+    check pending{"claim_token"}.getStr() == "FRCT-typed"
+    check pending{"provider_url"}.getStr() == "https://cloud.example.com"
+    check pending{"name"}.getStr() == "kitchen"
+
+  test "cloud mode with a blank claim code keeps the provisioned one":
+    writeFile(setupDir / "pending.json",
+      $(%*{"claim_token": "FRCT-pending", "provider_url": "https://cloud.example.com"}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "localhost"
+    let params = {"ssid": "home-wifi", "hostname": "kitchen", "controlMode": "cloud"}.toTable
+    let options = parseSetupOptions(params, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    let pending = parseFile(setupDir / "pending.json")
+    check pending{"claim_token"}.getStr() == "FRCT-pending"
+    check frame.frameConfig.serverHost == ""
+
+  test "backend mode still persists the server connection":
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = ""
+    let params = {
+      "ssid": "home-wifi",
+      "hostname": "office",
+      "controlMode": "backend",
+      "serverHost": "backend.example.com",
+      "serverPort": "8989",
+    }.toTable
+    let options = parseSetupOptions(params, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    let saved = parseFile(setupDir / "frame.json")
+    check saved{"serverHost"}.getStr() == "backend.example.com"
+    check saved{"serverPort"}.getInt() == 8989
+
+  test "claim tokens are masked in setup logs":
+    let params = {"claimToken": "FRCT-very-secret", "ssid": "home"}.toTable
+    let logged = loggableSetupParams(params)
+    check logged{"ssid"}.getStr() == "home"
+    check not ($logged).contains("FRCT-very-secret")

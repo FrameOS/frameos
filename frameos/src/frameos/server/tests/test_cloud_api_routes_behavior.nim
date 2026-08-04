@@ -88,6 +88,22 @@ suite "cloud enroll route behavior":
     check payload{"status"}.getStr("") == "disconnected"
     check payload{"mode"}.getStr("") == ""
 
+  test "status reports whether a self-hosted backend blocks managed mode":
+    configureServerState(adminConfig("backend.example.com"))
+    var cookie = loginAsAdmin()
+    var status = httpRequest(server.port, "GET", "/api/cloud/status",
+      headers = [("Cookie", cookie)])
+    check status.status == 200
+    check parseJson(status.body){"backend_managed"}.getBool(false)
+
+    # The release-image "localhost" placeholder is not a backend.
+    configureServerState(adminConfig("localhost"))
+    cookie = loginAsAdmin()
+    status = httpRequest(server.port, "GET", "/api/cloud/status",
+      headers = [("Cookie", cookie)])
+    check status.status == 200
+    check not parseJson(status.body){"backend_managed"}.getBool(true)
+
 # No stopServer/removeDir teardown: like the other behavior tests, the mummy
 # worker threads are torn down by process exit (an explicit close from the
 # main thread races the workers), and the temp workDir lives under the OS

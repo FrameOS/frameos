@@ -893,6 +893,11 @@ export interface CloudStatus {
     provider_url: string | null
     last_login_at: string | null
   } | null
+  /** Frame admin only: set once the frame is enrolled as cloud-managed. */
+  mode?: 'managed'
+  /** Frame admin only: a self-hosted backend controls this frame, so
+   * cloud-managed enrollment is unavailable until serverHost is cleared. */
+  backend_managed?: boolean
 }
 
 /** Mirrors GET /api/cloud/login/options (open endpoint for the login/setup screens) */

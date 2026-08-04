@@ -611,7 +611,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "serverCert": https_proxy.get("certs", {}).get("server", ""),
             "serverKey": https_proxy.get("certs", {}).get("server_key", ""),
         },
-        "serverHost": frame.server_host or "localhost",
+        # An explicitly empty server_host means "no backend controls this
+        # frame" (generic release SD images): it must survive as "" so the
+        # frame stays free to enroll with FrameOS Cloud. Only None falls back.
+        "serverHost": frame.server_host if frame.server_host is not None else "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
         "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
