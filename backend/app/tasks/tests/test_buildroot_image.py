@@ -1244,6 +1244,15 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
     # in-place patcher) and excluded from the later bulk copy.
     assert 'if [ -f "$boot_root/frameos-cloud.txt" ]' in captured["boot_patch_script"]
     assert "! -name frameos-cloud.txt" in captured["boot_patch_script"]
+    # The script is built by f-string interpolation, so a stray brace turns it
+    # into a syntax error only the frame owner would ever see.
+    script_file = tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh"
+    assert subprocess.run(["bash", "-n", str(script_file)]).returncode == 0
+    # A stalled boot patch is diagnosed from the log alone, so every step has
+    # to announce itself rather than leaving a silent gap.
+    assert 'step "labelling BOOT partition' in captured["boot_patch_script"]
+    assert 'step "copying boot overlay files"' in captured["boot_patch_script"]
+    assert 'step "mtools missing, installing it with apt"' in captured["boot_patch_script"]
 
 
 @pytest.mark.asyncio

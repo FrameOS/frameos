@@ -2630,16 +2630,24 @@ PY
             f"""#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+# Every step here is milliseconds on a healthy host. Announce each one anyway:
+# when this stalls it is the environment (a missing mtools pulling in apt, an
+# image file on slow storage), and a silent script leaves nothing to go on but
+# "still patching (16m elapsed)".
+step() {{ echo "boot patch: $*"; }}
 image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
 boot_root="${{FRAMEOS_BOOT_ROOT:-/boot-root}}"
 if ! command -v mlabel >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+  step "mtools missing, installing it with apt"
   apt-get update
   apt-get install -y --no-install-recommends mtools
 fi
 disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
+step "labelling BOOT partition at offset $offset of $disk"
 mlabel -i "$target" ::BOOT
+step "removing unmanaged boot files"
 managed_boot_files=({managed_boot_files_shell})
 for relpath in "${{managed_boot_files[@]}}"; do
   if [ ! -e "$boot_root/$relpath" ]; then
@@ -2659,6 +2667,7 @@ done
 # this block no-ops there and the managed-file mdel above removes any stale
 # copy instead.
 if [ -f "$boot_root/{cloud_config_name}" ]; then
+  step "copying {cloud_config_name} placeholder"
   mcopy -i "$target" -o "$boot_root/{cloud_config_name}" "::{cloud_config_name}"
 fi
 merge_config() {{
@@ -2667,6 +2676,7 @@ merge_config() {{
   if [ ! -f "$src" ]; then
     return 0
   fi
+  step "merging $relpath"
 
   existing="$(mktemp)"
   merged="$(mktemp)"
@@ -2725,12 +2735,15 @@ merge_config "firmware/config.txt"
 
 if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
   cd "$boot_root"
+  step "copying boot overlay files"
   find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware ! -name {cloud_config_name} -exec mcopy -i "$target" -o -s {{}} :: \\;
   if [ -d firmware ]; then
+    step "copying boot overlay firmware/ files"
     mmd -i "$target" ::firmware 2>/dev/null || true
     find firmware -mindepth 1 -maxdepth 1 ! -name config.txt -exec mcopy -i "$target" -o -s {{}} ::firmware/ \\;
   fi
 fi
+step "done"
 """,
             encoding="utf-8",
         )
