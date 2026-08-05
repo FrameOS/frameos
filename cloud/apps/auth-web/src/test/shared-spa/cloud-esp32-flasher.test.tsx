@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Esp32CloudFlasher,
   pinsSpecError,
+  portSelectionError,
   wifiInputError,
 } from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
 
@@ -212,6 +213,17 @@ function clickFlash() {
   fireEvent.click(screen.getByRole("button", { name: /connect & flash/i }));
 }
 
+// A frame name and a hardware choice are both required before flashing (there
+// is no default board any more). Fill them the way a real flash would.
+async function fillRequiredFields(hardware = "panel:EPD_7in5_V2") {
+  fireEvent.change(screen.getByLabelText("Frame name"), {
+    target: { value: "Kitchen" },
+  });
+  fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+    target: { value: hardware },
+  });
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -242,6 +254,24 @@ describe("wifiInputError", () => {
   it("enforces the 802.11 length limits", () => {
     expect(wifiInputError("x".repeat(33), "")).toMatch(/at most 32/);
     expect(wifiInputError("MyNet", "x".repeat(65))).toMatch(/at most 64/);
+  });
+});
+
+describe("portSelectionError", () => {
+  it("refuses known USB-UART bridge vendors — the console never answers there", () => {
+    // The PhotoPainter 13.3" exposes a CH343 ("USB Single Serial", WCH
+    // vendor id) next to the chip's own USB-Serial/JTAG port; flashing works
+    // over the bridge but the FrameOS console only exists on the JTAG port.
+    expect(portSelectionError({ usbVendorId: 0x1a86 })).toMatch(
+      /USB JTAG\/serial debug unit/,
+    );
+    expect(portSelectionError({ usbVendorId: 0x10c4 })).toMatch(/CP210x/);
+  });
+
+  it("accepts the Espressif built-in USB device and ports without USB info", () => {
+    expect(portSelectionError({ usbVendorId: 0x303a })).toBeUndefined();
+    expect(portSelectionError({})).toBeUndefined();
+    expect(portSelectionError(undefined)).toBeUndefined();
   });
 });
 
@@ -278,6 +308,47 @@ describe("Esp32CloudFlasher", () => {
     ).toHaveLength(0);
   });
 
+  it("requires a frame name before touching the network", async () => {
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "panel:EPD_7in5_V2" },
+    });
+    clickFlash();
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      expect.stringMatching(/Name the frame/),
+    );
+    // Only the mount-time release probe may have fired.
+    expect(
+      fetchedUrls().filter((url) => url !== "/api/frames/firmware"),
+    ).toHaveLength(0);
+  });
+
+  it("requires a hardware choice — there is no default board any more", async () => {
+    // The old default ("XIAO + 7.5\" V2") was a combo nobody actually runs,
+    // and silently provisioning any one bundle would misconfigure every
+    // other board. The picker starts on a placeholder and flashing refuses
+    // until something real is chosen.
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByLabelText("Frame hardware");
+    fireEvent.change(screen.getByLabelText("Frame name"), {
+      target: { value: "Kitchen" },
+    });
+    clickFlash();
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      expect.stringMatching(/Pick the frame hardware/),
+    );
+    expect(esptool.calls.writeFlash).not.toHaveBeenCalled();
+    expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
+  });
+
   it("flashes and provisions using only same-origin requests, quoting WiFi values", async () => {
     mockCloudApi();
     const port = createHealthyPort();
@@ -287,9 +358,7 @@ describe("Esp32CloudFlasher", () => {
 
     // The flasher owns its own name field (each enrollment path names its own
     // frame); the value must reach the claim-token mint.
-    fireEvent.change(screen.getByLabelText("Frame name (optional)"), {
-      target: { value: "Kitchen" },
-    });
+    await fillRequiredFields();
     fireEvent.change(screen.getByLabelText("WiFi network"), {
       target: { value: "My Home WiFi" },
     });
@@ -328,6 +397,7 @@ describe("Esp32CloudFlasher", () => {
     expect(port.writes).toEqual([
       `set cloud_url "${window.location.origin}"`,
       'set claim_token "FRCT_minted"',
+      'set panel "EPD_7in5_V2"',
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
     // The claim token is minted once, and only after the flash succeeded.
@@ -362,7 +432,7 @@ describe("Esp32CloudFlasher", () => {
     });
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
     clickFlash();
 
     const done = await screen.findByTestId("esp32-flash-done", undefined, {
@@ -385,7 +455,7 @@ describe("Esp32CloudFlasher", () => {
     });
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
     clickFlash();
 
     const done = await screen.findByTestId("esp32-flash-done", undefined, {
@@ -401,9 +471,7 @@ describe("Esp32CloudFlasher", () => {
     stubSerial(port);
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
 
-    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
-      target: { value: "panel:EPD_13in3e" },
-    });
+    await fillRequiredFields("panel:EPD_13in3e");
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
 
@@ -419,7 +487,7 @@ describe("Esp32CloudFlasher", () => {
     mockCloudApi();
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     fireEvent.change(screen.getByLabelText("WiFi network"), {
       target: { value: "MyNet" },
@@ -444,9 +512,7 @@ describe("Esp32CloudFlasher", () => {
     stubSerial(port);
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
 
-    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
-      target: { value: "hw:waveshare_esp32_s3_photopainter" },
-    });
+    await fillRequiredFields("hw:waveshare_esp32_s3_photopainter");
     fireEvent.change(screen.getByLabelText("GPIO pins (optional)"), {
       target: { value: "rst=1,dc=2,cs=3,cs2=-1,busy=4,sck=5,mosi=6,pwr=-1" },
     });
@@ -489,9 +555,7 @@ describe("Esp32CloudFlasher", () => {
     stubSerial(port);
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
 
-    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
-      target: { value: "hw:waveshare_esp32_s3_photopainter" },
-    });
+    await fillRequiredFields("hw:waveshare_esp32_s3_photopainter");
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
 
@@ -509,6 +573,11 @@ describe("Esp32CloudFlasher", () => {
     await screen.findByRole("button", { name: /connect & flash/i });
 
     expect(screen.queryByLabelText("Frame hardware")).toBeNull();
+    // Only the name is required here — there is no hardware picker to choose
+    // from on a legacy release.
+    fireEvent.change(screen.getByLabelText("Frame name"), {
+      target: { value: "Kitchen" },
+    });
     clickFlash();
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
     expect(fetchedUrls()).toContain(
@@ -522,7 +591,7 @@ describe("Esp32CloudFlasher", () => {
     const port = createHealthyPort();
     stubSerial(port);
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     clickFlash();
 
@@ -538,7 +607,7 @@ describe("Esp32CloudFlasher", () => {
     );
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     clickFlash();
 
@@ -552,6 +621,33 @@ describe("Esp32CloudFlasher", () => {
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
   });
 
+  it("refuses a USB-UART bridge port before flashing anything", async () => {
+    // Picking the PhotoPainter 13.3"'s "USB Single Serial" (CH343) port used
+    // to flash 3 MB and then time out waiting for a console that only exists
+    // on the "USB JTAG/serial debug unit" port. The wrong port must fail
+    // up front, before the flash and before a claim token is spent.
+    mockCloudApi();
+    const port = createHealthyPort();
+    (port as FakePort & { getInfo(): { usbVendorId: number } }).getInfo = () => ({
+      usbVendorId: 0x1a86,
+    });
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await fillRequiredFields();
+
+    clickFlash();
+
+    expect(
+      await screen.findByRole("alert", undefined, { timeout: 5000 }),
+    ).toHaveProperty(
+      "textContent",
+      expect.stringMatching(/USB JTAG\/serial debug unit/),
+    );
+    expect(esptool.calls.writeFlash).not.toHaveBeenCalled();
+    expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
+    expect(port.writes).toHaveLength(0);
+  });
+
   it("fails loudly when the flashed firmware never shows a console prompt", async () => {
     mockCloudApi();
     // Device never speaks: the stream ends without a prompt.
@@ -563,7 +659,7 @@ describe("Esp32CloudFlasher", () => {
       }),
     );
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     clickFlash();
 
@@ -584,7 +680,7 @@ describe("Esp32CloudFlasher", () => {
     esptool.calls.writeFlash.mockRejectedValueOnce(new Error("flash write failed"));
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     clickFlash();
 
@@ -599,7 +695,7 @@ describe("Esp32CloudFlasher", () => {
     esptool.calls.writeFlash.mockRejectedValue(new Error("flash write failed"));
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
 
     clickFlash();
 

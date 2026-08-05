@@ -443,7 +443,12 @@ keeps its prompts); every prompt can be pre-answered with the script's
 
 The provider's flasher page uses WebSerial + esptool-js to write a prebuilt
 firmware image, then provisions `cloud_url` + `claim_token` (+ optional
-WiFi) into the device's NVS config partition. Same enrollment flow A over the
+WiFi) into the device's NVS config partition. The port must be the chip's
+built-in USB-Serial/JTAG device ("USB JTAG/serial debug unit"): the console
+REPL only exists there (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`), and boards
+that also expose an on-board USB-UART bridge (PhotoPainter 13.3", CH343 →
+"USB Single Serial") can flash through the bridge but never provision, so
+the flasher refuses known bridge vendor ids before writing anything. Same enrollment flow A over the
 device's own network connection afterwards. The firmware binaries come from
 the release archive; the flasher never receives per-user builds.
 

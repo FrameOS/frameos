@@ -164,6 +164,13 @@ function savedBytes(saved: SavedFile): Uint8Array {
   return joined;
 }
 
+// The frame name is required now — every build path fills one first.
+function nameFrame(value = "Kitchen Frame") {
+  fireEvent.change(screen.getByPlaceholderText("Frame name"), {
+    target: { value },
+  });
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -211,6 +218,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.change(
       screen.getByPlaceholderText(/WiFi network \(optional/),
       { target: { value: 'my "network"' } },
@@ -238,9 +246,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Frame name (optional)"), {
-      target: { value: "Kitchen Frame" },
-    });
+    nameFrame();
     fireEvent.change(
       screen.getByPlaceholderText(/WiFi network \(optional/),
       { target: { value: "MyNet" } },
@@ -299,6 +305,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.click(
       screen.getByRole("button", { name: /download sd image/i }),
     );
@@ -327,6 +334,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.change(screen.getByLabelText("Display"), {
       target: { value: "waveshare.EPD_13in3e" },
     });
@@ -367,6 +375,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.change(screen.getByLabelText("Display"), {
       target: { value: "waveshare.EPD_10in3" },
     });
@@ -391,6 +400,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.change(screen.getByLabelText("Display"), {
       target: { value: "http.upload" },
     });
@@ -415,6 +425,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.change(
       screen.getByPlaceholderText(/WiFi network \(optional/),
       { target: { value: "MyNet" } },
@@ -467,6 +478,7 @@ describe("SdImageBuilder", () => {
     // The in-memory caveat is stated up front.
     expect(screen.getByText(/assembled in memory/)).toBeDefined();
 
+    nameFrame();
     fireEvent.click(
       screen.getByRole("button", { name: /download sd image/i }),
     );
@@ -474,7 +486,7 @@ describe("SdImageBuilder", () => {
 
     expect(clicked).toHaveLength(1);
     expect(clicked[0]?.download).toBe(
-      "frameos-raspberry-pi-zero-2-w-cloud.img.gz",
+      "frameos-raspberry-pi-zero-2-w-kitchen-frame.img.gz",
     );
     expect(clicked[0]?.href).toBe("blob:mock-url");
     expect(blobs).toHaveLength(1);
@@ -509,6 +521,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     const button = screen.getByRole("button", { name: /download sd image/i });
     fireEvent.click(button);
 
@@ -529,9 +542,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Frame name (optional)"), {
-      target: { value: "x".repeat(5000) },
-    });
+    nameFrame("x".repeat(5000));
     fireEvent.click(
       screen.getByRole("button", { name: /download sd image/i }),
     );
@@ -562,6 +573,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W (v1.2.3)",
     });
 
+    nameFrame();
     fireEvent.click(
       screen.getByRole("button", { name: /download sd image/i }),
     );
@@ -571,5 +583,27 @@ describe("SdImageBuilder", () => {
       undefined,
       { timeout: 5000 },
     );
+  });
+
+  it("requires a frame name before opening the save dialog", async () => {
+    mockReleaseAndImage();
+    stubSaveFilePicker();
+    const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+
+    await screen.findByText(/Name the frame first/);
+    expect(mint).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).startsWith("/api/frames/sd-image"),
+      ),
+    ).toHaveLength(0);
   });
 });
