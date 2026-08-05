@@ -74,6 +74,11 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner=ARMHF_RUNNER),
     TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
+    # Same Bootlin-toolchain build as bookworm armv6 (Raspberry Pi OS trixie
+    # still supports the Pi Zero W / Pi 1). Trixie's OpenSSL stubs pull
+    # libz/libzstd transitively at link time — needs the -rpath-link mirror
+    # flag in cross_compile.py.
+    TargetDefinition("debian", "trixie", "armv6", "linux/arm/v6", "debian:trixie"),
     TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
     TargetDefinition("ubuntu", "26.04", "arm64", "linux/arm64", "ubuntu:26.04", runner="depot-ubuntu-24.04-arm-16"),
