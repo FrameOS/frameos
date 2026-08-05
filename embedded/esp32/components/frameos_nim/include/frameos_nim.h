@@ -56,6 +56,10 @@ bool frameos_nim_send_event(const char *event, const char *payload_json);
 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
+/* Optional tap invoked with every structured log line (on the logging
+ * task!). Used by the cloud client to forward logs over its WebSocket; the
+ * tap must be cheap and never block. Pass NULL to remove. */
+void frameos_nim_set_log_tap(void (*tap)(const char *line));
 /* Enable/disable backend log upload after network state changes. The baked
  * config still gates this; passing true has no effect when logs are disabled. */
 void frameos_nim_set_log_upload_enabled(bool enabled);

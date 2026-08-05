@@ -276,6 +276,78 @@ html.theme-dark .button-primary {
   font-size: 30px;
 }
 
+/* The account header's storage meters (StorageUsageMeters.tsx): one thin
+   capacity bar per quota bucket, sitting to the right of the user's name.
+   Deliberately quiet — muted labels, 5px tracks, the accent fill shifting
+   to warning/danger only when a bucket actually fills up. */
+.storage-usage {
+  display: grid;
+  grid-template-columns: max-content minmax(72px, 120px) max-content;
+  gap: 5px 10px;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.storage-usage__total {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.storage-usage__total-label {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.storage-usage__total-value {
+  font-weight: 600;
+}
+
+.storage-usage__label {
+  color: var(--muted);
+}
+
+.storage-usage__track {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.storage-usage__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.storage-usage__fill--warning {
+  background: var(--warning);
+}
+
+.storage-usage__fill--critical {
+  background: var(--danger);
+}
+
+.storage-usage__value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+}
+
+.storage-usage__row {
+  display: contents;
+}
+
 .compact-header {
   align-items: center;
   margin-bottom: 0;

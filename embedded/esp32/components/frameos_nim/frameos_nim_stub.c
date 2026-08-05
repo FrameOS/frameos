@@ -46,6 +46,7 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     return false;
 }
 void frameos_nim_log_hook(const char *msg) { (void)msg; }
+void frameos_nim_set_log_tap(void (*tap)(const char *line)) { (void)tap; }
 void frameos_nim_set_log_upload_enabled(bool enabled) { (void)enabled; }
 void frameos_nim_flush_logs(void) {}
 uint8_t *fos_nim_http_request(const char *method, const char *url,

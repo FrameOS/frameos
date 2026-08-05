@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -80,6 +81,18 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_ASSET_LIST_MAX_DEPTH 8
 #define FOS_CLOUD_ASSET_PATH_MAX 256
 #define FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH 8
+/* Log forwarding: every structured log line (frameos_nim_log_hook) is teed
+ * into a small queue while the WS session is live AND the provider granted
+ * telemetry:logs, then the cloud task coalesces the queue into one
+ * `log_batch` per 1 s tick. This is a tick coalescer, not a store: nothing
+ * is kept across disconnects, a full queue drops the line, and a failed or
+ * refused send is simply forgotten (the hub's error acks — rate_limited,
+ * insufficient_scope — are documented as non-fatal notices). One batch per
+ * second also stays far under the hub's 120 batches/min cap, which a
+ * per-line send would trip during a render burst. */
+#define FOS_CLOUD_LOG_QUEUE_DEPTH 64
+#define FOS_CLOUD_LOG_BATCH_MAX 60
+#define FOS_CLOUD_LOG_LINE_MAX 2048
 
 static fos_cloud_state_t s_state = FOS_CLOUD_NONE;
 static char s_last_error[96] = "";
@@ -607,6 +620,12 @@ static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
 
+/* telemetry:logs granted by the provider — parsed from the ready message's
+ * scopes array, cleared with the session. Read from the logging tasks (the
+ * tap), written by the WS task; a stale read costs at most one line. */
+static volatile bool s_logs_granted = false;
+static QueueHandle_t s_log_queue = NULL;
+
 static void ws_backoff_reset(void);
 
 static void ws_send_json(cJSON *msg)
@@ -616,6 +635,109 @@ static void ws_send_json(cJSON *msg)
     esp_websocket_client_send_text(s_ws_client, text, strlen(text),
                                    pdMS_TO_TICKS(10000));
     cJSON_free(text);
+}
+
+/* Runs on whatever task produced the log line (render, HTTP, Nim): copy the
+ * line into the queue and get out. Anything that cannot be taken right now
+ * — session down, scope missing, queue full, allocation failure — drops the
+ * line; the serial console still carries everything. */
+static void cloud_log_tap(const char *line)
+{
+    if (!s_ws_ready || !s_logs_granted || s_log_queue == NULL) return;
+    size_t len = strnlen(line, FOS_CLOUD_LOG_LINE_MAX);
+    char *copy = malloc(len + 1);
+    if (!copy) return;
+    memcpy(copy, line, len);
+    copy[len] = '\0';
+    if (xQueueSend(s_log_queue, &copy, 0) != pdTRUE) {
+        free(copy);
+    }
+}
+
+static void ws_logs_init(void)
+{
+    if (s_log_queue == NULL) {
+        s_log_queue = xQueueCreate(FOS_CLOUD_LOG_QUEUE_DEPTH, sizeof(char *));
+    }
+    if (s_log_queue != NULL) {
+        frameos_nim_set_log_tap(cloud_log_tap);
+    }
+}
+
+static void ws_drain_log_queue(void)
+{
+    char *line = NULL;
+    while (s_log_queue != NULL && xQueueReceive(s_log_queue, &line, 0) == pdTRUE) {
+        free(line);
+    }
+}
+
+/* Cloud task, once per tick: coalesce whatever the tap queued into a single
+ * log_batch. The hub sends no ack on success and its two error acks
+ * (insufficient_scope, rate_limited) are non-fatal notices the verb
+ * dispatcher already ignores, so there is nothing to wait for here. */
+static void ws_poll_logs(void)
+{
+    if (s_log_queue == NULL) return;
+    if (!s_ws_client || !s_ws_ready || !s_logs_granted) {
+        /* Lines that raced in around a disconnect are not deliverable. */
+        ws_drain_log_queue();
+        return;
+    }
+    cJSON *logs = NULL;
+    int count = 0;
+    bool have_time = fos_wifi_time_synced();
+    double now = have_time ? (double)time(NULL) : 0;
+    char *line = NULL;
+    while (count < FOS_CLOUD_LOG_BATCH_MAX &&
+           xQueueReceive(s_log_queue, &line, 0) == pdTRUE) {
+        if (logs == NULL) logs = cJSON_CreateArray();
+        if (logs == NULL) {
+            free(line);
+            return;
+        }
+        cJSON *payload = cJSON_Parse(line);
+        if (payload != NULL && !cJSON_IsObject(payload)) {
+            cJSON_Delete(payload);
+            payload = NULL;
+        }
+        if (payload == NULL) {
+            /* Same wrapping the backend uploader applies to plain lines. */
+            payload = cJSON_CreateObject();
+            if (payload != NULL) {
+                cJSON_AddStringToObject(payload, "event", "log");
+                cJSON_AddStringToObject(payload, "source", "esp32");
+                cJSON_AddStringToObject(payload, "message", line);
+            }
+        }
+        free(line);
+        if (payload == NULL) continue;
+        cJSON *entry = cJSON_CreateObject();
+        if (entry == NULL) {
+            cJSON_Delete(payload);
+            continue;
+        }
+        /* Without SNTP the entry carries no timestamp and the hub stamps
+         * its own arrival time — better than a 1970 date. */
+        if (have_time) cJSON_AddNumberToObject(entry, "timestamp", now);
+        cJSON_AddItemToObject(entry, "payload", payload);
+        cJSON_AddItemToArray(logs, entry);
+        count++;
+    }
+    if (logs == NULL) return;
+    if (count == 0) {
+        cJSON_Delete(logs);
+        return;
+    }
+    cJSON *msg = cJSON_CreateObject();
+    if (msg == NULL) {
+        cJSON_Delete(logs);
+        return;
+    }
+    cJSON_AddStringToObject(msg, "type", "log_batch");
+    cJSON_AddItemToObject(msg, "logs", logs);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
 }
 
 /* Attach the hello-shaped state fields to msg. */
@@ -1320,10 +1442,25 @@ static void ws_handle_message(const char *data, size_t len)
     if (strcmp(type, "challenge") == 0) {
         ws_send_auth(root);
     } else if (strcmp(type, "ready") == 0) {
+        /* The ready message is authoritative for what this session may do:
+         * its scopes array reflects the provider's current grant, including
+         * revocations since enrollment. */
+        bool logs_granted = false;
+        const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
+        const cJSON *scope = NULL;
+        cJSON_ArrayForEach(scope, scopes) {
+            if (cJSON_IsString(scope) && scope->valuestring &&
+                strcmp(scope->valuestring, "telemetry:logs") == 0) {
+                logs_granted = true;
+                break;
+            }
+        }
+        s_logs_granted = logs_granted;
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
-        ESP_LOGI(TAG, "ws: session ready");
+        ESP_LOGI(TAG, "ws: session ready (logs %s)",
+                 logs_granted ? "granted" : "not granted");
     } else if (strcmp(type, "get_state") == 0) {
         ws_ack(id, true, NULL);
         ws_send_state(id);
@@ -1430,6 +1567,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
+            s_logs_granted = false; /* re-derived from this session's ready */
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
             ws_send_hello();
@@ -1446,6 +1584,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_CLOSED:
             s_ws_ready = false;
+            s_logs_granted = false;
             /* 4401: the provider closed an established socket because the
              * signature failed, the auth timed out, or the frame was revoked. */
             if (data && data->close_status_code == FOS_CLOUD_WS_AUTH_CLOSE_CODE) {
@@ -1599,8 +1738,11 @@ static void ws_start(void)
         ESP_LOGI(TAG, "ws: dialing %s://…%s", wss ? "wss" : "ws",
                  dial_path ? dial_path : "");
     }
-    /* TODO(cloud-frames): ship log batches under telemetry:logs; apply
-     * set_settings/set_schedule for the declarative allowlist. */
+    /* Tee runtime log lines toward this session (flushed by ws_poll_logs on
+     * the cloud task once telemetry:logs is confirmed by `ready`). */
+    ws_logs_init();
+    /* TODO(cloud-frames): apply set_settings/set_schedule for the
+     * declarative allowlist. */
 }
 
 /* Cloud task only: the websocket task must not be torn down from inside its
@@ -1612,6 +1754,8 @@ static void ws_stop(void)
     esp_websocket_client_destroy(s_ws_client);
     s_ws_client = NULL;
     s_ws_ready = false;
+    s_logs_granted = false;
+    ws_drain_log_queue();
     s_scene_ack_pending = false;
     free(s_ws_rx); /* the ws task is gone; nothing else touches this */
     s_ws_rx = NULL;
@@ -1640,6 +1784,7 @@ static void ws_start(void)
 
 static void ws_stop(void) {}
 static void ws_poll_scene_ack(void) {}
+static void ws_poll_logs(void) {}
 static bool ws_process_asset_jobs(void) { return false; }
 static bool ws_demote_requested(void) { return false; }
 static void ws_clear_demote_request(void) {}
@@ -1713,8 +1858,9 @@ static void cloud_task(void *arg)
                 ws_started = true;
             }
             ws_poll_scene_ack();
+            ws_poll_logs();
             /* Streamed asset replies run here, off the WS task. A 1 s idle
-             * tick keeps browse-the-SD latency humane; both polls are cheap
+             * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */
             ws_process_asset_jobs();
             vTaskDelay(pdMS_TO_TICKS(1000));
