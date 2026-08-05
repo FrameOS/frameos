@@ -25,7 +25,7 @@ import {
 } from "@frameos-cloud/db";
 import type { FramesDatabase } from "./frames";
 
-export const maxPrivateSceneBytesPerAccount = 200 * 1024 * 1024;
+export const maxPrivateSceneBytesPerAccount = 100 * 1024 * 1024;
 export const maxBackupBytesPerAccount = 100 * 1024 * 1024;
 export const maxFrameLogBytesPerAccount = 100 * 1024 * 1024;
 

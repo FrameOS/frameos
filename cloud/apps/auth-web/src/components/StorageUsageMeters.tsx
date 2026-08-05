@@ -23,7 +23,7 @@ function meterFill(bucket: MeterBucket) {
         : percent >= 80
           ? "storage-usage__fill storage-usage__fill--warning"
           : "storage-usage__fill",
-    // A 200 MB quota with 3 KB used rounds to 0% — keep a visible sliver so
+    // A 100 MB quota with 3 KB used rounds to 0% — keep a visible sliver so
     // "there is something here" still reads.
     width: bucket.bytes > 0 ? `${Math.max(1.5, Math.min(100, percent))}%` : "0",
   };
