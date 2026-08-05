@@ -217,7 +217,13 @@ async function enrollWithClaimToken(
         throw new QuotaExceededError();
       }
 
-      const name = displayName ?? token.name ?? "FrameOS frame";
+      // The claim token's name outranks the device's: the owner typed it at
+      // mint time (the ESP32 flasher's "Frame name" field), while the
+      // device's is self-asserted and usually just its default hostname —
+      // every stock ESP32 enrolls as "frameos", which used to shadow the
+      // chosen name. Multi-use tokens (SD images) carry no token name, so
+      // the device-sent name (baked into the image) still applies there.
+      const name = token.name ?? displayName ?? "FrameOS frame";
       const [linkedClient] = await tx
         .insert(linkedClients)
         .values({

@@ -1,4 +1,6 @@
 import {
+  ArrowLeftIcon,
+  ChevronRightIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
   CpuChipIcon,
@@ -27,13 +29,15 @@ const mintErrorMessages: Record<string, string> = {
 }
 
 // "Add frame": four enrollment paths (install script, SD image, link code,
-// ESP32 USB flashing). Claim codes are plumbing, not UX: the install command
-// is ready to copy the moment the panel appears, minted once per opening (see
-// the mint site below for why that is safe now). The SD builder and the ESP32
-// flasher mint their own — multi-use and single-use respectively — on first
-// use, because those flows can take minutes and burn a code per attempt. The
-// server stores only hashes; every enrolled frame appears as pending until the
-// owner confirms it.
+// ESP32 USB flashing), presented in two stages — first a chooser with one
+// line per path, then the chosen path's full form. Claim codes are plumbing,
+// not UX: the install command is minted once per opening (see the mint site
+// below for why that is safe now), so it is ready to copy the moment the
+// script path is opened. The SD builder and the ESP32 flasher mint their own
+// — multi-use and single-use respectively — on first use, because those
+// flows can take minutes and burn a code per attempt. The server stores only
+// hashes; every enrolled frame appears as pending until the owner confirms
+// it.
 //
 // Ported from cloud/apps/auth-web/src/components/AddFramePanel.tsx, which owned
 // the only copy of this flow while /account/frames and /frames both showed
@@ -56,7 +60,45 @@ export interface AddFramePanelProps {
   onClose?: (() => void) | undefined
 }
 
+type AddFramePath = 'script' | 'sd' | 'link' | 'esp32'
+
+// Stage one: one button per enrollment path, each with a single line saying
+// what it is for. The chosen path's full form is stage two.
+const pathChoices: {
+  description: string
+  icon: typeof CommandLineIcon
+  key: AddFramePath
+  title: string
+}[] = [
+  {
+    description: 'Run one command on a device that already runs Linux — it installs FrameOS and links the frame here.',
+    icon: CommandLineIcon,
+    key: 'script',
+    title: 'Install script (any Pi / most Linux)',
+  },
+  {
+    description: 'Build a personalized image in this browser, flash it to a card, and the Pi enrolls on first boot.',
+    icon: DevicePhoneMobileIcon,
+    key: 'sd',
+    title: 'SD card image (Raspberry Pi)',
+  },
+  {
+    description: 'Already have FrameOS on your network? Approve the short code the frame shows to link it here.',
+    icon: QrCodeIcon,
+    key: 'link',
+    title: 'Link a frame that already runs',
+  },
+  {
+    description: 'Plug the board in over USB — this browser writes the firmware and enrolls the frame automatically.',
+    icon: CpuChipIcon,
+    key: 'esp32',
+    title: 'Flash an ESP32 from this browser',
+  },
+]
+
 export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddFramePanelProps): ReactElement {
+  // undefined = the chooser stage; a key = that path's form.
+  const [path, setPath] = useState<AddFramePath | undefined>()
   const [claimToken, setClaimToken] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [installCopied, setInstallCopied] = useState(false)
@@ -249,6 +291,36 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
           </p>
         ) : null}
 
+        {path === undefined ? (
+          <div className="grid gap-2">
+            {pathChoices.map((choice) => (
+              <button
+                key={choice.key}
+                className="frameos-card flex items-center gap-3 rounded-2xl border border-white/90 p-4 text-left shadow-sm transition hover:border-blue-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                onClick={() => setPath(choice.key)}
+                type="button"
+              >
+                <choice.icon aria-hidden className="frameos-strong h-6 w-6 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="frameos-strong block text-sm font-semibold">{choice.title}</span>
+                  <span className="frameos-muted block text-xs">{choice.description}</span>
+                </span>
+                <ChevronRightIcon aria-hidden className="frameos-muted h-5 w-5 shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button
+            className="frameos-muted inline-flex items-center gap-1.5 text-xs font-semibold transition hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            onClick={() => setPath(undefined)}
+            type="button"
+          >
+            <ArrowLeftIcon aria-hidden className="h-4 w-4" />
+            All ways to add a frame
+          </button>
+        )}
+
+        {path === 'script' ? (
         <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
           <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
             <CommandLineIcon aria-hidden className="h-5 w-5" />
@@ -281,7 +353,9 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               : `Claim codes are single-use and expire within ${claimTokenTtlHours} hours.`}
           </p>
         </section>
+        ) : null}
 
+        {path === 'sd' ? (
         <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
           <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
             <DevicePhoneMobileIcon aria-hidden className="h-5 w-5" />
@@ -294,7 +368,9 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             mintClaimToken={mintClaimToken}
           />
         </section>
+        ) : null}
 
+        {path === 'link' ? (
         <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
           <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
             <QrCodeIcon aria-hidden className="h-5 w-5" />
@@ -312,7 +388,9 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             The frame asks and you approve — nothing to copy from here, and the code proves you can see the device.
           </p>
         </section>
+        ) : null}
 
+        {path === 'esp32' ? (
         <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
           <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
             <CpuChipIcon aria-hidden className="h-5 w-5" />
@@ -320,6 +398,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
           </h3>
           <Esp32CloudFlasher cloudOrigin={cloudOrigin} />
         </section>
+        ) : null}
       </div>
     </div>
   )

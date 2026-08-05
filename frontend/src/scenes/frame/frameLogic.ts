@@ -1523,10 +1523,20 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAc
     // Cloud frames have no POST /api/frames/{id} — the control plane only
     // accepts the declarative settings allowlist, and applies it on the
     // device immediately (which is why Save stays visible with no deploy
-    // step). Scene assignment is a separate, store-scene-only endpoint
-    // (/api/frames/{id}/scenes) that takes published store scene ids, not
-    // the frame's edited scene graphs, so Save deliberately never touches it.
-    if (!(await pushCloudFrameSettings(frameId, normalizedFrame))) {
+    // step). Edited scene graphs go through the same store-scene persistence
+    // Deploy uses (new immutable versions of assigned scenes, new private
+    // scenes for unclaimed ones, then the checksummed assignment push).
+    // Save used to skip scenes entirely, which silently dropped a newly
+    // added scene while still reporting success because the name pushed.
+    const settingsPushed = await pushCloudFrameSettings(frameId, normalizedFrame)
+    const scenes = normalizedFrame.scenes ?? []
+    if (scenes.length > 0) {
+      const outcome = await persistAndPushCloudFrameScenes(frameId, scenes, normalizedFrame.active_scene_id)
+      for (const storeSceneId of outcome.changedStoreSceneIds) {
+        clearCloudSceneJsonCache(storeSceneId)
+      }
+      framesModel.actions.hydrateCloudFrameScenes(frameId, true)
+    } else if (!settingsPushed) {
       throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
     }
     return

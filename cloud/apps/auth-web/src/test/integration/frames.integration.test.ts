@@ -288,7 +288,11 @@ describe("cloud-managed frame enrollment", () => {
     const claimToken = await mintToken("Kitchen frame");
     expect(claimToken.startsWith("FRCT_")).toBe(true);
 
-    const response = await enroll(claimToken, keys.publicKeyBase64);
+    // The device asserts its own name — a stock ESP32 always sends its
+    // default hostname "frameos" — and the owner's mint-time name must win.
+    const response = await enroll(claimToken, keys.publicKeyBase64, {
+      name: "frameos",
+    });
     expect(response.status).toBe(200);
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.status).toBe("pending");
@@ -382,6 +386,28 @@ describe("cloud-managed frame enrollment", () => {
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.ws_path).toBe("/api/frames/ws");
     expect("ws_url" in payload).toBe(false);
+  });
+
+  it("uses the device-sent name only when the claim token carries none", async () => {
+    // Install-script and SD-image tokens are minted without a name; there
+    // the device's own name (baked into the image, or its hostname) is the
+    // best available. With neither, the placeholder applies.
+    const accountId = await signIn();
+    const named = await enroll(await mintToken(), deviceKeypair().publicKeyBase64, {
+      name: "Hallway",
+    });
+    expect(named.status).toBe(200);
+    const anonymous = await enroll(await mintToken(), deviceKeypair().publicKeyBase64);
+    expect(anonymous.status).toBe(200);
+
+    const rows = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, accountId));
+    expect(rows.map((row) => row.name).sort()).toEqual([
+      "FrameOS frame",
+      "Hallway",
+    ]);
   });
 
   it("multi-use claim tokens enroll distinct frames until the budget is spent", async () => {
