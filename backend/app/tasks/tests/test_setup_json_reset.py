@@ -657,3 +657,98 @@ def test_wpa_supplicant_config_is_never_written_with_a_plaintext_psk_in_the_log(
     assert result.returncode == 0, result.stdout + result.stderr
     assert "topsecret123" not in result.stdout
     assert "topsecret123" not in sandbox.log_file.read_text(encoding="utf-8")
+
+
+# --- The frameos-setup.bin personalization blob ------------------------------
+
+
+def _personalized_blob(files: dict[str, bytes]) -> bytes:
+    from app.tasks.sd_image_blob_patch import build_setup_blob_payload
+    from app.tasks.setup_json_reset import render_setup_blob_region
+
+    return render_setup_blob_region(build_setup_blob_payload(files))
+
+
+def test_setup_blob_placeholder_layout():
+    from app.tasks.setup_json_reset import (
+        SETUP_BLOB_MAGIC,
+        SETUP_BLOB_PLACEHOLDER_SIZE,
+        render_setup_blob_placeholder,
+    )
+
+    placeholder = render_setup_blob_placeholder()
+    assert len(placeholder) == SETUP_BLOB_PLACEHOLDER_SIZE
+    text = placeholder.decode("ascii")
+    lines = text.split("\n")
+    assert lines[0] == SETUP_BLOB_MAGIC
+    # Every line is a comment: the personalizer verifies this before daring
+    # to overwrite the region, and first boot treats it as "not personalized".
+    assert all(line.startswith("#") for line in lines if line)
+
+
+def test_pristine_setup_blob_is_a_no_op_and_left_in_place(tmp_path):
+    from app.tasks.setup_json_reset import render_setup_blob_placeholder
+
+    sandbox = Sandbox(tmp_path)
+    sandbox.add_fake_frameos()
+    blob = sandbox.boot / "frameos-setup.bin"
+    placeholder = render_setup_blob_placeholder()
+    blob.write_bytes(placeholder)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The bottom gate exits before run_setup: no log file, no remount, and
+    # the placeholder survives byte for byte.
+    assert not sandbox.log_file.exists()
+    assert sandbox.mount_calls() == ""
+    assert blob.read_bytes() == placeholder
+
+
+def test_personalized_setup_blob_extracts_installs_and_shreds(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    argv_log = sandbox.add_fake_frameos(exit_status=0)
+    blob = sandbox.boot / "frameos-setup.bin"
+    blob.write_bytes(
+        _personalized_blob(
+            {
+                "frameos-setup.json": json.dumps({"name": "Blob frame"}).encode("utf-8"),
+                "frameos-hostname": b"blob-frame\n",
+                "frameos-wifi.nmconnection": b"[wifi]\nssid=BlobNet\n",
+                "frameos-authorized_keys": b"ssh-ed25519 AAAA blob@test\n",
+            }
+        )
+    )
+    shadow = sandbox.shadow_link(blob)
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Extracting first-boot personalization" in result.stdout
+    # The extracted setup JSON drove a real `frameos setup --with-setup=...`.
+    argv = argv_log.read_text(encoding="utf-8")
+    assert "--with-setup=" in argv
+    # The member files went through the existing per-file handlers.
+    assert (sandbox.etc / "hostname").read_text(encoding="utf-8") == "blob-frame\n"
+    assert sandbox.wifi_file.read_text(encoding="utf-8") == "[wifi]\nssid=BlobNet\n"
+    # The blob held every secret its members did: zero-overwritten, removed.
+    assert not blob.exists()
+    assert set(shadow.read_bytes()) == {0}
+    # The extracted setup JSON was shredded by the existing handler too.
+    assert not (sandbox.boot / "frameos-setup.json").exists()
+
+
+def test_setup_blob_without_optional_members_installs_only_what_it_has(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    sandbox.add_fake_frameos(exit_status=0)
+    blob = sandbox.boot / "frameos-setup.bin"
+    blob.write_bytes(
+        _personalized_blob({"frameos-setup.json": b'{"name": "Minimal"}'})
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (sandbox.etc / "hostname").exists()
+    assert not sandbox.wifi_file.exists()
+    assert not blob.exists()

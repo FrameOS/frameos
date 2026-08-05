@@ -379,6 +379,26 @@ directly. Providers serve a session-gated streaming pass-through
 public release asset through without buffering it. Personalization stays in
 the browser, so no user data passes through it.
 
+**The self-hosted sibling: `/boot/frameos-setup.bin`.** Release images also
+ship a second, larger placeholder — **8 MiB**, first line
+`# FRAMEOS-SETUP-BLOB-V1`, canonical bytes from
+`app.tasks.setup_json_reset.render_setup_blob_placeholder` — for
+personalization by a self-hosted FrameOS backend, whose payload (the full
+`frameos-setup.json` with frame config and scenes, plus the
+hostname/WiFi/SSH-keys/root-password boot files) cannot fit 4096 bytes. A
+personalized region is `size=<bytes>` on line 2 followed by a gzipped POSIX
+tar of the allow-listed `/boot/frameos-*` files, padded with `#` to the
+fixed size; the first-boot script unpacks it with busybox `gunzip | tar`,
+installs the members, shreds the blob, and runs the normal first-boot
+handlers (display/boot config comes from `frameos setup` itself, so no
+partition surgery is needed anywhere). The backend patches the region
+in place in the raw image (`app.tasks.sd_image_blob_patch`) exactly like
+the browser patches the cloud region — same magic-scan, same pristine-region
+verification, same fixed-size overwrite — which means SD personalization
+for backend-managed frames needs no mtools, debugfs, docker or build host
+when the frame runs a precompiled FrameOS with interpreted scenes. While
+the second line is a comment the region is inert and the image generic.
+
 **Multi-use claim tokens.** A provider may mint claim tokens with a use
 budget (`max_uses` > 1) so one personalized image can be flashed to many
 cards: each boot enrolls a distinct frame (every device generates its own
