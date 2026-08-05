@@ -23,13 +23,16 @@ import {
   maxNewScenesPerDay,
   maxSceneZipBytes,
   maxScenesPerAccount,
-  maxStoreBytesPerAccount,
   rebuildZipWithScenes,
   sceneSummary,
   slugifyName,
   slugSuffix,
   validateSceneZip,
 } from "../../../../../../src/lib/store";
+import {
+  maxPrivateSceneBytesPerAccount,
+  privateSceneBytesForAccount,
+} from "../../../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -88,23 +91,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("invalid_scenes", 400);
   }
 
-  // Same per-account quotas as publishing a new scene.
+  // Same per-account quotas as publishing a new scene. Forks are born
+  // private, so their bytes always count against the private-scene quota.
   const [quota] = await db
-    .select({
-      bytes: sql<number>`coalesce(sum(${storeSceneVersions.sizeBytes}), 0)::bigint`,
-      scenes: sql<number>`count(distinct ${storeScenes.id})::int`,
-    })
+    .select({ scenes: sql<number>`count(*)::int` })
     .from(storeScenes)
-    .leftJoin(
-      storeSceneVersions,
-      eq(storeSceneVersions.sceneId, storeScenes.id),
-    )
     .where(eq(storeScenes.accountId, accountId));
   if ((quota?.scenes ?? 0) >= maxScenesPerAccount) {
     return jsonError("scene_quota_exceeded", 403, {
       max_scenes: maxScenesPerAccount,
     });
   }
+  const privateBytes = await privateSceneBytesForAccount(db, accountId);
   const dailyLimited = await identityRateLimitResponse(accountId, "store:fork", {
     limit: maxNewScenesPerDay,
     windowMs: 24 * 60 * 60 * 1000,
@@ -172,9 +170,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (content.length > maxSceneZipBytes) {
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
   }
-  if (Number(quota?.bytes ?? 0) + content.length > maxStoreBytesPerAccount) {
+  if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
     return jsonError("storage_quota_exceeded", 403, {
-      max_bytes: maxStoreBytesPerAccount,
+      max_bytes: maxPrivateSceneBytesPerAccount,
+      private_bytes: Math.round(privateBytes),
     });
   }
 

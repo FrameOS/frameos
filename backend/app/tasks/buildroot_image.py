@@ -41,14 +41,21 @@ from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import RemoteDeployer
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
+from app.tasks.sd_image_blob_patch import (
+    build_setup_blob_payload,
+    patch_setup_blob_into_image,
+)
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_CLOUD_CONFIG_FILE,
     BOOT_HOSTNAME_FILE,
     BOOT_ROOT_PASSWORD_FILE,
+    BOOT_SETUP_BLOB_FILE,
     BOOT_WIFI_CONNECTION_FILE,
+    SETUP_BLOB_MEMBERS,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
+    render_setup_blob_region,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
     setup_json_reset_enabled,
@@ -1167,16 +1174,34 @@ class BuildrootImageBuilder:
             base_entry: dict[str, Any] | None = None
             compose_image = None
             precompiled_sd_image = None
+            personalization_mode: str | None = None
             if self._can_use_precompiled_sd_image():
-                compose_image = await self._precompiled_sd_image_patch_image()
-                precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                # Cheapest first: pure in-place byte patching of the release
+                # image's frameos-setup.bin placeholder — the same mechanism
+                # the cloud's in-browser SD builder uses, needing no mtools,
+                # debugfs or docker anywhere. Falls through to the partition
+                # patching path for older release images without the
+                # placeholder or payloads too big for the region.
+                precompiled_sd_image = await self._try_patch_precompiled_sd_image(
                     temp_dir=temp_dir,
                     output_path=raw_output_path,
                     bootstrap_frame=bootstrap_frame,
                     setup_payload=setup_payload,
-                    image=compose_image,
-                    allow_fallback=self.build_environment_provider != "none",
                 )
+                if precompiled_sd_image is not None:
+                    personalization_mode = "placeholder"
+                else:
+                    compose_image = await self._precompiled_sd_image_patch_image()
+                    precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                        temp_dir=temp_dir,
+                        output_path=raw_output_path,
+                        bootstrap_frame=bootstrap_frame,
+                        setup_payload=setup_payload,
+                        image=compose_image,
+                        allow_fallback=self.build_environment_provider != "none",
+                    )
+                    if precompiled_sd_image is not None:
+                        personalization_mode = "partition-patch"
             if precompiled_sd_image is None and self.build_environment_provider == "none":
                 raise RuntimeError(
                     buildroot_sd_image_no_build_environment_message(
@@ -1261,6 +1286,7 @@ class BuildrootImageBuilder:
                         "precompiledSdImage": {
                             "releaseUrl": precompiled_sd_image.release_url,
                             "cacheHit": precompiled_sd_image.cache_hit,
+                            "personalization": personalization_mode,
                         },
                     }
                     if precompiled_sd_image is not None
@@ -1359,6 +1385,98 @@ class BuildrootImageBuilder:
         host is for compiling, which is the part that actually wants the CPU.
         """
         return self._host_has_boot_patch_tools()
+
+    async def _try_patch_precompiled_sd_image(
+        self,
+        *,
+        temp_dir: Path,
+        output_path: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+    ) -> PrecompiledBuildrootSdImageResult | None:
+        """Personalize a release image by patching its setup-blob placeholder.
+
+        Pure byte surgery on the gunzipped .img — the /boot personalization
+        files ride a gzipped tar inside the fixed-size frameos-setup.bin
+        region, and the first-boot script extracts them (config.txt comes
+        from `frameos setup` running drivers.setup on-device, so no boot
+        partition merge is needed). Returns None whenever anything makes
+        this path inapplicable — no release image, no placeholder in it
+        (older release), payload too big — and the caller falls back.
+        """
+        if not self._can_use_precompiled_sd_image():
+            return None
+
+        precompiled_sd_image = await download_precompiled_buildroot_sd_image(
+            platform=self.platform.key,
+            logger=self._log,
+        )
+        if precompiled_sd_image is None:
+            return None
+
+        overlay_dir = temp_dir / "blob-overlay"
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+        boot_dir = overlay_dir / "boot"
+        boot_files: dict[str, bytes] = {}
+        for name in SETUP_BLOB_MEMBERS:
+            member_path = boot_dir / name
+            if member_path.is_file():
+                boot_files[name] = member_path.read_bytes()
+        if "frameos-setup.json" not in boot_files:
+            # Without the setup payload the first boot would have nothing to
+            # apply; the partition-patching path handles whatever this is.
+            return None
+
+        try:
+            payload = build_setup_blob_payload(boot_files)
+            # Fail on size before spending time gunzipping ~1.5 GB.
+            render_setup_blob_region(payload)
+        except ValueError as exc:
+            await self._log(
+                "stdout",
+                f"Setup payload does not fit the in-image placeholder ({exc}); "
+                "falling back to partition patching",
+            )
+            return None
+
+        await self._log(
+            "stdout",
+            f"Personalizing precompiled SD image {precompiled_sd_image.archive_path.name} "
+            "via its setup-blob placeholder",
+        )
+        try:
+            await self._with_progress_updates(
+                "Still unpacking precompiled Buildroot SD image",
+                asyncio.to_thread(
+                    self._prepare_precompiled_release_image,
+                    precompiled_sd_image.archive_path,
+                    output_path,
+                ),
+            )
+            patched = await asyncio.to_thread(
+                patch_setup_blob_into_image, output_path, payload
+            )
+        except Exception as exc:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stderr",
+                f"Could not patch the precompiled SD image in place: {exc}. "
+                "Falling back to partition patching.",
+            )
+            return None
+        if not patched:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stdout",
+                "Release image carries no setup-blob placeholder (pre-placeholder "
+                "release); falling back to partition patching",
+            )
+            return None
+        return precompiled_sd_image
 
     async def _try_compose_precompiled_sd_image(
         self,
@@ -2659,8 +2777,11 @@ PY
                 Path(BOOT_WIFI_CONNECTION_FILE).name,
                 Path(BOOT_AUTHORIZED_KEYS_FILE).name,
                 # Backend-personalized images are self-hosted; never ship a
-                # (stale) cloud-enrollment personalization file on them.
+                # (stale) cloud-enrollment personalization file on them. The
+                # setup-blob placeholder is equally dead weight here — this
+                # path writes the personalization files directly.
                 Path(BOOT_CLOUD_CONFIG_FILE).name,
+                Path(BOOT_SETUP_BLOB_FILE).name,
                 setup_relpath,
             }
         )

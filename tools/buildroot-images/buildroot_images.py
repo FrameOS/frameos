@@ -76,9 +76,11 @@ from update_versions import (  # noqa: E402
 from app.utils.cross_compile import TargetMetadata  # noqa: E402
 from app.tasks.setup_json_reset import (  # noqa: E402
     BOOT_CLOUD_CONFIG_FILE,
+    BOOT_SETUP_BLOB_FILE,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
     render_cloud_config_placeholder,
+    render_setup_blob_placeholder,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
 )
@@ -885,6 +887,15 @@ async def build_release_image(args: argparse.Namespace) -> None:
         # contiguity comment in backend/app/tasks/buildroot_image.py).
         (overlay_dir / "boot" / Path(BOOT_CLOUD_CONFIG_FILE).name).write_bytes(
             render_cloud_config_placeholder()
+        )
+        # And the big sibling: the 8 MiB frameos-setup.bin placeholder that
+        # lets a SELF-HOSTED backend personalize this image by pure in-place
+        # byte patching (backend/app/tasks/sd_image_blob_patch.py) — full
+        # frameos-setup.json payload plus the hostname/WiFi/SSH/root-password
+        # boot files, no mtools/debugfs anywhere. Same contiguity reasoning
+        # as above; a genimage-fresh FAT lays both out contiguously.
+        (overlay_dir / "boot" / Path(BOOT_SETUP_BLOB_FILE).name).write_bytes(
+            render_setup_blob_placeholder()
         )
 
         base_entry = await resolve_buildroot_base_entry(platform)

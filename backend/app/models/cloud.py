@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Session, mapped_column, relationship
 
 from app.database import Base
@@ -76,6 +76,11 @@ class CloudBackendLink(Base):
     backup_key_fingerprint = mapped_column(String(16), nullable=True)
     last_inventory_sync_at = mapped_column(DateTime, nullable=True)
     last_grant_sync_at = mapped_column(DateTime, nullable=True)
+    # Storage usage + limits snapshot from the provider's grants response
+    # (docs/cloud-link.md), refreshed on the 15-minute sync — shown in the
+    # cloud settings section so users see quota headroom without visiting the
+    # provider.
+    cloud_usage = mapped_column(JSON, nullable=True)
     revoked_at = mapped_column(DateTime, nullable=True)
     created_at = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     updated_at = mapped_column(DateTime, nullable=False, default=func.current_timestamp())

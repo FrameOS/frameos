@@ -45,7 +45,12 @@ def cloud_calls(monkeypatch):
                 "grants": [
                     {"account_id": "acc-1", "account_email": "owner@example.com", "role": "owner"},
                     {"account_id": "acc-2", "account_email": "guest@example.com", "role": "member"},
-                ]
+                ],
+                "usage": {
+                    "scenes": {"private_bytes": 123, "private_max_bytes": 209715200, "public_bytes": 456},
+                    "backups": {"bytes": 7, "max_bytes": 104857600},
+                    "frame_logs": {"bytes": 8, "max_bytes": 104857600},
+                },
             },
         ),
         "inventory": (200, {"status": "synced"}),
@@ -79,6 +84,9 @@ async def test_sync_link_updates_grants_and_memberships(db, service, cloud_calls
     assert link.cloud_account_email == "owner@example.com"
     assert link.last_grant_sync_at is not None
     assert link.last_inventory_sync_at is not None
+    # The storage usage + limits snapshot rides along on the grants response.
+    assert link.cloud_usage["scenes"]["private_bytes"] == 123
+    assert link.cloud_usage["backups"]["max_bytes"] == 104857600
 
     memberships = db.query(CloudMembership).order_by(CloudMembership.cloud_account_id).all()
     assert [(m.cloud_account_id, m.role) for m in memberships] == [("acc-1", "owner"), ("acc-2", "member")]

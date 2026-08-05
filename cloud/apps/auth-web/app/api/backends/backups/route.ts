@@ -23,6 +23,7 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { maxBackupBytesPerAccount } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -139,14 +140,20 @@ export async function POST(request: NextRequest) {
   const name = parseOptionalString(body.name)?.slice(0, 256);
   const contentType = parseOptionalString(body.content_type)?.slice(0, 128);
 
-  // Count-based quota; replacing an existing item never fails the check.
+  // Count quota (replacing an existing item never fails it) plus the account
+  // byte quota — replacements only count the size delta, so re-uploading a
+  // same-size backup always succeeds even at the limit.
   const [countRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
+    .select({
+      bytes: sql<number>`coalesce(sum(${clientBackups.sizeBytes}), 0)::float8`,
+      count: sql<number>`count(*)::int`,
+    })
     .from(clientBackups)
     .where(eq(clientBackups.accountId, linkedClient.accountId));
   const count = countRow?.count ?? 0;
+  const accountBytes = Number(countRow?.bytes ?? 0);
   const [existing] = await db
-    .select({ id: clientBackups.id })
+    .select({ id: clientBackups.id, sizeBytes: clientBackups.sizeBytes })
     .from(clientBackups)
     .where(
       and(
@@ -159,6 +166,14 @@ export async function POST(request: NextRequest) {
   if (!existing && count >= maxBackupsPerAccount) {
     return jsonError("backup_quota_exceeded", 403, {
       max_backups: maxBackupsPerAccount,
+    });
+  }
+  const bytesAfterSave =
+    accountBytes - (existing?.sizeBytes ?? 0) + content.length;
+  if (bytesAfterSave > maxBackupBytesPerAccount) {
+    return jsonError("backup_storage_quota_exceeded", 403, {
+      max_bytes: maxBackupBytesPerAccount,
+      used_bytes: Math.round(accountBytes),
     });
   }
 

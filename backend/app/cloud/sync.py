@@ -183,6 +183,12 @@ class CloudSync:
             if owner:
                 link.cloud_account_id = owner.get("account_id")
                 link.cloud_account_email = owner.get("account_email")
+            # Storage usage + limits ride along on the grants response; cache
+            # the snapshot so /api/cloud/status can show quota headroom
+            # without another provider round trip.
+            usage = response.get("usage")
+            if isinstance(usage, dict):
+                link.cloud_usage = usage
             link.last_grant_sync_at = datetime.datetime.utcnow()
 
             seen_accounts = set()

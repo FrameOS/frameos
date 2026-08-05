@@ -83,6 +83,90 @@ def render_cloud_config_placeholder() -> bytes:
     return placeholder
 
 
+# --- Release-image placeholder for /boot/frameos-setup.bin -------------------
+#
+# The big sibling of the frameos-cloud.txt placeholder, for SELF-HOSTED
+# backend personalization: a backend-managed frame needs the whole
+# frameos-setup.json payload (frame.json + scenes — multi-megabyte) plus the
+# hostname / WiFi / SSH / root-password boot files, which the 4096-byte cloud
+# region cannot hold. Generic release images pre-create this file as an
+# all-comments region of exactly SETUP_BLOB_PLACEHOLDER_SIZE bytes; a
+# personalizer overwrites the region IN PLACE in the raw .img — no FAT
+# metadata changes, no mtools/debugfs, no rebuild — with:
+#
+#   line 1: the magic (unchanged)
+#   line 2: "size=<decimal>" — byte length of the payload that follows
+#   payload: a gzipped POSIX tar of the /boot/frameos-* personalization
+#            files (busybox `gunzip | tar -x` unpacks it on-device)
+#   padding: "#" bytes to exactly SETUP_BLOB_PLACEHOLDER_SIZE
+#
+# On first boot the script below extracts the allow-listed members into
+# /boot, shreds the blob, and lets the existing per-file handlers run —
+# display/driver config comes from `frameos setup` itself (drivers.setup
+# writes config.txt and requests the reboot), so no boot-partition merge is
+# needed. Neither the magic line nor the total size may ever change.
+BOOT_SETUP_BLOB_FILE = "/boot/frameos-setup.bin"
+SETUP_BLOB_MAGIC = "# FRAMEOS-SETUP-BLOB-V1"
+SETUP_BLOB_PLACEHOLDER_SIZE = 8 * 1024 * 1024
+# The /boot files a blob may deliver. Extraction copies exactly these names
+# out of the archive — a hostile tar cannot plant anything else.
+SETUP_BLOB_MEMBERS = (
+    "frameos-setup.json",
+    "frameos-hostname",
+    "frameos-wifi.nmconnection",
+    "frameos-authorized_keys",
+    "frameos-root-password",
+)
+
+_SETUP_BLOB_PLACEHOLDER_HEADER = (
+    SETUP_BLOB_MAGIC
+    + """
+#
+# FrameOS first-boot personalization blob. Generic images ship this file as
+# a fixed-size all-comments placeholder; a FrameOS backend's "Build SD card"
+# flow overwrites the region in place with a size header and a gzipped tar
+# of /boot personalization files (frameos-setup.json, frameos-hostname,
+# frameos-wifi.nmconnection, frameos-authorized_keys,
+# frameos-root-password). It is read once on first boot, applied, and
+# zero-overwritten (it may hold WiFi and access secrets). While the second
+# line is a comment like this one it is ignored and left in place, so the
+# image stays generic.
+"""
+)
+
+
+def render_setup_blob_placeholder() -> bytes:
+    """The canonical all-comments /boot/frameos-setup.bin placeholder."""
+    header = _SETUP_BLOB_PLACEHOLDER_HEADER.encode("ascii")
+    remaining = SETUP_BLOB_PLACEHOLDER_SIZE - len(header)
+    if remaining < 0:
+        raise ValueError("Setup blob placeholder header exceeds the fixed placeholder size")
+    full_lines, partial = divmod(remaining, len(CLOUD_CONFIG_PLACEHOLDER_PAD_LINE))
+    placeholder = header + CLOUD_CONFIG_PLACEHOLDER_PAD_LINE * full_lines + b"#" * partial
+    if len(placeholder) != SETUP_BLOB_PLACEHOLDER_SIZE:
+        raise AssertionError("Setup blob placeholder is not exactly SETUP_BLOB_PLACEHOLDER_SIZE bytes")
+    return placeholder
+
+
+def render_setup_blob_region(payload: bytes) -> bytes:
+    """A personalized frameos-setup.bin region: magic, size header, payload, padding.
+
+    Raises ValueError when the payload cannot fit — callers fall back to the
+    server-side partition-patching path.
+    """
+    header = (SETUP_BLOB_MAGIC + "\n" + f"size={len(payload)}\n").encode("ascii")
+    remaining = SETUP_BLOB_PLACEHOLDER_SIZE - len(header) - len(payload)
+    if remaining < 0:
+        raise ValueError(
+            f"Setup blob payload of {len(payload)} bytes does not fit the "
+            f"{SETUP_BLOB_PLACEHOLDER_SIZE}-byte placeholder region"
+        )
+    region = header + payload + b"#" * remaining
+    if len(region) != SETUP_BLOB_PLACEHOLDER_SIZE:
+        raise AssertionError("Setup blob region is not exactly SETUP_BLOB_PLACEHOLDER_SIZE bytes")
+    return region
+
+
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
     if getattr(frame, "mode", None) != "buildroot" and not default_if_missing:
         return ""
@@ -112,6 +196,7 @@ ETC_DIR="${FRAMEOS_ETC_DIR:-/etc}"
 
 SETUP_FILE=__SETUP_FILE_EXPR__
 CLOUD_FILE=__CLOUD_FILE_EXPR__
+SETUP_BLOB_FILE=__SETUP_BLOB_FILE_EXPR__
 LOG_FILE=__LOG_FILE_EXPR__
 STATUS_FILE="${TMPDIR:-/tmp}/frameos-setup-reset.status"
 HOSTNAME_FILE=__HOSTNAME_FILE_EXPR__
@@ -195,6 +280,60 @@ json_fallback_sanitize() {
 cloud_config_has_key_lines() {
   [ -f "$CLOUD_FILE" ] || return 1
   tr -d '\\r' < "$CLOUD_FILE" | grep -v '^[[:space:]]*#' | grep -q '='
+}
+
+# Has $SETUP_BLOB_FILE been personalized? Generic images ship it as an
+# all-comments placeholder; a personalizer rewrites its second line to
+# "size=<bytes>". Only the first two lines are read — the payload after them
+# is binary.
+setup_blob_is_personalized() {
+  [ -f "$SETUP_BLOB_FILE" ] || return 1
+  sed -n '2p' "$SETUP_BLOB_FILE" | tr -d '\\r' | grep -q '^size=[0-9][0-9]*$'
+}
+
+# Unpack the personalization blob: skip the two header lines, gunzip+untar
+# the payload into a scratch dir, install only the allow-listed member names
+# into their /boot destinations, then shred the blob (it holds the same
+# secrets its member files do). The per-file handlers below then treat the
+# extracted files exactly like ones staged at image-build time.
+handle_setup_blob() {
+  echo "Extracting first-boot personalization from $SETUP_BLOB_FILE"
+  blob_magic_line="$(head -n 1 "$SETUP_BLOB_FILE" | tr -d '\\r')"
+  blob_size_line="$(sed -n '2p' "$SETUP_BLOB_FILE" | tr -d '\\r')"
+  blob_payload_size="${blob_size_line#size=}"
+  # +2 for the two newlines the header lines end with.
+  blob_header_size=$(( ${#blob_magic_line} + ${#blob_size_line} + 2 ))
+  blob_extract_dir="${TMPDIR:-/tmp}/frameos-setup-blob.$$"
+  rm -rf "$blob_extract_dir"
+  mkdir -p "$blob_extract_dir"
+  if ! tail -c +$((blob_header_size + 1)) "$SETUP_BLOB_FILE" \\
+      | head -c "$blob_payload_size" \\
+      | gunzip \\
+      | tar -x -C "$blob_extract_dir"; then
+    echo "Error: failed to extract the setup blob; leaving it in place for retry"
+    rm -rf "$blob_extract_dir"
+    return 1
+  fi
+  for blob_pair in \\
+      "frameos-setup.json:$SETUP_FILE" \\
+      "frameos-hostname:$HOSTNAME_FILE" \\
+      "frameos-wifi.nmconnection:$WIFI_CONNECTION_FILE" \\
+      "frameos-authorized_keys:$AUTHORIZED_KEYS_FILE" \\
+      "frameos-root-password:$ROOT_PASSWORD_FILE"; do
+    blob_member="${blob_pair%%:*}"
+    blob_target="${blob_pair#*:}"
+    if [ -f "$blob_extract_dir/$blob_member" ]; then
+      echo "Setup blob provides $blob_member"
+      if ! install -m 600 "$blob_extract_dir/$blob_member" "$blob_target"; then
+        echo "Error: failed to install $blob_member from the setup blob"
+        rm -rf "$blob_extract_dir"
+        return 1
+      fi
+    fi
+  done
+  rm -rf "$blob_extract_dir"
+  shred_remove_file "$SETUP_BLOB_FILE" || echo "Warning: failed to remove $SETUP_BLOB_FILE"
+  return 0
 }
 
 handle_cloud_config() {
@@ -477,6 +616,12 @@ else
   echo "Warning: failed to remount root filesystem read-write"
 fi
 
+if setup_blob_is_personalized; then
+  if ! handle_setup_blob; then
+    return 1
+  fi
+fi
+
 if [ -f "$HOSTNAME_FILE" ]; then
   echo "Installing hostname from $HOSTNAME_FILE"
   if ! install -m 644 "$HOSTNAME_FILE" "$ETC_DIR"/hostname; then
@@ -584,14 +729,15 @@ echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) wi
 return "$setup_status"
 }
 
-# Nothing to do: no setup JSON, and either no cloud personalization file at
-# all or only the untouched all-comments placeholder that generic release
-# images ship. Exit before run_setup so a placeholder-only image does no work
-# on any boot: no "mount -o remount,rw /" (which is never undone), no line
-# appended to the log on the FAT boot partition, and no reinstalling
-# /boot/frameos-hostname and /boot/frameos-wifi.nmconnection over /etc (which
-# would clobber on-device edits every boot).
-if [ ! -f "$SETUP_FILE" ] && ! cloud_config_has_key_lines; then
+# Nothing to do: no setup JSON, and neither personalization region carries
+# real content (generic release images ship both frameos-cloud.txt and
+# frameos-setup.bin as untouched all-comments placeholders). Exit before
+# run_setup so a placeholder-only image does no work on any boot: no
+# "mount -o remount,rw /" (which is never undone), no line appended to the
+# log on the FAT boot partition, and no reinstalling /boot/frameos-hostname
+# and /boot/frameos-wifi.nmconnection over /etc (which would clobber
+# on-device edits every boot).
+if [ ! -f "$SETUP_FILE" ] && ! cloud_config_has_key_lines && ! setup_blob_is_personalized; then
   exit 0
 fi
 
@@ -758,6 +904,7 @@ def render_setup_json_reset_script(setup_file_path: str, uses_network_manager: b
         "__WPA_SUPPLICANT_FROM_CLOUD__": "" if uses_network_manager else _WPA_SUPPLICANT_FROM_CLOUD,
         "__SETUP_FILE_EXPR__": _boot_path_expression(setup_file_path),
         "__CLOUD_FILE_EXPR__": _boot_path_expression(BOOT_CLOUD_CONFIG_FILE),
+        "__SETUP_BLOB_FILE_EXPR__": _boot_path_expression(BOOT_SETUP_BLOB_FILE),
         "__LOG_FILE_EXPR__": _boot_path_expression(BOOT_SETUP_RESET_LOG_FILE),
         "__HOSTNAME_FILE_EXPR__": _boot_path_expression(BOOT_HOSTNAME_FILE),
         "__WIFI_CONNECTION_FILE_EXPR__": _boot_path_expression(BOOT_WIFI_CONNECTION_FILE),

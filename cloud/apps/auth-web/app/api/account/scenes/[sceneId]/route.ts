@@ -21,6 +21,11 @@ import {
   validateSceneZip,
 } from "../../../../../src/lib/store";
 import { loadOwnedScene } from "../../../../../src/lib/store-owner";
+import {
+  maxPrivateSceneBytesPerAccount,
+  privateSceneBytesForAccount,
+  sceneBytesTotal,
+} from "../../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -59,6 +64,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // confusing at best, so reject it outright.
     if (scene.status === "pulled") {
       return jsonError("scene_pulled", 403);
+    }
+    // Public scenes are quota-free, so making one private moves its bytes
+    // back onto the meter — refuse the flip when it would land the account
+    // over quota instead of letting the toggle dodge every other check.
+    if (visibility === "private" && scene.visibility === "public") {
+      const [privateBytes, flippedBytes] = await Promise.all([
+        privateSceneBytesForAccount(db, session.accountId!),
+        sceneBytesTotal(db, scene.id),
+      ]);
+      if (privateBytes + flippedBytes > maxPrivateSceneBytesPerAccount) {
+        return jsonError("storage_quota_exceeded", 403, {
+          max_bytes: maxPrivateSceneBytesPerAccount,
+          private_bytes: Math.round(privateBytes),
+          scene_bytes: Math.round(flippedBytes),
+        });
+      }
     }
     changes.visibility = visibility;
   }

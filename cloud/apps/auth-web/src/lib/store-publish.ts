@@ -17,7 +17,6 @@ import {
   maxNewScenesPerDay,
   maxScenesPerAccount,
   maxSceneZipBytes,
-  maxStoreBytesPerAccount,
   maxVersionsPerScene,
   rebuildZipWithPreview,
   sceneSummary,
@@ -25,6 +24,11 @@ import {
   slugSuffix,
   validateSceneZip,
 } from "./store";
+import {
+  maxPrivateSceneBytesPerAccount,
+  privateSceneBytesForAccount,
+  sceneBytesTotal,
+} from "./usage";
 
 type PublishActor =
   | { accountId: string; providerSubject: string }
@@ -134,26 +138,38 @@ export async function publishStoreScene(
     }
   }
 
-  const [quota] = await db
-    .select({
-      bytes: sql<number>`coalesce(sum(${storeSceneVersions.sizeBytes}), 0)::bigint`,
-      scenes: sql<number>`count(distinct ${storeScenes.id})::int`,
-    })
+  const [sceneCountRow] = await db
+    .select({ scenes: sql<number>`count(*)::int` })
     .from(storeScenes)
-    .leftJoin(
-      storeSceneVersions,
-      eq(storeSceneVersions.sceneId, storeScenes.id),
-    )
     .where(eq(storeScenes.accountId, accountId));
-  if (!existing && (quota?.scenes ?? 0) >= maxScenesPerAccount) {
+  if (!existing && (sceneCountRow?.scenes ?? 0) >= maxScenesPerAccount) {
     return jsonError("scene_quota_exceeded", 403, {
       max_scenes: maxScenesPerAccount,
     });
   }
-  if (Number(quota?.bytes ?? 0) + content.length > maxStoreBytesPerAccount) {
-    return jsonError("storage_quota_exceeded", 403, {
-      max_bytes: maxStoreBytesPerAccount,
-    });
+  // Only PRIVATE scenes are metered — publishing publicly is free. The check
+  // uses the visibility this publish RESULTS in: an omitted visibility keeps
+  // an existing scene's setting and defaults a new scene to private.
+  const resultingVisibility =
+    input.visibility ?? existing?.visibility ?? "private";
+  if (resultingVisibility !== "public") {
+    const privateBytes = await privateSceneBytesForAccount(db, accountId);
+    // A version pushed onto an already-private scene adds `content.length`;
+    // if this publish also flips a public scene private, its existing bytes
+    // start counting too — fold them in so the flip cannot dodge the quota.
+    const flippingPrivateBytes =
+      existing && existing.visibility === "public"
+        ? await sceneBytesTotal(db, existing.id)
+        : 0;
+    if (
+      privateBytes + flippingPrivateBytes + content.length >
+      maxPrivateSceneBytesPerAccount
+    ) {
+      return jsonError("storage_quota_exceeded", 403, {
+        max_bytes: maxPrivateSceneBytesPerAccount,
+        private_bytes: Math.round(privateBytes),
+      });
+    }
   }
   if (!existing) {
     const [recent] = await db

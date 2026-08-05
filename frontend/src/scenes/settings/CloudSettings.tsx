@@ -29,6 +29,16 @@ function pollErrorMessage(pollError: string): string {
   }
 }
 
+function formatCloudBytes(size: number): string {
+  const units = ['B', 'KB', 'MB', 'GB']
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex++
+  }
+  return `${unitIndex === 0 ? size : Number(size.toFixed(1))} ${units[unitIndex]}`
+}
+
 function expiresInLabel(expiresAt: string | null): string | null {
   if (!expiresAt) {
     return null
@@ -138,6 +148,26 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </Button>
               </div>
             </div>
+            {link.usage ? (
+              <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
+                <div className="@md:w-1/3 @md:shrink-0">
+                  <Label>Cloud storage</Label>
+                </div>
+                <div className="w-full space-y-1 text-sm">
+                  <div className="frameos-muted">
+                    Private scenes {formatCloudBytes(link.usage.scenes.private_bytes)} of{' '}
+                    {formatCloudBytes(link.usage.scenes.private_max_bytes)}
+                    {link.usage.scenes.public_bytes > 0
+                      ? ` · public scenes ${formatCloudBytes(link.usage.scenes.public_bytes)} (free)`
+                      : ''}
+                    {' · '}backups {formatCloudBytes(link.usage.backups.bytes)} of{' '}
+                    {formatCloudBytes(link.usage.backups.max_bytes)}
+                    {' · '}frame logs {formatCloudBytes(link.usage.frame_logs.bytes)} of{' '}
+                    {formatCloudBytes(link.usage.frame_logs.max_bytes)}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {!frameAdminMode ? (
               <div className="space-y-1 @md:flex @md:items-start @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
