@@ -2358,7 +2358,9 @@ export const frameLogic = kea<frameLogicType>([
           kind: 'deploy',
           status: 'success',
           detail: [
-            'Saved to your cloud scenes — the frame applies them as soon as it syncs',
+            values.frame?.connected === false
+              ? 'Saved to your cloud scenes — the frame is offline right now and applies them when it reconnects'
+              : 'Saved to your cloud scenes — the frame applies them as soon as it syncs',
             ...outcome.notes,
           ].join('. '),
         })

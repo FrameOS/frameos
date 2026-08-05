@@ -69,6 +69,13 @@ static const char *NVS_NS = "frameos";
  * rejections (HTTP 401 on the upgrade, or a 4401 close from the provider). */
 #define FOS_CLOUD_WS_AUTH_FAILURES_MAX 3
 #define FOS_CLOUD_WS_AUTH_CLOSE_CODE 4401
+/* No ready session for this long (while enrolled, with WiFi up) → destroy
+ * and recreate the client. esp_websocket_client does not redial after a
+ * clean server close (the hub closes cleanly on an auth timeout, which a
+ * long e-paper refresh can cause by starving the handshake), and a failed
+ * client init/start was never retried at all — either way the link used to
+ * stay dead until a reboot. */
+#define FOS_CLOUD_WS_STALL_RESTART_US (120LL * 1000 * 1000)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
 /* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
@@ -1838,9 +1845,11 @@ static void cloud_task(void *arg)
     load_stored_state();
     uint32_t backoff_ms = FOS_CLOUD_BACKOFF_MIN_MS;
     bool ws_started = false;
+    int64_t ws_stall_since_us = 0;
 
     while (true) {
         if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+            ws_stall_since_us = 0; /* no WiFi is not a WS stall */
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -1856,7 +1865,28 @@ static void cloud_task(void *arg)
             if (!ws_started) {
                 ws_start();
                 ws_started = true;
+                ws_stall_since_us = 0;
             }
+#ifdef FOS_CLOUD_HAVE_WS
+            /* Stall watchdog: the client library owns the fast redial loop,
+             * but it silently gives up in several ways (see the constant's
+             * comment). A full stop/start from here is always safe — this
+             * IS the cloud task — and cheap at this cadence. */
+            if (fos_cloud_ws_connected()) {
+                ws_stall_since_us = 0;
+            } else {
+                int64_t now_us = esp_timer_get_time();
+                if (ws_stall_since_us == 0) {
+                    ws_stall_since_us = now_us;
+                } else if (now_us - ws_stall_since_us > FOS_CLOUD_WS_STALL_RESTART_US) {
+                    ESP_LOGW(TAG, "ws: no session for %d s; recreating the client",
+                             (int)(FOS_CLOUD_WS_STALL_RESTART_US / 1000000));
+                    ws_stop();
+                    ws_start();
+                    ws_stall_since_us = now_us;
+                }
+            }
+#endif
             ws_poll_scene_ack();
             ws_poll_logs();
             /* Streamed asset replies run here, off the WS task. A 1 s idle

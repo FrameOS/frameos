@@ -189,15 +189,19 @@ profile they target rather than relying on the cap.
 
 The provider must verify the signature against the enrolled public key and
 close the socket on mismatch, with WebSocket close code **4401** (also used
-when the auth step times out and when a frame is revoked mid-session). An
-upgrade rejected before the socket opens — bad or unknown bearer token — is a
-plain HTTP `401`.
+when a frame is revoked mid-session). A challenge that simply goes
+unanswered within the provider's auth window closes with **4408** instead:
+a slow device — an e-paper frame mid-refresh can stall for a minute — must
+be able to miss the window and redial without it counting as an
+authentication rejection. An upgrade rejected before the socket opens — bad
+or unknown bearer token — is a plain HTTP `401`.
 
 The frame reconnects with jittered exponential backoff (a device picks its
 delay uniformly from the lower half of a doubling window, so a fleet that
 lost the provider together does not come back in lockstep); the provider
-treats the WS liveness as `last_seen_at`. Both rejection signals above count
-toward the demotion rule under "Device-side state and demotion".
+treats the WS liveness as `last_seen_at`. The `4401` close and the HTTP
+`401` count toward the demotion rule under "Device-side state and
+demotion"; `4408` never does.
 
 ### Provider → frame verbs (complete list)
 

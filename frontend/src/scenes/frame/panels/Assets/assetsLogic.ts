@@ -260,7 +260,7 @@ export const assetsLogic = kea<assetsLogicType>([
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
   }),
-  loaders(({ actions, cache, props }) => ({
+  loaders(({ actions, cache, props, values }) => ({
     assets: [
       [] as AssetType[],
       {
@@ -277,11 +277,19 @@ export const assetsLogic = kea<assetsLogicType>([
               cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
             }
             actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            // While a refresh is still in flight the server may answer with
+            // an empty listing (cloud: the device has not replied yet). The
+            // list already on screen is newer information than "nothing" —
+            // keep it instead of blanking the panel until the reply lands.
+            if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
+              return values.assets
+            }
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
             console.error(error)
-            return []
+            // A transient fetch failure must not wipe the listing.
+            return values.assets
           }
         },
         refreshAssets: async () => {
@@ -301,11 +309,14 @@ export const assetsLogic = kea<assetsLogicType>([
               cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
             }
             actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
+              return values.assets
+            }
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
             console.error(error)
-            return []
+            return values.assets
           }
         },
       },

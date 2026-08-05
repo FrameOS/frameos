@@ -1067,7 +1067,10 @@ describe("lifecycle", () => {
     const extra = await startExtraHub({ authTimeoutMs: 200 });
     const device = await openDevice(token, extra.port);
     await device.next((msg) => msg.type === "challenge", "challenge");
-    expect(await device.closed).toBe(4401);
+    // 4408, NOT 4401: devices demote themselves to standalone after three
+    // 4401s, and a device that is merely slow (an e-paper refresh can stall
+    // the handshake past the window) must not eat auth strikes for it.
+    expect(await device.closed).toBe(4408);
   });
 
   it("terminates a device socket that stops answering pings", async () => {

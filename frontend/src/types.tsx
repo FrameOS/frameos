@@ -181,6 +181,9 @@ export interface FrameType {
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
+  // Cloud frames only: whether the device's management WebSocket is live on
+  // the hub right now. Commands sent while false queue until it redials.
+  connected?: boolean
   frame_sync_hint?: FrameSyncHint
 }
 

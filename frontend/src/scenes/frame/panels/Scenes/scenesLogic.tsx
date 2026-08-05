@@ -10,6 +10,7 @@ import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
@@ -732,6 +733,17 @@ export const scenesLogic = kea<scenesLogicType>([
           })
           if (!response.ok) {
             throw new Error('Failed to send preview scene event')
+          }
+          // On the cloud "accepted" only means "queued on the hub". With the
+          // frame offline nothing happens on the panel, and the silent
+          // success used to read as "preview does nothing" — say so.
+          if (isCloudMode() && values.frame?.connected === false) {
+            longRunningTasksModel.actions.finishTask({
+              frameId: props.frameId,
+              kind: taskKind,
+              sceneId,
+              detail: 'Queued — the frame is offline; it shows this when it reconnects.',
+            })
           }
         }
         actions.previewSceneSuccess()
