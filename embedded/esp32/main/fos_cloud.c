@@ -1355,7 +1355,9 @@ static void ws_handle_message(const char *data, size_t len)
         /* provider-side notices; nothing to do */
     } else if (strcmp(type, "set_schedule") == 0 || strcmp(type, "set_settings") == 0 ||
                strcmp(type, "get_logs") == 0 || strcmp(type, "get_metrics") == 0 ||
-               strcmp(type, "notify_update_available") == 0) {
+               strcmp(type, "notify_update_available") == 0 ||
+               strcmp(type, "asset_put") == 0 || strcmp(type, "asset_mkdir") == 0 ||
+               strcmp(type, "asset_delete") == 0 || strcmp(type, "asset_rename") == 0) {
         /* Documented verbs the esp32 profile does not implement. Answering
          * `unsupported_verb` (not `unknown_verb`) lets a provider tell "this
          * device profile is smaller" apart from "you sent something that is

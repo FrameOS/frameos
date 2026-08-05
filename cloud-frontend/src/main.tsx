@@ -1,4 +1,10 @@
 import { createRoot } from 'react-dom/client'
+// Point @monaco-editor/react at the bundled monaco BEFORE anything renders an
+// editor: without this it lazy-loads monaco from a CDN, which the cloud's CSP
+// blocks — every Monaco surface (app sources, scene JSON, code nodes) then
+// fails with a bare script error. The workers it spawns are bundled by
+// build.mjs into static/monaco/ (same contract as the other bundles).
+import '../../frontend/src/utils/configureMonaco'
 import { App } from './scenes/App'
 import './index.css'
 import { initKea } from '../../frontend/src/initKea'

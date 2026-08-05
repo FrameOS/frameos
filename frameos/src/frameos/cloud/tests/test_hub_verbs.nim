@@ -13,6 +13,10 @@ type
     dropEvents: bool ## simulates a full runtime event queue
     assetReads: seq[(string, bool)]
     assetData: string ## what readAssetFn serves for "photos/cat.jpg"
+    assetWrites: seq[(string, string)]
+    assetMkdirs: seq[string]
+    assetDeletes: seq[string]
+    assetRenames: seq[(string, string)]
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
@@ -56,6 +60,19 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
         AssetReadResult(error: "no_image")
       else:
         AssetReadResult(data: "png-bytes", contentType: "image/png", mtime: 1700000002),
+    writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} =
+      if path == "denied.bin":
+        raise newException(ValueError, "Invalid asset path")
+      recorded.assetWrites.add((path, data))
+      %*{"path": path, "size": data.len, "mtime": 1700000003, "is_dir": false},
+    mkdirAssetFn: proc(path: string) {.gcsafe.} =
+      recorded.assetMkdirs.add(path),
+    deleteAssetFn: proc(path: string) {.gcsafe.} =
+      if path == "missing.bin":
+        raise newException(OSError, "Asset not found")
+      recorded.assetDeletes.add(path),
+    renameAssetFn: proc(src: string, dst: string) {.gcsafe.} =
+      recorded.assetRenames.add((src, dst)),
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -426,6 +443,73 @@ suite "cloud hub verb dispatcher":
     })
     check refused.ack{"error"}.getStr("") == "no_image"
     check refused.extra.len == 0
+
+  test "asset_put stores decoded bytes and acks the stored entry":
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "p1", "type": "asset_put",
+      "path": "photos/new.jpg", "data": encode("fresh-bytes"),
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check reply.ack{"asset"}{"path"}.getStr("") == "photos/new.jpg"
+    check reply.ack{"asset"}{"size"}.getInt(0) == "fresh-bytes".len
+    check recorded.assetWrites == @[("photos/new.jpg", "fresh-bytes")]
+
+  test "asset_put refuses bad payloads without touching the filesystem":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put", "data": encode("x"),
+    }).ack{"error"}.getStr("") == "invalid_path"
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put", "path": "a.bin", "data": "",
+    }).ack{"error"}.getStr("") == "invalid_data"
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put", "path": "a.bin", "data": "not-base64!!!",
+    }).ack{"error"}.getStr("") == "invalid_data"
+    # Guard refusals from the write helper surface as invalid_path.
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put", "path": "denied.bin", "data": encode("x"),
+    }).ack{"error"}.getStr("") == "invalid_path"
+    check recorded.assetWrites.len == 0
+
+  test "asset write verbs never touch dot-directories":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    for message in [
+      %*{"type": "asset_put", "path": ".frameos/scene_images/x.png", "data": encode("x")},
+      %*{"type": "asset_mkdir", "path": ".thumbs/sub"},
+      %*{"type": "asset_delete", "path": ".frameos"},
+      %*{"type": "asset_rename", "src": "ok.bin", "dst": ".thumbs/ok.bin"},
+      %*{"type": "asset_rename", "src": ".thumbs/x.jpg", "dst": "ok.bin"},
+    ]:
+      check handleCloudVerb(ctx, message).ack{"error"}.getStr("") == "invalid_path"
+    check recorded.assetWrites.len == 0
+    check recorded.assetMkdirs.len == 0
+    check recorded.assetDeletes.len == 0
+    check recorded.assetRenames.len == 0
+
+  test "asset_mkdir, asset_delete and asset_rename dispatch and map errors":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_mkdir", "path": "albums/summer",
+    }).ack{"ok"}.getBool(false) == true
+    check recorded.assetMkdirs == @["albums/summer"]
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_delete", "path": "photos/old.jpg",
+    }).ack{"ok"}.getBool(false) == true
+    check recorded.assetDeletes == @["photos/old.jpg"]
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_delete", "path": "missing.bin",
+    }).ack{"error"}.getStr("") == "not_found"
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_rename", "src": "photos/cat.jpg", "dst": "photos/dog.jpg",
+    }).ack{"ok"}.getBool(false) == true
+    check recorded.assetRenames == @[("photos/cat.jpg", "photos/dog.jpg")]
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_rename", "src": "", "dst": "x.bin",
+    }).ack{"error"}.getStr("") == "invalid_path"
 
   test "reboot and restart_runtime use the injected implementations":
     let recorded = Recorded()

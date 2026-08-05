@@ -10,11 +10,14 @@
 ## arbitrary file read/write verb, no SSH anything, no compiled-scene deploy —
 ## the code for those capabilities simply does not exist here, so no
 ## provider-side compromise or configuration flag can reach them. The only
-## file access is `assets_list`/`asset_get`: read-only, resolved and bounded
-## on-device inside the assets directory (admin_api_assets_routes'
-## resolveAssetPath — the same guard the local Assets panel uses). Anything
-## outside the verb table is answered with `unknown_verb` and audit-logged
-## through the normal log pipeline (`cloud:audit`).
+## file access is the asset verb family (`assets_list`/`asset_get` plus the
+## write verbs `asset_put`/`asset_mkdir`/`asset_delete`/`asset_rename`):
+## resolved and bounded on-device inside the assets directory
+## (admin_api_assets_routes' resolveAssetPath — the same guard the local
+## Assets panel uses), with writes additionally refused for dot-directories
+## (`.frameos`, `.thumbs` — the device's own plumbing). Anything outside the
+## verb table is answered with `unknown_verb` and audit-logged through the
+## normal log pipeline (`cloud:audit`).
 ##
 ## Frames keep working when the provider is down: this thread only ever pushes
 ## data out and reacts to messages; rendering, schedules and the local admin
@@ -96,6 +99,10 @@ const
   # folder. Over the cap the listing says `truncated: true` — never a silent
   # stop (a partial listing that looks complete is worse than none).
   HubMaxAssetListEntries* = 5000
+  # `asset_put` rides a single inbound frame (there is no cloud→device chunk
+  # stream), so the raw payload must survive base64 inflation plus envelope
+  # inside HubMaxInboundBytes. 2.5 MiB raw ≈ 3.4 MiB encoded.
+  HubMaxAssetUploadBytes* = 2_621_440
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
@@ -157,6 +164,14 @@ type
     ## paths relative to the assets directory (docs/cloud-frames.md).
     listAssetsFn*: proc(): JsonNode {.gcsafe.}
     readAssetFn*: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.}
+    ## Write verbs. writeAssetFn returns the stored entry as
+    ## {"path" (relative), "size", "mtime", "is_dir"}; all four raise
+    ## ValueError for a path the guard refuses and OSError for a filesystem
+    ## failure — the handlers translate those into wire errors.
+    writeAssetFn*: proc(path: string, data: string): JsonNode {.gcsafe.}
+    mkdirAssetFn*: proc(path: string) {.gcsafe.}
+    deleteAssetFn*: proc(path: string) {.gcsafe.}
+    renameAssetFn*: proc(src: string, dst: string) {.gcsafe.}
     ## The current rendered image for `image_get` (error "no_image" until the
     ## first render).
     getImageFn*: proc(): AssetReadResult {.gcsafe.}
@@ -352,6 +367,17 @@ proc defaultReadAsset(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
       contentType: if thumb: "image/jpeg" else: contentTypeForFilePath(fullPath),
       mtime: getFileInfo(fullPath).lastWriteTime.toUnix())
 
+proc defaultWriteAsset(path: string, data: string): JsonNode {.gcsafe.} =
+  ## Store one uploaded file. resolveAssetUploadPath sanitizes the filename
+  ## component exactly like the local admin upload does, so the provider
+  ## cannot smuggle path tricks through the name; the returned path is the
+  ## relative path actually written.
+  {.gcsafe.}:
+    let (dir, name, ext) = splitFile(path)
+    var payload = saveAssetUploadPayload(dir, name & ext, data)
+    payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
+    payload
+
 proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
                               scenesChecksum: string): CloudVerbContext {.gcsafe.} =
   {.gcsafe.}:
@@ -385,6 +411,18 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       readAssetFn: proc(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
         {.gcsafe.}:
           defaultReadAsset(path, thumb),
+      writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} =
+        {.gcsafe.}:
+          defaultWriteAsset(path, data),
+      mkdirAssetFn: proc(path: string) {.gcsafe.} =
+        {.gcsafe.}:
+          createAssetDirectory(path),
+      deleteAssetFn: proc(path: string) {.gcsafe.} =
+        {.gcsafe.}:
+          deleteAssetEntry(path),
+      renameAssetFn: proc(src: string, dst: string) {.gcsafe.} =
+        {.gcsafe.}:
+          renameAssetEntry(src, dst),
       getImageFn: proc(): AssetReadResult {.gcsafe.} =
         {.gcsafe.}:
           try:
@@ -698,6 +736,107 @@ proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ctx.audit("image_get", true)
   CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, image))
 
+proc assetWriteError(error: ref CatchableError): string =
+  ## The write helpers raise ValueError for guard refusals and OSError for
+  ## filesystem trouble; "Asset not found" is the one OSError worth naming.
+  if error of ValueError:
+    "invalid_path"
+  elif error.msg == "Asset not found":
+    "not_found"
+  else:
+    "write_failed"
+
+proc refusedWritePath(path: string): bool =
+  ## Writes never touch dot-directories: `.thumbs` and `.frameos` (scene
+  ## snapshots) are the device's own plumbing. asset_get deliberately CAN
+  ## read them (that is how the provider fetches scene snapshots), but a
+  ## provider must not be able to plant or destroy files there.
+  hiddenAssetPath(path.strip())
+
+proc handleAssetPut(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.writeAssetFn.isNil:
+    ctx.audit("asset_put", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let path = msg{"path"}.getStr("")
+  if path.len == 0 or refusedWritePath(path):
+    ctx.audit("asset_put", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  let encoded = msg{"data"}.getStr("")
+  var data: string
+  try:
+    data = decode(encoded)
+  except CatchableError:
+    ctx.audit("asset_put", false, "invalid_data")
+    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+  if data.len == 0:
+    ctx.audit("asset_put", false, "invalid_data")
+    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+  if data.len > HubMaxAssetUploadBytes:
+    ctx.audit("asset_put", false, "too_large")
+    return CloudVerbReply(ack: ackError(id, "too_large"))
+  try:
+    let stored = ctx.writeAssetFn(path, data)
+    ctx.audit("asset_put", true)
+    var ack = ackOk(id)
+    ack["asset"] = stored
+    CloudVerbReply(ack: ack)
+  except CatchableError as error:
+    let wireError = assetWriteError(error)
+    ctx.audit("asset_put", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
+proc handleAssetMkdir(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.mkdirAssetFn.isNil:
+    ctx.audit("asset_mkdir", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let path = msg{"path"}.getStr("")
+  if path.len == 0 or refusedWritePath(path):
+    ctx.audit("asset_mkdir", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  try:
+    ctx.mkdirAssetFn(path)
+    ctx.audit("asset_mkdir", true)
+    CloudVerbReply(ack: ackOk(id))
+  except CatchableError as error:
+    let wireError = assetWriteError(error)
+    ctx.audit("asset_mkdir", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
+proc handleAssetDelete(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.deleteAssetFn.isNil:
+    ctx.audit("asset_delete", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let path = msg{"path"}.getStr("")
+  if path.len == 0 or refusedWritePath(path):
+    ctx.audit("asset_delete", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  try:
+    ctx.deleteAssetFn(path)
+    ctx.audit("asset_delete", true)
+    CloudVerbReply(ack: ackOk(id))
+  except CatchableError as error:
+    let wireError = assetWriteError(error)
+    ctx.audit("asset_delete", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
+proc handleAssetRename(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  if ctx.renameAssetFn.isNil:
+    ctx.audit("asset_rename", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let src = msg{"src"}.getStr("")
+  let dst = msg{"dst"}.getStr("")
+  if src.len == 0 or dst.len == 0 or refusedWritePath(src) or refusedWritePath(dst):
+    ctx.audit("asset_rename", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  try:
+    ctx.renameAssetFn(src, dst)
+    ctx.audit("asset_rename", true)
+    CloudVerbReply(ack: ackOk(id))
+  except CatchableError as error:
+    let wireError = assetWriteError(error)
+    ctx.audit("asset_rename", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
 proc handleGetLogs(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if not ctx.hasScope("telemetry:logs"):
     ctx.audit("get_logs", false, "insufficient_scope")
@@ -761,6 +900,14 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetsList(ctx, id)
   of "asset_get":
     result = handleAssetGet(ctx, id, msg)
+  of "asset_put":
+    result = handleAssetPut(ctx, id, msg)
+  of "asset_mkdir":
+    result = handleAssetMkdir(ctx, id, msg)
+  of "asset_delete":
+    result = handleAssetDelete(ctx, id, msg)
+  of "asset_rename":
+    result = handleAssetRename(ctx, id, msg)
   of "image_get":
     result = handleImageGet(ctx, id)
   of "render":

@@ -131,6 +131,19 @@ const cloudFrameSceneHydrationsInFlight = new Set<FrameId>()
 const cloudFrameScenesHydratedAt = new Map<FrameId, number>()
 const CLOUD_FRAME_SCENES_REFRESH_MS = 60_000
 
+/**
+ * Drop cached scenes.json bodies for one store scene (all pinned versions and
+ * 'latest'). A content save publishes a new version, and the '@latest' cache
+ * key would otherwise keep serving the pre-save body until a reload.
+ */
+export function clearCloudSceneJsonCache(storeSceneId: string): void {
+  for (const key of [...cloudSceneJsonCache.keys()]) {
+    if (key.startsWith(`${storeSceneId}@`)) {
+      cloudSceneJsonCache.delete(key)
+    }
+  }
+}
+
 async function fetchCloudFrameScenes(frameId: FrameId): Promise<FrameScene[]> {
   const rows = await listCloudFrameScenes(frameId)
   const scenes: FrameScene[] = []

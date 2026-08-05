@@ -126,6 +126,16 @@ export async function POST(
   if (!Array.isArray(body.scenes) || body.scenes.length > maxScenesPerFrame) {
     return jsonError("invalid_scenes", 400);
   }
+  // Optional: which RUNTIME scene the push should activate — the workspace's
+  // save passes the currently active scene so a deploy never yanks the
+  // display to another scene. The device ignores an id that is not in the
+  // payload (it then activates the first scene), so only shape is validated.
+  const activeSceneId =
+    typeof body.scene_id === "string" &&
+    body.scene_id.length > 0 &&
+    body.scene_id.length <= 256
+      ? body.scene_id
+      : undefined;
   const requested: { sceneId: string; sceneVersion: number | null }[] = [];
   for (const entry of body.scenes) {
     if (!entry || typeof entry !== "object") {
@@ -247,7 +257,11 @@ export async function POST(
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: session.accountId,
     frameId: frame.id,
-    payload: { checksum: payload.checksum, scenes: payload.scenes },
+    payload: {
+      checksum: payload.checksum,
+      scenes: payload.scenes,
+      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+    },
     type: "set_scenes",
   });
 

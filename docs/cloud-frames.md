@@ -223,14 +223,22 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping |
 | `image_get` | `{}` | the frame's current rendered image. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same caps); the first chunk's `content_type` says what the device produces (the Linux runtime sends `image/png` of its last render, the ESP32 packs `image/bmp` from its framebuffer). `ok: false` ack with `no_image` when nothing has rendered yet, `busy` on a small device already streaming |
 | `asset_get` | `{"path": "…", "thumb"?: true}` | read one file from the assets directory. Failure is an ordinary `ok: false` ack: `invalid_path` (traversal, absolute, or outside the assets directory), `not_found`, `is_directory`, `too_large` (the reference cap is **8 MiB** raw), `busy` (a small device already streaming another file). Success is a bare ack followed by one or more `{"id", "type": "asset_chunk", "seq": 0…N, "data": "<base64>", "done": bool}` messages with the same `id`, in order; the first chunk also carries `"size"` (total raw bytes), `"mtime"` and `"content_type"`. A read that fails after the ack ends the stream with `{"type": "asset_chunk", "id", "error": "…", "done": true}` and the provider discards the partial file. With `thumb`, a device that can generate thumbnails (Linux) returns a small preview; a device that cannot (ESP32) returns the original bytes |
+| `asset_put` | `{"path": "…", "data": "<base64>"}` | store one file in the assets directory. The whole payload rides a single message, so the raw size is bounded well under the inbound frame cap (the reference device cap is **2.5 MiB** raw — `too_large` past it); the filename component is sanitized by the device exactly like a local admin upload, parent folders are created as needed, and an existing file at the path is replaced. Errors: `invalid_path` (traversal, absolute, outside the assets directory, or a dot-directory — see below), `invalid_data` (empty or undecodable base64), `too_large`, `write_failed`. The ack carries `"asset": {"path" (relative, as stored), "size", "mtime", "is_dir"}` |
+| `asset_mkdir` | `{"path": "…"}` | create a folder (and parents) in the assets directory. Errors: `invalid_path`, `write_failed` |
+| `asset_delete` | `{"path": "…"}` | delete a file or folder (recursively) in the assets directory. Errors: `invalid_path`, `not_found`, `write_failed` |
+| `asset_rename` | `{"src": "…", "dst": "…"}` | rename/move a file or folder within the assets directory (the destination's parent folders are created). Errors: `invalid_path`, `not_found`, `write_failed` |
 
 Explicitly absent, by design (see `cloud/docs/cloud-frames.md`): shell/exec,
 PTY, arbitrary file read/write, SSH anything, network/WiFi config, admin
 credentials, update URLs, agent/profile state, compiled scene deploys. The
-`assets_list`/`asset_get` verbs are deliberately not a file API: they are
-read-only, confined to the assets directory (the same user-content directory
-the local admin's Assets panel serves), and the device — not the provider —
-resolves and bounds every path.
+asset verbs are deliberately not a file API: they are confined to the assets
+directory (the same user-content directory the local admin's Assets panel
+serves), and the device — not the provider — resolves and bounds every path.
+Additionally, the write verbs (`asset_put`/`asset_mkdir`/`asset_delete`/
+`asset_rename`) refuse any path containing a dot-component: dot-directories
+(`.thumbs`, `.frameos`) are the device's own plumbing (thumbnail cache, scene
+snapshots) — readable via `asset_get` where the provider knows a specific
+path, but never writable from the wire.
 
 ### Device profiles
 
@@ -244,7 +252,7 @@ drains either way.
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
 | Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
-| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `assets_list`, `asset_get` (both only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned), `image_get` (`image/bmp`) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available` |
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `assets_list`, `asset_get` (both only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned), `image_get` (`image/bmp`) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` |
 
 The ESP32 profile is a subset because the firmware has no scheduler, no log
 buffer and no metrics buffer to expose, and updates itself from its own

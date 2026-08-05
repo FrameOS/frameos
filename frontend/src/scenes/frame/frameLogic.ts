@@ -25,6 +25,8 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
+import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
+import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
@@ -2293,9 +2295,12 @@ export const frameLogic = kea<frameLogicType>([
     // push (the same call saveFrameForm makes) — but a form whose only
     // pending changes are scenes maps onto no settings at all, which
     // saveFrameForm treats as an error on a plain Save. Here it is fine: the
-    // scenes ARE the deploy, pushed by framesModel.deployFrame through the
-    // uploadScenes shim (set_scenes). So push what maps, ignore "nothing
-    // mapped", then hand over to the cloud deploy path.
+    // scenes are persisted separately — each edited scene becomes a new
+    // version of its private cloud scene (new scenes are created), the
+    // assignment list is updated, and POST /api/frames/{id}/scenes pushes the
+    // checksummed result to the device. That push IS the deploy; the ad-hoc
+    // uploadScenes shim stays as the fallback when persistence fails, so the
+    // frame still updates even if the cloud refuses a scene.
     const cloudSaveAndDeploy = async (): Promise<void> => {
       try {
         await pushCloudFrameSettings(props.frameId, normalizeFrameForSubmit(values.frameForm))
@@ -2316,7 +2321,49 @@ export const frameLogic = kea<frameLogicType>([
         longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
         throw error
       }
-      framesModel.actions.deployFrame(props.frameId, false)
+      const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
+      if (!scenes.length) {
+        framesModel.actions.deployFrame(props.frameId, false)
+        return
+      }
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'deploy',
+        title: 'Deploying scenes',
+        detail: 'Saving scenes to your cloud account',
+      })
+      try {
+        const outcome = await persistAndPushCloudFrameScenes(
+          props.frameId,
+          scenes,
+          values.frame?.active_scene_id
+        )
+        for (const storeSceneId of outcome.changedStoreSceneIds) {
+          clearCloudSceneJsonCache(storeSceneId)
+        }
+        framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        framesModel.actions.loadFrame(props.frameId)
+        longRunningTasksModel.actions.finishTask({
+          frameId: props.frameId,
+          kind: 'deploy',
+          status: 'success',
+          detail: [
+            'Saved to your cloud scenes — the frame applies them as soon as it syncs',
+            ...outcome.notes,
+          ].join('. '),
+        })
+      } catch (error) {
+        // Persistence failed (rate limit, moderation, offline store…) — the
+        // ad-hoc push still deploys the edited scenes to the device, it just
+        // cannot save them; deployFrame reports its own outcome.
+        const message = error instanceof Error ? error.message : String(error)
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'deploy',
+          detail: `Could not save the scenes to your cloud account (${message}) — pushing them straight to the frame instead`,
+        })
+        framesModel.actions.deployFrame(props.frameId, false)
+      }
     }
 
     return {
