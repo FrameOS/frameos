@@ -45,15 +45,17 @@ no `setup-done-*.json` copies of credentials linger on the card.
 | File | What it is |
 | --- | --- |
 | `frameos-setup-reset.log` | Everything the first-boot setup printed, **appended** across runs (a retry after a failure adds a second block). This is the log to read when provisioning itself misbehaves. |
-| `frameos-postboot-2min.log` | A **bounded snapshot, not a full log** — the name says so on purpose. Written by `frameos-postboot-log.service` twice per boot: a small marker as soon as multi-user boot is underway, then the full snapshot once uptime reaches two minutes. Contents: service states (`frameos`, `frameos-remote`, `wpa_supplicant`, `NetworkManager`), a network snapshot (`ip addr`/`ip route`/`iw`, `wpa_cli status`, running network daemons, the wpa_supplicant config **with secrets redacted**), size-capped journal tails for the FrameOS units and the whole boot, and the tail of the newest frameos file log. It answers "did frameos start, what did it log, and what does the network look like" from any laptop with an SD reader. |
+| `frameos-postboot-2min.log` | A **bounded snapshot covering the first two minutes after boot, not a full log** — the name says so on purpose. `frameos-postboot-log.service` writes it immediately at boot, refreshes it every 20 seconds until uptime reaches two minutes, then writes one final snapshot (labelled `final … no further refreshes this boot`) and stops. Power off at any point: within the window the file is at most 20 seconds stale, after it the final snapshot is the complete picture. Contents: service states (`frameos`, `frameos-remote`, `wpa_supplicant`, `NetworkManager`), a network snapshot (`ip addr`/`ip route`/`iw`, `wpa_cli status`, running network daemons, the wpa_supplicant config **with secrets redacted**), size-capped journal tails for the FrameOS units and the whole boot, and the tail of the newest frameos file log. It answers "did frameos start, what did it log, and what does the network look like" from any laptop with an SD reader. |
 
 ## Space and SD-card wear
 
 `frameos-postboot-2min.log` is assembled in tmpfs and copied to the FAT
-partition in a single write per snapshot (two writes per boot, ~256 KB
-ceiling, overwritten in place every boot). It cannot grow unbounded and adds
-no steady-state write load. `frameos-setup-reset.log` only grows when the
-first-boot service actually runs, which is once per provisioning.
+partition in a single write per refresh — at most ~8 writes in the first two
+minutes of a boot, then nothing until the next boot. It is overwritten in
+place with every section size-capped (~256 KB ceiling), so it can neither
+grow unbounded nor fill the boot partition. `frameos-setup-reset.log` only
+grows when the first-boot service actually runs, which is once per
+provisioning.
 
 ## Where the full logs are
 

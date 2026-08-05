@@ -2,14 +2,23 @@
 
 Buildroot images keep journald in RAM and frameos logs on the ext4 data
 partition — neither is readable when a user pulls the SD card and puts it in
-a laptop. This unit writes ONE bounded snapshot file to /boot (FAT, readable
-anywhere) shortly after every boot: did frameos start, what did it log, and
+a laptop. This unit keeps a bounded snapshot file on /boot (FAT, readable
+anywhere) continuously refreshed: did frameos start, what did it log, and
 what does the network stack look like. It exists to end the guessing game
 when a frame comes up with a blank screen and no connectivity.
 
-Wear/space budget: two writes per boot (an early marker right at startup, a
-full snapshot ~2 minutes in), the file is overwritten in place each boot and
-every section is size-capped, so the file stays under ~256 KB forever.
+Refresh cadence: immediately at boot, then every 20 s until uptime reaches
+two minutes, then one final refresh and stop. The user never has to guess
+how long to wait: within the two-minute window the file is at most 20 s
+stale, and after it the final snapshot (labelled as such) sits unchanged
+until the next boot. Boot problems show inside that window — the network
+check times out at 30 s and the boot hotspot's retries finish well before
+two minutes.
+
+Wear/space budget: the file is overwritten in place (staged in tmpfs, one
+FAT write per refresh) and every section is size-capped, so it stays under
+~256 KB forever and the writes stop entirely two minutes into every boot —
+at most ~8 writes per boot.
 """
 
 from __future__ import annotations
@@ -20,25 +29,29 @@ from pathlib import Path
 POSTBOOT_LOG_SCRIPT_NAME = "frameos-postboot-log.sh"
 POSTBOOT_LOG_SCRIPT_PATH = f"/usr/local/bin/{POSTBOOT_LOG_SCRIPT_NAME}"
 POSTBOOT_LOG_SERVICE_NAME = "frameos-postboot-log.service"
-# "2min" in the name on purpose: this is a snapshot taken about two minutes
-# after boot, not a full or live log. Full logs live in /srv/frameos/logs/.
+# "2min" in the name on purpose: this snapshot covers the first two minutes
+# after boot, it is not a full or live log. Full logs: /srv/frameos/logs/.
 POSTBOOT_LOG_FILE_NAME = "frameos-postboot-2min.log"
 BOOT_POSTBOOT_LOG_FILE = f"/boot/{POSTBOOT_LOG_FILE_NAME}"
 
 _POSTBOOT_LOG_SCRIPT = """#!/bin/sh
 # FrameOS post-boot diagnostics snapshot.
 #
-# Writes __LOG_NAME__ to the boot partition twice per boot: a small marker as
-# soon as multi-user boot is underway, then a full snapshot once uptime
-# reaches __CAPTURE_AT__ seconds. The file is a bounded SNAPSHOT for reading
-# the SD card on another computer - it is NOT a full log. Full frameos logs
-# are on the ext4 partition in /srv/frameos/logs/.
+# Refreshes __LOG_NAME__ on the boot partition every __REFRESH_INTERVAL__s
+# during the first __STOP_AFTER__s after boot, writes one final snapshot,
+# and then stops for good - the boot partition sees no further writes until
+# the next boot. Pull the power at any point: within the window the file is
+# at most __REFRESH_INTERVAL__s stale, after it the final snapshot is what
+# there is to read. It is a bounded SNAPSHOT for reading the SD card on
+# another computer - NOT a full log. Full frameos logs are on the ext4
+# partition in /srv/frameos/logs/.
 set -u
 
 BOOT_DIR="${FRAMEOS_BOOT_DIR:-/boot}"
 LOG_FILE="$BOOT_DIR/__LOG_NAME__"
 STAGE_FILE="${FRAMEOS_POSTBOOT_STAGE:-/run/frameos-postboot.tmp}"
-CAPTURE_AT_SECONDS=__CAPTURE_AT__
+REFRESH_INTERVAL_SECONDS=__REFRESH_INTERVAL__
+STOP_AFTER_SECONDS=__STOP_AFTER__
 SECTION_BYTES=49152
 
 uptime_seconds() {
@@ -70,7 +83,8 @@ grab() {
 write_header() {
   {
     printf '%s\\n' "FrameOS post-boot snapshot: $1"
-    printf '%s\\n' "This is a bounded snapshot written shortly after boot, NOT a full log."
+    printf '%s\\n' "Refreshed every ${REFRESH_INTERVAL_SECONDS}s during the first ${STOP_AFTER_SECONDS}s after boot, then final."
+    printf '%s\\n' "This is a bounded snapshot, NOT a full log."
     printf '%s\\n' "Full frameos logs: /srv/frameos/logs/ (ext4 data partition)."
     printf 'generated_at=%s uptime_seconds=%s\\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" "$(uptime_seconds)"
     printf 'hostname=%s\\n' "$(hostname 2>/dev/null)"
@@ -145,25 +159,26 @@ snapshot() {
   publish
 }
 
-# Early marker: proves the boot reached multi-user and shows the initial
-# service states even if the frame dies before the full snapshot.
-snapshot "early (boot start)"
-
-while [ "$(uptime_seconds)" -lt "$CAPTURE_AT_SECONDS" ]; do
-  sleep 5
+# The first snapshot right away proves the boot reached multi-user even if
+# the frame dies moments later; every refresh replaces the file whole.
+while [ "$(uptime_seconds)" -lt "$STOP_AFTER_SECONDS" ]; do
+  snapshot "at $(uptime_seconds)s uptime (still refreshing)"
+  sleep "$REFRESH_INTERVAL_SECONDS"
 done
 
-snapshot "at ${CAPTURE_AT_SECONDS}s uptime"
+snapshot "final at $(uptime_seconds)s uptime - no further refreshes this boot"
 """
 
-POSTBOOT_LOG_CAPTURE_AT_SECONDS = 120
+POSTBOOT_LOG_REFRESH_INTERVAL_SECONDS = 20
+POSTBOOT_LOG_STOP_AFTER_SECONDS = 120
 
 
 def render_postboot_log_script() -> str:
     return (
         _POSTBOOT_LOG_SCRIPT
         .replace("__LOG_NAME__", POSTBOOT_LOG_FILE_NAME)
-        .replace("__CAPTURE_AT__", str(POSTBOOT_LOG_CAPTURE_AT_SECONDS))
+        .replace("__REFRESH_INTERVAL__", str(POSTBOOT_LOG_REFRESH_INTERVAL_SECONDS))
+        .replace("__STOP_AFTER__", str(POSTBOOT_LOG_STOP_AFTER_SECONDS))
     )
 
 

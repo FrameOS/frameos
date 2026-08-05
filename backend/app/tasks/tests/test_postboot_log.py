@@ -36,7 +36,23 @@ def test_postboot_log_script_is_bounded_and_redacts_secrets():
     assert "/run/frameos-postboot.tmp" in script
     # No un-substituted template placeholders.
     assert "__LOG_NAME__" not in script
-    assert "__CAPTURE_AT__" not in script
+    assert "__REFRESH_INTERVAL__" not in script
+    assert "__STOP_AFTER__" not in script
+
+
+def test_postboot_log_script_refreshes_then_stops():
+    script = render_postboot_log_script()
+    # The user must never have to guess how long to wait: the file refreshes
+    # every 20 s during the first two minutes...
+    assert "REFRESH_INTERVAL_SECONDS=20" in script
+    assert "STOP_AFTER_SECONDS=120" in script
+    assert "still refreshing" in script
+    # ...and then the writes stop for good, so the boot partition sees a
+    # bounded number of writes per boot.
+    assert "final at" in script
+    assert "no further refreshes this boot" in script
+    # Snapshots label their own freshness in the header.
+    assert 'Refreshed every ${REFRESH_INTERVAL_SECONDS}s' in script
 
 
 def test_postboot_log_redaction_pattern_works(tmp_path: Path):
