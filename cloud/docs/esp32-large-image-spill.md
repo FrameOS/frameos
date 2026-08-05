@@ -1,7 +1,8 @@
 # ESP32 large-image spill-to-storage
 
-Status: prototype (C glue + Nim reader implemented, runtime-inert; firmware
-wiring TODO). Branch: `cloud-workspace-next`.
+Status: prototype merged to main (C glue + Nim reader + stub no-op,
+runtime-inert). Remaining: firmware wiring in `main.c` + bench validation —
+tracked in `docs/todo.md`.
 
 ## The failure this fixes
 
@@ -131,8 +132,8 @@ In `embedded/esp32/main/main.c` after storage init:
   `scenes.json` — the cap must never let a spill starve a scene update,
   hence the margin and the low ceiling. Note SPIFFS writes are slow;
   acceptable for a once-per-refresh e-ink frame.
-- `frameos_nim_stub.c` needs a no-op `fos_nim_http_set_spill_dir` once
-  main.c calls it (stub builds have no Nim and no HTTP glue).
+- `frameos_nim_stub.c` already carries the no-op `fos_nim_http_set_spill_dir`
+  (stub builds have no Nim and no HTTP glue).
 - Boot sweep in both cases (crash during spill leaves a `.tmp` behind).
 
 ### Failure modes

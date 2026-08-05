@@ -138,6 +138,8 @@ cloud-service items below. What remains open is listed last, with why.
 
 ## Still open
 
+These are also tracked in `docs/todo.md`.
+
 - **The frame stores its link token in plaintext** in `state/cloud_link.json`
   (mode 0600), where the backend encrypts its copy. The file-handling
   weaknesses around it are fixed — the file is created 0600 rather than
@@ -149,11 +151,10 @@ cloud-service items below. What remains open is listed last, with why.
   there is hardware-backed key storage, or if the state file starts travelling
   (support bundles, asset backups) — in which case the fix is to redact it
   there, not to encrypt at rest.
-- **Cloud rate limiting is in-memory per process.** It is the primary
-  brute-force control on `device:authorize`. The cloud runs as one instance on
-  one host today (see `cloud/docs/cloud-frames.md`), where this holds; a shared
-  store is a prerequisite for a second instance and is already tracked in
-  `cloud/TODO.md`. Deliberately not papered over here.
+- ~~Cloud rate limiting is in-memory per process~~ — resolved since this
+  review: limits are Postgres-backed (`rate_limit_buckets`, atomic upsert),
+  so they hold across replicas and restarts; in-memory buckets remain only
+  as the no-database fallback.
 - **`device/request` has no per-account rate limit**, only per-IP, so a
   signed-in attacker can enumerate user codes at 60/15 min per IP. The keyed
   hash above removes the offline-guessing path; an identity limit here would

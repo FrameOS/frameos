@@ -106,36 +106,18 @@ Two sides of this monorepo:
 ## What exists
 
 The registry core, the frameos integration, and the hardening/growth round
-are all live (details in `docs/cloud-link.md`, schema in
-`packages/db/src/schema.ts`, store logic in `apps/auth-web/src/lib/store.ts`):
-
-- Schema and publish API for linked clients (`POST /api/store/publish`,
-  `store:publish` scope): template zip validation with bomb guards, preview
-  extraction, immutable versions, globally unique slugs, quotas, audit events.
-- Public store API and web front: `repository.json` in the standard frameos
-  repository format, download/image/scenes.json endpoints, scene pages with
-  version history, search + pagination + tags + LLM-auto-assigned categories.
-- Owner management (visibility, delete, yank/unyank, category/tags, minimum
-  FrameOS version override) and superadmin moderation (pull/restore,
-  feature, publisher bans, user-report queue).
-- FrameOS-side integration: "Save to private cloud" in the Templates panel and
-  scene menus, the public store auto-added as a repository per project,
-  the "Private cloud scenes" private listing with proxied images, risk badges with
-  install confirmation, FrameOS version stamping and upgrade nudges.
-- In-browser live previews via the `frameos-wasm` workspace package and
-  visual scene editing via `frameos-editor` mounted directly into the page
-  (no iframe); both versioned to the FrameOS release.
-- Integration tests across publish, browse, download, scope enforcement,
-  validation, visibility, moderation, and owner/admin routes.
+are all live: publish API with zip validation and quotas, the public store
+front and repository.json, owner management and superadmin moderation,
+"Private cloud scenes", risk badges, wasm live previews and the in-page
+`frameos-editor`, and integration tests across the lot. Details in
+`docs/cloud-link.md`; schema in `packages/db/src/schema.ts`; store logic in
+`apps/auth-web/src/lib/store.ts`.
 
 ## Remaining work
 
-- [ ] Move blobs to object storage + CDN when size demands it; drop the
-      20-version prune. (Deliberately deferred: ~100 MB/account caps make
-      Postgres fine for launch; sha256 + size_bytes make the move mechanical.)
-- [ ] Apps (not just scenes): needs a real code review story — signing,
-      provenance, maybe human review before public listing. (Explicitly out
-      of scope for now.)
+Tracked in `docs/todo.md` at the repo root (object-storage move when size
+demands it; apps in the store pending a signing/review story; the open
+questions on pre-review, unpublish policy, and usernames).
 
 ## Protocol summary (details in docs/cloud-link.md at the repo root)
 
@@ -160,13 +142,5 @@ GET  {provider}/scenes/{slug}                      scene page; carries a frameos
 POST {provider}/api/store/scenes/{id}/report       (web session) flag for moderators
 ```
 
-## Open questions
-
-- Review-before-public for a category of risky scenes (contain shell apps)?
-  Currently: automated moderation gate + shell badge + install confirmation +
-  post-moderation (reports, pull, ban) — no human pre-review.
-- Unpublish policy: owners can delete outright today (small registry, no
-  dependents concept). npm learned the hard way — once anything can depend on
-  a scene, switch to yank-only + support-mediated deletion.
-- Usernames: still undecided long-term; the store works without them. The
-  first feature that truly needs them is publisher pages.
+Open questions moved to `docs/todo.md` (review-before-public for risky
+scenes, unpublish policy, usernames).

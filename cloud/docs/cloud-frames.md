@@ -1,8 +1,10 @@
 # Cloud-Managed Frames — Design
 
-Status: **draft, agreed direction** (2026-07-31). This is the concrete product
-design that `TODO.md` previously said to wait for. Nothing here is implemented
-unless explicitly marked.
+Status: **agreed direction, first cut shipped** (design 2026-07-31; phases
+1–3 largely live as of 2026-08 — enrollment, hub, scene management, the
+cloud workspace, provisioning). This doc remains the design reference;
+remaining work (signed OTA, capability audit, account hardening, fleet
+extras) is tracked in `docs/todo.md` at the repo root.
 
 ## Summary
 
@@ -440,10 +442,8 @@ widely distributed images make the unsigned update channel the weakest link.
 
 ## Open questions
 
-- **WS hub placement**: inside the Next.js process (custom server) vs. a
-  small sibling service sharing the DB. Next.js route handlers are awkward
-  hosts for long-lived sockets; a sibling `apps/frame-hub` may be cleaner.
-  Decide when the foundations work starts.
+- ~~WS hub placement~~ — decided: the sibling `apps/frame-hub` service
+  sharing the DB.
 - **Fleet previews doctrine**: is browser-side wasm rendering the permanent
   answer (extending the no-image-proxy rule to previews), or is an opt-in,
   end-to-end-encrypted screenshot path ever acceptable?

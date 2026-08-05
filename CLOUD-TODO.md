@@ -11,8 +11,12 @@ Two sides are involved:
   (`docs/cloud-link.md`). Anyone can point it at their own compatible server.
 - **FrameOS Cloud** (`cloud/`) — the hosted service: accounts, linked
   backends, the device-authorization flow, the scene store, and the paid
-  services below. Its own tracker is `cloud/TODO.md`; the store's is
-  `cloud/STORE-TODO.md`.
+  services below. Store decisions and threat model: `cloud/STORE-TODO.md`;
+  cloud-app scope guardrails: `cloud/TODO.md`.
+
+Remaining work, open questions, and the ideas parking lot are tracked in
+one place: `docs/todo.md`. This file keeps the principles, the scope
+table, and the protocol summary.
 
 ## Principles
 
@@ -89,75 +93,30 @@ Notes:
 
 ## Shipped
 
-Each of these is documented in `docs/cloud-link.md` and covered by tests;
-implementation entry points in parentheses.
+Everything below is live, documented in `docs/cloud-link.md` (frames wire
+contract: `docs/cloud-frames.md`), and covered by tests:
 
-- **Linking** via the device authorization flow, from backends
-  (`backend/app/api/cloud.py`, `frontend/src/scenes/settings/cloudLogic.tsx`)
-  and directly from frames
-  (`frameos/src/frameos/server/routes/cloud_api_routes.nim`); token encrypted
-  at rest; grants/inventory sync loop (`backend/app/cloud/sync.py`).
-- **Cloud login**: "Continue with FrameOS Cloud" on backend and on-device
-  admin login screens, explicit identity linking, first-run setup from a
-  cloud principal, and a local-password fallback toggle that can never lock
-  an install out.
-- **Scene store**: publish from the Templates UI (`store:publish`), the
-  public store as a plain scenes repository, "Private cloud scenes" private
-  scenes, version stamping, risk badges. Store-side details and decisions:
-  `cloud/STORE-TODO.md`.
-- **Config backups** (`backup:scenes` / `backup:frames`): scene template and
-  frame config backups with local on/off switches, secret stripping on
-  upload, restore, and the no-cloud-needed tarball export
-  (`GET /api/backup/export`).
-- **`frameos-wasm` and `frameos-editor`** as workspace packages powering
-  in-browser live previews and web scene editing on the store; published to
-  npm on release.
-- **E2E coverage**: `backend/app/api/tests/test_cloud_e2e.py` against a real
-  local cloud dev server, booted by `cloud/scripts/e2e-frameos.sh`.
-- **Cloud-managed frames** (first cut): direct enrollment (claim tokens +
-  device flow), the `frames` control plane and durable command queue, the
-  `apps/frame-hub` WebSocket hub, the restricted on-device cloud client
-  (`frameos/src/frameos/cloud/`, interpreted-only, closed verb set,
-  device-held Ed25519 identity), the shared-SPA `cloud-frontend` wrapper at
-  `cloud.frameos.net/frames`, log shipping with retention counted into
-  storage usage, buildroot `frameos-cloud.txt` personalization, and ESP32
-  browser flashing. Wire contract: `docs/cloud-frames.md`; design:
-  `cloud/docs/cloud-frames.md`.
+- **Linking** (device authorization flow, backends + frames, encrypted
+  tokens, grants/inventory sync), **cloud login** (handoff, identity
+  linking, first-run setup, lockout-proof local fallback), **scene store**
+  (publish, public repository, "Private cloud scenes", risk badges —
+  decisions in `cloud/STORE-TODO.md`), **config backups**
+  (`backup:scenes`/`backup:frames`, sealed-envelope encryption, tarball
+  export), **`frameos-wasm`/`frameos-editor`** npm packages, and
+  **cloud-managed frames** (enrollment, control plane + durable queue,
+  `apps/frame-hub`, restricted interpreted-only device client, shared-SPA
+  workspace at `cloud.frameos.net/frames`, log shipping, buildroot
+  personalization, ESP32 browser flashing — design:
+  `cloud/docs/cloud-frames.md`; workspace ledger:
+  `cloud/docs/cloud-workspace-gaps.md`).
+- E2E: `backend/app/api/tests/test_cloud_e2e.py` via
+  `cloud/scripts/e2e-frameos.sh`.
 
 ## Remaining work
 
-- Apps (not just scenes) in the store — needs a code-review/signing story
-  first (`cloud/STORE-TODO.md`).
-- Photo gallery service (`gallery:read`): curated feeds usable as image
-  sources in scenes, quota-limited free tier.
-- Asset backup (`backup:assets`): client-side encryption (age or similar,
-  key never leaves the user), content-addressed chunks, resumable.
-- Remote access (`remote:access`): persistent outbound WebSocket tunnel
-  from backend/frame to a cloud relay (pattern exists in
-  `app/ws/remote_bridge.py`); reach your backend/frame UI from
-  cloud.frameos.net. Explicit local toggle, visible "tunnel open" status.
-- Direct frame login from the cloud via that relay (`/admin` handoff).
-- Observability: log shipping + retention (`telemetry:logs`), metrics +
-  dashboards (`telemetry:metrics`), uptime/health alerts ("your frame has
-  been offline for 2 days").
-- Cloud-managed frames, remaining after the first cut: signed OTA
-  (`upgrade.nim` still verifies URL shape only — must land before widely
-  distributing SD images), the full JS-runtime capability audit
-  (per-scene asset sandboxes, CPU/time limits), account 2FA/passkeys +
-  re-auth for sensitive actions, panel-displayed link codes, wasm fleet
-  previews in the cloud UI, and free-tier quota tuning.
-
-## Ideas parking lot (unscheduled)
-
-- Fleet features: one cloud account administering many backends (installer /
-  digital-signage use case); cloud-side "all my frames" dashboard.
-- Shared household access: invite a second cloud account to a backend with a
-  role (viewer/member/admin) — the `cloud_membership` table anticipates this.
-- Notifications: deploy finished / frame offline → push/email via cloud.
-- Community scene of the day / featured gallery pushed as an opt-in feed.
-- Hosted backends: run the whole backend in the cloud, only frames at home.
-- E-ink-friendly weather/calendar data proxy (normalized upstream APIs, one
-  key, cached) so users don't need their own API keys per service.
+Tracked in `docs/todo.md` (one consolidated list: signed OTA, JS-runtime
+capability audit, account hardening, gallery/asset-backup/remote-access
+services, observability, store apps, open questions, parking lot).
 
 ## Protocol summary (details in docs/cloud-link.md)
 
@@ -175,13 +134,5 @@ The provider URL is user-editable (default `https://cloud.frameos.net`), so any
 server implementing this contract works. Env override: `FRAMEOS_CLOUD_URL`
 (`disabled` hides the feature entirely).
 
-## Open questions
-
-- Billing mechanics (Stripe? bundled tiers vs. per-service metering) — decide
-  before anything paid ships.
-- Should `store:publish` require a verified email + human review always, or
-  only for the public store (not personal collections)?
-- Asset backup encryption UX: who holds the key, what does recovery look like
-  if the user loses it? (Answer must be "we cannot read your photos".)
-- One backend link per installation vs. per project — currently one per
-  installation; multi-tenant installs may eventually want per-organization.
+Open product questions (billing, publish review policy, backup-key UX,
+per-org links) live with the rest of the tracker in `docs/todo.md`.
