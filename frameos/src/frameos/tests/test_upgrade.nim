@@ -24,6 +24,16 @@ suite "FrameOS upgrade helpers":
       "VERSION_CODENAME": "noble",
     }.toTable) == (distro: "ubuntu", release: "24.04")
 
+  test "uname arch mapping keeps armv6 separate from armhf":
+    check archForUname("aarch64") == "arm64"
+    check archForUname("armv7l") == "armhf"
+    # Pi Zero W / Pi 1: armhf release artifacts are ARMv7 and SIGILL on the
+    # ARM1176, so armv6l must map to its own target.
+    check archForUname("armv6l") == "armv6"
+    check archForUname("x86_64") == "amd64"
+    expect ValueError:
+      discard archForUname("riscv64")
+
   test "release payload selects stable target asset":
     let release = releaseInfoFromPayload(
       %*{

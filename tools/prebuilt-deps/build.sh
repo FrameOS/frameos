@@ -29,6 +29,7 @@ TARGET_MATRIX=(
   "debian|trixie|armhf|linux/arm/v7|debian:trixie"
   "debian|trixie|arm64|linux/arm64|debian:trixie"
   "debian|trixie|amd64|linux/amd64|debian:trixie"
+  "debian|trixie|armv6|linux/amd64|debian:trixie"
   "ubuntu|24.04|arm64|linux/arm64|ubuntu:24.04"
   "ubuntu|24.04|amd64|linux/amd64|ubuntu:24.04"
   "ubuntu|26.04|arm64|linux/arm64|ubuntu:26.04"

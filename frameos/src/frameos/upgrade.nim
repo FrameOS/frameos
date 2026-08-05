@@ -20,7 +20,7 @@ const
     "ubuntu-24.04",
     "ubuntu-26.04",
   ]
-  SupportedArches = ["arm64", "armhf", "amd64"]
+  SupportedArches = ["arm64", "armhf", "armv6", "amd64"]
   MaxReleaseArchiveBytes = 512 * 1024 * 1024
 
 type
@@ -126,20 +126,28 @@ proc parseOsRelease(path = "/etc/os-release"): Table[string, string] =
       value = value[1 .. ^2]
     result[parts[0]] = value
 
+proc archForUname*(uname: string): string =
+  case uname
+  of "aarch64", "arm64", "armv8":
+    "arm64"
+  of "armv8l", "armv7l", "armhf":
+    "armhf"
+  # ARMv6 (Pi Zero W / Pi 1) must never fall back to armhf: those release
+  # artifacts are built for ARMv7 and SIGILL on the ARM1176. Mirrors the
+  # mapping in backend app/tasks/prebuilt_deps.py:resolve_prebuilt_target.
+  of "armv6l", "armv6":
+    "armv6"
+  of "x86_64", "amd64":
+    "amd64"
+  else:
+    raise newException(ValueError, "Unsupported CPU architecture: " & uname & ". Supported architectures: " & SupportedArches.join(", "))
+
 proc detectArch(): string =
   let overrideArch = getEnv("FRAMEOS_ARCH_OVERRIDE").strip()
   if overrideArch.len > 0:
     return overrideArch
   let uname = runShellCapture("uname -m", timeoutMs = 5000, maxOutputBytes = 4096).output.strip().splitLines()[0]
-  case uname
-  of "aarch64", "arm64", "armv8":
-    "arm64"
-  of "armv8l", "armv7l", "armv6l", "armhf":
-    "armhf"
-  of "x86_64", "amd64":
-    "amd64"
-  else:
-    raise newException(ValueError, "Unsupported CPU architecture: " & uname & ". Supported architectures: " & SupportedArches.join(", "))
+  archForUname(uname)
 
 proc normalizeDistroRelease*(values: Table[string, string]): tuple[distro, release: string] =
   result.distro = getEnv("FRAMEOS_DISTRO_OVERRIDE", values.getOrDefault("ID", "")).strip()

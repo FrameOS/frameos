@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_frameos import download_precompiled_frameos_release, frame_compiled_scene_count
 
 
@@ -74,6 +75,15 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
     assert Path(result.archive_path).is_file()
     assert result.cache_hit is False
     assert any("Downloading precompiled FrameOS release" in message for _level, message in logs)
+
+
+def test_resolve_prebuilt_target_armv6():
+    # armv6 must never fall back to armhf (ARMv7 artifacts SIGILL on ARM1176)
+    # and resolves per-release like every other arch.
+    assert resolve_prebuilt_target("debian", "trixie", "armv6l") == "debian-trixie-armv6"
+    assert resolve_prebuilt_target("raspios", "trixie", "armv6l") == "debian-trixie-armv6"
+    assert resolve_prebuilt_target("debian", "bookworm", "armv6l") == "debian-bookworm-armv6"
+    assert resolve_prebuilt_target("debian", "trixie", "aarch64") == "debian-trixie-arm64"
 
 
 @pytest.mark.asyncio

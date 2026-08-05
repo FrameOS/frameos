@@ -29,7 +29,7 @@ FRAMEOS_CLAIM_TOKEN="${FRAMEOS_CLAIM_TOKEN:-}"
 FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" # __FRAMEOS_CLOUD_URL_DEFAULT__
 FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"
 SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
-SUPPORTED_ARCHES="arm64 armhf amd64"
+SUPPORTED_ARCHES="arm64 armhf armv6 amd64"
 TTY="/dev/tty"
 GENERATED_ADMIN_PASSWORD=""
 
@@ -296,7 +296,11 @@ download_file() {
 detect_arch() {
   case "$(uname -m)" in
     aarch64|arm64|armv8) echo arm64 ;;
-    armv8l|armv7l|armv6l|armhf) echo armhf ;;
+    armv8l|armv7l|armhf) echo armhf ;;
+    # ARMv6 (Pi Zero W / Pi 1) must never fall back to armhf: those release
+    # artifacts are built for ARMv7 and SIGILL on the ARM1176. Mirrors the
+    # mapping in backend app/tasks/prebuilt_deps.py:resolve_prebuilt_target.
+    armv6l|armv6) echo armv6 ;;
     x86_64|amd64) echo amd64 ;;
     *) die "Unsupported CPU architecture: $(uname -m). Supported architectures: $SUPPORTED_ARCHES" ;;
   esac

@@ -91,6 +91,7 @@ DEFAULT_TARGETS = [
     "debian-trixie-armhf",
     "debian-trixie-arm64",
     "debian-trixie-amd64",
+    "debian-trixie-armv6",
     "ubuntu-24.04-arm64",
     "ubuntu-24.04-amd64",
     "ubuntu-26.04-arm64",

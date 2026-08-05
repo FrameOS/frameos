@@ -364,7 +364,16 @@ class CrossCompiler:
         extra_cflags = (
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
-        extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        lib_flags = [f"-L{path}" for path in lib_dirs]
+        if target_cross_toolchain and target_cross_toolchain.tarball_url:
+            # ld resolves transitive DT_NEEDED deps of Debian link stubs (e.g.
+            # trixie's libcrypto.so needs libz.so.1 and libzstd.so.1) through
+            # -rpath-link search paths, not -L, so point it at the mirror too.
+            lib_flags.append(
+                "-Wl,-rpath-link,"
+                f"{TARBALL_TOOLCHAIN_DEBIAN_MIRROR}/lib/{target_cross_toolchain.triplet}"
+            )
+        extra_libs = shlex.quote(" ".join(lib_flags)) if lib_flags else "''"
         target_toolchain_script = indent(
             self._target_cross_toolchain_setup_script(target_cross_toolchain),
             " " * 16,
