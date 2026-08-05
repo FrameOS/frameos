@@ -135,7 +135,11 @@ proc newFrameOS*(): FrameOS =
       hotspotStatus: HotspotStatus.disabled,
     ),
   )
-  drivers.init(result)
+  # Display drivers are initialized later, in start(): first the network
+  # check and boot hotspot get their chance to run, so a display driver that
+  # crashes or hangs during init (bad SPI overlay, wrong pins, unvalidated
+  # panel) cannot leave the frame both blank AND unreachable. A frame with a
+  # broken display but a live hotspot/network can still be debugged.
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
   startScheduler(result)
@@ -208,6 +212,11 @@ proc start*(self: FrameOS) {.async.} =
   if applyBootGuardStartupFallback(firstSceneId, bootCrashCount):
     self.logger.log(%*{"event": "boot:guard:fallback", "sceneId": bootGuardFallbackSceneId(),
       "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
+
+  # Deliberately after the network check, boot hotspot and boot-crash
+  # accounting: a driver that dies here leaves a reachable frame, and the
+  # crash is counted by the boot guard on the next attempt.
+  drivers.init(self)
 
   self.runner.start(firstSceneId)
 

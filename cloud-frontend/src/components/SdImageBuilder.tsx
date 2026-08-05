@@ -290,6 +290,11 @@ export function SdImageBuilder({
     let writable: WritableImageStream | undefined
     try {
       // Validate user input before opening the save dialog.
+      if (!frameName.trim()) {
+        failWith('Name the frame first — that is how its enrollments show up in this workspace.')
+        busyRef.current = false
+        return
+      }
       sanitizeConfigValue(frameName, 'Frame name')
       sanitizeConfigValue(wifiSsid, 'WiFi network name')
       sanitizeConfigValue(wifiPassword, 'WiFi password')
@@ -530,12 +535,13 @@ export function SdImageBuilder({
             ))}
           </select>
           <input
-            aria-label="Frame name (optional)"
+            aria-label="Frame name"
             className={controlClassName}
             disabled={building}
             maxLength={256}
             onChange={(event) => setFrameName(event.target.value)}
-            placeholder="Frame name (optional)"
+            placeholder="Frame name"
+            required
             value={frameName}
           />
           <select

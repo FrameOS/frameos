@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, notExists, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
@@ -11,9 +11,9 @@ import {
 } from "@frameos-cloud/db";
 import { AccountNav } from "../../src/components/AccountNav";
 import { AppShell } from "../../src/components/AppShell";
+import { StorageUsageMeters } from "../../src/components/StorageUsageMeters";
 import { UserIdentifier } from "../../src/components/UserIdentifier";
 import { getAccountUrl, getCloudBaseUrl } from "../../src/lib/env";
-import { formatBytes } from "../../src/lib/format";
 import { readSession } from "../../src/lib/session";
 import { accountUsage, type AccountUsage } from "../../src/lib/usage";
 
@@ -63,6 +63,15 @@ export default async function AccountLayout({
             and(
               eq(linkedClients.accountId, accountId),
               isNull(linkedClients.revokedAt),
+              // Same predicate as the installs page: cloud-managed frames
+              // carry a linkedClients row, but they are counted on the
+              // Frames tab, not here.
+              notExists(
+                db
+                  .select({ id: frames.id })
+                  .from(frames)
+                  .where(eq(frames.linkedClientId, linkedClients.id)),
+              ),
             ),
           ),
         db
@@ -92,13 +101,6 @@ export default async function AccountLayout({
     usage = usageSnapshot;
   }
 
-  const storageBytes = usage
-    ? usage.scenes.private_bytes +
-      usage.scenes.public_bytes +
-      usage.backups.bytes +
-      usage.frame_logs.bytes
-    : 0;
-
   return (
     <AppShell isSuperadmin={isSuperadmin} title="FrameOS Account">
       {session.accountId ? (
@@ -112,24 +114,8 @@ export default async function AccountLayout({
         <div>
           <h1>{session?.name ?? "FrameOS Cloud account"}</h1>
           <p className="copy">{session?.email}</p>
-          {session?.accountId && usage ? (
-            <p className="copy">
-              Storage used: {formatBytes(storageBytes)}
-              {" — "}
-              private scenes {formatBytes(usage.scenes.private_bytes)} of{" "}
-              {formatBytes(usage.scenes.private_max_bytes)}
-              {usage.scenes.public_bytes > 0
-                ? ` · public scenes ${formatBytes(usage.scenes.public_bytes)} (free)`
-                : ""}
-              {" · "}
-              backups {formatBytes(usage.backups.bytes)} of{" "}
-              {formatBytes(usage.backups.max_bytes)}
-              {" · "}
-              frame logs {formatBytes(usage.frame_logs.bytes)} of{" "}
-              {formatBytes(usage.frame_logs.max_bytes)}
-            </p>
-          ) : null}
         </div>
+        {session?.accountId && usage ? <StorageUsageMeters usage={usage} /> : null}
       </div>
       <AccountNav
         counts={{

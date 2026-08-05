@@ -40,10 +40,12 @@ const genericFirmwareSuffix = '-esp32-s3-generic.bin'
 // pins in one shot (the preset table in fos_console.c, mirroring
 // EMBEDDED_HARDWARE_PRESETS in the backend). Everything else is a XIAO with
 // a bare panel wired to it — the full compiled-in panel table
-// (lib/generated-devices) is offered via `set panel`; the default (empty)
-// keeps the firmware's baked-in EPD_7in5_V2.
+// (lib/generated-devices) is offered via `set panel`. There is no implicit
+// default: nobody actually runs the firmware's baked-in EPD_7in5_V2 combo,
+// and silently provisioning any one bundle would misconfigure every other
+// board — so the picker starts on a placeholder and flashing requires a
+// choice.
 const boardChoices = [
-  { label: 'Seeed XIAO ESP32-S3 + Waveshare 7.5" V2 (default)', value: '' },
   { label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)', value: 'hw:waveshare_esp32_s3_photopainter' },
   { label: 'Waveshare PhotoPainter 13.3" (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
 ] as const
@@ -75,6 +77,35 @@ export function pinsSpecError(spec: string): string | undefined {
 }
 const flashBaudrate = 460800
 const consoleBaudrate = 115200
+
+// The firmware's console REPL lives only on the ESP32-S3's built-in
+// USB-Serial/JTAG device (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG in
+// embedded/esp32/sdkconfig.defaults) — the port the OS names
+// "USB JTAG/serial debug unit". Some boards (Waveshare PhotoPainter 13.3")
+// additionally expose an on-board USB-UART bridge on UART0, which shows up
+// as a second port ("USB Single Serial" for its CH343). The ROM bootloader
+// flashes fine through the bridge, but the console prompt can never appear
+// there, so provisioning would always time out after a successful-looking
+// flash. Known bridge vendors are refused before anything is written.
+const uartBridgeVendors: Record<number, string> = {
+  0x0403: 'FTDI',
+  0x067b: 'Prolific',
+  0x10c4: 'Silicon Labs CP210x',
+  0x1a86: 'WCH ("USB Single Serial")',
+}
+
+export function portSelectionError(info: { usbVendorId?: number } | undefined): string | undefined {
+  const bridge = info?.usbVendorId !== undefined ? uartBridgeVendors[info.usbVendorId] : undefined
+  if (!bridge) {
+    return undefined
+  }
+  return (
+    `The selected port is a ${bridge} USB-UART bridge. Flashing would work through it, ` +
+    'but the FrameOS console only answers on the chip\'s built-in USB port, so the frame could ' +
+    'never be provisioned. Click flash again and pick the port named "USB JTAG/serial debug unit" ' +
+    '(boards like the PhotoPainter 13.3" show both ports over one cable).'
+  )
+}
 
 // The console prompt has no trailing space (fos_console.c: `printf("frameos>")`).
 const consolePrompt = 'frameos>'
@@ -365,7 +396,10 @@ async function provisionOverSerial(
     log('Waiting for the FrameOS console…')
     if (!(await readUntil(consolePrompt, bootPromptTimeoutMs))) {
       throw new Error(
-        'The flashed firmware never showed its FrameOS console prompt, so nothing was provisioned. Unplug the board, plug it back in and try again.'
+        'The flashed firmware never showed its FrameOS console prompt, so nothing was provisioned. ' +
+          'If the board offers more than one serial port, the console only answers on ' +
+          '"USB JTAG/serial debug unit" — not on a "USB Single Serial" UART bridge. ' +
+          'Unplug the board, plug it back in and try again with that port.'
       )
     }
     for (const command of commands) {
@@ -500,7 +534,7 @@ export function Esp32CloudFlasher({
   // flash, provision it over serial, never show it to the user.
   async function mintEnrollmentCode(): Promise<string> {
     const response = await fetch('/api/frames/claim-tokens', {
-      body: JSON.stringify(frameName ? { name: frameName } : {}),
+      body: JSON.stringify({ name: frameName.trim() }),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })
@@ -534,6 +568,16 @@ export function Esp32CloudFlasher({
       setPhase('error')
       return
     }
+    if (!frameName.trim()) {
+      setError('Name the frame first — that is how it shows up in this workspace.')
+      setPhase('error')
+      return
+    }
+    if (panelSelectable && !panelChoice) {
+      setError('Pick the frame hardware first — your board, or the e-paper panel wired to your ESP32.')
+      setPhase('error')
+      return
+    }
     if (rememberWifi && wifiSsid) {
       storeRememberedWifi(wifiSsid, wifiPassword)
     } else {
@@ -549,9 +593,15 @@ export function Esp32CloudFlasher({
       const firmware = await fetchGenericFirmware(log)
 
       setPhase('connecting')
-      log('Pick the USB serial port of your ESP32…')
+      log('Pick the USB serial port of your ESP32 — if several are listed, choose "USB JTAG/serial debug unit"…')
       const serial = (navigator as unknown as { serial: WebSerialLike }).serial
       const port = await serial.requestPort()
+      // Refuse a USB-UART bridge port before writing anything: the flash
+      // would succeed but provisioning could never find the console.
+      const portError = portSelectionError(port.getInfo?.())
+      if (portError) {
+        throw new Error(portError)
+      }
 
       setPhase('flashing')
       const { ESPLoader, Transport } = await loadEsptool()
@@ -749,16 +799,18 @@ export function Esp32CloudFlasher({
     <div className="space-y-2">
       <p className="frameos-muted text-xs">
         Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the frame to this
-        account automatically.
+        account automatically. If the port picker lists several ports, choose &ldquo;USB JTAG/serial debug unit&rdquo;
+        (a &ldquo;USB Single Serial&rdquo; port can flash but not provision).
       </p>
       <div className="grid gap-2">
         <input
-          aria-label="Frame name (optional)"
+          aria-label="Frame name"
           className={controlClassName}
           disabled={busy}
           maxLength={256}
           onChange={(event) => setFrameName(event.target.value)}
-          placeholder="Frame name (optional)"
+          placeholder="Frame name"
+          required
           value={frameName}
         />
         {!panelSelectable ? (
@@ -777,6 +829,9 @@ export function Esp32CloudFlasher({
               onChange={(event) => setPanelChoice(event.target.value)}
               value={panelChoice}
             >
+              <option disabled value="">
+                Choose your board or e-paper panel…
+              </option>
               <optgroup label="Integrated boards">
                 {boardChoices.map((choice) => (
                   <option key={choice.value} value={choice.value}>

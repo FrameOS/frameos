@@ -505,10 +505,23 @@ static void queue_log_line(const char *msg)
     xSemaphoreGive(s_log_lock);
 }
 
+static void (*s_log_tap)(const char *line) = NULL;
+
+void frameos_nim_set_log_tap(void (*tap)(const char *line))
+{
+    s_log_tap = tap;
+}
+
 void frameos_nim_log_hook(const char *msg)
 {
     ESP_LOGI("nim", "%s", msg ? msg : "");
     queue_log_line(msg);
+    /* The tap runs on whatever task logged; the cloud client's tap only
+     * copies the line into its own queue (or drops it). */
+    void (*tap)(const char *) = s_log_tap;
+    if (tap != NULL && msg != NULL) {
+        tap(msg);
+    }
 }
 
 void frameos_nim_set_log_upload_enabled(bool enabled)

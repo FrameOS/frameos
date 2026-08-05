@@ -45,6 +45,12 @@ function mintCalls() {
   );
 }
 
+// The panel opens on a chooser stage — one button per enrollment path — and
+// the forms live behind them.
+function openPath(name: RegExp) {
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+
 beforeEach(() => {
   onClose.mockReset();
   fetchMock.mockReset();
@@ -79,6 +85,10 @@ describe("AddFramePanel", () => {
     renderPanel();
 
     expect(screen.getByText("Add a frame")).toBeDefined();
+    // Minted at mount — before any path is chosen — so the command is ready
+    // the moment the script stage opens.
+    expect(mintCalls()).toHaveLength(1);
+    openPath(/install script/i);
     await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
     expect(mintCalls()).toHaveLength(1);
     // Copyable straight away — no claim code to transcribe by hand, and no
@@ -94,6 +104,7 @@ describe("AddFramePanel", () => {
 
   it("mints once per opening, not once per render", async () => {
     const view = renderPanel();
+    openPath(/install script/i);
     await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
 
     view.rerender(
@@ -132,6 +143,7 @@ describe("AddFramePanel", () => {
   it("shows the masked command while the code is still in flight", async () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
     renderPanel();
+    openPath(/install script/i);
 
     await screen.findByText(/FRAMEOS_CLAIM_TOKEN=<claim code>/);
     expect(screen.getByText(/Creating a single-use claim code/)).toBeDefined();
@@ -146,6 +158,7 @@ describe("AddFramePanel", () => {
   // is whatever host the admin browsed through.
   it("builds the install command against the injected cloud origin", async () => {
     renderPanel();
+    openPath(/install script/i);
 
     await screen.findByText(
       /curl -fsSL https:\/\/account\.frameos\.net\/install\.sh/,
@@ -199,6 +212,7 @@ describe("AddFramePanel", () => {
     view.unmount();
     expect(pending[0]?.signal?.aborted).toBe(true);
     renderPanel();
+    openPath(/install script/i);
     await act(async () => {
       pending[0]?.deliver(Response.json({ claim_token: "FRCT_stale" }));
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -223,6 +237,36 @@ describe("AddFramePanel", () => {
 
     expect(screen.getByText("Add a frame")).toBeDefined();
     expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
+  });
+
+  it("opens on a chooser stage and drills into one path at a time", async () => {
+    renderPanel();
+
+    // Stage one: all four paths as buttons, no forms yet.
+    expect(screen.getByRole("button", { name: /install script/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /sd card image/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /link a frame/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /flash an esp32/i })).toBeDefined();
+    expect(screen.queryByTestId("esp32-flasher")).toBeNull();
+    expect(screen.queryByTestId("sd-builder")).toBeNull();
+    expect(screen.queryByText(/FRAMEOS_CLAIM_TOKEN/)).toBeNull();
+
+    // Stage two: only the chosen path's form.
+    openPath(/flash an esp32/i);
+    expect(screen.getByTestId("esp32-flasher")).toBeDefined();
+    expect(screen.queryByTestId("sd-builder")).toBeNull();
+    expect(screen.queryByText(/FRAMEOS_CLAIM_TOKEN/)).toBeNull();
+
+    // Back to the chooser.
+    fireEvent.click(
+      screen.getByRole("button", { name: /all ways to add a frame/i }),
+    );
+    expect(screen.queryByTestId("esp32-flasher")).toBeNull();
+    expect(screen.getByRole("button", { name: /sd card image/i })).toBeDefined();
+
+    openPath(/sd card image/i);
+    expect(screen.getByTestId("sd-builder")).toBeDefined();
+    expect(screen.queryByTestId("esp32-flasher")).toBeNull();
   });
 
   it("closes through the drawer that owns its open state", () => {

@@ -1,9 +1,10 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, sql } from "drizzle-orm";
 import Link from "next/link";
 import {
   connectedBackends,
   createDb,
   deviceAuthorizationRequests,
+  frames,
   linkedClients,
 } from "@frameos-cloud/db";
 import { InstallRowMenu } from "../../../src/components/InstallRowMenu";
@@ -55,7 +56,23 @@ export default async function AccountInstallsPage({
             connectedBackends,
             eq(connectedBackends.linkedClientId, linkedClients.id),
           )
-          .where(eq(linkedClients.accountId, accountId))
+          .where(
+            and(
+              eq(linkedClients.accountId, accountId),
+              // Cloud-managed frames (claim-token or link-code enrollment)
+              // each carry a linkedClients row too, but they live on the
+              // Frames page — listing them here twice as "backends" was just
+              // confusing. What remains: self-managed backends and frames
+              // that link to the cloud for services (login, backups) without
+              // handing over management. Those have no `frames` row.
+              notExists(
+                db
+                  .select({ id: frames.id })
+                  .from(frames)
+                  .where(eq(frames.linkedClientId, linkedClients.id)),
+              ),
+            ),
+          )
           .orderBy(desc(linkedClients.createdAt))
       : [];
 
@@ -92,7 +109,9 @@ export default async function AccountInstallsPage({
         <div>
           <h2>Linked backends</h2>
           <p className="copy">
-            To manage frames and use cloud services, link a FrameOS backend.{" "}
+            Self-managed frames and backends that link to your account for
+            cloud services like login and backups. Cloud-managed frames live
+            under Frames.{" "}
             <a
               href="https://frameos.net/guide/"
               rel="noreferrer noopener"

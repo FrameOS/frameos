@@ -1228,6 +1228,17 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
         "../frameos-firstboot-setup.service"
     ) in captured["root_patch_script"]
     assert "write $service_root/etc/fstab /etc/fstab" in captured["root_patch_script"]
+    # Older cached base images also get the post-boot diagnostics snapshot
+    # unit patched in, so every composed image writes /boot/frameos-postboot-2min.log.
+    assert (
+        "write $service_root/usr/local/bin/frameos-postboot-log.sh /usr/local/bin/frameos-postboot-log.sh"
+        in captured["root_patch_script"]
+    )
+    assert "sif /usr/local/bin/frameos-postboot-log.sh mode 0100755" in captured["root_patch_script"]
+    assert (
+        "symlink /etc/systemd/system/multi-user.target.wants/frameos-postboot-log.service "
+        "../frameos-postboot-log.service"
+    ) in captured["root_patch_script"]
     assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
     assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
     boot_root = temp_dir / "overlay" / "boot"
