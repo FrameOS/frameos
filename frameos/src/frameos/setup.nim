@@ -383,7 +383,14 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
   # Wifi power save is a notorious source of dropouts and firmware wedges on
   # the Pi Zero 2 W's brcmfmac chip. Persist the NetworkManager setting and
   # also switch it off on the running interfaces right away.
-  if dirExists("/etc/NetworkManager"):
+  #
+  # /etc/NetworkManager exists even on images that have no NetworkManager at
+  # all (buildroot stages it as a bind-mount point on every platform), so also
+  # require the systemd unit before writing config for — and reloading — a
+  # service that is not there. The `iw` fallback below still disables power
+  # save on those images.
+  if dirExists("/etc/NetworkManager") and
+      commandSucceeds("systemctl cat NetworkManager.service >/dev/null 2>&1"):
     try:
       const powersaveConfPath = "/etc/NetworkManager/conf.d/wifi-powersave-off.conf"
       const powersaveConf = "[connection]\n# 2 = disable wifi power saving\nwifi.powersave = 2\n"

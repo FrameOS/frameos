@@ -68,6 +68,11 @@ from app.tasks.buildroot_platforms import (
     get_buildroot_platform,
     normalize_buildroot_platform,
 )
+from app.tasks.postboot_log import (
+    POSTBOOT_LOG_SCRIPT_PATH,
+    POSTBOOT_LOG_SERVICE_NAME,
+    stage_postboot_log,
+)
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.utils.build_environment import BuildEnvironmentProvider, selected_build_environment_provider
@@ -1618,6 +1623,7 @@ class BuildrootImageBuilder:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         stage_buildroot_network_manager_state(overlay_dir)
+        stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
             raise RuntimeError("FrameOS cross compilation did not produce a binary")
@@ -2533,6 +2539,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             shutil.rmtree(compose_dir)
         compose_dir.mkdir(parents=True, exist_ok=True)
         stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
+        stage_postboot_log(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up
@@ -2694,6 +2701,13 @@ rm /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME}
 symlink /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME} ../{SETUP_JSON_RESET_SERVICE_NAME}
 rm /etc/fstab
 write $service_root/etc/fstab /etc/fstab
+rm {POSTBOOT_LOG_SCRIPT_PATH}
+write $service_root{POSTBOOT_LOG_SCRIPT_PATH} {POSTBOOT_LOG_SCRIPT_PATH}
+sif {POSTBOOT_LOG_SCRIPT_PATH} mode 0100755
+rm /etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME}
+write $service_root/etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME} /etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME}
+rm /etc/systemd/system/multi-user.target.wants/{POSTBOOT_LOG_SERVICE_NAME}
+symlink /etc/systemd/system/multi-user.target.wants/{POSTBOOT_LOG_SERVICE_NAME} ../{POSTBOOT_LOG_SERVICE_NAME}
 EOF
 {zero_2_w_wifi_firmware_section}debugfs -w -f "$cmds" "$rootfs"
 python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
