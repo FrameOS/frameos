@@ -100,6 +100,25 @@ describe("frames SPA shell", () => {
     expect(body).toContain('cloud_ws_origin: "https://hub.frameos.net"');
   });
 
+  it("never guesses a hub origin in production, even for localhost requests", async () => {
+    // The standalone server does not rebuild request.url from the forwarded
+    // Host header, so behind nginx every production request looks like
+    // localhost — the guess shipped ws://localhost:3100 to real browsers.
+    // Only an explicit FRAME_HUB_PUBLIC_URL may point elsewhere in prod.
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      for (const origin of ["http://localhost:3000", "http://10.4.0.47:3000"]) {
+        const body = await (await get(`${origin}/frames`)).text();
+        expect(body).not.toContain("cloud_ws_origin");
+      }
+      process.env.FRAME_HUB_PUBLIC_URL = "https://hub.frameos.net";
+      const body = await (await get("http://localhost:3000/frames")).text();
+      expect(body).toContain('cloud_ws_origin: "https://hub.frameos.net"');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("leaves a real hostname same-origin, where nginx proxies the socket", async () => {
     const body = await (
       await get("https://account.frameos.net/frames")

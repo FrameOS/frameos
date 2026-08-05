@@ -39,12 +39,38 @@ function createNextConfig(phase: string): NextConfig {
   // the socket fails before the fleet UI can load, with no clue why unless
   // you notice the CSP violation. Allow the hub explicitly, in both its http
   // and ws forms (connect-src matches the scheme literally).
+  //
+  // Dev server only: headers() is evaluated at BUILD time, and production
+  // bundles are built on a dev machine whose .env.local sets
+  // FRAME_HUB_PUBLIC_URL to a LAN address — reading it here shipped that LAN
+  // IP inside the production CSP header. Production needs no entry at all.
   const hubOrigin =
-    process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(/\/$/, "") ||
-    (phase === PHASE_DEVELOPMENT_SERVER ? "http://localhost:3100" : "");
+    phase === PHASE_DEVELOPMENT_SERVER
+      ? process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(/\/$/, "") ||
+        "http://localhost:3100"
+      : "";
   const hubConnectSrc = hubOrigin
     ? ` ${hubOrigin} ${hubOrigin.replace(/^http/, "ws")}`
     : "";
+
+  // Forms are same-origin except the logout button, which posts to the cloud
+  // origin from the scenes host too. That origin is a runtime fact
+  // (FRAMEOS_CLOUD_APP_URL on the server) the build machine cannot know —
+  // baking getCloudBaseUrl() here shipped `form-action http://localhost:3000`
+  // to production, where it CSP-blocked logout on scenes.frameos.net. In
+  // production allow https: targets (matching the frame-src posture); the
+  // dev server, evaluated live with real env, keeps the exact origin.
+  const formAction =
+    phase === PHASE_DEVELOPMENT_SERVER
+      ? `form-action 'self' ${new URL(getCloudBaseUrl()).origin}`
+      : "form-action 'self' https:";
+
+  // Cloudflare zone-injected RUM beacon; without this entry the browser
+  // console fills with CSP violations on every prod page load.
+  const scriptSrcElem =
+    phase === PHASE_DEVELOPMENT_SERVER
+      ? ""
+      : " https://static.cloudflareinsights.com";
 
   const contentSecurityPolicy = (frameAncestors: string) =>
     [
@@ -52,14 +78,14 @@ function createNextConfig(phase: string): NextConfig {
       "base-uri 'self'",
       `connect-src 'self' https:${hubConnectSrc}`,
       "font-src 'self' data:",
-      `form-action 'self' ${new URL(getCloudBaseUrl()).origin}`,
+      formAction,
       `frame-ancestors ${frameAncestors}`,
       // 'self' for the embedded scene editor; http(s) so the account pages
       // can open a linked FrameOS backend (user-chosen origin) in a frame.
       "frame-src 'self' https: http:",
       "img-src 'self' data: https:",
       "object-src 'none'",
-      scriptSrc,
+      `${scriptSrc}${scriptSrcElem}`,
       "style-src 'self' 'unsafe-inline'",
     ].join("; ");
 

@@ -177,6 +177,14 @@ export async function GET(request: NextRequest) {
   // Empty counts as unset: FRAME_HUB_PUBLIC_URL= in a .env would otherwise be
   // an empty string, which ?? happily keeps and which silently disables the
   // injection (same trap getHubPort documents for FRAME_HUB_PORT=).
+  //
+  // The hostname sniffing is additionally gated off in production: the
+  // standalone server does not reconstruct request.url from the forwarded
+  // Host header, so behind nginx every request looks like localhost — and the
+  // prod shell shipped `cloud_ws_origin: "ws://localhost:3100"`, breaking the
+  // fleet socket for every browser. In production the hub is same-origin
+  // (nginx proxies the WS paths); only an explicit FRAME_HUB_PUBLIC_URL may
+  // override that.
   const configuredHub = process.env.FRAME_HUB_PUBLIC_URL?.trim().replace(
     /\/$/,
     "",
@@ -184,11 +192,13 @@ export async function GET(request: NextRequest) {
   const requestHostname = new URL(request.url).hostname;
   const hubOrigin =
     configuredHub ||
-    (localHosts.has(requestHostname)
-      ? "http://localhost:3100"
-      : isPrivateLanIPv4(requestHostname)
-        ? `http://${requestHostname}:3100`
-        : undefined);
+    (process.env.NODE_ENV === "production"
+      ? undefined
+      : localHosts.has(requestHostname)
+        ? "http://localhost:3100"
+        : isPrivateLanIPv4(requestHostname)
+          ? `http://${requestHostname}:3100`
+          : undefined);
   if (hubOrigin) {
     const injected = injectAtAnchor(html, wsOriginAnchor, [
       `cloud_ws_origin: ${JSON.stringify(hubOrigin)},`,
