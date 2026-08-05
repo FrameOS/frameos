@@ -13,6 +13,10 @@ import {
 } from "../../../../../../src/lib/store";
 import { syncLatestSceneZipPreview } from "../../../../../../src/lib/store-image-sync";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
+import {
+  maxPrivateSceneBytesPerAccount,
+  privateSceneBytesForAccount,
+} from "../../../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -58,6 +62,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("image_quota_exceeded", 403, {
       max_images: maxImagesPerScene,
     });
+  }
+  // Gallery bytes count into the private-scene quota (they always did in the
+  // usage display; this write path just never checked). Public scenes are
+  // free (usage.ts).
+  if (scene.visibility !== "public") {
+    const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
+    if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
+      return jsonError("storage_quota_exceeded", 403, {
+        max_bytes: maxPrivateSceneBytesPerAccount,
+        private_bytes: Math.round(privateBytes),
+      });
+    }
   }
 
   const moderation = await moderateStoreContent({

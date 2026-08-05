@@ -23,6 +23,10 @@ import {
   validateSceneZip,
 } from "../../../../../../src/lib/store";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
+import {
+  maxPrivateSceneBytesPerAccount,
+  privateSceneBytesForAccount,
+} from "../../../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -162,6 +166,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   if (content.length > maxSceneZipBytes) {
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
+  }
+  // Every save appends an immutable version; without this check the editor
+  // was the one write path that ignored the account byte quota entirely.
+  // Public scenes are free (usage.ts).
+  if (scene.visibility !== "public") {
+    const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
+    if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
+      return jsonError("storage_quota_exceeded", 403, {
+        max_bytes: maxPrivateSceneBytesPerAccount,
+        private_bytes: Math.round(privateBytes),
+      });
+    }
   }
 
   const validated = validateSceneZip(content);

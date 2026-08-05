@@ -21,6 +21,12 @@ import {
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
+// usage.ts only type-imports from this module, so no runtime cycle.
+import {
+  cullFrameLogsOverBudget,
+  frameLogBytesForAccount,
+  maxFrameLogBytesPerAccount,
+} from "./usage";
 
 type Database = ReturnType<typeof createDb>;
 
@@ -464,6 +470,10 @@ export async function storeFrameLogs(
   db: FramesDatabase,
   frameId: string,
   logs: { timestamp: Date; payload: unknown }[],
+  // The frame's owning account, for the account-wide byte budget. Optional
+  // so older callers/tests keep working; without it only the per-frame row
+  // cap applies.
+  accountId?: string,
 ) {
   const batch = logs.slice(0, maxLogBatch).flatMap((entry) => {
     const serialized = JSON.stringify(entry.payload ?? null);
@@ -499,6 +509,17 @@ export async function storeFrameLogs(
         .where(
           and(eq(frameLogs.frameId, frameId), lt(frameLogs.id, cutoff.id + 1)),
         );
+    }
+    // Account byte budget: logs are telemetry, so over budget the OLDEST
+    // lines across the whole account are culled — never refused (a frame
+    // must not learn its logs bounced; usage.ts owns the budget).
+    if (accountId) {
+      const overBudget =
+        (await frameLogBytesForAccount(tx, accountId)) >
+        maxFrameLogBytesPerAccount;
+      if (overBudget) {
+        await cullFrameLogsOverBudget(tx, accountId);
+      }
     }
   });
   return batch.length;

@@ -12,7 +12,8 @@ export const maxSceneZipEntries = 200;
 export const maxPreviewImageBytes = 4 * 1024 * 1024;
 export const maxImagesPerScene = 10;
 export const maxScenesPerAccount = 200;
-export const maxStoreBytesPerAccount = 100 * 1024 * 1024;
+// The byte quota moved to src/lib/usage.ts (maxPrivateSceneBytesPerAccount,
+// 200 MiB, private scenes only — public scenes are free).
 // Versions are immutable, but they are Postgres blobs: keep the newest 20 per
 // scene and prune older ones on publish (documented deviation, STORE-TODO).
 export const maxVersionsPerScene = 20;

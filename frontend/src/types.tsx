@@ -846,6 +846,12 @@ export interface FrameOSSettings {
 }
 
 /** Mirrors GET /api/cloud/status (backend/app/api/cloud.py and the frame's cloud_api_routes.nim) */
+export interface CloudUsage {
+  scenes: { private_bytes: number; private_max_bytes: number; public_bytes: number }
+  backups: { bytes: number; max_bytes: number }
+  frame_logs: { bytes: number; max_bytes: number }
+}
+
 export interface CloudStatus {
   enabled: boolean
   provider_url: string | null
@@ -867,6 +873,9 @@ export interface CloudStatus {
     account_email: string | null
     connected_at: string | null
     last_inventory_sync_at: string | null
+    /** Storage usage + quota snapshot from the provider's grants poll.
+     * Public scenes are quota-free, hence the private/public split. */
+    usage?: CloudUsage | null
   } | null
   /** True unless cloud login is enforced (local passwords disabled). */
   local_fallback_enabled?: boolean

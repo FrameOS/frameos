@@ -254,6 +254,10 @@ def _status_payload(db: Session, link: CloudBackendLink | None, user: User | Non
             "last_inventory_sync_at": link.last_inventory_sync_at.isoformat()
             if link.last_inventory_sync_at
             else None,
+            # Snapshot from the provider's grants response (15-min sync):
+            # {scenes: {private_bytes, private_max_bytes, public_bytes},
+            #  backups: {bytes, max_bytes}, frame_logs: {bytes, max_bytes}}.
+            "usage": link.cloud_usage if isinstance(link.cloud_usage, dict) else None,
         }
         # A pending feature change awaiting owner approval on the provider.
         if link.device_code:

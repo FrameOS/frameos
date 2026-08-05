@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { accountUsage } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -32,11 +33,18 @@ export async function GET(request: NextRequest) {
   // Display/contact snapshot only, so the backend can show "Connected as
   // <email>"; account identity stays keyed on the provider identity, never on
   // this email (see the accounts schema note).
-  const [account] = await db
-    .select({ primaryEmail: accounts.primaryEmail })
-    .from(accounts)
-    .where(eq(accounts.id, linkedClient.accountId))
-    .limit(1);
+  const [[account], usage] = await Promise.all([
+    db
+      .select({ primaryEmail: accounts.primaryEmail })
+      .from(accounts)
+      .where(eq(accounts.id, linkedClient.accountId))
+      .limit(1),
+    // Storage usage + limits ride along on the 15-minute grants poll, so
+    // linked backends (and their frames) can show "X of Y used" without a
+    // second endpoint. The limits are included so no client hardcodes them —
+    // paid tiers will raise them per account later.
+    accountUsage(db, linkedClient.accountId),
+  ]);
 
   return NextResponse.json({
     grants: [
@@ -48,5 +56,6 @@ export async function GET(request: NextRequest) {
       },
     ],
     linked_client_id: linkedClient.id,
+    usage,
   });
 }

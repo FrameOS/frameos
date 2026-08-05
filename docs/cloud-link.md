@@ -232,9 +232,20 @@ its own privileges silently.
   "grants": [
     { "account_id": "…", "account_email": "owner@example.com", "role": "owner", "updated_at": "…" }
   ],
-  "linked_client_id": "…"
+  "linked_client_id": "…",
+  "usage": {
+    "scenes": { "private_bytes": 0, "private_max_bytes": 209715200, "public_bytes": 0 },
+    "backups": { "bytes": 0, "max_bytes": 104857600 },
+    "frame_logs": { "bytes": 0, "max_bytes": 104857600 }
+  }
 }
 ```
+
+`usage` (optional) is the account's storage usage and quota snapshot —
+public store scenes are quota-free, hence the private/public split. The
+limits ride along so clients never hardcode them (a provider may raise them
+per account, e.g. for a paid tier). Clients should treat the whole block as
+informational display data.
 
 `account_email` is a display snapshot, not an identity key. FrameOS may cache
 grant state across short provider outages, but must honor revocation as soon

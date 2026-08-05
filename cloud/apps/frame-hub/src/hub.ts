@@ -727,7 +727,12 @@ export async function startFrameHub(
     }
     // storeFrameLogs enforces the per-frame retention cap and per-line size
     // limits in the same transaction as the insert.
-    const stored = await storeFrameLogs(db, session.frame.id, entries);
+    const stored = await storeFrameLogs(
+      db,
+      session.frame.id,
+      entries,
+      session.frame.accountId,
+    );
     if (stored === 0) {
       return;
     }

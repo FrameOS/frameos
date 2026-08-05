@@ -5,12 +5,9 @@ import {
   accounts,
   clientBackups,
   createDb,
-  frameLogs,
   frames,
   linkedClients,
-  storeSceneImages,
   storeScenes,
-  storeSceneVersions,
 } from "@frameos-cloud/db";
 import { AccountNav } from "../../src/components/AccountNav";
 import { AppShell } from "../../src/components/AppShell";
@@ -18,6 +15,7 @@ import { UserIdentifier } from "../../src/components/UserIdentifier";
 import { getAccountUrl, getCloudBaseUrl } from "../../src/lib/env";
 import { formatBytes } from "../../src/lib/format";
 import { readSession } from "../../src/lib/session";
+import { accountUsage, type AccountUsage } from "../../src/lib/usage";
 
 // Shared chrome for all /account pages: sign-in gate, app shell, the account
 // header, and the section navigation with each section's headline number as
@@ -43,24 +41,16 @@ export default async function AccountLayout({
   let installCount = 0;
   let sceneCount = 0;
   let backupCount = 0;
-  let backupBytes = 0;
-  let sceneBytes = 0;
   let frameCount = 0;
-  let frameLogBytes = 0;
+  let usage: AccountUsage | null = null;
 
   if (session.accountId) {
     const accountId = session.accountId;
     const db = createDb();
-    const [
-      [row],
-      installs,
-      scenes,
-      backups,
-      sceneVersionSizes,
-      sceneImageSizes,
-      frameRows,
-      frameLogSizes,
-    ] = await Promise.all([
+    // Byte sums come from the same accountUsage() helper the quota
+    // enforcement and /api/backends/grants use — one definition of "used".
+    const [[row], installs, scenes, backups, frameRows, usageSnapshot] =
+      await Promise.all([
         db
           .select({ isSuperadmin: accounts.isSuperadmin })
           .from(accounts)
@@ -76,33 +66,13 @@ export default async function AccountLayout({
             ),
           ),
         db
-          .select({
-            count: sql<number>`count(*)::int`,
-            previewBytes: sql<number>`coalesce(sum(octet_length(${storeScenes.previewImage})), 0)::float8`,
-          })
+          .select({ count: sql<number>`count(*)::int` })
           .from(storeScenes)
           .where(eq(storeScenes.accountId, accountId)),
         db
-          .select({
-            bytes: sql<number>`coalesce(sum(${clientBackups.sizeBytes}), 0)::float8`,
-            count: sql<number>`count(*)::int`,
-          })
+          .select({ count: sql<number>`count(*)::int` })
           .from(clientBackups)
           .where(eq(clientBackups.accountId, accountId)),
-        db
-          .select({
-            bytes: sql<number>`coalesce(sum(${storeSceneVersions.sizeBytes}), 0)::float8`,
-          })
-          .from(storeSceneVersions)
-          .innerJoin(storeScenes, eq(storeSceneVersions.sceneId, storeScenes.id))
-          .where(eq(storeScenes.accountId, accountId)),
-        db
-          .select({
-            bytes: sql<number>`coalesce(sum(octet_length(${storeSceneImages.content})), 0)::float8`,
-          })
-          .from(storeSceneImages)
-          .innerJoin(storeScenes, eq(storeSceneImages.sceneId, storeScenes.id))
-          .where(eq(storeScenes.accountId, accountId)),
         db
           .select({ count: sql<number>`count(*)::int` })
           .from(frames)
@@ -112,28 +82,22 @@ export default async function AccountLayout({
               sql`${frames.status} <> 'revoked'`,
             ),
           ),
-        db
-          .select({
-            bytes: sql<number>`coalesce(sum(${frameLogs.sizeBytes}), 0)::float8`,
-          })
-          .from(frameLogs)
-          .innerJoin(frames, eq(frameLogs.frameId, frames.id))
-          .where(eq(frames.accountId, accountId)),
+        accountUsage(db, accountId),
       ]);
     isSuperadmin = row?.isSuperadmin ?? false;
     installCount = installs[0]?.count ?? 0;
     sceneCount = scenes[0]?.count ?? 0;
     backupCount = backups[0]?.count ?? 0;
-    backupBytes = backups[0]?.bytes ?? 0;
-    sceneBytes =
-      (sceneVersionSizes[0]?.bytes ?? 0) +
-      (sceneImageSizes[0]?.bytes ?? 0) +
-      (scenes[0]?.previewBytes ?? 0);
     frameCount = frameRows[0]?.count ?? 0;
-    frameLogBytes = frameLogSizes[0]?.bytes ?? 0;
+    usage = usageSnapshot;
   }
 
-  const storageBytes = backupBytes + sceneBytes + frameLogBytes;
+  const storageBytes = usage
+    ? usage.scenes.private_bytes +
+      usage.scenes.public_bytes +
+      usage.backups.bytes +
+      usage.frame_logs.bytes
+    : 0;
 
   return (
     <AppShell isSuperadmin={isSuperadmin} title="FrameOS Account">
@@ -148,12 +112,21 @@ export default async function AccountLayout({
         <div>
           <h1>{session?.name ?? "FrameOS Cloud account"}</h1>
           <p className="copy">{session?.email}</p>
-          {session?.accountId ? (
+          {session?.accountId && usage ? (
             <p className="copy">
               Storage used: {formatBytes(storageBytes)}
-              {storageBytes > 0
-                ? ` — backups ${formatBytes(backupBytes)} · store scenes ${formatBytes(sceneBytes)} · frame logs ${formatBytes(frameLogBytes)}`
+              {" — "}
+              private scenes {formatBytes(usage.scenes.private_bytes)} of{" "}
+              {formatBytes(usage.scenes.private_max_bytes)}
+              {usage.scenes.public_bytes > 0
+                ? ` · public scenes ${formatBytes(usage.scenes.public_bytes)} (free)`
                 : ""}
+              {" · "}
+              backups {formatBytes(usage.backups.bytes)} of{" "}
+              {formatBytes(usage.backups.max_bytes)}
+              {" · "}
+              frame logs {formatBytes(usage.frame_logs.bytes)} of{" "}
+              {formatBytes(usage.frame_logs.max_bytes)}
             </p>
           ) : null}
         </div>
