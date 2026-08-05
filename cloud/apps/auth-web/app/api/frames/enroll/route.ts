@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   authenticateLinkedClient,
   linkedClientHasScope,
+  linkedClientScopes,
 } from "../../../../src/lib/backend-auth";
 import {
   jsonError,
@@ -27,6 +28,18 @@ import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secr
 export const runtime = "nodejs";
 
 const wsPath = "/api/frames/ws";
+
+// What a claim-token enrollment grants (see the linked-client insert below).
+// The response's `scope` string must list ALL of it: the device stores that
+// string as its local scope list and gates its own telemetry push loops on
+// it — reporting only frame:managed here is how frames ended up never
+// sending a single log line while the hub sat ready to accept them.
+const claimTokenGrantedScopes = [
+  frameManagedScope,
+  frameTelemetryLogsScope,
+  frameTelemetryMetricsScope,
+];
+const claimTokenScopeString = claimTokenGrantedScopes.join(" ");
 
 // Same set the frames-app shell route uses to decide "is this a dev server".
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -218,11 +231,7 @@ async function enrollWithClaimToken(
             // (the hub refuses every log_batch with insufficient_scope and
             // nothing in the UI says why). The LOCAL switch on the device
             // (send_logs) remains the privacy control.
-            requestedScopes: [
-              frameManagedScope,
-              frameTelemetryLogsScope,
-              frameTelemetryMetricsScope,
-            ],
+            requestedScopes: claimTokenGrantedScopes,
           },
           publicDisplayName: name,
           tokenReference: accessToken.tokenReference,
@@ -283,7 +292,7 @@ async function enrollWithClaimToken(
   return NextResponse.json({
     access_token: result.accessTokenValue,
     frame_id: result.frame.id,
-    scope: frameManagedScope,
+    scope: claimTokenScopeString,
     status: result.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
@@ -346,7 +355,7 @@ async function replayEnrollment(
   return NextResponse.json({
     access_token: accessToken.token,
     frame_id: existing.frame.id,
-    scope: frameManagedScope,
+    scope: claimTokenScopeString,
     status: existing.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
@@ -397,7 +406,10 @@ async function enrollLinkedFrame(
       .where(eq(frames.id, existing.id));
     return NextResponse.json({
       frame_id: existing.id,
-      scope: frameManagedScope,
+      // The full grant, not just frame:managed — the device unions this into
+      // its local scope string (Flow B is additive) and enables its
+      // telemetry push loops from it.
+      scope: linkedClientScopes(linkedClient).join(" "),
       status: existing.status,
       ws_path: wsPath,
       ...(wsUrl ? { ws_url: wsUrl } : {}),
@@ -440,7 +452,7 @@ async function enrollLinkedFrame(
 
   return NextResponse.json({
     frame_id: frame.id,
-    scope: frameManagedScope,
+    scope: linkedClientScopes(linkedClient).join(" "),
     status: frame.status,
     ws_path: wsPath,
     ...(wsUrl ? { ws_url: wsUrl } : {}),

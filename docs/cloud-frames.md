@@ -179,8 +179,13 @@ profile they target rather than relying on the cap.
    64-byte signature; the provider verifies the signature against the same
    decoded bytes it generated. (Signing the base64 text is the obvious
    mistake, and it fails silently — the socket simply closes.)
-4. Provider → frame: `{"type": "ready", "pending_commands": N}` — then drains
-   the durable per-frame command queue in order.
+4. Provider → frame: `{"type": "ready", "pending_commands": N,
+   "scopes"?: ["frame:managed", "telemetry:logs", …]}` — then drains the
+   durable per-frame command queue in order. The optional `scopes` array is
+   the link's currently granted scope list; a device should treat it as
+   additive truth and enable the matching push loops (telemetry above all) —
+   it is how a frame whose enrollment response under-reported the grant
+   learns it may send logs and metrics without re-enrolling.
 
 The provider must verify the signature against the enrolled public key and
 close the socket on mismatch, with WebSocket close code **4401** (also used

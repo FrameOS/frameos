@@ -222,6 +222,25 @@ proc persistScenesChecksum(checksum: string) {.gcsafe.} =
       state["scenes_checksum"] = %checksum
       saveCloudLinkState(state)
 
+proc persistProviderScopes(scopes: seq[string]): bool {.gcsafe.} =
+  ## Union the scopes the provider announced in its `ready` message into the
+  ## link state. Additive on purpose (removals arrive as a fresh enroll or a
+  ## link reset, never silently): older enroll responses under-reported the
+  ## grant as just frame:managed, so this is how an already-enrolled frame
+  ## learns it may send telemetry. Returns true when anything changed; the
+  ## save bumps the link generation, which the session loop already watches.
+  {.gcsafe.}:
+    if scopes.len == 0:
+      return false
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      let existing = state{"scope"}.getStr("")
+      let merged = unionScopeString(existing, scopes.join(" "))
+      if merged != existing:
+        state["scope"] = %merged
+        saveCloudLinkState(state)
+        result = true
+
 proc providerExemptHostPort(providerUrl: string): string =
   ## "host:port" for the provider's own API endpoint. The local admin linked
   ## this provider deliberately (possibly a dev provider on the LAN), so its
@@ -1131,9 +1150,11 @@ proc recvJsonWithin(socket: WebSocket, timeoutMs: int): Future[JsonNode] {.async
   except JsonParsingError:
     result = %*{}
 
-proc runHandshake(socket: WebSocket, ctx: CloudVerbContext) {.async.} =
+proc runHandshake(socket: WebSocket, ctx: CloudVerbContext): Future[JsonNode] {.async.} =
   ## hello → challenge → auth → ready. Raises CloudHubAuthError when the
-  ## provider rejects the signature or the handshake stalls.
+  ## provider rejects the signature or the handshake stalls. Returns the
+  ## `ready` message — it carries `pending_commands` and (newer hubs) the
+  ## link's granted `scopes`.
   var hello = helloStatePayload(ctx.frameConfig, ctx.scenesChecksum)
   hello["type"] = %"hello"
   await socket.send($hello)
@@ -1171,7 +1192,7 @@ proc runHandshake(socket: WebSocket, ctx: CloudVerbContext) {.async.} =
     let ready = await recvJsonWithin(socket, HubHandshakeTimeoutMs)
     let msgType = ready{"type"}.getStr("")
     if msgType == "ready":
-      break
+      return ready
     if msgType == "error":
       raise newException(CloudHubAuthError,
         "Provider rejected device authentication: " & ready{"error"}.getStr(""))
@@ -1253,8 +1274,28 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   let pingInterval = min(HubPingIntervalSeconds, idleTimeout / 3)
   result = sessionDisconnected
   try:
-    await runHandshake(socket, ctx)
+    let ready = await runHandshake(socket, ctx)
     log(%*{"event": "cloud:hub:connected", "provider": link.providerUrl})
+    # The hub announces the link's granted scopes in `ready`. Merge anything
+    # new into the local link state — this is how frames whose enroll response
+    # under-reported the grant (older providers said only frame:managed)
+    # finally learn they may push telemetry. The generation-watch below picks
+    # up the persisted change; the in-memory flags update here so the very
+    # first session already forwards logs.
+    let readyScopes = ready{"scopes"}
+    if readyScopes != nil and readyScopes.kind == JArray:
+      var announced: seq[string] = @[]
+      for scope in readyScopes:
+        if scope.kind == JString and scope.getStr("").len > 0:
+          announced.add(scope.getStr(""))
+      if persistProviderScopes(announced):
+        generation = currentCloudLinkGeneration()
+        for scope in announced:
+          if scope notin ctx.scopes:
+            ctx.scopes.add(scope)
+        logsGranted = "telemetry:logs" in ctx.scopes
+        metricsGranted = "telemetry:metrics" in ctx.scopes
+        log(%*{"event": "cloud:hub:scopesUpdated", "scopes": ctx.scopes.join(" ")})
     if logsGranted:
       # Drop anything queued before this session so the provider only gets
       # lines from its own watch window.
