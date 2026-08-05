@@ -139,6 +139,27 @@ const sharedDepsPlugin = {
   },
 }
 
+// Monaco's workers load by fixed URL (configureMonaco.ts:
+// {assets_base_path}/static/monaco/<name>.js), so they are built separately
+// with stable, unhashed names — the shell never references them, the main
+// bundle constructs their URLs at runtime. Self-contained (no splitting):
+// a worker cannot share chunks with the DOM bundle anyway.
+const monacoWorkerNames = ['editor.worker', 'json.worker', 'css.worker', 'html.worker', 'ts.worker']
+await build({
+  absWorkingDir: __dirname,
+  entryPoints: monacoWorkerNames.map((name) => ({
+    in: `../frontend/src/monaco/${name}.ts`,
+    out: `monaco/${name}`,
+  })),
+  bundle: true,
+  format: 'esm',
+  splitting: false,
+  outdir: staticDir,
+  minify: true,
+  sourcemap: isDev,
+  tsconfig: path.resolve(__dirname, 'tsconfig.json'),
+})
+
 const buildOptions = {
   absWorkingDir: __dirname,
   entryPoints: ['src/main.tsx'],

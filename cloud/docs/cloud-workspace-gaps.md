@@ -1,5 +1,29 @@
 # Cloud workspace: the road to full frame control
 
+> Status (2026-08-05, cloud-workspace-fixes): item **2** got its long-term
+> half — `/scene_images/{sceneId}` now serves the DEVICE's own per-scene
+> snapshot first (the runner already writes
+> `{assets}/.frameos/scene_images/{name}-{md5}.png` on every scene switch;
+> the route fetches it through the existing `asset_get` verb +
+> `frame_asset_files` cache, `?thumb=1` riding the device's 320×320
+> thumbnailer) and falls back to store covers. Item **3** grew real
+> persistence: cloud Save & Deploy now saves edited scenes to the account
+> (new versions of assigned private scenes via `/api/account/scenes/{id}/
+> content`, brand-new scenes via the new `POST /api/account/scenes`
+> create-from-JSON route), updates the assignment list and pushes it — the
+> ad-hoc uploadScenes push is only the fallback when persistence fails. The
+> Assets panel is read-write on cloud: new wire verbs `asset_put` /
+> `asset_mkdir` / `asset_delete` / `asset_rename` (docs/cloud-frames.md;
+> dot-directories refused, 2.5 MiB single-frame upload cap) behind
+> backend-contract routes `/api/frames/{id}/assets/{upload,mkdir,delete,
+> rename}`. The wasm live preview proxies external fetches through
+> `/api/store/preview-proxy` on cloud (injected `preview_proxy_url` +
+> `isCloudMode()` fallback in livePreviewLogic — it used to resolve the
+> backend's project-scoped proxy path, fail, and leave every fetch to die on
+> CORS). Monaco + app sources work in the cloud workspace (bundled monaco +
+> workers in cloud-frontend, embedded builtin app sources), and the tab
+> title says FrameOS Cloud.
+
 > Status (2026-08-03, this branch): items **4** and **5** are done, item **8**
 > is done (tiles hydrate from the server), and asset browsing shipped as a new
 > surface: `assets_list`/`asset_get` wire verbs (docs/cloud-frames.md), hub

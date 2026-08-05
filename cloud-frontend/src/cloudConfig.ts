@@ -25,6 +25,9 @@ interface CloudAppConfig {
   cloud_origin?: string
   cloud_scenes_url?: string
   cloud_theme_cookie_domain?: string
+  /** Read by livePreviewLogic straight off FRAMEOS_APP_CONFIG: the wasm
+   * preview's same-origin HTTP proxy (/api/store/preview-proxy). */
+  preview_proxy_url?: string
 }
 
 function config(): CloudAppConfig {

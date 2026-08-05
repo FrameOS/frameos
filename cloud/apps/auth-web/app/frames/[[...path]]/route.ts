@@ -83,6 +83,11 @@ function appConfigLines(): string[] {
     // deployment it would set a host-only cookie that shadows the shared one
     // and the two surfaces would disagree again.
     `cloud_theme_cookie_domain: ${JSON.stringify(getSessionCookieDomain() ?? "")},`,
+    // The wasm live preview's CORS escape hatch: the same anonymous,
+    // rate-limited proxy the store's scene pages use. Without it the SPA
+    // would try the backend's project-scoped proxy path, which the cloud
+    // does not serve, and every external fetch in a preview dies on CORS.
+    `preview_proxy_url: ${JSON.stringify("/api/store/preview-proxy")},`,
   ];
 }
 

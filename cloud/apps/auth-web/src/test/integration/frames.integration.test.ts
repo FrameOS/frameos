@@ -293,11 +293,15 @@ describe("cloud-managed frame enrollment", () => {
     const payload = (await response.json()) as Record<string, unknown>;
     expect(payload.status).toBe("pending");
     expect(payload.token_type).toBe("Bearer");
-    expect(payload.scope).toBe("frame:managed");
+    // The FULL grant, not just frame:managed — the device stores this string
+    // as its local scope list and gates its telemetry push loops on it.
+    expect(payload.scope).toBe(
+      "frame:managed telemetry:logs telemetry:metrics",
+    );
     expect(payload.ws_path).toBe("/api/frames/ws");
     expect(typeof payload.access_token).toBe("string");
 
-    // The linked client is real and carries only the managed scope.
+    // The linked client is real and carries the claim-token grant.
     const [frame] = await db
       .select()
       .from(frames)

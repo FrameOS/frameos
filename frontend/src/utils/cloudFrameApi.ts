@@ -159,6 +159,90 @@ export async function listCloudFrameScenes(frameId: FrameId): Promise<CloudFrame
 }
 
 /**
+ * Replace a cloud frame's assignment list outright and push it to the device
+ * (POST /api/frames/{id}/scenes enqueues the checksummed set_scenes). Pass
+ * `activeSceneId` (a RUNTIME scene id) to keep the current scene on screen —
+ * the device otherwise activates the first scene of the payload.
+ */
+export async function setCloudFrameScenes(
+  frameId: FrameId,
+  scenes: readonly { scene_id: string; scene_version?: number | null }[],
+  activeSceneId?: string
+): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      scenes: scenes.map((scene) => ({
+        scene_id: scene.scene_id,
+        ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
+      })),
+      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
+    }),
+  })
+  await assertOk(response, 'Failed to update the frame scene list')
+}
+
+/**
+ * The scenes.json body of a store scene — the exact payload the device
+ * receives over set_scenes, carrying the runtime scene ids. Null when the
+ * scene is unreadable (pulled, network) so callers can leave it untouched.
+ */
+export async function fetchStoreSceneScenesJson(storeSceneId: string): Promise<FrameScene[] | null> {
+  try {
+    const response = await apiFetch(`/api/store/scenes/${storeSceneId}/scenes.json`)
+    if (!response.ok) {
+      return null
+    }
+    const json = await response.json()
+    return Array.isArray(json) && json.length > 0 ? (json as FrameScene[]) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Create a NEW private cloud scene from raw scenes JSON
+ * (POST /api/account/scenes — cloud only). Returns the store scene id.
+ */
+export async function createCloudAccountScene(
+  name: string,
+  scenes: readonly Partial<FrameScene>[],
+  description?: string
+): Promise<string> {
+  const response = await apiFetch(`/api/account/scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, scenes, ...(description ? { description } : {}) }),
+  })
+  await assertOk(response, `Failed to save "${name}" to your cloud scenes`)
+  const data = (await response.json()) as { scene?: { id?: string } }
+  if (!data.scene?.id) {
+    throw new Error(`Failed to save "${name}" to your cloud scenes (no scene id returned)`)
+  }
+  return data.scene.id
+}
+
+/**
+ * Replace a private cloud scene's contents with new scenes JSON, publishing a
+ * new immutable version (POST /api/account/scenes/{id}/content). Returns the
+ * new version number when the server reports one.
+ */
+export async function updateCloudAccountSceneContent(
+  storeSceneId: string,
+  scenes: readonly Partial<FrameScene>[]
+): Promise<number | undefined> {
+  const response = await apiFetch(`/api/account/scenes/${storeSceneId}/content`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenes }),
+  })
+  await assertOk(response, 'Failed to save the scene changes to your cloud scenes')
+  const data = (await response.json()) as { scene?: { version?: number } }
+  return typeof data.scene?.version === 'number' ? data.scene.version : undefined
+}
+
+/**
  * Assign a store scene to a cloud-managed frame. This is the cloud's actual
  * scene contract: POST /api/frames/{id}/scenes takes the full ordered list of
  * STORE scene ids, persists it server-side and enqueues a set_scenes push to

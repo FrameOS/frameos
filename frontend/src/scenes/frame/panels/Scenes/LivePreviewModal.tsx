@@ -447,9 +447,9 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
 
           <div className="frameos-muted shrink-0 text-xs">
             Runs the scene with the FrameOS interpreter compiled to WebAssembly, in your browser. Apps that fetch
-            external URLs are routed through the backend to get around browser CORS restrictions, so images and data
-            load — the device itself fetches them directly. Device-only apps (screenshots, camera snapshots) are
-            unavailable.
+            external URLs are routed through a same-origin proxy to get around browser CORS restrictions, so images
+            and data load — the device itself fetches them directly. Device-only apps (screenshots, camera snapshots)
+            are unavailable.
           </div>
         </div>
 

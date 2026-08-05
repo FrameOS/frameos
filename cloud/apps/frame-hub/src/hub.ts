@@ -524,6 +524,12 @@ export async function startFrameHub(
         JSON.stringify({
           id: randomUUID(),
           pending_commands: pendingCount,
+          // What this link is granted, so the device can enable the matching
+          // push loops. Load-bearing for older enrollments: their enroll
+          // response under-reported the scope string as just frame:managed,
+          // so without this a frame never learns it may send telemetry
+          // (docs/cloud-frames.md session start).
+          scopes: session.scopes,
           type: "ready",
         }),
       );

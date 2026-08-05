@@ -1,16 +1,23 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, strformat, strutils, sequtils, options, os, tables, algorithm
 import std/monotimes
+import std/uri
 import zippy
 
 import frameos/values
 import frameos/types
 import frameos/channels
+import frameos/cloud/link_state
 import frameos/utils/url
 import frameos/utils/time
 import apps/render/text/app as render_textApp
 import scenes/scenes as compiledScenes
 import system/options as sceneOptions
+
+# Sockets exist on the device runtimes only — the wasm/embedded builds render
+# this scene too, and there the address lines just say "unknown".
+when not defined(frameosWasm) and not defined(frameosEmbedded):
+  import std/net as system_net
 
 const DEBUG = true
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
@@ -71,18 +78,89 @@ proc buildSceneList*(self: Scene): seq[(string, string)] =
   ordered.sort(proc(a, b: (string, string)): int = cmpIgnoreCase(a[1], b[1]))
   return ordered
 
+proc defaultRouteInterface*(): string =
+  ## The interface carrying the default route ("wlan0", "eth0"), from
+  ## /proc/net/route — Linux only, empty anywhere else. Pure file read, no
+  ## child processes.
+  try:
+    if fileExists("/proc/net/route"):
+      for line in readFile("/proc/net/route").splitLines():
+        let cols = line.splitWhitespace()
+        if cols.len >= 2 and cols[1] == "00000000":
+          return cols[0]
+  except CatchableError:
+    discard
+  ""
+
+proc primaryIpAddress*(): string =
+  ## The local address the kernel would route external traffic through:
+  ## "connect" a UDP socket to a public address (no packet is sent) and read
+  ## the socket's own address back. Empty when there is no usable network.
+  when defined(frameosWasm) or defined(frameosEmbedded):
+    ""
+  else:
+    try:
+      let socket = system_net.newSocket(system_net.Domain.AF_INET,
+        system_net.SockType.SOCK_DGRAM, system_net.Protocol.IPPROTO_UDP)
+      defer: socket.close()
+      socket.connect("1.1.1.1", system_net.Port(53))
+      let (address, _) = socket.getLocalAddr()
+      if address.len > 0 and address != "0.0.0.0":
+        return address
+      ""
+    except CatchableError:
+      ""
+
+proc cloudProviderHostname(state: JsonNode): string =
+  let providerUrl = providerUrlFromState(state)
+  try:
+    let parsed = parseUri(providerUrl)
+    if parsed.hostname.len > 0:
+      return parsed.hostname
+  except CatchableError:
+    discard
+  providerUrl
+
+proc managementLine*(frameConfig: FrameConfig): string =
+  ## Who controls this frame: FrameOS Cloud (managed enrollment), a
+  ## self-hosted backend, or nobody (standalone). The old "Server:
+  ## not configured:8989" line lied on cloud-managed frames, whose
+  ## server_host is deliberately empty.
+  let linkState = loadCloudLinkState()
+  if linkState{"mode"}.getStr("") == "managed":
+    let host = cloudProviderHostname(linkState)
+    let status = linkState{"status"}.getStr("disconnected")
+    return &"Managed via: FrameOS Cloud ({host}, {status})"
+  let serverHost = frameConfig.serverHost
+  if serverHost.len > 0 and serverHost notin ["localhost", "127.0.0.1", "::1"]:
+    let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
+    return &"Managed via: self-hosted backend ({serverHost}:{serverPort})"
+  "Managed via: standalone (no server configured)"
+
 proc buildSceneListText*(self: Scene): string =
   let entries = self.buildSceneList()
   let frameConfig = self.frameConfig
   let resolution = &"{frameConfig.width}x{frameConfig.height}"
   let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
   let deviceType = if frameConfig.device.len > 0: frameConfig.device else: "unknown device"
-  let serverHost = if frameConfig.serverHost.len > 0: frameConfig.serverHost else: "not configured"
-  let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
-  let frameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
+  let ipAddress = primaryIpAddress()
+  let networkInterface = defaultRouteInterface()
+  let networkLine =
+    if ipAddress.len > 0 and networkInterface.len > 0:
+      &"Network: {ipAddress} ({networkInterface})"
+    elif ipAddress.len > 0:
+      &"Network: {ipAddress}"
+    else:
+      "Network: not connected"
+  # 0.0.0.0 means "listening everywhere" — as a URL it helps nobody, so show
+  # the address the network actually reaches this frame on when we know it.
+  let configuredFrameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
+  let frameHost =
+    if configuredFrameHost == "0.0.0.0" and ipAddress.len > 0: ipAddress
+    else: configuredFrameHost
   let framePort = if publicPort(frameConfig) > 0: $publicPort(frameConfig) else: "?"
   let frameScheme = publicScheme(frameConfig)
-  let agentAccess = if frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled" else: "disabled"
+  let remoteControl = if frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled" else: "disabled"
   var lines: seq[string] = @[
     "FrameOS System Info",
     "",
@@ -91,9 +169,10 @@ proc buildSceneListText*(self: Scene): string =
     &"Resolution: {resolution}",
     &"Rotation: {frameConfig.rotate}°",
     &"Time zone: {frameConfig.timeZone}",
-    &"Server: {serverHost}:{serverPort}",
+    networkLine,
+    managementLine(frameConfig),
     &"Frame: {frameScheme}://{frameHost}:{framePort}",
-    &"Agent access: {agentAccess}",
+    &"FrameOS Remote control: {remoteControl}",
     ""
   ]
   if entries.len == 0:

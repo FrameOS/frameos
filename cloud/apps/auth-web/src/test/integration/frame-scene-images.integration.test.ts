@@ -9,6 +9,8 @@ import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
   createDb,
+  frameAssetFiles,
+  frameCommands,
   frames,
   frameSceneAssignments,
   linkedClients,
@@ -19,6 +21,7 @@ import {
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getSceneImage } from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
+import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { resetSceneImageCacheForTests } from "../../lib/scene-images";
 import { hashSecret } from "../../lib/secrets";
@@ -352,5 +355,85 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     expect(Buffer.from(await second.arrayBuffer()).toString()).toBe(
       "cached-bytes",
     );
+  });
+
+  it("prefers the device's cached snapshot over the store cover", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Snapshotted",
+      previewImage: Buffer.from("cover-bytes"),
+      previewImageType: "image/jpeg",
+      runtimeSceneIds: ["runtime-snap"],
+    });
+    await assignScene(frame.id, scene.id);
+    await db.insert(frameAssetFiles).values({
+      content: Buffer.from("device-render"),
+      contentType: "image/png",
+      frameId: frame.id,
+      path: sceneSnapshotAssetPath("runtime-snap"),
+      sizeBytes: "device-render".length,
+      thumb: false,
+    });
+
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-snap`),
+      routeParams(frame.id, "runtime-snap"),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "device-render",
+    );
+  });
+
+  it("queues an asset_get for the snapshot and serves the cover meanwhile", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Fetching",
+      previewImage: Buffer.from("cover-bytes"),
+      previewImageType: "image/jpeg",
+      runtimeSceneIds: ["runtime-fetch"],
+    });
+    await assignScene(frame.id, scene.id);
+
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-fetch?thumb=1`),
+      routeParams(frame.id, "runtime-fetch"),
+    );
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "cover-bytes",
+    );
+    const queued = await db
+      .select({ payload: frameCommands.payload, type: frameCommands.type })
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame.id));
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.type).toBe("asset_get");
+    expect(queued[0]!.payload).toEqual({
+      path: sceneSnapshotAssetPath("runtime-fetch"),
+      thumb: true,
+    });
+  });
+
+  it("404s fast for an unmapped scene on a disconnected frame, still queueing the fetch", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+
+    const started = Date.now();
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-unknown`),
+      routeParams(frame.id, "runtime-unknown"),
+    );
+    expect(response.status).toBe(404);
+    // No long poll: the frame is not connected, so waiting cannot help.
+    expect(Date.now() - started).toBeLessThan(5000);
+    const queued = await db
+      .select({ type: frameCommands.type })
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame.id));
+    expect(queued.map((row) => row.type)).toEqual(["asset_get"]);
   });
 });

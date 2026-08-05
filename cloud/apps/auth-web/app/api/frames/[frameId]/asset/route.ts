@@ -1,9 +1,11 @@
-import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
-import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
-  enqueueFrameCommand,
+  cachedAssetFile,
+  queueAssetGetIfIdle,
+  recentFailedAssetGet,
+} from "../../../../../src/lib/frame-asset-cache";
+import {
   frameForAccount,
   maxAssetPathChars,
 } from "../../../../../src/lib/frames";
@@ -12,7 +14,6 @@ import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
 
-const fetchCommandTtlMs = 2 * 60 * 1000;
 // A cached copy this old is re-requested in the background on the next hit;
 // the stale bytes still serve immediately (assets on a frame rarely change,
 // and a sleeping battery frame must not block every thumbnail).
@@ -54,59 +55,6 @@ function normalizeAssetPath(raw: string): string | undefined {
 function contentDisposition(kind: "attachment" | "inline", filename: string) {
   const safe = filename.replace(/[^\w. -]/g, "_").slice(0, 255);
   return `${kind}; filename="${safe || "asset"}"`;
-}
-
-type Db = NonNullable<ReturnType<typeof requireDatabase>["db"]>;
-
-async function cachedAssetFile(
-  db: Db,
-  frameId: string,
-  path: string,
-  thumb: boolean,
-) {
-  const [row] = await db
-    .select()
-    .from(frameAssetFiles)
-    .where(
-      and(
-        eq(frameAssetFiles.frameId, frameId),
-        eq(frameAssetFiles.path, path),
-        eq(frameAssetFiles.thumb, thumb),
-      ),
-    )
-    .limit(1);
-  return row;
-}
-
-async function outstandingFetch(
-  db: Db,
-  frameId: string,
-  path: string,
-  thumb: boolean,
-) {
-  // Payload equality is checked in JS: the handful of live asset_get rows per
-  // frame does not justify a jsonb index.
-  const rows = await db
-    .select({ id: frameCommands.id, payload: frameCommands.payload })
-    .from(frameCommands)
-    .where(
-      and(
-        eq(frameCommands.frameId, frameId),
-        eq(frameCommands.type, "asset_get"),
-        inArray(frameCommands.status, ["pending", "sent"]),
-        or(
-          isNull(frameCommands.expiresAt),
-          gt(frameCommands.expiresAt, new Date()),
-        ),
-      ),
-    );
-  return rows.find((row) => {
-    const payload =
-      row.payload && typeof row.payload === "object"
-        ? (row.payload as Record<string, unknown>)
-        : {};
-    return payload.path === path && (payload.thumb === true) === thumb;
-  });
 }
 
 function assetResponse(
@@ -177,15 +125,7 @@ export async function GET(
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > cacheStaleAfterMs;
   if (needsFetch && frame.status === "active") {
-    if (!(await outstandingFetch(db, frame.id, path, thumb))) {
-      await enqueueFrameCommand(db, {
-        createdByAccountId: session.accountId,
-        frameId: frame.id,
-        payload: { path, ...(thumb ? { thumb: true } : {}) },
-        ttlMs: fetchCommandTtlMs,
-        type: "asset_get",
-      });
-    }
+    await queueAssetGetIfIdle(db, session.accountId, frame.id, path, thumb);
   }
   if (cached) {
     // Stale-while-revalidate: the refresh (if any) was queued above and the
@@ -208,24 +148,13 @@ export async function GET(
     // the connection open for nothing. Only THIS path's recent command
     // counts — an old failure for some other file must not poison every
     // later request for this frame.
-    const failedCommands = await db
-      .select({ error: frameCommands.error, payload: frameCommands.payload })
-      .from(frameCommands)
-      .where(
-        and(
-          eq(frameCommands.frameId, frame.id),
-          eq(frameCommands.type, "asset_get"),
-          eq(frameCommands.status, "failed"),
-          gt(frameCommands.createdAt, new Date(now - 60_000)),
-        ),
-      );
-    const refused = failedCommands.find((row) => {
-      const payload =
-        row.payload && typeof row.payload === "object"
-          ? (row.payload as Record<string, unknown>)
-          : {};
-      return payload.path === path && (payload.thumb === true) === thumb;
-    });
+    const refused = await recentFailedAssetGet(
+      db,
+      frame.id,
+      path,
+      thumb,
+      60_000,
+    );
     if (refused) {
       return jsonError(refused.error ?? "asset_fetch_failed", 404);
     }

@@ -597,9 +597,10 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync pulls from the backend's own store; the on-device panel and the
-  // cloud have nothing to sync from. Cloud is read-only wholesale — its wire
-  // contract is assets_list/asset_get and nothing else.
-  const readOnly = workspaceMode() === 'cloud'
+  // cloud have nothing to sync from. Everything else works on every control
+  // plane — the cloud speaks asset_put/asset_mkdir/asset_delete/asset_rename
+  // through /api/frames/{id}/assets/* since cloud-workspace-fixes.
+  const readOnly = false
   const showSyncAction = workspaceMode() === 'backend'
 
   // syncAssets registers a long-running task toast, so no need to open logs
