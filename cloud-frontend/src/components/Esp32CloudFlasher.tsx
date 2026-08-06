@@ -46,9 +46,16 @@ const genericC3FirmwareSuffix = '-esp32-c3-generic.bin'
 // default: nobody actually runs the firmware's baked-in EPD_7in5_V2 combo,
 // and silently provisioning any one bundle would misconfigure every other
 // board — so the picker starts on a placeholder and flashing requires a
-// choice. `platform` picks the firmware asset: ESP32-C3 boards need the
+// choice. `platform` picks the firmware asset: ESP32-C3 boards would need the
 // esp32-c3-generic build (thin-client only — no PSRAM, so no on-device
 // renderer), everything else flashes the esp32-s3-generic one.
+//
+// ESP32-C3 boards (TRMNL OG/BWRY, XTEINK X4) are deliberately NOT offered
+// here yet: a cloud-managed C3 frame has no render source (the cloud's S3
+// frames render on-device; thin clients pull bitmaps from a self-hosted
+// backend), so flashing one from the cloud would hand the user a status
+// screen. Re-add them once the cloud can render for thin clients — the
+// platform plumbing below already supports the esp32-c3-generic asset.
 const boardChoices = [
   {
     label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)',
@@ -60,11 +67,8 @@ const boardChoices = [
     value: 'hw:waveshare_esp32_s3_epaper_13_3e6',
     platform: genericPlatform,
   },
-  { label: 'TRMNL OG (7.5" ESP32-C3)', value: 'hw:trmnl_og', platform: genericC3Platform },
-  { label: 'TRMNL BWRY (7.5" color ESP32-C3)', value: 'hw:trmnl_bwry', platform: genericC3Platform },
   { label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_og_diy_kit', platform: genericPlatform },
   { label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_4in26_diy_kit', platform: genericPlatform },
-  { label: 'XTEINK X4 (4.26" ESP32-C3)', value: 'hw:xteink_x4', platform: genericC3Platform },
   { label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)', value: 'hw:seeed_reterminal_sticky', platform: genericPlatform },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
