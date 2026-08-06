@@ -899,15 +899,13 @@ def test_embedded_hardware_preset_for_inky_frames():
         assert layout["flash"]["flashBytes"] == (2 if flash == "2MB" else 4) * 1024 * 1024
 
 
-def test_pico_frames_refuse_backend_firmware_builds():
+@pytest.mark.asyncio
+async def test_pico_frames_refuse_backend_firmware_builds():
     frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_5_7"})
     ensure_embedded_frame_defaults(frame)
 
-    import asyncio
     with pytest.raises(ValueError, match="BOOTSEL"):
-        asyncio.get_event_loop().run_until_complete(
-            embedded_firmware_module._build_firmware(None, None, frame, None)
-        )
+        await embedded_firmware_module._build_firmware(None, None, frame, None)
 
 
 def test_embedded_hardware_preset_for_trmnl_diy_kits():
