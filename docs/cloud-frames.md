@@ -478,12 +478,15 @@ constructing them. (Transitional: the generic binary is published as
 image, `…-esp32-c3-generic.bin`, targets PSRAM-less ESP32-C3 boards
 (TRMNL OG/BWRY, XTEINK X4): same panel set and provisioning surface, but
 thin-client only — no on-device renderer. Backend-managed C3 frames pull
-rendered bitmaps over the existing `/api/frames/{id}/embedded/render`
-endpoint. Cloud-managed C3 frames can enroll, report state, and take
-settings/logs verbs today, but scene rendering needs a cloud-side render
-source (a push-image verb or server-rendered pulls) — not yet implemented;
-until then a C3 frame linked to the cloud shows its provisioning/status
-screen only.
+rendered bitmaps over `/api/frames/{id}/embedded/render`: the backend runs
+the frame's scenes inside the same emscripten wasm runtime the live preview
+uses (QuickJS sandboxed in wasm, no outbound network, bounded Node
+subprocess — `backend/app/utils/embedded_render.py`), falling back to a
+diagnostic card when scenes or the toolchain are missing. Cloud-managed C3
+frames can enroll, report state, and take settings/logs verbs today, but
+cloud-side scene rendering (the same wasm approach, or a push-image verb)
+is not yet implemented; until then a C3 frame linked to the cloud shows its
+provisioning/status screen only.
 
 Concretely, the firmware exposes these as allowlisted keys on the
 existing USB serial console (`set cloud_url …`, `set claim_token …`,
