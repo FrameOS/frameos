@@ -13,6 +13,8 @@ import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
+  EMBEDDED_PICO_2W,
+  EMBEDDED_PICO_W,
   devices,
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
@@ -324,6 +326,25 @@ const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['de
   mosi: 11,
   pwr: -1,
 }
+// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py.
+// All Inky Frame sizes share the carrier wiring; BUSY and the five front
+// buttons sit behind a shift register (sr_* keys, busy_bit) that only the
+// pico firmware consumes.
+const INKY_FRAME_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 27,
+  dc: 28,
+  cs: 17,
+  cs2: -1,
+  busy: -1,
+  sck: 18,
+  mosi: 19,
+  pwr: -1,
+  sr_clock: 8,
+  sr_latch: 9,
+  sr_data: 10,
+  busy_bit: 7,
+  hold_vsys: 2,
+}
 
 interface EmbeddedHardwarePresetConfig {
   label: string
@@ -458,6 +479,54 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 5, label: 'OK' },
       { pin: 6, label: 'PREV' },
     ],
+  },
+  // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
+  // BOOTSEL and are provisioned via USB serial — no backend firmware builds.
+  // Buttons A-E live behind the shift register, so gpioButtons stays empty.
+  pimoroni_inky_frame_4: {
+    label: 'Pimoroni Inky Frame 4.0" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_4in01f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_5_7: {
+    label: 'Pimoroni Inky Frame 5.7" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_5in65f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3_pico2: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico 2 W, 2024)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3_spectra: {
+    label: 'Pimoroni Inky Frame 7.3" Spectra 6 (Pico 2 W)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
   },
 }
 

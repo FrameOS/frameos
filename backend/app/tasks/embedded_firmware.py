@@ -49,13 +49,17 @@ from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_EMBEDDED_PLATFORM = "esp32-s3"
-# Every chip the embedded firmware builds for. ``localRenderSupported`` gates
-# the on-device Nim/pixie/QuickJS renderer: it needs PSRAM (an 800×480 RGBA
-# compose buffer alone is 1.5MB), so PSRAM-less chips run thin-client only and
-# their firmware links the stub instead of the Nim runtime.
+# Every chip the embedded firmware supports. ``family`` selects the firmware
+# tree and build/flash story: "esp32" builds per-frame with ESP-IDF
+# (embedded/esp32); "pico" ships a generic UF2 (embedded/pico) flashed over
+# BOOTSEL and provisioned over USB serial — the backend never builds it.
+# ``localRenderSupported`` gates the on-device Nim/pixie/QuickJS renderer: it
+# needs PSRAM (an 800×480 RGBA compose buffer alone is 1.5MB), so PSRAM-less
+# chips run thin-client only against the server-side wasm renderer.
 EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
     "esp32-s3": {
         "label": "ESP32-S3",
+        "family": "esp32",
         "idfTarget": "esp32s3",
         "aliases": {"", "esp32s3", "esp32-s3-devkitc-1"},
         "maxGpio": 48,
@@ -65,11 +69,28 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
     },
     "esp32-c3": {
         "label": "ESP32-C3",
+        "family": "esp32",
         "idfTarget": "esp32c3",
         "aliases": {"esp32c3", "esp32-c3-devkitm-1"},
         "maxGpio": 21,
         "defaultPsramMB": 0,
         "sdkconfigOverlay": "sdkconfig.defaults.esp32c3",
+        "localRenderSupported": False,
+    },
+    "pico-w": {
+        "label": "Raspberry Pi Pico W",
+        "family": "pico",
+        "aliases": {"pico_w", "picow", "rp2040"},
+        "maxGpio": 29,
+        "defaultPsramMB": 0,
+        "localRenderSupported": False,
+    },
+    "pico-2w": {
+        "label": "Raspberry Pi Pico 2 W",
+        "family": "pico",
+        "aliases": {"pico2_w", "pico2w", "pico-2-w", "rp2350"},
+        "maxGpio": 29,
+        "defaultPsramMB": 0,
         "localRenderSupported": False,
     },
 }
@@ -242,6 +263,30 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 5, "label": "OK"},
     {"pin": 6, "label": "PREV"},
 ]
+# Pimoroni Inky Frame (all sizes share the carrier wiring): EPD on SPI0
+# SCK18/MOSI19, CS17, DC28, RST27; BUSY and the five front buttons read
+# through a shift register on CLOCK8/LATCH9/DATA10 (busy = bit 7). The sr_*
+# keys extend the ESP32 pin vocabulary; only embedded/pico consumes them.
+EMBEDDED_INKY_FRAME_PINS = {
+    "rst": 27,
+    "dc": 28,
+    "cs": 17,
+    "cs2": -1,
+    "busy": -1,
+    "sck": 18,
+    "mosi": 19,
+    "pwr": -1,
+    "sr_clock": 8,
+    "sr_latch": 9,
+    "sr_data": 10,
+    "busy_bit": 7,
+    # HOLD_VSYS_EN: keeps the regulator alive on battery; the pico firmware
+    # asserts it first thing at boot.
+    "hold_vsys": 2,
+}
+# Buttons A-E live behind the shift register (bits 0-4), not GPIOs; the list
+# stays empty so nothing tries to configure GPIO interrupts for them.
+EMBEDDED_INKY_FRAME_GPIO_BUTTONS: list[dict[str, Any]] = []
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     "waveshare_esp32_s3_photopainter": {
         "device": "waveshare.EPD_7in3e",
@@ -336,6 +381,54 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
     },
+    # Pimoroni Inky Frame family: Pico W (originals) / Pico 2 W (2025
+    # refresh) carrier with the EPD on SPI0 and BUSY + buttons behind a
+    # shift register — the extended pin keys (sr_*, busy_bit) are consumed
+    # by the pico firmware's console, not the ESP32 build. The `device`
+    # points at the Waveshare panel whose glass/controller matches, which
+    # is what sizes the server-side thin-client render.
+    "pimoroni_inky_frame_4": {
+        "device": "waveshare.EPD_4in01f",
+        "platform": "pico-w",
+        "flashSize": "2MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_INKY_FRAME_PINS,
+        "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
+    },
+    "pimoroni_inky_frame_5_7": {
+        "device": "waveshare.EPD_5in65f",
+        "platform": "pico-w",
+        "flashSize": "2MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_INKY_FRAME_PINS,
+        "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
+    },
+    "pimoroni_inky_frame_7_3": {
+        "device": "waveshare.EPD_7in3f",
+        "platform": "pico-w",
+        "flashSize": "2MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_INKY_FRAME_PINS,
+        "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
+    },
+    # Dec 2024 refresh: same ACeP panel, Pico 2 W aboard.
+    "pimoroni_inky_frame_7_3_pico2": {
+        "device": "waveshare.EPD_7in3f",
+        "platform": "pico-2w",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_INKY_FRAME_PINS,
+        "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
+    },
+    # Aug 2025 refresh: Spectra 6 panel (black top border), Pico 2 W aboard.
+    "pimoroni_inky_frame_7_3_spectra": {
+        "device": "waveshare.EPD_7in3e",
+        "platform": "pico-2w",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_INKY_FRAME_PINS,
+        "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
+    },
 }
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
@@ -385,6 +478,15 @@ EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
 EMBEDDED_DEFAULT_FLASH_SIZE = "8MB"
 EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
+    # Pico W (RP2040). Informational only: pico-family firmware is a generic
+    # UF2 flashed over BOOTSEL, the backend never builds or partitions it.
+    "2MB": {
+        "flashSize": "2MB",
+        "flashBytes": 2 * 1024 * 1024,
+        "sdkconfigDefaults": (),
+        "partitionTable": None,
+        "otaSupported": False,
+    },
     "4MB": {
         "flashSize": "4MB",
         "flashBytes": 4 * 1024 * 1024,
@@ -500,6 +602,11 @@ def embedded_flash_size_for_frame(frame: Frame) -> str:
     preset_key = embedded_hardware_preset_for_frame(frame)
     if preset_key:
         return normalize_embedded_flash_size(EMBEDDED_HARDWARE_PRESETS[preset_key]["flashSize"])
+    platform = embedded_platform_for_frame(frame)
+    if platform == "pico-w":
+        return "2MB"
+    if platform == "pico-2w":
+        return "4MB"
     return EMBEDDED_DEFAULT_FLASH_SIZE
 
 
@@ -513,19 +620,22 @@ def embedded_ota_supported_for_frame(frame: Frame) -> bool:
 
 def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
     files = list(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
-    overlay = embedded_platform_spec_for_frame(frame)["sdkconfigOverlay"]
+    overlay = embedded_platform_spec_for_frame(frame).get("sdkconfigOverlay")
     if overlay:
         files.append(overlay)
     return ";".join(files)
 
 
 def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
+    spec = embedded_platform_spec_for_frame(frame)
+    if spec["family"] != "esp32":
+        return {}
     profile = embedded_flash_profile_for_frame(frame)
     required = {
         **EMBEDDED_REQUIRED_SDKCONFIG,
         # A mismatch wipes the shared build dir, which is exactly what a chip
         # target switch needs: CMake caches cannot survive an IDF_TARGET change.
-        "CONFIG_IDF_TARGET": f'"{embedded_platform_spec_for_frame(frame)["idfTarget"]}"',
+        "CONFIG_IDF_TARGET": f'"{spec["idfTarget"]}"',
         "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
         "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
     }
@@ -952,9 +1062,11 @@ def _parse_embedded_size(value: str) -> int:
     return int(number, 10) * multiplier
 
 
-def _embedded_partition_table_rows(table_name: str) -> list[dict[str, Any]]:
-    table_path = EMBEDDED_PROJECT_DIR / table_name
+def _embedded_partition_table_rows(table_name: str | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    if not table_name:  # pico family: no ESP-IDF partition table
+        return rows
+    table_path = EMBEDDED_PROJECT_DIR / table_name
     next_offset = 0
     if not table_path.is_file():
         return rows
@@ -1684,6 +1796,12 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
 
 
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
+    if embedded_platform_spec_for_frame(frame)["family"] != "esp32":
+        raise ValueError(
+            "This platform uses the generic prebuilt firmware: flash the "
+            "frameos-<version>-pico-w.uf2 (or -pico-2w.uf2) release asset over "
+            "BOOTSEL and provision it over the USB serial console."
+        )
     if not EMBEDDED_PROJECT_DIR.is_dir():
         raise ValueError(f"Embedded firmware project not found at {EMBEDDED_PROJECT_DIR}")
     idf_path = embedded_idf_path()

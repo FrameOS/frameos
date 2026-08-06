@@ -29,6 +29,8 @@ import {
   embeddedPlatforms,
   EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
+  EMBEDDED_PICO_2W,
+  EMBEDDED_PICO_W,
   modes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
@@ -173,6 +175,7 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
 const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
+  { value: '2MB', label: '2MB (Pico W, no OTA)' },
   { value: '4MB', label: '4MB (no OTA)' },
   { value: '8MB', label: '8MB' },
   { value: '16MB', label: '16MB' },
@@ -576,6 +579,21 @@ const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
+// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py,
+// limited to the eight ESP32-vocabulary keys Esp32PinLayout carries. BUSY sits
+// behind the Inky shift register (sr_* keys, consumed by the pico firmware
+// only), so it is -1 here.
+const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 27,
+  dc: 28,
+  cs: 17,
+  cs2: -1,
+  busy: -1,
+  sck: 18,
+  mosi: 19,
+  pwr: -1,
+}
+
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
   { key: 'cs', label: 'CS' },
   { key: 'sck', label: 'SCK' },
@@ -717,6 +735,49 @@ const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset,
     flashSize: '8MB',
     psramMB: 8,
     pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+  // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
+  // BOOTSEL and are provisioned via USB serial — the backend never builds
+  // per-frame firmware for them.
+  pimoroni_inky_frame_4: {
+    label: 'Pimoroni Inky Frame 4.0" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_4in01f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_5_7: {
+    label: 'Pimoroni Inky Frame 5.7" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_5in65f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3_pico2: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico 2 W, 2024)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3_spectra: {
+    label: 'Pimoroni Inky Frame 7.3" Spectra 6 (Pico 2 W)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
   },
 }
 
@@ -884,6 +945,11 @@ const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLa
     value: 'elecrow-crowpanel-5in79',
     label: 'Elecrow CrowPanel 5.79"',
     pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+  {
+    value: 'pimoroni-inky-frame',
+    label: 'Pimoroni Inky Frame (Pico W / Pico 2 W)',
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
   },
 ]
 

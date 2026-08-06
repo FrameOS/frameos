@@ -150,8 +150,9 @@ def test_embedded_flash_size_profiles():
     assert normalize_embedded_flash_size('4mb') == '4MB'
     assert normalize_embedded_flash_size('32 MB') == '32MB'
     assert normalize_embedded_flash_size(16) == '16MB'
+    assert normalize_embedded_flash_size('2MB') == '2MB'  # Pico W
     with pytest.raises(ValueError):
-        normalize_embedded_flash_size('2MB')
+        normalize_embedded_flash_size('3MB')
 
     default_frame = Frame()
     assert embedded_flash_size_for_frame(default_frame) == '8MB'
@@ -868,6 +869,45 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
     }
     assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
     assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
+
+
+def test_embedded_hardware_preset_for_inky_frames():
+    for preset, panel, platform, flash in (
+        ("pimoroni_inky_frame_4", "EPD_4in01f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_5_7", "EPD_5in65f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_7_3", "EPD_7in3f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_7_3_pico2", "EPD_7in3f", "pico-2w", "4MB"),
+        ("pimoroni_inky_frame_7_3_spectra", "EPD_7in3e", "pico-2w", "4MB"),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == platform
+        assert embedded_flash_size_for_frame(frame) == flash
+        assert embedded_ota_supported_for_frame(frame) is False
+        assert embedded_module_psram_bytes(frame) == 0
+        # Pico family: thin client always, no ESP-IDF build inputs.
+        assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+        assert embedded_required_sdkconfig_for_frame(frame) == {}
+        check_embedded_panel_fits_memory(frame)
+        # The shift-register wiring rides along in device_config for the
+        # pico firmware's provisioning flow.
+        assert frame.device_config["pins"]["sr_clock"] == 8
+        assert frame.device_config["pins"]["busy_bit"] == 7
+        # Layout must not crash without a partition table.
+        layout = embedded_firmware_layout_for_frame(frame)
+        assert layout["flash"]["flashBytes"] == (2 if flash == "2MB" else 4) * 1024 * 1024
+
+
+def test_pico_frames_refuse_backend_firmware_builds():
+    frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_5_7"})
+    ensure_embedded_frame_defaults(frame)
+
+    import asyncio
+    with pytest.raises(ValueError, match="BOOTSEL"):
+        asyncio.get_event_loop().run_until_complete(
+            embedded_firmware_module._build_firmware(None, None, frame, None)
+        )
 
 
 def test_embedded_hardware_preset_for_trmnl_diy_kits():

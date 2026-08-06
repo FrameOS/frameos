@@ -70,10 +70,14 @@ interface DeployPlanProgressStep {
   state: 'done' | 'current' | 'pending' | 'error'
 }
 
-function embeddedFlashSize(frame: FrameType): '4MB' | '8MB' | '16MB' | '32MB' {
+function embeddedFlashSize(frame: FrameType): '2MB' | '4MB' | '8MB' | '16MB' | '32MB' {
   const raw = frame.embedded?.firmware?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
   const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
-  return normalized === '4MB' || normalized === '8MB' || normalized === '16MB' || normalized === '32MB'
+  return normalized === '2MB' ||
+    normalized === '4MB' ||
+    normalized === '8MB' ||
+    normalized === '16MB' ||
+    normalized === '32MB'
     ? normalized
     : '8MB'
 }
@@ -83,7 +87,8 @@ function embeddedOtaSupported(frame: FrameType): boolean {
   if (typeof firmwareSupport === 'boolean') {
     return firmwareSupport
   }
-  return embeddedFlashSize(frame) !== '4MB'
+  const flashSize = embeddedFlashSize(frame)
+  return flashSize !== '2MB' && flashSize !== '4MB'
 }
 
 function needsEsp32UsbJtagPortGuidance(frame: FrameType): boolean {
@@ -1785,6 +1790,10 @@ function EmbeddedFirmwareSection({
   const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
+  // provisioned over the USB serial console: no per-frame firmware builds, no
+  // esptool, no browser flashing, no OTA. Hide all of those controls.
+  const isPicoPlatform = platformLabel.startsWith('pico')
   const flashSize = embeddedFlashSize(frame)
   const otaSupported = embeddedOtaSupported(frame)
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
@@ -1813,8 +1822,18 @@ function EmbeddedFirmwareSection({
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The
-          firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+          {isPicoPlatform ? (
+            <>
+              This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
+              over BOOTSEL drag-and-drop and provision it over the USB serial console. The backend does not build
+              per-frame firmware for it.
+            </>
+          ) : (
+            <>
+              Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial.
+              The firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+            </>
+          )}
         </div>
         {firmware?.status ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
@@ -1835,71 +1854,75 @@ function EmbeddedFirmwareSection({
           </div>
         ) : null}
       </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
-          demand, so the first flash can take a few minutes.
-          {showUsbJtagPortGuidance ? (
-            <span className="mt-2 block">
-              The 13.3&quot; ESP32 board can appear as two serial ports. Choose
-              <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> for
-              browser flashing when you want scenes uploaded after flashing. Use
-              <span className="font-semibold text-[color:var(--tool-strong)]"> USB single serial</span> only for
-              manual/recovery flashing; it does not carry FrameOS logs, previews, or scene uploads.
-            </span>
-          ) : null}
-        </div>
-        <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
-      </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
-            <div className="frame-tool-muted mt-1 text-sm leading-5">
-              {otaSupported
-                ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
-                : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
+      {isPicoPlatform ? null : (
+        <>
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built
+              on demand, so the first flash can take a few minutes.
+              {showUsbJtagPortGuidance ? (
+                <span className="mt-2 block">
+                  The 13.3&quot; ESP32 board can appear as two serial ports. Choose
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> for
+                  browser flashing when you want scenes uploaded after flashing. Use
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB single serial</span> only for
+                  manual/recovery flashing; it does not carry FrameOS logs, previews, or scene uploads.
+                </span>
+              ) : null}
+            </div>
+            <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
+          </div>
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+                <div className="frame-tool-muted mt-1 text-sm leading-5">
+                  {otaSupported
+                    ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
+                    : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOtaUpdate}
+                disabled={browserFlashBusy || !otaSupported}
+                className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+                {otaBuilding ? 'Finish build & update' : 'Update over the air'}
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onOtaUpdate}
-            disabled={browserFlashBusy || !otaSupported}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {otaBuilding ? 'Finish build & update' : 'Update over the air'}
-          </button>
-        </div>
-      </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
-        </div>
-        <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
-          <code>{flashCommand}</code>
-        </pre>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onDownload}
-            disabled={building}
-            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
-            {building ? 'Building firmware' : 'Build & download firmware'}
-          </button>
-          <button
-            type="button"
-            onClick={copyFlashCommand}
-            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <ClipboardDocumentIcon className="h-4 w-4" />
-            {copied ? 'Copied' : 'Copy flash command'}
-          </button>
-        </div>
-      </div>
-      <FirmwareFootprintVisualization frame={frame} />
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
+            </div>
+            <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+              <code>{flashCommand}</code>
+            </pre>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onDownload}
+                disabled={building}
+                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+                {building ? 'Building firmware' : 'Build & download firmware'}
+              </button>
+              <button
+                type="button"
+                onClick={copyFlashCommand}
+                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ClipboardDocumentIcon className="h-4 w-4" />
+                {copied ? 'Copied' : 'Copy flash command'}
+              </button>
+            </div>
+          </div>
+          <FirmwareFootprintVisualization frame={frame} />
+        </>
+      )}
     </section>
   )
 }

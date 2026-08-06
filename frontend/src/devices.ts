@@ -246,11 +246,17 @@ export const buildrootPlatforms: Option[] = [
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
 export const EMBEDDED_ESP32_C3 = 'esp32-c3'
+export const EMBEDDED_PICO_W = 'pico-w'
+export const EMBEDDED_PICO_2W = 'pico-2w'
 
 export const embeddedPlatforms: Option[] = [
   { value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' },
   // No PSRAM on supported C3 boards: firmware runs thin-client only.
   { value: EMBEDDED_ESP32_C3, label: 'ESP32-C3 (thin client)' },
+  // Pico family: generic UF2 flashed over BOOTSEL, provisioned over USB
+  // serial — the backend never builds per-frame firmware for these.
+  { value: EMBEDDED_PICO_W, label: 'Raspberry Pi Pico W (thin client)' },
+  { value: EMBEDDED_PICO_2W, label: 'Raspberry Pi Pico 2 W (thin client)' },
 ]
 
 export const rpiOSPlatforms: Option[] = [

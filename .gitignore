@@ -106,3 +106,6 @@ frontend/editor-smoke.png
 
 # Turborepo cache
 .turbo/
+
+# Pico firmware build trees (embedded/pico)
+embedded/pico/build*/
