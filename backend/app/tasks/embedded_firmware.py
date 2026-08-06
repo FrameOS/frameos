@@ -93,6 +93,18 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
         "defaultPsramMB": 0,
         "localRenderSupported": False,
     },
+    # No hardware at all: the backend renders (same wasm path as the thin
+    # clients) and serves the frame as an image/page URL — for browser
+    # kiosks, old tablets, or any device that can show a picture.
+    # Self-hosted backends only.
+    "virtual": {
+        "label": "Virtual frame (backend renderer)",
+        "family": "virtual",
+        "aliases": {"backend-renderer", "virtual-frame"},
+        "maxGpio": -1,
+        "defaultPsramMB": 0,
+        "localRenderSupported": False,
+    },
 }
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
@@ -1455,7 +1467,10 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if not frame.server_api_key:
         frame.server_api_key = secure_token(32)
     if not frame.device or frame.device == "web_only":
-        frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
+        if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual":
+            frame.device = "virtual"
+        else:
+            frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
 
     frame.max_http_response_bytes = embedded_max_http_response_bytes_for_frame(frame)
 
@@ -1796,7 +1811,13 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
 
 
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
-    if embedded_platform_spec_for_frame(frame)["family"] != "esp32":
+    family = embedded_platform_spec_for_frame(frame)["family"]
+    if family == "virtual":
+        raise ValueError(
+            "Virtual frames have no firmware — the backend renders them; "
+            "use the image URL from the frame's settings."
+        )
+    if family != "esp32":
         raise ValueError(
             "This platform uses the generic prebuilt firmware: flash the "
             "frameos-<version>-pico-w.uf2 (or -pico-2w.uf2) release asset over "
