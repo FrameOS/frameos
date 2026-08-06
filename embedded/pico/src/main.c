@@ -14,6 +14,8 @@
 #include "pk_console.h"
 #include "pk_display.h"
 #include "pk_http.h"
+#include "pk_rtc.h"
+#include "pk_shiftreg.h"
 #include "pk_wifi.h"
 
 #define WIFI_CONNECT_TIMEOUT_MS 30000
@@ -167,13 +169,31 @@ int main(void)
         pk_wifi_connect(WIFI_CONNECT_TIMEOUT_MS);
     }
 
+    // Buttons A-E live behind the Inky shift register, bits 0-4 (MSB-first
+    // read, matching Pimoroni's C++ convention). Any press = render now;
+    // a button also wakes the board from the RTC power cut in hardware.
+    uint8_t buttons_last = 0;
     absolute_time_t next_render = get_absolute_time(); // render once at boot
     for (;;) {
         bool render_requested = pk_console_poll();
+        pk_config_t *config = pk_config();
+        if (config->pins.sr_clock >= 0) {
+            uint8_t buttons = pk_shiftreg_read(&config->pins) & 0x1F;
+            if ((buttons & ~buttons_last) != 0) {
+                printf("button 0x%02x pressed, rendering\n", (unsigned)(buttons & ~buttons_last));
+                render_requested = true;
+            }
+            buttons_last = buttons;
+        }
         if (render_requested ||
             absolute_time_diff_us(get_absolute_time(), next_render) < 0) {
             render_once();
-            next_render = make_timeout_time_ms(pk_config()->interval_seconds * 1000);
+            if (config->deep_sleep && pk_config_backend_ready()) {
+                // Powers off on battery (cold boot on wake); returns after
+                // the interval on USB power.
+                pk_rtc_sleep_minutes(config->interval_seconds / 60);
+            }
+            next_render = make_timeout_time_ms(config->interval_seconds * 1000);
         }
         sleep_ms(20);
     }

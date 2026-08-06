@@ -25,6 +25,8 @@ add_executable(frameos_pico
     src/pk_console.c
     src/pk_wifi.c
     src/pk_http.c
+    src/pk_time.c
+    src/pk_rtc.c
     src/pk_display.c
     src/pk_shiftreg.c
     src/drivers/panel_uc8159.c
@@ -37,6 +39,9 @@ target_include_directories(frameos_pico PRIVATE src)
 target_link_libraries(frameos_pico
     pico_stdlib
     pico_cyw43_arch_lwip_poll
+    pico_lwip_sntp
+    pico_lwip_mbedtls
+    pico_mbedtls
     hardware_spi
     hardware_i2c
     hardware_flash

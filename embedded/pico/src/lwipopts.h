@@ -50,4 +50,17 @@
 #define LWIP_CHKSUM_ALGORITHM 3
 #define LWIP_DHCP_DOES_ACD_CHECK 0
 
+// TLS via mbedTLS behind lwIP's altcp layer (https backends + hostname
+// verification against the embedded CA roots).
+#define LWIP_ALTCP 1
+#define LWIP_ALTCP_TLS 1
+#define LWIP_ALTCP_TLS_MBEDTLS 1
+
+// SNTP for certificate validity checks (pk_time.c).
+#define SNTP_SERVER_DNS 1
+#ifndef __ASSEMBLER__
+void pk_time_set(unsigned long epoch_seconds);
+#endif
+#define SNTP_SET_SYSTEM_TIME(sec) pk_time_set(sec)
+
 #endif // LWIPOPTS_H

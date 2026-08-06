@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "hardware/watchdog.h"
+#include "pico/bootrom.h"
 #include "pico/stdlib.h"
 
 #include "pk_config.h"
@@ -65,7 +66,8 @@ static void print_status(void)
            config->pins.sck, config->pins.mosi, config->pins.cs, config->pins.dc,
            config->pins.rst, config->pins.busy, config->pins.sr_clock,
            config->pins.sr_latch, config->pins.sr_data, config->pins.busy_bit);
-    printf("interval: %lus\n", (unsigned long)config->interval_seconds);
+    printf("interval: %lus%s\n", (unsigned long)config->interval_seconds,
+           config->deep_sleep ? " (deep sleep)" : "");
 }
 
 static bool parse_pins(const char *value, pk_pins_t *pins)
@@ -104,8 +106,7 @@ static void handle_set(char *key, char *value)
     pk_config_t *config = pk_config();
     if (strcmp(key, "backend") == 0) {
         if (value[0] && !pk_http_url_is_supported(value)) {
-            printf("error: only http:// backends are supported on this firmware "
-                   "(TLS is not built in yet)\n");
+            printf("error: backend must be an http:// or https:// URL\n");
             return;
         }
         snprintf(config->backend_url, sizeof(config->backend_url), "%s", value);
@@ -116,6 +117,8 @@ static void handle_set(char *key, char *value)
     } else if (strcmp(key, "interval") == 0) {
         unsigned long seconds = strtoul(value, NULL, 10);
         config->interval_seconds = seconds < 15 ? 15 : (uint32_t)seconds;
+    } else if (strcmp(key, "deep_sleep") == 0) {
+        config->deep_sleep = (uint8_t)(atoi(value) != 0);
     } else if (strcmp(key, "panel") == 0) {
         if (strcmp(value, "none") != 0 && pk_display_find(value) == NULL) {
             size_t count = 0;
@@ -187,9 +190,14 @@ static void handle_line(char *line)
     } else if (strcmp(command, "factory-reset") == 0) {
         pk_config_factory_reset();
         printf("configuration erased\n");
+    } else if (strcmp(command, "bootsel") == 0) {
+        // Reboot into the UF2 bootloader so reflashing needs no BOOTSEL press.
+        printf("rebooting into BOOTSEL mode\n");
+        sleep_ms(100);
+        reset_usb_boot(0, 0);
     } else {
         printf("commands: status, wifi <ssid> [pass], set <key> <value>, "
-               "render, buttons, factory-reset\n");
+               "render, buttons, bootsel, factory-reset\n");
     }
 }
 

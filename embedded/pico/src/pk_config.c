@@ -11,7 +11,7 @@
 // stay consistent per target without a linker-script partition table.
 #define PK_CONFIG_FLASH_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define PK_CONFIG_MAGIC 0x504B4346u // "PKCF"
-#define PK_CONFIG_VERSION 1u
+#define PK_CONFIG_VERSION 2u // v2: + deep_sleep
 
 typedef struct {
     uint32_t magic;

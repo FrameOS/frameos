@@ -61,14 +61,27 @@ the matching Inky Frame hardware preset, which points its device at the
 matching panel so the server-side render arrives in the right size and
 pixel format.
 
+## Battery mode
+
+`set deep_sleep 1` powers the board off completely after each render via
+the Inky Frame's PCF85063A RTC + HOLD_VSYS latch (~20µA), cold-booting on
+the next interval or on any front button. On USB power the latch cannot cut
+VSYS, so the firmware sleeps in place instead — behaviour stays equivalent.
+
+## TLS
+
+`https://` backends work: TLS 1.2 via pico-sdk's mbedTLS behind lwIP altcp,
+with hostname verification against an embedded bundle of the major public
+CA roots (`src/certs/pk_ca_roots.h` — ISRG, DigiCert, Amazon, GlobalSign,
+USERTrust, GoDaddy; swap in your own root for a private CA). Certificate
+validity periods check against SNTP time, falling back to a build-time
+floor when NTP is unreachable.
+
 ## Limitations (v1)
 
-- `http://` backends only: TLS is not built in yet, so the backend must be
-  reachable over the LAN (the normal self-hosted setup). `set backend`
-  refuses `https://` up front.
-- No cloud enrollment: the cloud link requires TLS + WebSockets.
-- Polling loop only; the Inky Frame's PCF85063A RTC power-cut deep sleep
-  (months of battery) is not wired up yet — powered operation is the
-  target for now.
-- Buttons behind the Inky shift register are readable (`buttons` on the
-  console) but not yet bound to actions.
+- No cloud enrollment yet: the cloud link additionally needs a WebSocket
+  client and a cloud-side render source for thin clients.
+- Front buttons trigger an immediate render (and wake from deep sleep in
+  hardware); per-button scene actions need a device-event backend endpoint.
+- The Inky 4.0" panel's scan orientation may need a PSR tweak vs the
+  Waveshare 4.01" reference init; needs validation on glass.

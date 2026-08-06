@@ -4,18 +4,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lwip/altcp.h"
+#include "lwip/altcp_tcp.h"
+#include "lwip/altcp_tls.h"
 #include "lwip/dns.h"
 #include "lwip/pbuf.h"
-#include "lwip/tcp.h"
+#include "mbedtls/ssl.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
+
+#include "certs/pk_ca_roots.h"
+#include "pk_time.h"
 
 #define PK_HTTP_HEADER_MAX 1024
 
 typedef struct {
     const pk_http_request_t *request;
-    struct tcp_pcb *pcb;
+    struct altcp_pcb *pcb;
     ip_addr_t addr;
+    bool tls;
     bool dns_done;
     bool connected;
     bool finished;
@@ -23,15 +30,28 @@ typedef struct {
     bool headers_done;
     bool sink_aborted;
     int status;
-    size_t body_bytes;
     // Status line + headers accumulate here until the blank line; the body
     // never touches this buffer.
     char header[PK_HTTP_HEADER_MAX];
     size_t header_len;
+    size_t body_bytes;
     char host[128];
     char path[256];
     uint16_t port;
 } pk_http_state_t;
+
+// One TLS client config for the process: verifies against the embedded CA
+// roots (certs/pk_ca_roots.h). sizeof includes the trailing NUL, which
+// mbedTLS's PEM parser requires.
+static struct altcp_tls_config *tls_config(void)
+{
+    static struct altcp_tls_config *s_config = NULL;
+    if (s_config == NULL) {
+        s_config = altcp_tls_create_config_client(
+            (const u8_t *)PK_CA_ROOTS_PEM, sizeof(PK_CA_ROOTS_PEM));
+    }
+    return s_config;
+}
 
 static void state_fail(pk_http_state_t *state)
 {
@@ -44,13 +64,18 @@ static bool parse_url(pk_http_state_t *state, const char *url)
     const char *rest = NULL;
     if (strncmp(url, "http://", 7) == 0) {
         rest = url + 7;
+        state->tls = false;
+        state->port = 80;
+    } else if (strncmp(url, "https://", 8) == 0) {
+        rest = url + 8;
+        state->tls = true;
+        state->port = 443;
     } else {
         return false;
     }
     const char *slash = strchr(rest, '/');
     const char *host_end = slash ? slash : rest + strlen(rest);
     const char *colon = memchr(rest, ':', (size_t)(host_end - rest));
-    state->port = 80;
     const char *name_end = host_end;
     if (colon) {
         state->port = (uint16_t)atoi(colon + 1);
@@ -66,10 +91,11 @@ static bool parse_url(pk_http_state_t *state, const char *url)
 
 bool pk_http_url_is_supported(const char *url)
 {
-    return url != NULL && strncmp(url, "http://", 7) == 0;
+    return url != NULL &&
+           (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
-static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+static err_t on_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err)
 {
     pk_http_state_t *state = arg;
     if (p == NULL) { // remote closed: end of body
@@ -85,7 +111,6 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
         const uint8_t *data = q->payload;
         size_t len = q->len;
         if (!state->headers_done) {
-            // Append into the header buffer until the \r\n\r\n terminator.
             size_t take = len;
             size_t room = sizeof(state->header) - 1 - state->header_len;
             if (take > room) take = room;
@@ -105,8 +130,6 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
                 state_fail(state);
                 break;
             }
-            // Bytes past the header terminator within what we consumed are
-            // body; anything we did not copy (take < len) is body too.
             size_t header_total = (size_t)(body + 4 - state->header);
             const uint8_t *body_start = (const uint8_t *)state->header + header_total;
             size_t body_in_header = state->header_len - header_total;
@@ -137,7 +160,7 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
         }
         state->body_bytes += len;
     }
-    tcp_recved(pcb, p->tot_len);
+    altcp_recved(pcb, p->tot_len);
     pbuf_free(p);
     return ERR_OK;
 }
@@ -152,7 +175,7 @@ static void on_err(void *arg, err_t err)
     }
 }
 
-static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err)
+static err_t on_connected(void *arg, struct altcp_pcb *pcb, err_t err)
 {
     pk_http_state_t *state = arg;
     if (err != ERR_OK) {
@@ -174,11 +197,11 @@ static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err)
                        state->path, state->host);
     }
     if (len <= 0 || (size_t)len >= sizeof(request) ||
-        tcp_write(pcb, request, (u16_t)len, TCP_WRITE_FLAG_COPY) != ERR_OK) {
+        altcp_write(pcb, request, (u16_t)len, TCP_WRITE_FLAG_COPY) != ERR_OK) {
         state_fail(state);
         return ERR_ABRT;
     }
-    tcp_output(pcb);
+    altcp_output(pcb);
     return ERR_OK;
 }
 
@@ -207,6 +230,21 @@ pk_http_result_t pk_http_get(const pk_http_request_t *request)
     absolute_time_t deadline = make_timeout_time_ms(
         request->timeout_ms > 0 ? request->timeout_ms : 60000);
 
+    if (state.tls) {
+        // Certificate validity checks want real time; give SNTP a moment.
+        pk_time_start_sntp();
+        absolute_time_t sntp_deadline = make_timeout_time_ms(8000);
+        while (!pk_time_synced() &&
+               absolute_time_diff_us(get_absolute_time(), sntp_deadline) > 0) {
+            cyw43_arch_poll();
+            sleep_ms(10);
+        }
+        if (!pk_time_synced()) {
+            printf("http: no NTP time yet, validating certificates against a "
+                   "build-time floor\n");
+        }
+    }
+
     cyw43_arch_lwip_begin();
     err_t err = dns_gethostbyname(state.host, &state.addr, on_dns, &state);
     if (err == ERR_OK) {
@@ -228,14 +266,24 @@ pk_http_result_t pk_http_get(const pk_http_request_t *request)
 
     if (!state.failed) {
         cyw43_arch_lwip_begin();
-        state.pcb = tcp_new_ip_type(IP_GET_TYPE(&state.addr));
+        if (state.tls) {
+            struct altcp_tls_config *config = tls_config();
+            state.pcb = config ? altcp_tls_new(config, IP_GET_TYPE(&state.addr)) : NULL;
+            if (state.pcb != NULL) {
+                // SNI + hostname verification against the certificate.
+                mbedtls_ssl_set_hostname(
+                    (mbedtls_ssl_context *)altcp_tls_context(state.pcb), state.host);
+            }
+        } else {
+            state.pcb = altcp_tcp_new_ip_type(IP_GET_TYPE(&state.addr));
+        }
         if (state.pcb == NULL) {
             state_fail(&state);
         } else {
-            tcp_arg(state.pcb, &state);
-            tcp_recv(state.pcb, on_recv);
-            tcp_err(state.pcb, on_err);
-            if (tcp_connect(state.pcb, &state.addr, state.port, on_connected) != ERR_OK) {
+            altcp_arg(state.pcb, &state);
+            altcp_recv(state.pcb, on_recv);
+            altcp_err(state.pcb, on_err);
+            if (altcp_connect(state.pcb, &state.addr, state.port, on_connected) != ERR_OK) {
                 state_fail(&state);
             }
         }
@@ -253,11 +301,11 @@ pk_http_result_t pk_http_get(const pk_http_request_t *request)
 
     cyw43_arch_lwip_begin();
     if (state.pcb != NULL) {
-        tcp_arg(state.pcb, NULL);
-        tcp_recv(state.pcb, NULL);
-        tcp_err(state.pcb, NULL);
-        if (tcp_close(state.pcb) != ERR_OK) {
-            tcp_abort(state.pcb);
+        altcp_arg(state.pcb, NULL);
+        altcp_recv(state.pcb, NULL);
+        altcp_err(state.pcb, NULL);
+        if (altcp_close(state.pcb) != ERR_OK) {
+            altcp_abort(state.pcb);
         }
         state.pcb = NULL;
     }

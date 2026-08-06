@@ -42,6 +42,9 @@ typedef struct {
     char hardware_preset[PK_STR_LEN];
     pk_pins_t pins;
     uint32_t interval_seconds;    // render poll interval (min 15s)
+    // Battery mode: after each render, power off via the RTC + HOLD_VSYS
+    // latch and cold-boot on the next interval (Inky Frame ~20uA).
+    uint8_t deep_sleep;
 } pk_config_t;
 
 pk_config_t *pk_config(void);
