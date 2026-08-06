@@ -85,11 +85,16 @@ const devicePath = "/api/frames/ws";
 const browserAccountPath = "/api/frames/updates";
 const browserFramePathPattern = /^\/api\/frames\/([0-9a-f-]{36})\/updates$/i;
 
-// Close codes: 4401 = authentication failed (bad signature, timeout, or a
-// session revoked while the socket was open), 4409 = superseded by a newer
-// socket for the same frame, 1013 = "try again later" (a consumer that stopped
-// reading; see maxBufferedBytes).
+// Close codes: 4401 = authentication failed (bad signature, or a session
+// revoked while the socket was open), 4408 = the challenge went unanswered
+// within the auth window, 4409 = superseded by a newer socket for the same
+// frame, 1013 = "try again later" (a consumer that stopped reading; see
+// maxBufferedBytes). 4408 is deliberately NOT 4401: devices count 4401s
+// toward demoting themselves to standalone (3 strikes), and a slow device —
+// an e-paper frame mid-refresh can stall for a minute — must be able to
+// miss the window and simply redial without eating a strike.
 const closeAuthFailed = 4401;
+const closeAuthTimeout = 4408;
 const closeSuperseded = 4409;
 const closeSlowConsumer = 1013;
 
@@ -1039,7 +1044,7 @@ export async function startFrameHub(
     session.authTimeout = setTimeout(() => {
       if (!session.ready) {
         logWarn("device.auth_timeout", { frameId: frame.id });
-        ws.close(closeAuthFailed, "auth_timeout");
+        ws.close(closeAuthTimeout, "auth_timeout");
       }
     }, authTimeoutMs);
 

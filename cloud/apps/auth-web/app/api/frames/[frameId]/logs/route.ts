@@ -79,20 +79,20 @@ export async function GET(
   return NextResponse.json({
     has_more: hasMore,
     logs: page.map((row) => {
-      const payload =
-        row.payload && typeof row.payload === "object"
-          ? (row.payload as Record<string, unknown>)
-          : {};
+      // Same mapping as the hub's newLogEvent: structured payloads ship as
+      // type "webhook" with the whole object as the line — the shape the
+      // self-hosted backend stores device logs in, which the SPA's Logs
+      // panel pretty-renders (event highlighted, the rest as key=value).
+      const structured =
+        Boolean(row.payload) &&
+        typeof row.payload === "object" &&
+        !Array.isArray(row.payload);
       return {
         frame_id: frame.id,
         id: row.id,
-        line:
-          typeof payload.line === "string"
-            ? payload.line
-            : JSON.stringify(row.payload),
+        line: JSON.stringify(row.payload ?? null),
         timestamp: row.timestamp,
-        type:
-          typeof payload.event === "string" ? payload.event : "log",
+        type: structured ? "webhook" : "log",
       };
     }),
   });

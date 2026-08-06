@@ -744,14 +744,21 @@ describe("telemetry", () => {
       type: "log_batch",
     });
 
+    // Structured payloads ship as backend-style "webhook" lines: the whole
+    // object JSON-encoded, so the SPA renders event + key=value instead of
+    // raw JSON.
     const logEvent = await browser.next(
       (msg) =>
         msg.event === "new_log" &&
-        (msg.data as Record<string, unknown>).type === "render:done",
+        String((msg.data as Record<string, unknown>).line).includes("render:done"),
       "new_log event",
     );
     const logData = logEvent.data as Record<string, unknown>;
-    expect(logData.line).toBe("done in 1.2s");
+    expect(logData.type).toBe("webhook");
+    expect(JSON.parse(String(logData.line))).toEqual({
+      event: "render:done",
+      line: "done in 1.2s",
+    });
     expect(logData.frame_id).toBe(frame.id);
     expect(typeof logData.id).toBe("number");
 
@@ -1067,7 +1074,10 @@ describe("lifecycle", () => {
     const extra = await startExtraHub({ authTimeoutMs: 200 });
     const device = await openDevice(token, extra.port);
     await device.next((msg) => msg.type === "challenge", "challenge");
-    expect(await device.closed).toBe(4401);
+    // 4408, NOT 4401: devices demote themselves to standalone after three
+    // 4401s, and a device that is merely slow (an e-paper refresh can stall
+    // the handshake past the window) must not eat auth strikes for it.
+    expect(await device.closed).toBe(4408);
   });
 
   it("terminates a device socket that stops answering pings", async () => {

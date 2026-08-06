@@ -189,15 +189,19 @@ profile they target rather than relying on the cap.
 
 The provider must verify the signature against the enrolled public key and
 close the socket on mismatch, with WebSocket close code **4401** (also used
-when the auth step times out and when a frame is revoked mid-session). An
-upgrade rejected before the socket opens — bad or unknown bearer token — is a
-plain HTTP `401`.
+when a frame is revoked mid-session). A challenge that simply goes
+unanswered within the provider's auth window closes with **4408** instead:
+a slow device — an e-paper frame mid-refresh can stall for a minute — must
+be able to miss the window and redial without it counting as an
+authentication rejection. An upgrade rejected before the socket opens — bad
+or unknown bearer token — is a plain HTTP `401`.
 
 The frame reconnects with jittered exponential backoff (a device picks its
 delay uniformly from the lower half of a doubling window, so a fleet that
 lost the provider together does not come back in lockstep); the provider
-treats the WS liveness as `last_seen_at`. Both rejection signals above count
-toward the demotion rule under "Device-side state and demotion".
+treats the WS liveness as `last_seen_at`. The `4401` close and the HTTP
+`401` count toward the demotion rule under "Device-side state and
+demotion"; `4408` never does.
 
 ### Provider → frame verbs (complete list)
 
@@ -257,7 +261,7 @@ drains either way.
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
 | Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
-| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `assets_list`, `asset_get` (both only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned), `image_get` (`image/bmp`) | `set_schedule`, `set_settings`, `get_logs`, `get_metrics`, `notify_update_available`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` |
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `set_settings` (the `interval`/`name` subset only — any other allowlisted key refuses the whole verb with `setting_not_allowed`, so a provider should not enqueue them), `assets_list`, `asset_get` (both only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned), `image_get` (`image/bmp`) | `set_schedule`, `get_logs`, `get_metrics`, `notify_update_available`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` |
 
 The ESP32 profile is a subset because the firmware has no scheduler, no log
 buffer and no metrics buffer to expose, and updates itself from its own

@@ -258,8 +258,10 @@ const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings'
 
 /** What the esp32 cloud profile keeps of the gated set: logs are served from
  * the cloud's own store (pushed by the frame, read over HTTP), so they work
- * regardless of which verbs the firmware answers. */
-const esp32CloudCapabilities: readonly FrameCapability[] = ['logs']
+ * regardless of which verbs the firmware answers; settings ride the
+ * firmware's set_settings verb, which persists the interval/name subset
+ * (the control plane refuses the rest for esp32 up front). */
+const esp32CloudCapabilities: readonly FrameCapability[] = ['logs', 'settings']
 
 /** `platform: "esp32"` today; prefix-matched so "esp32-s3" variants gate too. */
 function isEsp32Platform(platform: unknown): boolean {

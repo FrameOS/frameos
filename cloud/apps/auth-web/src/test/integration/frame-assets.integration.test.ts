@@ -113,7 +113,7 @@ function rawPublicKeyBase64() {
   return Buffer.from(spki.subarray(spki.length - 32)).toString("base64");
 }
 
-async function activeFrame(status = "active") {
+async function activeFrame(status = "active", connected = true) {
   const accountId = await signIn();
   const [client] = await db
     .insert(linkedClients)
@@ -129,6 +129,9 @@ async function activeFrame(status = "active") {
     .insert(frames)
     .values({
       accountId,
+      // The listing endpoint only asks a frame that is live on the hub, so
+      // the fixture defaults to connected.
+      connected,
       linkedClientId: client!.id,
       name: "Asset frame",
       publicKey: rawPublicKeyBase64(),
@@ -206,6 +209,22 @@ describe("GET /api/frames/{id}/assets", () => {
     const { frame } = await activeFrame("pending");
     const response = await getFrameAssets(
       getRequest(`/api/frames/${frame.id}/assets`),
+      assetsParams(frame.id),
+    );
+    const payload = await response.json();
+    expect(payload.assets).toEqual([]);
+    expect(payload.cache).toBeUndefined();
+    expect(await commandsOfType(frame.id, "assets_list")).toHaveLength(0);
+  });
+
+  it("never queues toward a disconnected frame, and does not report refreshing", async () => {
+    // A disconnected frame used to turn the panel into an infinite loop:
+    // every poll re-enqueued assets_list (the previous one kept expiring
+    // unanswered), every response said refreshing, and the panel refetched
+    // every 2 s until the tab closed.
+    const { frame } = await activeFrame("active", false);
+    const response = await getFrameAssets(
+      getRequest(`/api/frames/${frame.id}/assets?refresh=1`),
       assetsParams(frame.id),
     );
     const payload = await response.json();

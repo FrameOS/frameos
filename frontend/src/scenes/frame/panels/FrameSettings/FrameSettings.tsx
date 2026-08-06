@@ -55,7 +55,7 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { frameSettingsSectionIsAllowed, workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { frameSettingsSectionIsAllowed, isEsp32CloudFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
@@ -797,6 +797,12 @@ export function FrameSettings({
   // not exist in the cloud protocol, so their settings are never rendered.
   const workspaceSurfaceMode = workspaceMode()
   const hideForCloud = workspaceSurfaceMode === 'cloud'
+  // A cloud-managed ESP32 accepts exactly two settings from the cloud —
+  // name and refresh interval (its set_settings subset). Everything else on
+  // this panel (mounts, network, palette, GPIO, …) either does not exist on
+  // the firmware or is provisioned on the device itself, so rendering those
+  // sections was an invitation to edit values that can never be saved.
+  const esp32CloudProfile = hideForCloud && isEsp32CloudFrame(frame)
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
@@ -1120,7 +1126,32 @@ export function FrameSettings({
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        {showFrameInfo ? (
+        {esp32CloudProfile ? (
+          <>
+            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-info">Frame settings</H6>
+              {frameActionsMenu}
+            </div>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field name="name" label="Name">
+                <TextInput name="name" placeholder="Hallway frame" required />
+              </Field>
+              <Field
+                name="interval"
+                label="Refresh interval in seconds"
+                tooltip="How often the frame re-renders its active scene. E-paper panels want large values (300 or more); the firmware enforces a 5 second minimum."
+              >
+                <TextInput name="interval" placeholder="300" />
+              </Field>
+              <p className="frameos-muted text-sm">
+                This ESP32 frame accepts its name and refresh interval from the cloud. The panel driver, WiFi, GPIO
+                and other hardware settings are provisioned on the device itself — over its USB console or the
+                FrameOS-Setup portal.
+              </p>
+            </div>
+          </>
+        ) : null}
+        {!esp32CloudProfile && showFrameInfo ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
               <H6 id="frame-settings-info">Frame info</H6>
@@ -1187,6 +1218,10 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
+        {/* Everything below is the full settings surface; the esp32 cloud
+            profile renders only the compact block above instead. */}
+        {!esp32CloudProfile ? (
+          <>
         {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
         {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
         {showFrameInfo ? (
@@ -3029,6 +3064,8 @@ export function FrameSettings({
             ))
           )}
         </div>
+          </>
+        ) : null}
       </Form>
     </div>
   )

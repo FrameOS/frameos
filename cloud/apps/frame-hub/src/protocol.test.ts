@@ -256,12 +256,15 @@ describe("browser event shaping", () => {
       payload: { event: "render:done", line: "rendered scene", scene: "s1" },
       timestamp: new Date("2026-08-01T12:00:00.000Z"),
     });
+    // Structured payloads ship backend-style: type "webhook" with the whole
+    // object as the line, which the SPA pretty-renders (event + key=value)
+    // instead of showing raw JSON.
     expect(event).toEqual({
       frame_id: "frame-uuid",
       id: 42,
-      line: "rendered scene",
+      line: '{"event":"render:done","line":"rendered scene","scene":"s1"}',
       timestamp: "2026-08-01T12:00:00.000Z",
-      type: "render:done",
+      type: "webhook",
     });
   });
 
@@ -289,14 +292,14 @@ describe("browser event shaping", () => {
     expect(event.frame_id).toBe("frame-uuid");
   });
 
-  it("falls back to serialized payload and type 'log'", () => {
+  it("falls back to a plain 'log' line for non-object payloads", () => {
     const event = newLogEvent("frame-uuid", {
       id: 1,
-      payload: { message: "hi" },
+      payload: "plain text line",
       timestamp: new Date("2026-08-01T12:00:00.000Z"),
     });
     expect(event.type).toBe("log");
-    expect(event.line).toBe('{"message":"hi"}');
+    expect(event.line).toBe('"plain text line"');
   });
 
   it("builds update_frame data as the frame summary plus live state", () => {

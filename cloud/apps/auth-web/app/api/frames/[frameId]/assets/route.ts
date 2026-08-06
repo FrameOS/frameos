@@ -82,9 +82,14 @@ export async function GET(
   const wantRefresh = request.nextUrl.searchParams.get("refresh") === "1";
   const outstanding = await outstandingCommand(db, frame.id, "assets_list");
   let enqueued = false;
+  // Only ask a frame that is actually on the hub. A disconnected frame used
+  // to make this an infinite loop: every poll re-enqueued assets_list (the
+  // previous one kept expiring unanswered), every response said
+  // `refreshing`, and the panel refetched every 2 s until the tab closed.
   if (
     !outstanding &&
     frame.status === "active" &&
+    frame.connected &&
     (wantRefresh || !listing)
   ) {
     // Supersede rather than stack: expired-but-unswept rows of the same type
@@ -98,7 +103,9 @@ export async function GET(
     });
     enqueued = true;
   }
-  const refreshing = enqueued || Boolean(outstanding);
+  // A pending command on a disconnected frame is not "refreshing" — nothing
+  // will answer until the frame redials, so the panel must not poll for it.
+  const refreshing = frame.connected && (enqueued || Boolean(outstanding));
   return NextResponse.json({
     assets: listing?.payload ?? [],
     ...(listing?.truncated ? { truncated: true } : {}),

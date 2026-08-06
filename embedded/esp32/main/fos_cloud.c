@@ -69,6 +69,13 @@ static const char *NVS_NS = "frameos";
  * rejections (HTTP 401 on the upgrade, or a 4401 close from the provider). */
 #define FOS_CLOUD_WS_AUTH_FAILURES_MAX 3
 #define FOS_CLOUD_WS_AUTH_CLOSE_CODE 4401
+/* No ready session for this long (while enrolled, with WiFi up) → destroy
+ * and recreate the client. esp_websocket_client does not redial after a
+ * clean server close (the hub closes cleanly on an auth timeout, which a
+ * long e-paper refresh can cause by starving the handshake), and a failed
+ * client init/start was never retried at all — either way the link used to
+ * stay dead until a reboot. */
+#define FOS_CLOUD_WS_STALL_RESTART_US (120LL * 1000 * 1000)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
 /* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
@@ -1414,6 +1421,57 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
     return false;
 }
 
+/* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
+ * profile persists the subset that maps onto fos_config: `interval`
+ * (interval_sec, picked up by the render loop's next pass, no reboot) and
+ * `name` (the DHCP hostname — the provider-side display name stays
+ * authoritative on the provider). Any other key refuses the WHOLE verb with
+ * setting_not_allowed, mirroring the Nim runtime, so the provider never
+ * half-applies a settings push. */
+static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
+{
+    const cJSON *settings = cJSON_GetObjectItem(root, "settings");
+    if (!cJSON_IsObject(settings)) {
+        ws_ack(id, false, "invalid_settings");
+        return;
+    }
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, settings) {
+        const char *key = entry->string ? entry->string : "";
+        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0) {
+            ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
+            ws_ack(id, false, "setting_not_allowed");
+            return;
+        }
+    }
+    fos_config_t *config = fos_config();
+    const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
+    if (interval != NULL) {
+        if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
+            interval->valuedouble > 86400) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        uint32_t seconds = (uint32_t)interval->valuedouble;
+        /* Same floor the local admin API applies (fos_http.c). */
+        if (seconds < 5) seconds = 5;
+        config->interval_sec = seconds;
+    }
+    const cJSON *name = cJSON_GetObjectItem(settings, "name");
+    if (name != NULL) {
+        if (!cJSON_IsString(name) || !name->valuestring[0]) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
+    }
+    if (fos_config_save() != ESP_OK) {
+        ws_ack(id, false, "persist_failed");
+        return;
+    }
+    ws_ack(id, true, NULL);
+}
+
 /* Ack a message we could not parse, so the provider's durable queue moves on. */
 static void ws_ack_unparseable(const char *data, size_t len)
 {
@@ -1478,6 +1536,8 @@ static void ws_handle_message(const char *data, size_t len)
         }
     } else if (strcmp(type, "set_scenes") == 0) {
         ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "set_settings") == 0) {
+        ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {
         ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
     } else if (strcmp(type, "asset_get") == 0) {
@@ -1490,7 +1550,7 @@ static void ws_handle_message(const char *data, size_t len)
         ws_schedule_reboot();
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
-    } else if (strcmp(type, "set_schedule") == 0 || strcmp(type, "set_settings") == 0 ||
+    } else if (strcmp(type, "set_schedule") == 0 ||
                strcmp(type, "get_logs") == 0 || strcmp(type, "get_metrics") == 0 ||
                strcmp(type, "notify_update_available") == 0 ||
                strcmp(type, "asset_put") == 0 || strcmp(type, "asset_mkdir") == 0 ||
@@ -1741,8 +1801,8 @@ static void ws_start(void)
     /* Tee runtime log lines toward this session (flushed by ws_poll_logs on
      * the cloud task once telemetry:logs is confirmed by `ready`). */
     ws_logs_init();
-    /* TODO(cloud-frames): apply set_settings/set_schedule for the
-     * declarative allowlist. */
+    /* TODO(cloud-frames): apply set_schedule for the declarative
+     * allowlist (set_settings ships the interval/name subset already). */
 }
 
 /* Cloud task only: the websocket task must not be torn down from inside its
@@ -1838,9 +1898,11 @@ static void cloud_task(void *arg)
     load_stored_state();
     uint32_t backoff_ms = FOS_CLOUD_BACKOFF_MIN_MS;
     bool ws_started = false;
+    int64_t ws_stall_since_us = 0;
 
     while (true) {
         if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+            ws_stall_since_us = 0; /* no WiFi is not a WS stall */
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -1856,7 +1918,28 @@ static void cloud_task(void *arg)
             if (!ws_started) {
                 ws_start();
                 ws_started = true;
+                ws_stall_since_us = 0;
             }
+#ifdef FOS_CLOUD_HAVE_WS
+            /* Stall watchdog: the client library owns the fast redial loop,
+             * but it silently gives up in several ways (see the constant's
+             * comment). A full stop/start from here is always safe — this
+             * IS the cloud task — and cheap at this cadence. */
+            if (fos_cloud_ws_connected()) {
+                ws_stall_since_us = 0;
+            } else {
+                int64_t now_us = esp_timer_get_time();
+                if (ws_stall_since_us == 0) {
+                    ws_stall_since_us = now_us;
+                } else if (now_us - ws_stall_since_us > FOS_CLOUD_WS_STALL_RESTART_US) {
+                    ESP_LOGW(TAG, "ws: no session for %d s; recreating the client",
+                             (int)(FOS_CLOUD_WS_STALL_RESTART_US / 1000000));
+                    ws_stop();
+                    ws_start();
+                    ws_stall_since_us = now_us;
+                }
+            }
+#endif
             ws_poll_scene_ack();
             ws_poll_logs();
             /* Streamed asset replies run here, off the WS task. A 1 s idle
