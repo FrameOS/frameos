@@ -10,6 +10,20 @@ packages:
 
 overrides:
   csstype: 3.2.3
+  sharp: '>=0.35.0'
+  # Security floors for transitive deps flagged by Dependabot
+  shell-quote: '>=1.9.0'
+  body-parser@1: '>=1.20.6 <2'
+  brace-expansion@2: '>=2.1.4 <3'
+  immutable@5: '>=5.1.8'
+  lodash: '>=4.18.0'
+  lodash-es: '>=4.18.0'
+  path-to-regexp@0.1: '>=0.1.13 <0.2'
+  picomatch@2: '>=2.3.2 <3'
+  picomatch@4: '>=4.0.4'
+  postcss@8: '>=8.5.23'
+  qs@6: '>=6.15.2'
+  svgo@4: '>=4.0.2'
 
 packageExtensions:
   kea-forms@*:
