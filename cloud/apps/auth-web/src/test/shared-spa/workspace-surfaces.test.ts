@@ -112,8 +112,9 @@ describe("cloud mode keeps what the protocol does implement", () => {
 // The mode allow-lists say what a control plane implements; the device
 // profile says what the frame on the other end implements. A cloud-managed
 // frame whose enrollment-reported hardware.platform is "esp32" answers
-// `unsupported_verb` for set_schedule, set_settings, get_logs, get_metrics
-// and notify_update_available (docs/cloud-frames.md "Device profiles";
+// `unsupported_verb` for set_schedule, get_logs, get_metrics and
+// notify_update_available; set_settings it implements for the
+// interval/name subset (docs/cloud-frames.md "Device profiles";
 // embedded/esp32/main/fos_cloud.c).
 //
 // The profile DISABLES those controls with an explanation - it never hides
@@ -138,8 +139,8 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("disables schedule, settings and metrics with a reason", () => {
-    for (const panel of ["schedule", "settings", "metrics"] as const) {
+  it("disables schedule and metrics with a reason", () => {
+    for (const panel of ["schedule", "metrics"] as const) {
       expect(frameToolPanelDisabledReason("cloud", panel, esp32Frame)).toEqual(
         expect.stringContaining("ESP32"),
       );
@@ -147,6 +148,11 @@ describe("the esp32 cloud device profile", () => {
         expect.stringContaining("ESP32"),
       );
     }
+  });
+
+  it("keeps Settings enabled - the firmware persists the interval/name subset via set_settings", () => {
+    expect(frameToolPanelDisabledReason("cloud", "settings", esp32Frame)).toBeNull();
+    expect(sceneToolPanelDisabledReason("cloud", "settings", esp32Frame)).toBeNull();
   });
 
   it("keeps Logs enabled - they are pushed to the cloud, not pulled via get_logs", () => {
@@ -204,8 +210,10 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("derives a logs-only capability set for esp32 and a full one otherwise", () => {
-    expect(frameCapabilities(esp32Frame, "cloud")).toEqual(new Set(["logs"]));
+  it("derives a logs+settings capability set for esp32 and a full one otherwise", () => {
+    expect(frameCapabilities(esp32Frame, "cloud")).toEqual(
+      new Set(["logs", "settings"]),
+    );
     expect(frameCapabilities(piFrame, "cloud")).toEqual(
       new Set(["schedule", "settings", "logs", "metrics", "updateNotify"]),
     );

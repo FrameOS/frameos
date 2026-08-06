@@ -320,9 +320,14 @@ async function refreshEmbeddedUsbFrameImage(frameId: FrameId): Promise<void> {
     embeddedUsbImageRefreshRetries.delete(frameId)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    if (/no preview rendered yet|preview snapshot was not retained/i.test(detail)) {
-      // Expected right after a deploy: the first render is still in
-      // progress. Quietly retry until a preview exists.
+    const retryable =
+      // Expected right after a deploy: the first render is still in progress.
+      /no preview rendered yet|preview snapshot was not retained/i.test(detail) ||
+      // Expected under load: a console log line interleaved with the serial
+      // payload dump (UsbPayloadCorruptedError). The next transfer usually
+      // lands in a quiet window.
+      (error instanceof Error && error.name === 'UsbPayloadCorruptedError')
+    if (retryable) {
       const attempts = (embeddedUsbImageRefreshRetries.get(frameId) ?? 0) + 1
       if (attempts <= EMBEDDED_USB_IMAGE_RETRY_LIMIT) {
         embeddedUsbImageRefreshRetries.set(frameId, attempts)

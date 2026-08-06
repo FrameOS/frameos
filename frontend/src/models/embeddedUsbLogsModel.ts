@@ -320,6 +320,38 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
+// The device's console is a shared stdout: other tasks (render printfs,
+// ESP_LOG lines, the cloud client) can interleave lines into the middle of
+// a multi-second base64 payload dump. A corrupted transfer is therefore an
+// expected transient, not a programming error — callers retry it.
+export class UsbPayloadCorruptedError extends Error {
+  constructor(detail: string) {
+    super(`USB payload corrupted (${detail}) — likely a log line interleaved with the transfer`)
+    this.name = 'UsbPayloadCorruptedError'
+  }
+}
+
+// Decode the BEGIN…END payload region defensively: whole lines that are not
+// pure base64 are interleaved log output and get dropped; the declared byte
+// length then verifies nothing else went missing (a print that glued itself
+// onto a chunk line takes that chunk's bytes down with it).
+function decodeUsbBase64Payload(payload: string, declaredBytes: number): Uint8Array {
+  const kept = payload
+    .split(/\r?\n/)
+    .filter((line) => /^[A-Za-z0-9+/=]*$/.test(line))
+    .join('')
+  let bytes: Uint8Array
+  try {
+    bytes = base64ToBytes(kept)
+  } catch (error) {
+    throw new UsbPayloadCorruptedError('not valid base64')
+  }
+  if (declaredBytes > 0 && bytes.byteLength !== declaredBytes) {
+    throw new UsbPayloadCorruptedError(`expected ${declaredBytes} bytes, decoded ${bytes.byteLength}`)
+  }
+  return bytes
+}
+
 function usbApiResponseCommand(command: string): string {
   return command.trim().split(/\s+/, 1)[0] || command
 }
@@ -370,11 +402,31 @@ function parseUsbCommandResult(command: string, text: string): EmbeddedUsbApiCom
   if (encoding === 'base64') {
     return {
       command: responseCommand,
-      bytes: base64ToBytes(payload.replace(/\s+/g, '')),
+      bytes: decodeUsbBase64Payload(payload, Number(beginMatch[2]) || 0),
       metadata,
     }
   }
   return { command: responseCommand, text: payload, metadata }
+}
+
+// A ~1 MB image payload arrives in hundreds of serial chunks; running the
+// full parser (three regexes plus an indexOf over the whole accumulated
+// buffer) on every chunk was O(n²) and froze the tab for seconds. The
+// parser only has a chance of succeeding once one of these markers has
+// arrived, so the read loops gate on seeing one in the freshly received
+// tail first. BEGIN is deliberately not in the list — it arrives at the
+// START of a payload, and parsing from then on would restore the O(n²).
+const usbResponseTerminators = [
+  '__FRAMEOS_USB_OK__',
+  '__FRAMEOS_USB_ERROR__',
+  '__FRAMEOS_USB_END__',
+  '__FRAMEOS_USB_READY__',
+] as const
+
+function tailHasUsbTerminator(received: string, freshLength: number): boolean {
+  // Overlap window: a marker can straddle the chunk boundary.
+  const tail = received.slice(-(freshLength + 64))
+  return usbResponseTerminators.some((marker) => tail.includes(marker))
 }
 
 async function writeUsbPayload(writer: WritableStreamDefaultWriter<Uint8Array>, payload: Uint8Array): Promise<void> {
@@ -416,10 +468,18 @@ async function runUsbApiCommandOnPort(
   let writer: WritableStreamDefaultWriter<Uint8Array> | null = null
   let received = ''
   let timedOut = false
-  const appendReceived = (value: Uint8Array): void => {
+  // Sticky across chunks: a terminator may arrive without its trailing
+  // newline (the ERROR regex requires one), so once seen, keep parsing
+  // until the parser produces a result.
+  let parseArmed = false
+  const appendReceived = (value: Uint8Array): boolean => {
     const decoded = decoder.decode(value, { stream: true })
     received += decoded
     onText?.(decoded)
+    if (!parseArmed && tailHasUsbTerminator(received, decoded.length)) {
+      parseArmed = true
+    }
+    return parseArmed
   }
   try {
     await openPort(port, { resetBaud: !keepOpen })
@@ -445,13 +505,18 @@ async function runUsbApiCommandOnPort(
           throw new Error('USB serial command stream ended')
         }
         if (chunk.value) {
-          appendReceived(chunk.value)
+          if (!appendReceived(chunk.value)) {
+            continue
+          }
           const result = parseUsbCommandResult(command, received)
           if (result) {
             return result
           }
           if (parseUsbCommandReady(command, received)) {
             payloadReady = true
+            // Re-arm for the actual response phase, or every post-READY
+            // chunk of a large payload would run the full parser again.
+            parseArmed = false
             break
           }
         }
@@ -473,7 +538,9 @@ async function runUsbApiCommandOnPort(
         throw new Error('USB serial command stream ended')
       }
       if (chunk.value) {
-        appendReceived(chunk.value)
+        if (!appendReceived(chunk.value)) {
+          continue
+        }
         const result = parseUsbCommandResult(command, received)
         if (result) {
           return result

@@ -1421,6 +1421,57 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
     return false;
 }
 
+/* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
+ * profile persists the subset that maps onto fos_config: `interval`
+ * (interval_sec, picked up by the render loop's next pass, no reboot) and
+ * `name` (the DHCP hostname — the provider-side display name stays
+ * authoritative on the provider). Any other key refuses the WHOLE verb with
+ * setting_not_allowed, mirroring the Nim runtime, so the provider never
+ * half-applies a settings push. */
+static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
+{
+    const cJSON *settings = cJSON_GetObjectItem(root, "settings");
+    if (!cJSON_IsObject(settings)) {
+        ws_ack(id, false, "invalid_settings");
+        return;
+    }
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, settings) {
+        const char *key = entry->string ? entry->string : "";
+        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0) {
+            ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
+            ws_ack(id, false, "setting_not_allowed");
+            return;
+        }
+    }
+    fos_config_t *config = fos_config();
+    const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
+    if (interval != NULL) {
+        if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
+            interval->valuedouble > 86400) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        uint32_t seconds = (uint32_t)interval->valuedouble;
+        /* Same floor the local admin API applies (fos_http.c). */
+        if (seconds < 5) seconds = 5;
+        config->interval_sec = seconds;
+    }
+    const cJSON *name = cJSON_GetObjectItem(settings, "name");
+    if (name != NULL) {
+        if (!cJSON_IsString(name) || !name->valuestring[0]) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
+    }
+    if (fos_config_save() != ESP_OK) {
+        ws_ack(id, false, "persist_failed");
+        return;
+    }
+    ws_ack(id, true, NULL);
+}
+
 /* Ack a message we could not parse, so the provider's durable queue moves on. */
 static void ws_ack_unparseable(const char *data, size_t len)
 {
@@ -1485,6 +1536,8 @@ static void ws_handle_message(const char *data, size_t len)
         }
     } else if (strcmp(type, "set_scenes") == 0) {
         ws_handle_set_scenes(root, id);
+    } else if (strcmp(type, "set_settings") == 0) {
+        ws_handle_set_settings(root, id);
     } else if (strcmp(type, "assets_list") == 0) {
         ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
     } else if (strcmp(type, "asset_get") == 0) {
@@ -1497,7 +1550,7 @@ static void ws_handle_message(const char *data, size_t len)
         ws_schedule_reboot();
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
-    } else if (strcmp(type, "set_schedule") == 0 || strcmp(type, "set_settings") == 0 ||
+    } else if (strcmp(type, "set_schedule") == 0 ||
                strcmp(type, "get_logs") == 0 || strcmp(type, "get_metrics") == 0 ||
                strcmp(type, "notify_update_available") == 0 ||
                strcmp(type, "asset_put") == 0 || strcmp(type, "asset_mkdir") == 0 ||
@@ -1748,8 +1801,8 @@ static void ws_start(void)
     /* Tee runtime log lines toward this session (flushed by ws_poll_logs on
      * the cloud task once telemetry:logs is confirmed by `ready`). */
     ws_logs_init();
-    /* TODO(cloud-frames): apply set_settings/set_schedule for the
-     * declarative allowlist. */
+    /* TODO(cloud-frames): apply set_schedule for the declarative
+     * allowlist (set_settings ships the interval/name subset already). */
 }
 
 /* Cloud task only: the websocket task must not be torn down from inside its

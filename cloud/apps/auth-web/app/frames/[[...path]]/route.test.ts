@@ -100,6 +100,21 @@ describe("frames SPA shell", () => {
     expect(body).toContain('cloud_ws_origin: "https://hub.frameos.net"');
   });
 
+  it("re-homes a cross-host LOCAL hub override onto the page's own hostname", async () => {
+    // FRAME_HUB_PUBLIC_URL=http://<lan-ip>:3100 exists for the DEVICE (it
+    // must dial the LAN address). A browser on http://localhost:3000 must
+    // not inherit it: the dev session cookie is host-only for localhost, so
+    // a socket to the LAN IP never carries it and the hub 401s every
+    // upgrade — the fleet socket then error-loops. The browser keeps the
+    // page's hostname (cookies ignore ports); the LAN-IP page keeps the
+    // LAN-IP hub.
+    process.env.FRAME_HUB_PUBLIC_URL = "http://10.4.0.47:3100";
+    const local = await (await get("http://localhost:3000/frames")).text();
+    expect(local).toContain('cloud_ws_origin: "http://localhost:3100"');
+    const lan = await (await get("http://10.4.0.47:3000/frames")).text();
+    expect(lan).toContain('cloud_ws_origin: "http://10.4.0.47:3100"');
+  });
+
   it("never guesses a hub origin in production, even for localhost requests", async () => {
     // The standalone server does not rebuild request.url from the forwarded
     // Host header, so behind nginx every production request looks like

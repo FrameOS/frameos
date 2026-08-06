@@ -1204,6 +1204,54 @@ describe("frame management API", () => {
     expect(commands.filter((c) => c.type === "set_settings")).toHaveLength(0);
   });
 
+  it("queues set_settings toward an esp32 for its interval/name subset", async () => {
+    // The firmware's set_settings persists interval (render cadence) and
+    // name (hostname); the provider enqueues those and refuses the rest.
+    const keys = deviceKeypair();
+    await signIn();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const response = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { interval: 600, name: "Desk, renamed" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      command_id: string | null;
+      status: string;
+    };
+    expect(payload.status).toBe("queued");
+    expect(payload.command_id).toBeTruthy();
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const settingsCommands = commands.filter((c) => c.type === "set_settings");
+    expect(settingsCommands).toHaveLength(1);
+    expect(settingsCommands[0]?.payload).toEqual({
+      settings: { interval: 600, name: "Desk, renamed" },
+    });
+    // The rename also applied provider-side.
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.name).toBe("Desk, renamed");
+  });
+
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
     const keys = deviceKeypair();
     await signIn();
