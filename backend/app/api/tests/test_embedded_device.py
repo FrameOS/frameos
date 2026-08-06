@@ -100,6 +100,97 @@ async def test_render_returns_spectra6_fosb_bitmap(async_client, no_auth_client,
 
 
 @pytest.mark.asyncio
+async def test_render_uses_wasm_scene_render_when_available(async_client, no_auth_client, db, monkeypatch):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Black', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        # Solid black RGBA → the 1bpp packing must come out all zeros,
+        # which the (mostly white) diagnostic card never does.
+        return bytes([0, 0, 0, 255]) * (width * height)
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', fake_render)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    payload = body[12:]
+    assert payload == b'\x00' * len(payload)
+
+
+@pytest.mark.asyncio
+async def test_render_falls_back_to_diagnostic_when_scene_render_fails(
+    async_client, no_auth_client, db, monkeypatch
+):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Broken', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def failing_render(frame_arg, width, height, **kwargs):
+        return None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', failing_render)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    # The diagnostic card has a white background: 1bpp packing is mostly 0xFF.
+    payload = body[12:]
+    assert payload.count(0xFF) > len(payload) // 2
+
+
+@pytest.mark.asyncio
+async def test_render_end_to_end_wasm_scene(async_client, no_auth_client, db):
+    """Full path: real Node subprocess hosting the wasm scene runtime.
+
+    Runs only where the toolchain exists (node on PATH + the emscripten
+    bundle built by frameos/tools/build_wasm.sh) — CI's docker images and
+    dev checkouts that ran build_wasm.sh.
+    """
+    import json as jsonlib
+    from pathlib import Path
+
+    from app.utils.embedded_render import thin_client_renderer_available
+
+    if not thin_client_renderer_available():
+        pytest.skip('node + wasm bundle not available')
+    fixture = Path(__file__).resolve().parents[4] / 'e2e' / 'generated' / 'scenes.json'
+    if not fixture.is_file():
+        pytest.skip('e2e scenes fixture not available')
+
+    scenes = jsonlib.loads(fixture.read_text())
+    gradient = [scene for scene in scenes if scene.get('id') == 'dataGradient_interpreted']
+    assert gradient, 'expected dataGradient_interpreted in the e2e fixture'
+
+    frame = await device_frame(async_client, db)
+    frame.scenes = gradient
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    version, pixel_format, width, height, _ = struct.unpack('<BBHHH', body[4:12])
+    assert (width, height) == (800, 480)
+    payload = body[12:]
+    assert len(payload) == (width // 8) * height
+    # A gradient dithers to a genuine mix of black and white — nothing like
+    # the diagnostic card's near-uniform white field.
+    ones = sum(bin(byte).count('1') for byte in payload[:4800])
+    total_bits = 4800 * 8
+    assert 0.05 < ones / total_bits < 0.95
+
+
+@pytest.mark.asyncio
 async def test_scenes_requires_device_auth(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes')

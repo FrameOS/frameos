@@ -102,7 +102,9 @@ Two chip targets build from this project:
 - **ESP32-C3**: thin-client-only firmware for PSRAM-less boards
   (`FRAMEOS_ESP32_PLATFORM=esp32-c3 ./ci_build_image.sh`, or backend builds
   for a frame whose platform is `esp32-c3`). ~380 KB of usable SRAM rules out
-  the local renderer; the backend or cloud renders and the device blits.
+  the local renderer; the backend renders the frame's scenes server-side in
+  the wasm scene runtime (`backend/app/utils/embedded_render.py`) and the
+  device blits the packed bitmap.
   Built with the 4 MB no-OTA layout so one image fits every supported C3 board.
 
 Known boards ship as hardware presets (`set hardware <preset>` on the console,
