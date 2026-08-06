@@ -159,20 +159,23 @@ export function browserEvent(event: string, data: unknown) {
 // new_log event in the shape the SPA's Logs panel expects. frame_id is the
 // frame's uuid — the same id the frames API returns, so
 // `log.frame_id === props.frameId` holds in the SPA.
+//
+// Structured payloads ship as type "webhook" with the whole object as the
+// line — the exact shape the self-hosted backend stores device logs in
+// (backend/app/models/log.py process_log), which is what the SPA's Logs
+// panel pretty-renders (event highlighted, the rest as key=value) instead
+// of a wall of raw JSON. Non-object payloads stay plain "log" lines.
 export function newLogEvent(
   frameId: string,
   row: { id: number; timestamp: Date; payload: unknown },
 ) {
-  const payload = isRecord(row.payload) ? row.payload : {};
+  const structured = isRecord(row.payload);
   return {
     frame_id: frameId,
     id: row.id,
-    line:
-      typeof payload.line === "string"
-        ? payload.line
-        : JSON.stringify(row.payload ?? null),
+    line: JSON.stringify(row.payload ?? null),
     timestamp: row.timestamp.toISOString(),
-    type: typeof payload.event === "string" ? payload.event : "log",
+    type: structured ? "webhook" : "log",
   };
 }
 

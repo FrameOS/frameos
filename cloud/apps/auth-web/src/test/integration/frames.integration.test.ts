@@ -1402,7 +1402,13 @@ describe("frame management API", () => {
       logs: { id: number; line: string; type: string }[];
     };
     expect(allPayload.logs).toHaveLength(3);
-    expect(allPayload.logs[0]?.type).toBe("render");
+    // Structured payloads ship as backend-style webhook lines: the whole
+    // object as JSON, which the SPA pretty-renders (event + key=value).
+    expect(allPayload.logs[0]?.type).toBe("webhook");
+    expect(JSON.parse(allPayload.logs[0]!.line)).toEqual({
+      event: "render",
+      line: "line 0",
+    });
     expect(allPayload.has_more).toBe(false);
 
     const after = await getFrameLogs(
@@ -1458,8 +1464,8 @@ describe("frame management API", () => {
     expect(payload.logs).toHaveLength(1000);
     expect(payload.has_more).toBe(true);
     // The oldest row fell off the page; the newest is last (chronological).
-    expect(payload.logs[0]?.line).toBe("line 1");
-    expect(payload.logs.at(-1)?.line).toBe("line 1000");
+    expect(JSON.parse(payload.logs[0]!.line).line).toBe("line 1");
+    expect(JSON.parse(payload.logs.at(-1)!.line).line).toBe("line 1000");
     // Ids ascend within the page, so ?after_id incremental catch-up works.
     expect(payload.logs[0]!.id).toBeLessThan(payload.logs.at(-1)!.id);
   });
