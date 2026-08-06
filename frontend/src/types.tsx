@@ -7,6 +7,7 @@ import type { FrameId } from './utils/frameId'
 export type { FrameId }
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
+export type FrameVirtualColorMode = 'rgb' | 'bw' | 'gray4' | 'bwyr' | 'sevencolor' | 'spectra6'
 export type FrameEmbeddedFlashSize = '2MB' | '4MB' | '8MB' | '16MB' | '32MB'
 export type FrameEmbeddedHardwarePreset =
   | 'custom'
@@ -107,6 +108,9 @@ export interface FrameType {
     psramMB?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
+    /** Virtual frames only: how the backend quantizes the rendered image.
+     * Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py. */
+    colorMode?: FrameVirtualColorMode
     pins?: {
       rst?: number
       dc?: number
@@ -296,6 +300,10 @@ export interface NewFrameFormType {
   device?: string | null
   device_config?: FrameType['device_config']
   embedded?: FrameEmbeddedConfig
+  /** Virtual frames only. FrameCreateRequest has no width/height fields, so
+   * these are applied with a follow-up update right after creation. */
+  width?: number
+  height?: number
   timezone?: string | null
   server_host?: string | null
   ssh_pass?: string | null

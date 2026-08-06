@@ -5,6 +5,7 @@ import {
   ArrowLeftIcon,
   ArrowUpTrayIcon,
   CommandLineIcon,
+  ComputerDesktopIcon,
   CpuChipIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
@@ -15,18 +16,22 @@ import {
   EMBEDDED_ESP32_S3,
   EMBEDDED_PICO_2W,
   EMBEDDED_PICO_W,
+  EMBEDDED_VIRTUAL,
   devices,
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
   buildrootPlatforms,
   embeddedPlatforms,
+  isThinClientEmbeddedPlatform,
   rpiOSPlatforms,
+  virtualColorModes,
 } from '../../devices'
 import { defaultRemoteControl, newFrameForm } from './newFrameForm'
 import {
   FrameEmbeddedHardwarePreset,
   FrameInstallMethod,
   FrameOSSettings,
+  FrameVirtualColorMode,
   GPIOButton,
   NewFrameFormType,
 } from '../../types'
@@ -198,7 +203,8 @@ function setInstallMethodValues(
       platform: EMBEDDED_ESP32_S3,
       frame_host: '',
       server_host: defaultNewFrameServerHost(savedSettings),
-      device: '',
+      // "none" = headless firmware (panel "none"); a real panel is opt-in.
+      device: 'none',
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
@@ -217,6 +223,31 @@ function setInstallMethodValues(
     mode: 'rpios',
     platform: '',
     server_host: defaultNewFrameServerHost(savedSettings),
+  }
+}
+
+// A virtual frame is an embedded-mode frame on the "virtual" platform: no
+// board, no panel, no pins, no WiFi. The backend renders its scenes (same
+// wasm path as the thin clients) and serves them as an image/page URL, and
+// ensure_embedded_frame_defaults sets device to "virtual" server-side.
+// Mirrors the clamp in backend/app/api/virtual_frame.py
+const VIRTUAL_MIN_DIMENSION = 16
+const VIRTUAL_MAX_DIMENSION = 4096
+const VIRTUAL_DEFAULT_WIDTH = 800
+const VIRTUAL_DEFAULT_HEIGHT = 480
+
+function setVirtualInstallValues(savedSettings: FrameOSSettings): Partial<NewFrameFormType> {
+  return {
+    install_method: 'embedded',
+    mode: 'embedded',
+    platform: EMBEDDED_VIRTUAL,
+    frame_host: '',
+    server_host: defaultNewFrameServerHost(savedSettings),
+    device: 'virtual',
+    device_config: {},
+    width: VIRTUAL_DEFAULT_WIDTH,
+    height: VIRTUAL_DEFAULT_HEIGHT,
+    gpio_buttons: [],
   }
 }
 
@@ -572,10 +603,14 @@ const unsupportedEmbeddedWaveshareDevices = new Set([
 ])
 
 const embeddedDevices = [
+  // Device "none" is what survives the backend's embedded defaults and maps
+  // to firmware panel "none" (headless). "web_only" would NOT: the backend
+  // rewrites an empty or web_only device to the default Waveshare panel
+  // (ensure_embedded_frame_defaults in backend/app/tasks/embedded_firmware.py).
+  { value: 'none', label: 'No display panel' },
   ...(devices
     .find((group) => group.label === 'Waveshare')
     ?.options.filter((device) => !unsupportedEmbeddedWaveshareDevices.has(device.value)) ?? []),
-  { value: 'web_only', label: 'No display (headless)' },
 ]
 
 function renderEmbeddedDeviceOptions(): JSX.Element[] {
@@ -596,7 +631,10 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
   ))
 }
 
-type AddFrameMode = FrameInstallMethod | 'import'
+// 'virtual' is not its own install_method: it is the embedded install flow on
+// the "virtual" platform, surfaced as a separate card because there is no
+// hardware to flash and none of the ESP32 steps apply.
+type AddFrameMode = FrameInstallMethod | 'import' | 'virtual'
 type UploadHeader = { name: string; value: string }
 
 function installMethodTitle(installMethod: AddFrameMode): string {
@@ -608,6 +646,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'embedded') {
     return 'Flash embedded device'
+  }
+  if (installMethod === 'virtual') {
+    return 'Virtual frame'
   }
   if (installMethod === 'import') {
     return 'Import frame'
@@ -743,7 +784,9 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const { file, importingFrameLoading, isNewFrameSubmitting, newFrame, newFrameErrors } = useValues(newFrameForm)
   const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
-  const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
+  const isVirtualPlatform = installMethod === 'embedded' && newFrame.platform === EMBEDDED_VIRTUAL
+  const addFrameMode: AddFrameMode | undefined =
+    newFrame.mode === 'import' ? 'import' : isVirtualPlatform ? 'virtual' : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
@@ -796,6 +839,36 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         sdCardAssets: presetConfig.sdCardAssets,
       },
       gpio_buttons: presetConfig.gpioButtons.map((button) => ({ ...button })),
+    })
+  }
+
+  // Virtual frames have no board, panel, pins, or WiFi: the backend renders
+  // them and serves the result as an image/page URL. Picking the platform
+  // wires in the "virtual" device (the backend would default it the same
+  // way) and flips the form to the virtual flow; leaving it resets the
+  // device to headless ("none") so the panel picker starts at no panel.
+  const setEmbeddedPlatform = (platform: string): void => {
+    if (platform === EMBEDDED_VIRTUAL) {
+      setNewFrameValues({
+        platform,
+        device: 'virtual',
+        embedded: { ...(newFrame.embedded ?? {}), platform, hardwarePreset: 'custom' },
+        device_config: { ...(newFrame.device_config ?? {}), hardwarePreset: 'custom' },
+        gpio_buttons: [],
+      })
+      return
+    }
+    if (newFrame.device === 'virtual') {
+      setNewFrameValues({
+        platform,
+        device: 'none',
+        embedded: { ...(newFrame.embedded ?? {}), platform },
+      })
+      return
+    }
+    setNewFrameValues({
+      platform,
+      embedded: { ...(newFrame.embedded ?? {}), platform },
     })
   }
 
@@ -868,6 +941,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Build firmware for an ESP32 and flash it over USB."
             >
               <CpuChipIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setVirtualInstallValues(savedSettings))}
+              title="Virtual frame"
+              description="No hardware — the backend renders to a PNG anyone can download."
+            >
+              <ComputerDesktopIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
@@ -1180,6 +1260,83 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
+      ) : addFrameMode === 'virtual' ? (
+        <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            No hardware — the backend renders this frame's scenes and serves them as an image URL (one PNG per request)
+            and a self-refreshing kiosk page for browsers, tablets, and signage players. Both URLs appear in the frame's
+            settings after it is added.
+          </p>
+          <FormField label="Name" error={newFrameErrors.name}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.name ?? ''}
+              onChange={(event) => setNewFrameValue('name', event.target.value)}
+              placeholder="Kitchen Frame"
+              required
+            />
+          </FormField>
+          <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+            <FormField label="Width">
+              <input
+                className={textInputClassName()}
+                type="number"
+                min={VIRTUAL_MIN_DIMENSION}
+                max={VIRTUAL_MAX_DIMENSION}
+                value={newFrame.width ?? ''}
+                onChange={(event) => {
+                  const parsed = parseInt(event.target.value, 10)
+                  setNewFrameValue('width', Number.isNaN(parsed) ? undefined : parsed)
+                }}
+                placeholder={String(VIRTUAL_DEFAULT_WIDTH)}
+                required
+              />
+            </FormField>
+            <FormField label="Height">
+              <input
+                className={textInputClassName()}
+                type="number"
+                min={VIRTUAL_MIN_DIMENSION}
+                max={VIRTUAL_MAX_DIMENSION}
+                value={newFrame.height ?? ''}
+                onChange={(event) => {
+                  const parsed = parseInt(event.target.value, 10)
+                  setNewFrameValue('height', Number.isNaN(parsed) ? undefined : parsed)
+                }}
+                placeholder={String(VIRTUAL_DEFAULT_HEIGHT)}
+                required
+              />
+            </FormField>
+          </div>
+          <FormField label="Color mode">
+            <select
+              className={selectClassName()}
+              value={newFrame.device_config?.colorMode ?? 'rgb'}
+              onChange={(event) =>
+                setNewFrameValue('device_config', {
+                  ...(newFrame.device_config ?? {}),
+                  colorMode: event.target.value as FrameVirtualColorMode,
+                })
+              }
+            >
+              {virtualColorModes.map((mode) => (
+                <option key={mode.value} value={mode.value}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <div className="flex gap-2 pt-2">
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </Form>
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
@@ -1199,7 +1356,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <select
               className={selectClassName()}
               value={newFrame.platform ?? ''}
-              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+              onChange={(event) => setEmbeddedPlatform(event.target.value)}
             >
               {renderPlatformOptions('embedded')}
             </select>
@@ -1213,7 +1370,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               <option value="custom">Custom ESP32 board</option>
               {Object.entries(EMBEDDED_HARDWARE_PRESET_CONFIGS).map(([preset, config]) => (
                 <option key={preset} value={preset}>
-                  {config.label}
+                  {isThinClientEmbeddedPlatform(config.platform) ? `${config.label} — Thin client` : config.label}
                 </option>
               ))}
             </select>
@@ -1221,13 +1378,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           <FormField label="Display panel" error={newFrameErrors.device}>
             <select
               className={selectClassName()}
-              value={newFrame.device ?? ''}
+              value={newFrame.device || 'none'}
               onChange={(event) => setEmbeddedDevice(event.target.value)}
               required
             >
-              <option value="" disabled>
-                Select display panel
-              </option>
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>

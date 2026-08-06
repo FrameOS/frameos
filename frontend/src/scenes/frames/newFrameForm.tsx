@@ -58,7 +58,9 @@ function agentPayload(frame: NewFrameFormType): NonNullable<NewFrameFormType['ag
 }
 
 function framePayload(frame: NewFrameFormType): NewFrameFormType {
-  const { rememberWifi: _rememberWifi, ...frameValues } = frame
+  // width/height are not part of FrameCreateRequest (the backend would drop
+  // them silently); they are applied with a follow-up update after creation.
+  const { rememberWifi: _rememberWifi, width: _width, height: _height, ...frameValues } = frame
   const installMethod = installMethodOf(frame)
   const agent = agentPayload(frame)
 
@@ -205,6 +207,32 @@ export const newFrameForm = kea<newFrameFormType>([
           }
 
           const result = await response.json()
+          let createdFrame = result?.frame
+          // FrameCreateRequest carries no width/height, so a virtual frame's
+          // chosen size is applied through the regular frame-update endpoint
+          // right after creation.
+          const sizeUpdate = {
+            ...(frame.width ? { width: frame.width } : {}),
+            ...(frame.height ? { height: frame.height } : {}),
+          }
+          if (createdFrame?.id && Object.keys(sizeUpdate).length > 0) {
+            try {
+              const updateResponse = await apiFetch(`/api/frames/${createdFrame.id}`, {
+                method: 'POST',
+                body: JSON.stringify(sizeUpdate),
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+              })
+              if (updateResponse.ok) {
+                createdFrame = { ...createdFrame, ...sizeUpdate }
+              } else {
+                console.error('Failed to apply frame size after creation')
+              }
+            } catch (error) {
+              console.error(error)
+            }
+          }
           try {
             await saveRememberedWifiDefaults(frame)
           } catch (error) {
@@ -212,9 +240,9 @@ export const newFrameForm = kea<newFrameFormType>([
           }
           actions.resetNewFrame()
           actions.hideForm()
-          if (result?.frame?.id) {
-            framesModel.actions.addFrame(result.frame)
-            actions.frameCreated(result.frame.id, installMethod)
+          if (createdFrame?.id) {
+            framesModel.actions.addFrame(createdFrame)
+            actions.frameCreated(createdFrame.id, installMethod)
           }
         } catch (error) {
           console.error(error)
