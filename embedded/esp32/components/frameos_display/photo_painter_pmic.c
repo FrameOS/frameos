@@ -3,6 +3,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
+
+/* The PhotoPainter is an ESP32-S3 board; its AXP2101 I2C pins (GPIO 47/48)
+ * do not exist on smaller chips, so other targets get a stub. */
+#if !CONFIG_IDF_TARGET_ESP32S3
+
+#include "esp_err.h"
+
+esp_err_t fos_photo_painter_enable_epd_power(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#else
+
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_check.h"
@@ -146,3 +161,5 @@ esp_err_t fos_photo_painter_enable_epd_power(void)
              input_before, input_after, input_readback);
     return ESP_OK;
 }
+
+#endif /* CONFIG_IDF_TARGET_ESP32S3 */

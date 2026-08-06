@@ -15,6 +15,7 @@
 #include "freertos/semphr.h"
 
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -210,7 +211,7 @@ static char *read_file(const char *path, size_t *out_len)
         fclose(f);
         return NULL;
     }
-    char *buf = heap_caps_malloc(size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *buf = fos_big_malloc(size + 1);
     if (buf == NULL) buf = malloc(size + 1);
     if (buf == NULL) {
         fclose(f);
@@ -591,7 +592,7 @@ esp_err_t fos_scenes_sync(bool force)
     }
 
     size_t cap = content_length > 0 ? (size_t)content_length : 16384;
-    char *buf = heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *buf = fos_big_malloc(cap + 1);
     if (buf == NULL) buf = malloc(cap + 1);
     if (buf == NULL) {
         log_scene_event("scenes:sync", "error", "backend", "", "out-of-memory",
@@ -613,7 +614,7 @@ esp_err_t fos_scenes_sync(bool force)
                 return ESP_ERR_NO_MEM;
             }
             size_t new_cap = cap * 2 > SCENES_MAX_BYTES ? SCENES_MAX_BYTES : cap * 2;
-            char *new_buf = heap_caps_realloc(buf, new_cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            char *new_buf = fos_big_realloc(buf, new_cap + 1);
             if (new_buf == NULL) new_buf = realloc(buf, new_cap + 1);
             if (new_buf == NULL) {
                 log_scene_event("scenes:sync", "error", "backend", "", "out-of-memory",

@@ -83,6 +83,11 @@ const metadataPayload = {
       size: firmwareBytes.length,
     },
     {
+      name: "frameos-1.2.3-esp32-c3-generic.bin",
+      platform: "esp32-c3-generic",
+      size: firmwareBytes.length,
+    },
+    {
       name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
       platform: "raspberry-pi-zero-2-w",
       size: 1024,
@@ -561,6 +566,54 @@ describe("Esp32CloudFlasher", () => {
 
     expect(port.writes).toContain('set hardware "waveshare_esp32_s3_photopainter"');
     expect(port.writes.some((line) => line.startsWith("set panel"))).toBe(false);
+  });
+
+  it("lists every hardware bundle from the firmware preset table", async () => {
+    // Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
+    // (and the preset table in fos_console.c) — a preset missing here cannot
+    // be provisioned from the browser at all.
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    const picker = await screen.findByLabelText("Frame hardware");
+    const values = Array.from(picker.querySelectorAll("option")).map(
+      (option) => option.getAttribute("value"),
+    );
+    expect(values).toEqual(
+      expect.arrayContaining([
+        "hw:waveshare_esp32_s3_photopainter",
+        "hw:waveshare_esp32_s3_epaper_13_3e6",
+        "hw:trmnl_og",
+        "hw:trmnl_bwry",
+        "hw:trmnl_og_diy_kit",
+        "hw:trmnl_4in26_diy_kit",
+        "hw:xteink_x4",
+        "hw:seeed_reterminal_sticky",
+      ]),
+    );
+  });
+
+  it("flashes the ESP32-C3 firmware for C3 boards and provisions the bundle", async () => {
+    // The TRMNL OG/BWRY and XTEINK X4 are ESP32-C3 boards: no PSRAM, thin
+    // client only, and a different chip — they must get the esp32-c3-generic
+    // asset, never the S3 build.
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    await fillRequiredFields("hw:trmnl_og");
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(fetchedUrls()).toContain(
+      "/api/frames/firmware?platform=esp32-c3-generic",
+    );
+    expect(fetchedUrls()).not.toContain(
+      "/api/frames/firmware?platform=esp32-s3-generic",
+    );
+    expect(port.writes).toContain('set hardware "trmnl_og"');
   });
 
   it("hides the panel picker for releases without the all-panels firmware", async () => {

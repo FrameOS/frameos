@@ -1,0 +1,22 @@
+# ESP32-C3 target overlay. Apply last, after the flash-size profile:
+#   SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota;sdkconfig.defaults.esp32c3"
+CONFIG_IDF_TARGET="esp32c3"
+
+# No supported C3 module has PSRAM: the firmware runs thin-client only
+# (server- or cloud-rendered images blitted to the panel). The base config's
+# SPIRAM/octal keys do not exist on the C3 and are ignored; SPIRAM itself must
+# be off so nothing probes for it.
+# CONFIG_SPIRAM is not set
+
+# The base config pushes mbedTLS buffers to PSRAM; on the C3 keep them on the
+# internal heap but allocate them per-connection so idle TLS costs nothing.
+# CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC is not set
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+
+# ~380 KB of usable SRAM total: trim Wi-Fi buffer pools from their defaults.
+# A thin client moves one image at a time; throughput is panel-refresh bound.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16

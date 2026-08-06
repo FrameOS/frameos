@@ -37,8 +37,10 @@ from app.tasks.embedded_firmware import (
     embedded_sdkconfig_defaults_for_frame,
     embedded_sd_card_assets_for_frame,
     ensure_embedded_frame_defaults,
+    embedded_platform_for_frame,
     latest_embedded_firmware,
     normalize_embedded_flash_size,
+    normalize_embedded_platform,
     request_pending_embedded_firmware_ota,
     _reset_stale_embedded_sdkconfig,
 )
@@ -720,6 +722,128 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
 
 
+def test_normalize_embedded_platform():
+    assert normalize_embedded_platform(None) == "esp32-s3"
+    assert normalize_embedded_platform("") == "esp32-s3"
+    assert normalize_embedded_platform("esp32s3") == "esp32-s3"
+    assert normalize_embedded_platform("esp32-s3-devkitc-1") == "esp32-s3"
+    assert normalize_embedded_platform("esp32-c3") == "esp32-c3"
+    assert normalize_embedded_platform("esp32c3") == "esp32-c3"
+    assert normalize_embedded_platform("ESP32-C3") == "esp32-c3"
+    with pytest.raises(ValueError):
+        normalize_embedded_platform("esp32-p4")
+
+
+def test_embedded_hardware_preset_for_trmnl_og():
+    frame = Frame(id=9, embedded={"hardwarePreset": "trmnl_og"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_7in5_V2"
+    assert frame.embedded["platform"] == "esp32-c3"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_flash_size_for_frame(frame) == "4MB"
+    assert embedded_ota_supported_for_frame(frame) is False
+    assert embedded_module_psram_bytes(frame) == 0
+    # No PSRAM: local rendering is impossible, the platform forces thin-client.
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    # Remote mode always passes the guardrail regardless of PSRAM.
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 10, "dc": 5, "cs": 6, "cs2": -1,
+        "busy": 4, "sck": 7, "mosi": 8, "pwr": -1,
+    }
+    assert frame.gpio_buttons == [{"pin": 2, "label": "BUTTON"}]
+    assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+    assert embedded_sdkconfig_defaults_for_frame(frame) == (
+        "sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota;sdkconfig.defaults.esp32c3"
+    )
+    required = embedded_required_sdkconfig_for_frame(frame)
+    assert required["CONFIG_IDF_TARGET"] == '"esp32c3"'
+    assert required["CONFIG_ESPTOOLPY_FLASHSIZE"] == '"4MB"'
+
+
+def test_embedded_hardware_preset_for_trmnl_bwry():
+    frame = Frame(id=9, embedded={"hardwarePreset": "trmnl_bwry"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in5yr"
+    assert embedded_panel_for_frame(frame) == "EPD_7in5yr"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+
+
+def test_embedded_hardware_preset_for_xteink_x4():
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_4in26"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_ota_supported_for_frame(frame) is True
+    assert embedded_module_psram_bytes(frame) == 0
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    pins = embedded_pins_for_frame(frame)
+    assert pins == {
+        "rst": 5, "dc": 4, "cs": 21, "cs2": -1,
+        "busy": 6, "sck": 8, "mosi": 10, "pwr": -1,
+    }
+    # Every pin fits the C3's GPIO range (0-21).
+    assert all(-1 <= pin <= 21 for pin in pins.values())
+    assert frame.gpio_buttons == [{"pin": 3, "label": "POWER"}]
+
+
+def test_embedded_pins_clamp_uses_platform_gpio_range():
+    frame = Frame(
+        id=9,
+        embedded={"hardwarePreset": "trmnl_og"},
+        device_config={"hardwarePreset": "trmnl_og", "pins": {"rst": 38}},
+    )
+    # GPIO 38 does not exist on the C3; the override is ignored.
+    assert embedded_pins_for_frame(frame)["rst"] == 10
+
+
+def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
+    frame = Frame(id=9, embedded={"hardwarePreset": "seeed_reterminal_sticky"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_3in97"
+    assert embedded_panel_for_frame(frame) == "EPD_3in97"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    # PSRAM on board: local rendering stays available.
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
+        "busy": 18, "sck": 13, "mosi": 14, "pwr": -1,
+    }
+    assert embedded_sdkconfig_defaults_for_frame(frame) == (
+        "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
+    )
+    assert embedded_required_sdkconfig_for_frame(frame)["CONFIG_IDF_TARGET"] == '"esp32s3"'
+
+
+def test_embedded_hardware_preset_for_trmnl_diy_kits():
+    for preset, panel, button in (
+        ("trmnl_og_diy_kit", "EPD_7in5_V2", {"pin": 5, "label": "KEY3"}),
+        ("trmnl_4in26_diy_kit", "EPD_4in26", {"pin": 2, "label": "KEY1"}),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "8MB"
+        assert embedded_pins_for_frame(frame) == {
+            "rst": 38, "dc": 10, "cs": 44, "cs2": -1,
+            "busy": 4, "sck": 7, "mosi": 9, "pwr": -1,
+        }
+        assert button in frame.gpio_buttons
+
+
 def test_embedded_hardware_preset_keeps_explicit_gpio_buttons():
     frame = Frame(
         id=8,
@@ -1055,6 +1179,7 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
         '\n'.join([
             'CONFIG_ESP_ERR_TO_NAME_LOOKUP=y',
             'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
+            'CONFIG_IDF_TARGET="esp32s3"',
             'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
             'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
             '',

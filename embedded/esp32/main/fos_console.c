@@ -24,6 +24,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
+#include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -181,7 +182,7 @@ static int cmd_set(int argc, char **argv)
             const char *panel;
             const char *pins;
             const char *gpio_buttons;
-            const char *assets_sd_pins;
+            const char *assets_sd_pins; /* empty = board has no usable TF socket */
         } presets[] = {
             { "waveshare_esp32_s3_photopainter", "EPD_7in3e",
               "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1",
@@ -191,6 +192,35 @@ static int cmd_set(int argc, char **argv)
               "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
               "",
               "cs=15,sck=6,miso=5,mosi=7" },
+            /* TRMNL OG / BWRY (ESP32-C3 firmware). */
+            { "trmnl_og", "EPD_7in5_V2",
+              "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
+              "2:BUTTON",
+              "" },
+            { "trmnl_bwry", "EPD_7in5yr",
+              "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
+              "2:BUTTON",
+              "" },
+            /* Seeed XIAO ePaper Driver Board (TRMNL DIY kits, XIAO ESP32-S3). */
+            { "trmnl_og_diy_kit", "EPD_7in5_V2",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
+              "0:BOOT\n5:KEY3",
+              "" },
+            { "trmnl_4in26_diy_kit", "EPD_4in26",
+              "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
+              "0:BOOT\n2:KEY1",
+              "" },
+            /* XTEINK X4 (ESP32-C3 firmware). TF socket shares the EPD SPI bus,
+             * so SD assets stay off. */
+            { "xteink_x4", "EPD_4in26",
+              "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1",
+              "3:POWER",
+              "" },
+            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
+            { "seeed_reterminal_sticky", "EPD_3in97",
+              "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
+              "4:POWER",
+              "" },
         };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
         for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
@@ -202,10 +232,11 @@ static int cmd_set(int argc, char **argv)
                 printf("internal error applying preset %s\n", presets[i].name);
                 return 1;
             }
-            config->assets_sd.enabled = true;
+            config->assets_sd.enabled = presets[i].assets_sd_pins[0] != '\0';
             printf("applied %s: panel=%s pins=%s buttons=%u sd_pins=%s\n",
                    presets[i].name, presets[i].panel, presets[i].pins,
-                   (unsigned)config->gpio_button_count, presets[i].assets_sd_pins);
+                   (unsigned)config->gpio_button_count,
+                   presets[i].assets_sd_pins[0] ? presets[i].assets_sd_pins : "(none)");
             break;
         }
     }
@@ -386,7 +417,7 @@ static int cmd_display_test(int argc, char **argv)
         return 1;
     }
 
-    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *buf = fos_big_malloc(len);
     if (!buf) buf = malloc(len);
     if (!buf) {
         printf("display_test: allocation failed (%u bytes)\n", (unsigned)len);
@@ -697,7 +728,7 @@ static int cmd_usb_api(int argc, char **argv)
             usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
             return 1;
         }
-        uint8_t *body = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t *body = fos_big_malloc(len + 1);
         if (!body) body = malloc(len + 1);
         if (!body) {
             usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");

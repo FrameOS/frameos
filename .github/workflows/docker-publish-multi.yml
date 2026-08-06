@@ -412,6 +412,13 @@ jobs:
               # remove once no deployed cloud references it.
               cp embedded/esp32/build-ci/merged-binary.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-epd7in5v2.bin"
+              # ESP32-C3 thin-client firmware (TRMNL OG/BWRY, XTEINK X4):
+              # 4MB no-OTA layout, no on-device Nim renderer.
+              FRAMEOS_ESP32_PLATFORM=esp32-c3 \
+                FRAMEOS_ESP32_BUILD_DIR=build-ci-c3 \
+                bash embedded/esp32/ci_build_image.sh
+              cp embedded/esp32/build-ci-c3/merged-binary.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic.bin"
             '
           ls -lh release-assets/
 
@@ -425,6 +432,7 @@ jobs:
           path: |
             release-assets/*-esp32-s3-generic.bin
             release-assets/*-esp32-s3-epd7in5v2.bin
+            release-assets/*-esp32-c3-generic.bin
           if-no-files-found: error
 
   # Depot builds both platforms remotely with its own persistent layer cache,

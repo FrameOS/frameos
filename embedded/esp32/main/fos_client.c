@@ -23,6 +23,7 @@
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -388,7 +389,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         return;
     }
-    uint8_t *copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *copy = fos_big_malloc(len);
     if (!copy) copy = malloc(len);
     if (!copy) {
         ESP_LOGW(TAG, "preview snapshot skipped: out of memory for %u bytes", (unsigned)len);
@@ -565,7 +566,7 @@ static esp_err_t render_once(void)
         err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
-        buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        buf = fos_big_malloc(buf_len);
         if (!buf) buf = malloc(buf_len);
         if (!buf) {
             ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);

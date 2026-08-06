@@ -24,6 +24,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -228,7 +229,7 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     if (total < 0 || (total == 0 && !allow_empty) || (size_t)total > max_len) {
         return ESP_ERR_INVALID_SIZE;
     }
-    char *body = heap_caps_malloc((size_t)total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *body = fos_big_malloc((size_t)total + 1);
     if (!body) body = malloc((size_t)total + 1);
     if (!body) return ESP_ERR_NO_MEM;
     int received = 0;
@@ -916,7 +917,7 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
         return ESP_ERR_NOT_FOUND;
     }
 
-    uint8_t *packed = heap_caps_malloc(packed_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *packed = fos_big_malloc(packed_len);
     if (!packed) packed = malloc(packed_len);
     if (!packed) return ESP_ERR_NO_MEM;
     esp_err_t err = fos_client_snapshot_copy(packed, packed_len, &width, &height, &format, NULL, NULL);
@@ -936,7 +937,7 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
         return ESP_ERR_INVALID_SIZE;
     }
     size_t bmp_len = 54u + palette_bytes + pixel_bytes;
-    uint8_t *bmp = heap_caps_malloc(bmp_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *bmp = fos_big_malloc(bmp_len);
     if (!bmp) bmp = malloc(bmp_len);
     if (!bmp) {
         free(packed);
@@ -1813,7 +1814,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     if (total <= 0 || total > 512 * 1024) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
     }
-    char *body = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *body = fos_big_malloc(total + 1);
     if (!body) body = malloc(total + 1);
     if (!body) return httpd_resp_send_500(req);
     int received = 0;

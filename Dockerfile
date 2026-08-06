@@ -2,7 +2,10 @@
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG ESP_IDF_VERSION=v5.5.4
-ARG ESP_IDF_TARGET=esp32s3
+# Comma-separated list passed to ESP-IDF install.sh; every chip the embedded
+# firmware builds for (ESP32-S3 boards render locally, ESP32-C3 boards are
+# thin clients).
+ARG ESP_IDF_TARGET=esp32s3,esp32c3
 
 FROM ${PYTHON_IMAGE} AS nim-toolchain
 

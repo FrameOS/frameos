@@ -12,6 +12,12 @@ export type FrameEmbeddedHardwarePreset =
   | 'custom'
   | 'waveshare_esp32_s3_photopainter'
   | 'waveshare_esp32_s3_epaper_13_3e6'
+  | 'trmnl_og'
+  | 'trmnl_bwry'
+  | 'trmnl_og_diy_kit'
+  | 'trmnl_4in26_diy_kit'
+  | 'xteink_x4'
+  | 'seeed_reterminal_sticky'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode

@@ -92,6 +92,13 @@ ESP32_UNSUPPORTED = {
 }
 
 
+# Panels that live in the Waveshare driver tree but are other vendors' glass.
+ESP32_PANEL_BRANDS = {
+    "EPD_7in5yr": "TRMNL BWRY",       # Good Display GDEM075F52
+    "EPD_3in97": "Good Display",      # GDEM0397T81P (Seeed reTerminal Sticky)
+}
+
+
 def build_esp32_panels():
     from app.drivers.waveshare import get_variant_folder
     panels = []
@@ -114,9 +121,10 @@ def build_esp32_panels():
         }.get(v.color_option, v.color_option)
         code = "" if v.code == "" else f" ({v.code.upper()})"
         dim = f"{max(v.width or 0, v.height or 0)}x{min(v.width or 0, v.height or 0)}"
+        brand = ESP32_PANEL_BRANDS.get(v.key, "Waveshare")
         panels.append({
             "key": v.key,
-            "label": f'Waveshare {v.size}"{code} {dim} {color}',
+            "label": f'{brand} {v.size}"{code} {dim} {color}',
         })
     return panels
 

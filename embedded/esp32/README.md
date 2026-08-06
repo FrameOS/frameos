@@ -47,7 +47,7 @@ Requires [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) v5.5.x:
 mkdir -p ~/esp && cd ~/esp
 git clone --depth 1 --branch v5.5.4 --recursive --shallow-submodules \
   https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh esp32s3
+cd esp-idf && ./install.sh esp32s3,esp32c3
 ```
 
 The backend finds the toolchain via the `IDF_PATH` env var, falling back to
@@ -92,6 +92,37 @@ logs to UART0 and avoid QEMU's PSRAM path; the default build profile remains
 USB Serial/JTAG with octal PSRAM enabled. The QEMU smoke verifies that the
 bootloader selects `ota_0` and ESP-IDF starts the `frameos_esp32` app image;
 when QEMU reaches `app_main`, the script reports that stronger signal too.
+
+## Chip targets and supported boards
+
+Two chip targets build from this project:
+
+- **ESP32-S3** (default): the full firmware, including the on-device Nim/pixie
+  renderer and QuickJS. Needs a module with PSRAM for local rendering.
+- **ESP32-C3**: thin-client-only firmware for PSRAM-less boards
+  (`FRAMEOS_ESP32_PLATFORM=esp32-c3 ./ci_build_image.sh`, or backend builds
+  for a frame whose platform is `esp32-c3`). ~380 KB of usable SRAM rules out
+  the local renderer; the backend or cloud renders and the device blits.
+  Built with the 4 MB no-OTA layout so one image fits every supported C3 board.
+
+Known boards ship as hardware presets (`set hardware <preset>` on the console,
+or the preset dropdown in the frontends — the authoritative table is
+`EMBEDDED_HARDWARE_PRESETS` in `backend/app/tasks/embedded_firmware.py`):
+
+| Preset | Chip | Panel | Notes |
+| --- | --- | --- | --- |
+| `waveshare_esp32_s3_photopainter` | S3 | EPD_7in3e 7.3" Spectra | PMIC power-up, TF socket |
+| `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket |
+| `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG |
+| `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY |
+| `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board |
+| `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board |
+| `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off |
+| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
+
+The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
+supported — it needs a parallel display driver class this component does not
+have.
 
 ## First boot and provisioning
 

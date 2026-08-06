@@ -32,8 +32,10 @@ const firmwareApiUrl = '/api/frames/firmware'
 // panel picker only shows when the release actually publishes the generic
 // asset.
 const genericPlatform = 'esp32-s3-generic'
+const genericC3Platform = 'esp32-c3-generic'
 const legacyPlatform = 'esp32-s3-epd7in5v2'
 const genericFirmwareSuffix = '-esp32-s3-generic.bin'
+const genericC3FirmwareSuffix = '-esp32-c3-generic.bin'
 
 // Hardware picker. Integrated boards are BUNDLES: `set hardware <preset>`
 // makes the firmware apply the panel, EPD wiring, GPIO buttons and TF-card
@@ -44,10 +46,26 @@ const genericFirmwareSuffix = '-esp32-s3-generic.bin'
 // default: nobody actually runs the firmware's baked-in EPD_7in5_V2 combo,
 // and silently provisioning any one bundle would misconfigure every other
 // board — so the picker starts on a placeholder and flashing requires a
-// choice.
+// choice. `platform` picks the firmware asset: ESP32-C3 boards need the
+// esp32-c3-generic build (thin-client only — no PSRAM, so no on-device
+// renderer), everything else flashes the esp32-s3-generic one.
 const boardChoices = [
-  { label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)', value: 'hw:waveshare_esp32_s3_photopainter' },
-  { label: 'Waveshare PhotoPainter 13.3" (ESP32-S3 — SD card)', value: 'hw:waveshare_esp32_s3_epaper_13_3e6' },
+  {
+    label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)',
+    value: 'hw:waveshare_esp32_s3_photopainter',
+    platform: genericPlatform,
+  },
+  {
+    label: 'Waveshare PhotoPainter 13.3" (ESP32-S3 — SD card)',
+    value: 'hw:waveshare_esp32_s3_epaper_13_3e6',
+    platform: genericPlatform,
+  },
+  { label: 'TRMNL OG (7.5" ESP32-C3)', value: 'hw:trmnl_og', platform: genericC3Platform },
+  { label: 'TRMNL BWRY (7.5" color ESP32-C3)', value: 'hw:trmnl_bwry', platform: genericC3Platform },
+  { label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_og_diy_kit', platform: genericPlatform },
+  { label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_4in26_diy_kit', platform: genericPlatform },
+  { label: 'XTEINK X4 (4.26" ESP32-C3)', value: 'hw:xteink_x4', platform: genericC3Platform },
+  { label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)', value: 'hw:seeed_reterminal_sticky', platform: genericPlatform },
 ] as const
 
 // The console's `set pins` spec (fos_config_parse_pins): comma-separated
@@ -305,22 +323,24 @@ interface FirmwareAsset {
   size: number
 }
 
-async function fetchGenericFirmware(log: (line: string) => void): Promise<Uint8Array> {
+async function fetchGenericFirmware(platform: string, log: (line: string) => void): Promise<Uint8Array> {
   log('Looking up the latest FrameOS release…')
   const release = await fetchReleaseListing<{
     assets?: FirmwareAsset[]
     release?: string
   }>(firmwareApiUrl)
-  // Prefer the all-panels build; fall back to the single-panel one that
-  // releases before the runtime driver table published.
+  // Prefer the requested chip's all-panels build; for ESP32-S3 fall back to
+  // the single-panel build that releases before the runtime driver table
+  // published. There is no legacy ESP32-C3 build to fall back to.
   const asset =
-    release.assets?.find((entry) => entry.platform === genericPlatform) ??
-    release.assets?.find((entry) => entry.platform === legacyPlatform)
+    release.assets?.find((entry) => entry.platform === platform) ??
+    (platform === genericPlatform ? release.assets?.find((entry) => entry.platform === legacyPlatform) : undefined)
   if (!asset) {
+    const suffix = platform === genericC3Platform ? genericC3FirmwareSuffix : genericFirmwareSuffix
     throw new Error(
       `Release ${
         release.release || '?'
-      } has no ${genericFirmwareSuffix} asset yet — it ships with the first release after cloud frames landed. You can flash manually via embedded/esp32 instead.`
+      } has no ${suffix} asset yet — it ships with the first release after cloud frames landed. You can flash manually via embedded/esp32 instead.`
     )
   }
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`)
@@ -511,6 +531,10 @@ export function Esp32CloudFlasher({
   // `set hardware`, or a bare panel via `set panel`.
   const provisionKey = panelChoice.replace(/^(hw|panel):/, '')
   const provisionCommand = panelChoice.startsWith('hw:') ? 'hardware' : 'panel'
+  // Which firmware asset the chosen hardware needs. Bare panels are wired to
+  // a XIAO ESP32-S3; board bundles carry their chip in boardChoices.
+  const firmwarePlatform =
+    boardChoices.find((choice) => choice.value === panelChoice)?.platform ?? genericPlatform
 
   // The handoff to the freshly enrolled frame: once provisioning is done the
   // board reboots and enrolls on its own schedule, so watch the frames list
@@ -590,7 +614,7 @@ export function Esp32CloudFlasher({
     setKnownFrameIds(null)
     try {
       setPhase('fetching')
-      const firmware = await fetchGenericFirmware(log)
+      const firmware = await fetchGenericFirmware(firmwarePlatform, log)
 
       setPhase('connecting')
       log('Pick the USB serial port of your ESP32 — if several are listed, choose "USB JTAG/serial debug unit"…')

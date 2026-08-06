@@ -11,6 +11,7 @@ import {
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
   devices,
   partialRefreshDefaultsByDevice,
@@ -262,51 +263,163 @@ const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType
   maxFrequencyKHz: 20000,
 }
 
-function normalizeEmbeddedHardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
-  if (value === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
-  }
-  if (value === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return WAVESHARE_13IN3E6_HARDWARE_PRESET
-  }
-  return 'custom'
+// Mirrors EMBEDDED_TRMNL_OG_PINS and friends in backend/app/tasks/embedded_firmware.py
+const TRMNL_OG_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 10,
+  dc: 5,
+  cs: 6,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 8,
+  pwr: -1,
+}
+const XIAO_EPAPER_DRIVER_BOARD_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+const XTEINK_X4_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 5,
+  dc: 4,
+  cs: 21,
+  cs2: -1,
+  busy: 6,
+  sck: 8,
+  mosi: 10,
+  pwr: -1,
+}
+const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 17,
+  dc: 16,
+  cs: 15,
+  cs2: -1,
+  busy: 18,
+  sck: 13,
+  mosi: 14,
+  pwr: -1,
 }
 
-function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+interface EmbeddedHardwarePresetConfig {
+  label: string
+  platform: string
   device: string
   flashSize: NonNullable<NonNullable<NewFrameFormType['embedded']>['flashSize']>
   psramMB: number
   pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
   gpioButtons: GPIOButton[]
-  sdCardAssets: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
-} | null {
-  if (hardwarePreset === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return {
-      device: WAVESHARE_PHOTOPAINTER_DEVICE,
-      flashSize: '16MB',
-      psramMB: 8,
-      pins: { ...WAVESHARE_PHOTOPAINTER_PINS },
-      gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS.map((button) => ({ ...button })),
-      sdCardAssets: {
-        ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
-        pins: { ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS.pins },
-      },
-    }
+  sdCardAssets?: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
+}
+
+// Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
+const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset, EmbeddedHardwarePresetConfig>> = {
+  [WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    platform: EMBEDDED_ESP32_S3,
+    device: WAVESHARE_PHOTOPAINTER_DEVICE,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: WAVESHARE_PHOTOPAINTER_PINS,
+    gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
+    sdCardAssets: WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
+  },
+  [WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+    platform: EMBEDDED_ESP32_S3,
+    device: WAVESHARE_13IN3E6_DEVICE,
+    flashSize: '32MB',
+    psramMB: 16,
+    pins: WAVESHARE_13IN3E6_PINS,
+    gpioButtons: [],
+    sdCardAssets: WAVESHARE_13IN3E6_SD_CARD_ASSETS,
+  },
+  trmnl_og: {
+    label: 'TRMNL OG (7.5" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: TRMNL_OG_PINS,
+    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
+  },
+  trmnl_bwry: {
+    label: 'TRMNL BWRY (7.5" color ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5yr',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: TRMNL_OG_PINS,
+    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
+  },
+  trmnl_og_diy_kit: {
+    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 5, label: 'KEY3' },
+    ],
+  },
+  trmnl_4in26_diy_kit: {
+    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 2, label: 'KEY1' },
+    ],
+  },
+  xteink_x4: {
+    label: 'XTEINK X4 (4.26" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '16MB',
+    psramMB: 0,
+    pins: XTEINK_X4_PINS,
+    gpioButtons: [{ pin: 3, label: 'POWER' }],
+  },
+  seeed_reterminal_sticky: {
+    label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_3in97',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_STICKY_PINS,
+    gpioButtons: [{ pin: 4, label: 'POWER' }],
+  },
+}
+
+function normalizeEmbeddedHardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  if (typeof value === 'string' && value in EMBEDDED_HARDWARE_PRESET_CONFIGS) {
+    return value as FrameEmbeddedHardwarePreset
   }
-  if (hardwarePreset === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return {
-      device: WAVESHARE_13IN3E6_DEVICE,
-      flashSize: '32MB',
-      psramMB: 16,
-      pins: { ...WAVESHARE_13IN3E6_PINS },
-      gpioButtons: [],
-      sdCardAssets: {
-        ...WAVESHARE_13IN3E6_SD_CARD_ASSETS,
-        pins: { ...WAVESHARE_13IN3E6_SD_CARD_ASSETS.pins },
-      },
-    }
+  return 'custom'
+}
+
+function embeddedHardwarePresetConfig(
+  hardwarePreset: FrameEmbeddedHardwarePreset
+): EmbeddedHardwarePresetConfig | null {
+  const config = EMBEDDED_HARDWARE_PRESET_CONFIGS[hardwarePreset]
+  if (!config) {
+    return null
   }
-  return null
+  return {
+    ...config,
+    pins: { ...config.pins },
+    gpioButtons: config.gpioButtons.map((button) => ({ ...button })),
+    sdCardAssets: config.sdCardAssets ? { ...config.sdCardAssets, pins: { ...config.sdCardAssets.pins } } : undefined,
+  }
 }
 
 function renderDeviceOptions(): JSX.Element[] {
@@ -537,11 +650,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
     }
 
     setNewFrameValues({
-      platform: EMBEDDED_ESP32_S3,
+      platform: presetConfig.platform,
       device: presetConfig.device,
       embedded: {
         ...(newFrame.embedded ?? {}),
-        platform: EMBEDDED_ESP32_S3,
+        platform: presetConfig.platform,
         flashSize: presetConfig.flashSize,
         hardwarePreset,
       },
@@ -967,9 +1080,12 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               value={embeddedHardwarePreset}
               onChange={(event) => setEmbeddedHardwarePreset(normalizeEmbeddedHardwarePreset(event.target.value))}
             >
-              <option value="custom">Custom ESP32-S3 board</option>
-              <option value={WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET}>Waveshare ESP32-S3 PhotoPainter</option>
-              <option value={WAVESHARE_13IN3E6_HARDWARE_PRESET}>Waveshare ESP32-S3 ePaper 13.3E6</option>
+              <option value="custom">Custom ESP32 board</option>
+              {Object.entries(EMBEDDED_HARDWARE_PRESET_CONFIGS).map(([preset, config]) => (
+                <option key={preset} value={preset}>
+                  {config.label}
+                </option>
+              ))}
             </select>
           </FormField>
           <FormField label="Display panel" error={newFrameErrors.device}>
