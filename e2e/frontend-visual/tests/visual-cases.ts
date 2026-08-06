@@ -133,7 +133,12 @@ async function scrollLogsToLatest(page: Page): Promise<void> {
       break
     }
     if (await scrollButton.isVisible().catch(() => false)) {
-      await scrollButton.click()
+      // The panel can auto-follow to the bottom between the visibility check
+      // and the click, which hides the button — that is the state this
+      // helper is trying to reach, not a failure. A short timeout plus
+      // swallow keeps the loop's own retry (and the final asserts below) as
+      // the source of truth instead of deadlocking on a vanished button.
+      await scrollButton.click({ timeout: 1000 }).catch(() => {})
     }
     await page.evaluate(() => {
       const scrollElement = document.scrollingElement ?? document.documentElement

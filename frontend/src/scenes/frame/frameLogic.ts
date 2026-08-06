@@ -25,6 +25,7 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
+import { cloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
@@ -588,8 +589,21 @@ function frameosVersionRequiresDeploy(previousFrameosVersion: string | null): bo
   return false
 }
 
-function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
+// The keys a diff between server truth and the form may consider. On the
+// cloud only the declarative settings allowlist (plus scenes) round-trips:
+// GET /api/frames/{id} never returns fields like frame_admin_auth or
+// error_behavior, while sanitizeFrame materializes defaults for them in the
+// form — so diffing the full key list pinned "Frame admin auth" and "Global
+// error handling" into Pending save forever, unsaveable by construction.
+function frameDiffKeys(): (keyof FrameType)[] {
+  if (isCloudMode()) {
+    return [...(cloudFrameSettingKeys as readonly (keyof FrameType)[]), 'scenes']
+  }
   return FRAME_KEYS
+}
+
+function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
+  return frameDiffKeys()
 }
 
 export function normalizeSceneForComparison(
@@ -709,7 +723,7 @@ function computeChangeDetails(
   const details: ChangeDetail[] = []
   const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
 
-  for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
+  for (const key of frameDiffKeys().filter((k) => k !== 'scenes')) {
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: frameChangeDetailLabel(key, previous?.[key], next?.[key]),
@@ -2359,8 +2373,12 @@ export const frameLogic = kea<frameLogicType>([
           status: 'success',
           detail: [
             values.frame?.connected === false
-              ? 'Saved to your cloud scenes — the frame is offline right now and applies them when it reconnects'
-              : 'Saved to your cloud scenes — the frame applies them as soon as it syncs',
+              ? 'Deploy queued — the frame is offline right now and applies the scenes when it reconnects'
+              : 'Deployed — the frame applies the scenes as soon as it syncs',
+            // The scene graphs themselves live in the account's cloud scene
+            // library (that IS the storage for cloud frames), mentioned so
+            // the library entries this creates are not a mystery.
+            'Also saved to your cloud scenes',
             ...outcome.notes,
           ].join('. '),
         })

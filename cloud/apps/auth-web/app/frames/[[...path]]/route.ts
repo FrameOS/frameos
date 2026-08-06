@@ -190,8 +190,39 @@ export async function GET(request: NextRequest) {
     "",
   );
   const requestHostname = new URL(request.url).hostname;
+  // The BROWSER's hub origin must share the page's hostname in dev: the
+  // session cookie is host-only (no FRAMEOS_SESSION_COOKIE_DOMAIN in dev,
+  // and IP literals cannot carry Domain= anyway), so a socket dialed at a
+  // different host never sends it and the hub 401s every upgrade — the SPA
+  // then error-loops on ws://…/api/frames/updates. FRAME_HUB_PUBLIC_URL
+  // exists for DEVICES (they need a LAN address, enroll/route.ts) and still
+  // shapes the device ws_url; for the browser we override only when it
+  // points at a *different local/LAN host* than the page — the exact
+  // cookie-breaking case — keeping its port. A public hub hostname stays
+  // authoritative (a deployment fronting dev with real cookie domains).
+  const hostIsLocal = (host: string): boolean =>
+    localHosts.has(host) || isPrivateLanIPv4(host);
+  const browserHub = (() => {
+    if (!configuredHub) {
+      return undefined;
+    }
+    try {
+      const configured = new URL(configuredHub);
+      if (
+        process.env.NODE_ENV !== "production" &&
+        hostIsLocal(configured.hostname) &&
+        configured.hostname !== requestHostname &&
+        hostIsLocal(requestHostname)
+      ) {
+        return `http://${requestHostname}:${configured.port || "3100"}`;
+      }
+    } catch {
+      // Unparseable override: pass it through untouched below.
+    }
+    return configuredHub;
+  })();
   const hubOrigin =
-    configuredHub ||
+    browserHub ||
     (process.env.NODE_ENV === "production"
       ? undefined
       : localHosts.has(requestHostname)

@@ -744,14 +744,21 @@ describe("telemetry", () => {
       type: "log_batch",
     });
 
+    // Structured payloads ship as backend-style "webhook" lines: the whole
+    // object JSON-encoded, so the SPA renders event + key=value instead of
+    // raw JSON.
     const logEvent = await browser.next(
       (msg) =>
         msg.event === "new_log" &&
-        (msg.data as Record<string, unknown>).type === "render:done",
+        String((msg.data as Record<string, unknown>).line).includes("render:done"),
       "new_log event",
     );
     const logData = logEvent.data as Record<string, unknown>;
-    expect(logData.line).toBe("done in 1.2s");
+    expect(logData.type).toBe("webhook");
+    expect(JSON.parse(String(logData.line))).toEqual({
+      event: "render:done",
+      line: "done in 1.2s",
+    });
     expect(logData.frame_id).toBe(frame.id);
     expect(typeof logData.id).toBe("number");
 

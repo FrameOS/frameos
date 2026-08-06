@@ -62,15 +62,20 @@ export async function POST(
   const settings = validated.settings;
 
   // The frame's NAME is provider-side data (frames.name, what frameSummary
-  // returns) — the device never has to accept it. The ESP32 firmware answers
-  // `unsupported_verb` for set_settings, so for esp32 platforms the name is
-  // the ONLY settable key and nothing is enqueued; refuse mixed payloads up
-  // front so nothing is half-applied.
+  // returns) — the device never has to accept it. The ESP32 firmware's
+  // set_settings persists only `interval` and `name` (its declarative
+  // subset; anything else it refuses whole-verb with setting_not_allowed),
+  // so a payload carrying other keys is refused up front and nothing is
+  // half-applied.
   const platform = (frame.hardware as { platform?: unknown } | null)?.platform;
   const isEsp32 =
     typeof platform === "string" &&
     platform.toLowerCase().startsWith("esp32");
-  if (isEsp32 && Object.keys(settings).some((key) => key !== "name")) {
+  const esp32SettableKeys = new Set(["interval", "name"]);
+  if (
+    isEsp32 &&
+    Object.keys(settings).some((key) => !esp32SettableKeys.has(key))
+  ) {
     return jsonError("settings_not_supported_by_device", 400);
   }
 
@@ -81,10 +86,14 @@ export async function POST(
       .where(eq(frames.id, frame.id));
   }
 
-  // Non-esp32 devices still get the push (name included) so their local
-  // config stays in sync with what the cloud now shows.
+  // Devices get the push (name included) so their local config stays in
+  // sync with what the cloud now shows. For ESP32 a name-only payload skips
+  // the command: the display name is provider data, and older firmware
+  // without the set_settings verb would refuse the push for nothing.
+  const needsDevicePush =
+    !isEsp32 || Object.keys(settings).some((key) => key !== "name");
   let command: Awaited<ReturnType<typeof enqueueFrameCommand>> | undefined;
-  if (!isEsp32) {
+  if (needsDevicePush) {
     await supersedePendingCommands(db, frame.id, "set_settings");
     command = await enqueueFrameCommand(db, {
       createdByAccountId: session.accountId,
