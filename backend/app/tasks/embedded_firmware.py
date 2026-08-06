@@ -202,6 +202,46 @@ EMBEDDED_SEEED_STICKY_PINS = {
     "mosi": 14,
     "pwr": -1,
 }
+# Seeed reTerminal E1001/E1002 (ESP32-S3, 32MB flash, 8MB PSRAM): same EPD
+# wiring on both — SCK7/MOSI9, CS10, DC11, RST12, BUSY13 (Zephyr board DTS
+# and the open usetrmnl/trmnl-firmware agree). Buttons: GPIO3 refresh (green),
+# GPIO4 left, GPIO5 right. The microSD slot's pins are not in either source,
+# so SD assets stay off until confirmed from the schematic.
+EMBEDDED_SEEED_RETERMINAL_E10XX_PINS = {
+    "rst": 12,
+    "dc": 11,
+    "cs": 10,
+    "cs2": -1,
+    "busy": 13,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": -1,
+}
+EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
+    {"pin": 3, "label": "REFRESH"},
+    {"pin": 4, "label": "LEFT"},
+    {"pin": 5, "label": "RIGHT"},
+]
+# Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8): dual-SSD1683 792x272 panel
+# on SCK12/MOSI11, CS45, DC46, RST47, BUSY48 (vendor demo code spi.h).
+# Buttons: HOME=2, EXIT=1, rotary NEXT=4, OK=5, PREV=6.
+EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS = {
+    "rst": 47,
+    "dc": 46,
+    "cs": 45,
+    "cs2": -1,
+    "busy": 48,
+    "sck": 12,
+    "mosi": 11,
+    "pwr": -1,
+}
+EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
+    {"pin": 2, "label": "HOME"},
+    {"pin": 1, "label": "EXIT"},
+    {"pin": 4, "label": "NEXT"},
+    {"pin": 5, "label": "OK"},
+    {"pin": 6, "label": "PREV"},
+]
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     "waveshare_esp32_s3_photopainter": {
         "device": "waveshare.EPD_7in3e",
@@ -274,6 +314,27 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
         "gpioButtons": [{"pin": 4, "label": "POWER"}],
+    },
+    "seeed_reterminal_e1001": {
+        "device": "waveshare.EPD_7in5_V2",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+    },
+    "seeed_reterminal_e1002": {
+        "device": "waveshare.EPD_7in3e",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+    },
+    "elecrow_crowpanel_5in79": {
+        "device": "waveshare.EPD_5in79",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
+        "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
     },
 }
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in

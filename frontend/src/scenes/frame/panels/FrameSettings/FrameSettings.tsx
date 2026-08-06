@@ -554,6 +554,28 @@ const ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
+const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 12,
+  dc: 11,
+  cs: 10,
+  cs2: -1,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 47,
+  dc: 46,
+  cs: 45,
+  cs2: -1,
+  busy: 48,
+  sck: 12,
+  mosi: 11,
+  pwr: -1,
+}
+
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
   { key: 'cs', label: 'CS' },
   { key: 'sck', label: 'SCK' },
@@ -671,6 +693,30 @@ const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset,
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1001: {
+    label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  elecrow_crowpanel_5in79: {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_5in79',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
   },
 }
 
@@ -829,6 +875,16 @@ const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLa
   },
   { value: 'xteink-x4', label: 'XTEINK X4 (ESP32-C3)', pins: ESP32_XTEINK_X4_PIN_LAYOUT },
   { value: 'seeed-reterminal-sticky', label: 'Seeed reTerminal Sticky', pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT },
+  {
+    value: 'seeed-reterminal-e10xx',
+    label: 'Seeed reTerminal E1001/E1002',
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  {
+    value: 'elecrow-crowpanel-5in79',
+    label: 'Elecrow CrowPanel 5.79"',
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
 ]
 
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {

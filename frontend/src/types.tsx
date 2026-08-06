@@ -18,6 +18,9 @@ export type FrameEmbeddedHardwarePreset =
   | 'trmnl_4in26_diy_kit'
   | 'xteink_x4'
   | 'seeed_reterminal_sticky'
+  | 'seeed_reterminal_e1001'
+  | 'seeed_reterminal_e1002'
+  | 'elecrow_crowpanel_5in79'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode

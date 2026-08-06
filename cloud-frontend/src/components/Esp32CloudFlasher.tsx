@@ -66,6 +66,17 @@ const boardChoices = [
   { label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_4in26_diy_kit', platform: genericPlatform },
   { label: 'XTEINK X4 (4.26" ESP32-C3)', value: 'hw:xteink_x4', platform: genericC3Platform },
   { label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)', value: 'hw:seeed_reterminal_sticky', platform: genericPlatform },
+  { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
+  {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    value: 'hw:seeed_reterminal_e1002',
+    platform: genericPlatform,
+  },
+  {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    value: 'hw:elecrow_crowpanel_5in79',
+    platform: genericPlatform,
+  },
 ] as const
 
 // The console's `set pins` spec (fos_config_parse_pins): comma-separated

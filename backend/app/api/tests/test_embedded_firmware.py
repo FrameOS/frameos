@@ -827,6 +827,49 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
     assert embedded_required_sdkconfig_for_frame(frame)["CONFIG_IDF_TARGET"] == '"esp32s3"'
 
 
+def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
+    for preset, panel in (
+        ("seeed_reterminal_e1001", "EPD_7in5_V2"),
+        ("seeed_reterminal_e1002", "EPD_7in3e"),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "32MB"
+        assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+        check_embedded_panel_fits_memory(frame)
+        # Both boards share the same EPD wiring (Zephyr DTS + TRMNL firmware).
+        assert embedded_pins_for_frame(frame) == {
+            "rst": 12, "dc": 11, "cs": 10, "cs2": -1,
+            "busy": 13, "sck": 7, "mosi": 9, "pwr": -1,
+        }
+        assert frame.gpio_buttons == [
+            {"pin": 3, "label": "REFRESH"},
+            {"pin": 4, "label": "LEFT"},
+            {"pin": 5, "label": "RIGHT"},
+        ]
+        assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+
+
+def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
+    frame = Frame(id=9, embedded={"hardwarePreset": "elecrow_crowpanel_5in79"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_panel_for_frame(frame) == "EPD_5in79"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "8MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 47, "dc": 46, "cs": 45, "cs2": -1,
+        "busy": 48, "sck": 12, "mosi": 11, "pwr": -1,
+    }
+    assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
+    assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
+
+
 def test_embedded_hardware_preset_for_trmnl_diy_kits():
     for preset, panel, button in (
         ("trmnl_og_diy_kit", "EPD_7in5_V2", {"pin": 5, "label": "KEY3"}),

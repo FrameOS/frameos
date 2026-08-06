@@ -590,6 +590,9 @@ describe("Esp32CloudFlasher", () => {
         "hw:trmnl_4in26_diy_kit",
         "hw:xteink_x4",
         "hw:seeed_reterminal_sticky",
+        "hw:seeed_reterminal_e1001",
+        "hw:seeed_reterminal_e1002",
+        "hw:elecrow_crowpanel_5in79",
       ]),
     );
   });

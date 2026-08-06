@@ -304,6 +304,26 @@ const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['de
   mosi: 14,
   pwr: -1,
 }
+const SEEED_RETERMINAL_E10XX_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 12,
+  dc: 11,
+  cs: 10,
+  cs2: -1,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 47,
+  dc: 46,
+  cs: 45,
+  cs2: -1,
+  busy: 48,
+  sck: 12,
+  mosi: 11,
+  pwr: -1,
+}
 
 interface EmbeddedHardwarePresetConfig {
   label: string
@@ -397,6 +417,47 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     psramMB: 8,
     pins: SEEED_RETERMINAL_STICKY_PINS,
     gpioButtons: [{ pin: 4, label: 'POWER' }],
+  },
+  seeed_reterminal_e1001: {
+    label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E10XX_PINS,
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
+  },
+  seeed_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E10XX_PINS,
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
+  },
+  elecrow_crowpanel_5in79: {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_5in79',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ELECROW_CROWPANEL_5IN79_PINS,
+    gpioButtons: [
+      { pin: 2, label: 'HOME' },
+      { pin: 1, label: 'EXIT' },
+      { pin: 4, label: 'NEXT' },
+      { pin: 5, label: 'OK' },
+      { pin: 6, label: 'PREV' },
+    ],
   },
 }
 

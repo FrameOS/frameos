@@ -221,6 +221,21 @@ static int cmd_set(int argc, char **argv)
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
               "" },
+            /* Seeed reTerminal E1001 (7.5" mono) / E1002 (7.3" Spectra 6):
+             * same EPD wiring on both. SD pins unconfirmed, assets off. */
+            { "seeed_reterminal_e1001", "EPD_7in5_V2",
+              "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
+              "3:REFRESH\n4:LEFT\n5:RIGHT",
+              "" },
+            { "seeed_reterminal_e1002", "EPD_7in3e",
+              "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
+              "3:REFRESH\n4:LEFT\n5:RIGHT",
+              "" },
+            /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
+            { "elecrow_crowpanel_5in79", "EPD_5in79",
+              "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
+              "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
+              "" },
         };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
         for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
