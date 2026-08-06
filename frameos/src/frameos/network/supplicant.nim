@@ -38,6 +38,7 @@ const
   networkRunDir* = "/run/frameos"
   hostapdPidPath* = networkRunDir & "/hostapd.pid"
   dnsmasqPidPath* = networkRunDir & "/dnsmasq.pid"
+  dnsmasqLeasePath* = networkRunDir & "/dnsmasq.leases"
   udhcpdLeasePath* = networkRunDir & "/udhcpd.leases"
   udhcpdPidPath* = networkRunDir & "/udhcpd.pid"
   ## wpa_cli's compiled-in default. /var/run is a symlink to /run on both
@@ -549,9 +550,12 @@ proc dnsmasqCommand*(iface: string): string =
   ## --conf-file=/dev/null keeps a distro dnsmasq.conf from bleeding in.
   ## --address=/#/ points every lookup at the frame so phones pop the captive
   ## portal instead of silently giving up (NM's shared mode has no upstream
-  ## resolver here either).
+  ## resolver here either). --dhcp-leasefile must point at tmpfs: the default
+  ## /var/lib/misc/dnsmasq.leases sits on the read-only rootfs on buildroot
+  ## images and dnsmasq refuses to start at all when it cannot open it.
   "sudo dnsmasq --conf-file=/dev/null --interface=" & shq(iface) &
     " --bind-interfaces --except-interface=lo --no-resolv --no-hosts" &
+    " --dhcp-leasefile=" & shq(dnsmasqLeasePath) &
     " --listen-address=" & hotspotAddress &
     " --dhcp-range=" & hotspotDhcpStart & "," & hotspotDhcpEnd & "," & hotspotNetmask & ",12h" &
     " --dhcp-option=3," & hotspotAddress &
@@ -920,10 +924,13 @@ proc hotspotRunning*(ctx: NetworkContext): bool =
 
 proc startDhcpServer(ctx: NetworkContext, device: string, probe: NetworkToolProbe): SupplicantOpResult =
   if probe.hasDnsmasq:
-    let (_, rc) = ctx.run(dnsmasqCommand(device) & " 2>&1", "")
+    let (output, rc) = ctx.run(dnsmasqCommand(device) & " 2>&1", "")
     if rc == 0:
       return SupplicantOpResult(ok: true, message: "dnsmasq")
-    return SupplicantOpResult(ok: false, message: "dnsmasq failed to start.")
+    # A broken dnsmasq (bad build, unwritable lease dir) must not take the
+    # setup portal down with it when busybox udhcpd is sitting right there.
+    if not probe.hasUdhcpd:
+      return SupplicantOpResult(ok: false, message: "dnsmasq failed to start: " & output.strip())
   if probe.hasUdhcpd:
     if not ctx.writeFile(udhcpdConfPath, buildUdhcpdConf(device), 0o644):
       return SupplicantOpResult(ok: false, message: "Could not write " & udhcpdConfPath & ".")

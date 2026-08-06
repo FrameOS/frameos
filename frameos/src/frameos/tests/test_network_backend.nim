@@ -274,6 +274,8 @@ network={
     check cmd.contains("--dhcp-option=3,10.42.0.1")
     check cmd.contains("--address=/#/10.42.0.1")
     check cmd.contains("--conf-file=/dev/null")
+    # The default lease path lives on the read-only rootfs on buildroot images.
+    check cmd.contains("--dhcp-leasefile='/run/frameos/dnsmasq.leases'")
 
   test "udhcpd config covers the same range as the dnsmasq path":
     let conf = buildUdhcpdConf("wlan0")

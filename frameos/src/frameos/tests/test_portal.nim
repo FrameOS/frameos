@@ -325,6 +325,7 @@ type SupplicantMode = enum
   smAssociateFails
   smNoDhcpLease
   smScanEmpty
+  smDnsmasqFails
 
 var supMode {.global.}: SupplicantMode
 var supHasWpaPassphrase {.global.}: bool
@@ -357,7 +358,7 @@ proc supRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
 
     # No nmcli in the probe output: this is the armv6 image.
     if cmd.contains("command -v nmcli"):
-      var tools = @["wpa_supplicant", "wpa_cli", "hostapd", "iw", "dnsmasq", "udhcpc"]
+      var tools = @["wpa_supplicant", "wpa_cli", "hostapd", "iw", "dnsmasq", "udhcpd", "udhcpc"]
       if supHasWpaPassphrase:
         tools.add("wpa_passphrase")
       return (tools.join("\n") & "\n", 0)
@@ -378,6 +379,8 @@ proc supRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
       return ("ssid=home-wifi\nwpa_state=COMPLETED\n", 0)
     if cmd.contains("wpa_passphrase 'home-wifi'"):
       return ("network={\n\tssid=\"home-wifi\"\n\t#psk=\"pw12345678\"\n\tpsk=deadbeef\n}\n", 0)
+    if cmd.contains("dnsmasq --conf-file") and supMode == smDnsmasqFails:
+      return ("dnsmasq: cannot open or create lease file /var/lib/misc/dnsmasq.leases: Read-only file system", 3)
     if cmd.contains("ip -4 addr show"):
       if supMode == smNoDhcpLease:
         return ("", 0)
@@ -498,6 +501,18 @@ suite "portal supplicant backend":
     check ok
     check ev[1] == "setCurrentScene"
     check ev[2]["sceneId"].getStr() == "system/wifiHotspot"
+
+  test "startAp falls back to udhcpd when dnsmasq cannot start":
+    # The Pi Zero W buildroot bug: dnsmasq's default lease file lives on the
+    # read-only rootfs, so it exits at startup. busybox udhcpd must take over
+    # instead of the whole portal tearing itself down.
+    supMode = smDnsmasqFails
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    startAp(frame)
+
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    check supRan("udhcpd '/srv/frameos/state/network/udhcpd.conf'")
+    check supFiles["/srv/frameos/state/network/udhcpd.conf"].contains("lease_file /run/frameos/udhcpd.leases")
 
   test "startAp reports the hotspot as failed when hostapd is missing":
     # Same shape as the nmcli failure path: status error, no scene event.
