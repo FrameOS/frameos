@@ -27,6 +27,7 @@ import {
   withCustomPalette,
   buildrootPlatforms,
   embeddedPlatforms,
+  EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
   modes,
 } from '../../../../devices'
@@ -508,6 +509,73 @@ const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
   pwr: 1,
 }
 
+// Mirrors EMBEDDED_TRMNL_OG_PINS and friends in backend/app/tasks/embedded_firmware.py
+const ESP32_TRMNL_OG_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 10,
+  dc: 5,
+  cs: 6,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 8,
+  pwr: -1,
+}
+
+const ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 5,
+  dc: 4,
+  cs: 21,
+  cs2: -1,
+  busy: 6,
+  sck: 8,
+  mosi: 10,
+  pwr: -1,
+}
+
+const ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 17,
+  dc: 16,
+  cs: 15,
+  cs2: -1,
+  busy: 18,
+  sck: 13,
+  mosi: 14,
+  pwr: -1,
+}
+
+const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 12,
+  dc: 11,
+  cs: 10,
+  cs2: -1,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 47,
+  dc: 46,
+  cs: 45,
+  cs2: -1,
+  busy: 48,
+  sck: 12,
+  mosi: 11,
+  pwr: -1,
+}
+
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
   { key: 'cs', label: 'CS' },
   { key: 'sck', label: 'SCK' },
@@ -536,68 +604,146 @@ const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   mosi: 7,
 }
 
-const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
-  { value: 'custom', label: 'Custom ESP32-S3 board' },
-  { value: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 PhotoPainter' },
-  { value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 ePaper 13.3E6' },
-]
-
-function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
-  if (value === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
-  }
-  if (value === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
-  }
-  return 'custom'
-}
-
-function esp32WavesharePhotopainterSdCardAssets(): Esp32SdCardAssets {
-  return {
-    enabled: true,
-    preset: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
-    pins: { ...ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT },
-    maxFrequencyKHz: 20000,
-    mountPath: '/srv/assets',
-  }
-}
-
-function esp32Waveshare13in3e6SdCardAssets(): Esp32SdCardAssets {
-  return {
-    enabled: true,
-    preset: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
-    pins: { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT },
-    maxFrequencyKHz: 20000,
-    mountPath: '/srv/assets',
-  }
-}
-
-function esp32HardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+interface Esp32HardwarePresetConfig {
+  label: string
+  platform: string
   device: string
   flashSize: FrameEmbeddedFlashSize
   psramMB: number
   pins: Esp32PinLayout
-  sdCardAssets: Esp32SdCardAssets
-} | null {
-  if (hardwarePreset === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return {
-      device: ESP32_WAVESHARE_PHOTOPAINTER_DEVICE,
-      flashSize: '16MB',
-      psramMB: 8,
-      pins: { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT },
-      sdCardAssets: esp32WavesharePhotopainterSdCardAssets(),
-    }
+  sdCardAssets?: Esp32SdCardAssets
+}
+
+// Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
+const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset, Esp32HardwarePresetConfig>> = {
+  [ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    platform: EMBEDDED_ESP32_S3,
+    device: ESP32_WAVESHARE_PHOTOPAINTER_DEVICE,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
+      pins: ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  [ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+    platform: EMBEDDED_ESP32_S3,
+    device: ESP32_WAVESHARE_13IN3E6_DEVICE,
+    flashSize: '32MB',
+    psramMB: 16,
+    pins: ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+      pins: ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  trmnl_og: {
+    label: 'TRMNL OG (7.5" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: ESP32_TRMNL_OG_PIN_LAYOUT,
+  },
+  trmnl_bwry: {
+    label: 'TRMNL BWRY (7.5" color ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5yr',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: ESP32_TRMNL_OG_PIN_LAYOUT,
+  },
+  trmnl_og_diy_kit: {
+    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  trmnl_4in26_diy_kit: {
+    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  xteink_x4: {
+    label: 'XTEINK X4 (4.26" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '16MB',
+    psramMB: 0,
+    pins: ESP32_XTEINK_X4_PIN_LAYOUT,
+  },
+  seeed_reterminal_sticky: {
+    label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_3in97',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1001: {
+    label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  elecrow_crowpanel_5in79: {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_5in79',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+}
+
+const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
+  { value: 'custom', label: 'Custom ESP32 board' },
+  ...Object.entries(ESP32_HARDWARE_PRESET_CONFIGS).map(([value, config]) => ({ value, label: config.label })),
+]
+
+function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  if (typeof value === 'string' && value in ESP32_HARDWARE_PRESET_CONFIGS) {
+    return value as FrameEmbeddedHardwarePreset
   }
-  if (hardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return {
-      device: ESP32_WAVESHARE_13IN3E6_DEVICE,
-      flashSize: '32MB',
-      psramMB: 16,
-      pins: { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
-      sdCardAssets: esp32Waveshare13in3e6SdCardAssets(),
-    }
+  return 'custom'
+}
+
+function esp32HardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): Esp32HardwarePresetConfig | null {
+  const config = ESP32_HARDWARE_PRESET_CONFIGS[hardwarePreset]
+  if (!config) {
+    return null
   }
-  return null
+  return {
+    ...config,
+    pins: { ...config.pins },
+    sdCardAssets: config.sdCardAssets
+      ? { ...config.sdCardAssets, pins: { ...(config.sdCardAssets.pins ?? {}) } }
+      : undefined,
+  }
 }
 
 function esp32RecommendedPinLayout(
@@ -712,33 +858,57 @@ function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): bo
   return ESP32_PIN_FIELDS.every(({ key }) => first[key] === second[key])
 }
 
+const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLayout }[] = [
+  { value: 'xiao', label: 'Seeed XIAO ESP32-S3', pins: ESP32_XIAO_PIN_LAYOUT },
+  { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8', pins: ESP32_XIAO_13IN3E_PIN_LAYOUT },
+  {
+    value: 'waveshare-photopainter',
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    pins: ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT,
+  },
+  { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6', pins: ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
+  { value: 'trmnl-og', label: 'TRMNL OG/BWRY (ESP32-C3)', pins: ESP32_TRMNL_OG_PIN_LAYOUT },
+  {
+    value: 'xiao-epaper-driver-board',
+    label: 'Seeed XIAO ePaper Driver Board (TRMNL DIY Kit)',
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  { value: 'xteink-x4', label: 'XTEINK X4 (ESP32-C3)', pins: ESP32_XTEINK_X4_PIN_LAYOUT },
+  { value: 'seeed-reterminal-sticky', label: 'Seeed reTerminal Sticky', pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT },
+  {
+    value: 'seeed-reterminal-e10xx',
+    label: 'Seeed reTerminal E1001/E1002',
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  {
+    value: 'elecrow-crowpanel-5in79',
+    label: 'Elecrow CrowPanel 5.79"',
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+]
+
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
-  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT)) {
-    return 'waveshare-photopainter'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT)) {
-    return 'waveshare-13in3e6'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_PIN_LAYOUT)) {
-    return 'xiao'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_13IN3E_PIN_LAYOUT)) {
-    return 'xiao-13in3e'
+  for (const layoutPreset of ESP32_PIN_LAYOUT_PRESETS) {
+    if (esp32PinLayoutsEqual(pins, layoutPreset.pins)) {
+      return layoutPreset.value
+    }
   }
   return 'custom'
 }
 
 function esp32PinLayoutPresetOptions(device?: string): Option[] {
-  const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
-  const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
-  const photopainter = { value: 'waveshare-photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' }
-  const waveshare13in3e6 = { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6' }
-  if (device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE) {
-    return [photopainter, xiao, xiao13in3e, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+  const options: Option[] = ESP32_PIN_LAYOUT_PRESETS.map(({ value, label }) => ({ value, label }))
+  // Float the layout that matches the selected panel's dedicated board to the top
+  const preferredValue =
+    device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE
+      ? 'waveshare-photopainter'
+      : device === ESP32_WAVESHARE_13IN3E6_DEVICE
+      ? 'waveshare-13in3e6'
+      : null
+  if (preferredValue) {
+    options.sort((first, second) => (first.value === preferredValue ? -1 : second.value === preferredValue ? 1 : 0))
   }
-  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
-    ? [waveshare13in3e6, xiao13in3e, xiao, photopainter, { value: 'custom', label: 'Custom' }]
-    : [xiao, xiao13in3e, photopainter, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+  return [...options, { value: 'custom', label: 'Custom' }]
 }
 
 function esp32PinLayoutForPreset(
@@ -746,17 +916,9 @@ function esp32PinLayoutForPreset(
   device?: string,
   hardwarePreset?: FrameEmbeddedHardwarePreset | string
 ): Esp32PinLayout | null {
-  if (preset === 'xiao') {
-    return { ...ESP32_XIAO_PIN_LAYOUT }
-  }
-  if (preset === 'xiao-13in3e') {
-    return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
-  }
-  if (preset === 'waveshare-photopainter') {
-    return { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT }
-  }
-  if (preset === 'waveshare-13in3e6') {
-    return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
+  const layoutPreset = ESP32_PIN_LAYOUT_PRESETS.find(({ value }) => value === preset)
+  if (layoutPreset) {
+    return { ...layoutPreset.pins }
   }
   if (preset === 'recommended') {
     return esp32RecommendedPinLayout(device, hardwarePreset)
@@ -840,7 +1002,7 @@ export function FrameSettings({
       device: presetConfig.device,
       embedded: {
         ...(frameForm.embedded ?? {}),
-        platform: EMBEDDED_ESP32_S3,
+        platform: presetConfig.platform,
         flashSize: presetConfig.flashSize,
         hardwarePreset,
       },

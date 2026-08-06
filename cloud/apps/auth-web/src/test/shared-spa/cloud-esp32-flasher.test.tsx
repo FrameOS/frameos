@@ -83,6 +83,11 @@ const metadataPayload = {
       size: firmwareBytes.length,
     },
     {
+      name: "frameos-1.2.3-esp32-c3-generic.bin",
+      platform: "esp32-c3-generic",
+      size: firmwareBytes.length,
+    },
+    {
       name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
       platform: "raspberry-pi-zero-2-w",
       size: 1024,
@@ -561,6 +566,38 @@ describe("Esp32CloudFlasher", () => {
 
     expect(port.writes).toContain('set hardware "waveshare_esp32_s3_photopainter"');
     expect(port.writes.some((line) => line.startsWith("set panel"))).toBe(false);
+  });
+
+  it("lists every ESP32-S3 hardware bundle and no ESP32-C3 boards", async () => {
+    // Mirrors the S3 subset of EMBEDDED_HARDWARE_PRESETS in
+    // backend/app/tasks/embedded_firmware.py (and the preset table in
+    // fos_console.c) — a preset missing here cannot be provisioned from the
+    // browser at all. The C3 boards (TRMNL OG/BWRY, XTEINK X4) are thin
+    // clients with no cloud render source yet, so the cloud flasher must not
+    // offer them until the cloud can render for them.
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+
+    const picker = await screen.findByLabelText("Frame hardware");
+    const values = Array.from(picker.querySelectorAll("option")).map(
+      (option) => option.getAttribute("value"),
+    );
+    expect(values).toEqual(
+      expect.arrayContaining([
+        "hw:waveshare_esp32_s3_photopainter",
+        "hw:waveshare_esp32_s3_epaper_13_3e6",
+        "hw:trmnl_og_diy_kit",
+        "hw:trmnl_4in26_diy_kit",
+        "hw:seeed_reterminal_sticky",
+        "hw:seeed_reterminal_e1001",
+        "hw:seeed_reterminal_e1002",
+        "hw:elecrow_crowpanel_5in79",
+      ]),
+    );
+    expect(values).not.toContain("hw:trmnl_og");
+    expect(values).not.toContain("hw:trmnl_bwry");
+    expect(values).not.toContain("hw:xteink_x4");
   });
 
   it("hides the panel picker for releases without the all-panels firmware", async () => {

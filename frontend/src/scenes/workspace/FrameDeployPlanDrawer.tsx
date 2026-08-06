@@ -1788,8 +1788,11 @@ function EmbeddedFirmwareSection({
   const flashSize = embeddedFlashSize(frame)
   const otaSupported = embeddedOtaSupported(frame)
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
-  const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
+  const filename = firmware?.filename || `frameos-${platformLabel}-frame${frame.id}.bin`
+  const flashCommand = `esptool.py --chip ${platformLabel.replace(
+    /-/g,
+    ''
+  )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'

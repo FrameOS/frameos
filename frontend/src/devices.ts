@@ -96,6 +96,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_3in0g', label: 'Waveshare 3.0" (G) 400x168 Black/White/Yellow/Red' },
       { value: 'waveshare.EPD_3in52', label: 'Waveshare 3.52" 360x240 Black/White' },
       { value: 'waveshare.EPD_3in52b', label: 'Waveshare 3.52" (B) 360x240 Black/White/Red' },
+      { value: 'waveshare.EPD_3in97', label: 'Good Display 3.97" 800x480 Black/White' },
       { value: 'waveshare.EPD_3in7', label: 'Waveshare 3.7" 480x280 4 Grayscale' },
       { value: 'waveshare.EPD_4in0e', label: 'Waveshare 4.0" (E) 600x400 Spectra 6 Color' },
       { value: 'waveshare.EPD_4in01f', label: 'Waveshare 4.01" (F) 640x400 7 Color' },
@@ -131,6 +132,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_7in5b', label: 'Waveshare 7.5" (B) 640x384 Black/White/Red' },
       { value: 'waveshare.EPD_7in5bc', label: 'Waveshare 7.5" (BC) 640x384 Black/White/Yellow' },
       { value: 'waveshare.EPD_7in5c', label: 'Waveshare 7.5" (C) 640x384 Black/White/Yellow' },
+      { value: 'waveshare.EPD_7in5yr', label: 'TRMNL BWRY 7.5" (YR) 800x480 Black/White/Yellow/Red' },
       { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" (V2) 800x480 Black/White' },
       { value: 'waveshare.EPD_7in5_V2_gray', label: 'Waveshare 7.5" (V2 GRAY) 800x480 4 Grayscale' },
       { value: 'waveshare.EPD_7in5b_V2', label: 'Waveshare 7.5" (B V2) 800x480 Black/White/Red' },
@@ -243,8 +245,13 @@ export const buildrootPlatforms: Option[] = [
 ]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
+export const EMBEDDED_ESP32_C3 = 'esp32-c3'
 
-export const embeddedPlatforms: Option[] = [{ value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' }]
+export const embeddedPlatforms: Option[] = [
+  { value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' },
+  // No PSRAM on supported C3 boards: firmware runs thin-client only.
+  { value: EMBEDDED_ESP32_C3, label: 'ESP32-C3 (thin client)' },
+]
 
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },

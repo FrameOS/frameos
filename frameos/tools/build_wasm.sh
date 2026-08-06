@@ -129,7 +129,10 @@ nim c \
     --passL:"-sMODULARIZE=1" \
     --passL:"-sEXPORT_ES6=1" \
     --passL:"-sEXPORT_NAME=createFrameOS" \
-    --passL:"-sENVIRONMENT=web,worker" \
+    `# node: the backend's thin-client renderer runs this same bundle under` \
+    `# Node (backend/tools/embedded_wasm_render.mjs); web,worker keep the` \
+    `# browser live-preview working.` \
+    --passL:"-sENVIRONMENT=web,worker,node" \
     --passL:"-sALLOW_MEMORY_GROWTH=1" \
     `# Growable memory via resizable ArrayBuffers (GROWABLE_ARRAYBUFFERS=1,` \
     `# the default) makes wasmMemory.buffer resizable, and Chrome's` \

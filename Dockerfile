@@ -2,7 +2,10 @@
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG ESP_IDF_VERSION=v5.5.4
-ARG ESP_IDF_TARGET=esp32s3
+# Comma-separated list passed to ESP-IDF install.sh; every chip the embedded
+# firmware builds for (ESP32-S3 boards render locally, ESP32-C3 boards are
+# thin clients).
+ARG ESP_IDF_TARGET=esp32s3,esp32c3
 
 FROM ${PYTHON_IMAGE} AS nim-toolchain
 
@@ -359,6 +362,15 @@ RUN set -eux; \
       > /etc/apt/sources.list.d/docker.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin; \
+    # Node hosts the wasm scene runtime for ESP32 thin-client renders
+    # (backend/tools/embedded_wasm_render.mjs); without it the render
+    # endpoint falls back to the diagnostic bitmap.
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends nodejs; \
     apt-get purge -y --auto-remove curl gnupg; \
     rm -rf /var/lib/apt/lists/*
 

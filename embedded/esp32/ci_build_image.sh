@@ -10,6 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Boot-time default panel only: every supported panel driver is compiled into
 # the image and can be selected at runtime (`set panel <key>` / setup portal).
 PANEL="${FRAMEOS_SELECTED_PANEL:-EPD_7in5_V2}"
+# esp32-s3 (default): full firmware with the on-device Nim renderer.
+# esp32-c3: thin-client firmware (no PSRAM on supported C3 boards → no local
+# rendering), built for the 4MB no-OTA layout that fits every C3 target.
+PLATFORM="${FRAMEOS_ESP32_PLATFORM:-esp32-s3}"
 BUILD_NAME="${FRAMEOS_ESP32_BUILD_DIR:-build-ci}"
 if [[ "$BUILD_NAME" = /* ]]; then
     BUILD_DIR="$BUILD_NAME"
@@ -20,7 +24,25 @@ fi
 SDKCONFIG_PATH="${FRAMEOS_ESP32_SDKCONFIG:-$BUILD_DIR/sdkconfig}"
 QEMU_SMOKE="${FRAMEOS_ESP32_QEMU:-0}"
 QEMU_TIMEOUT_SECONDS="${FRAMEOS_ESP32_QEMU_TIMEOUT_SECONDS:-60}"
-SDKCONFIG_DEFAULTS="${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-$SCRIPT_DIR/sdkconfig.defaults}"
+case "$PLATFORM" in
+    esp32-s3)
+        IDF_TARGET_NAME="esp32s3"
+        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults"
+        ;;
+    esp32-c3)
+        IDF_TARGET_NAME="esp32c3"
+        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.defaults.4mb-no-ota;$SCRIPT_DIR/sdkconfig.defaults.esp32c3"
+        if [[ "$QEMU_SMOKE" == "1" ]]; then
+            echo "QEMU smoke is only wired up for esp32-s3 (qemu-xtensa)" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Unsupported FRAMEOS_ESP32_PLATFORM: $PLATFORM (expected esp32-s3 or esp32-c3)" >&2
+        exit 1
+        ;;
+esac
+SDKCONFIG_DEFAULTS="${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-$DEFAULT_SDKCONFIG_DEFAULTS}"
 if [[ "$QEMU_SMOKE" == "1" && -z "${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-}" ]]; then
     SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.qemu.defaults"
 fi
@@ -65,8 +87,15 @@ mkdir -p "$BUILD_DIR"
 cd "$SCRIPT_DIR"
 
 export FRAMEOS_SELECTED_PANEL="$PANEL"
-echo "Building FrameOS ESP32 firmware (all panels compiled in, default panel $FRAMEOS_SELECTED_PANEL)"
-./build_nim.sh
+export IDF_TARGET="$IDF_TARGET_NAME"
+echo "Building FrameOS ESP32 firmware for $PLATFORM (all panels compiled in, default panel $FRAMEOS_SELECTED_PANEL)"
+if [[ "$PLATFORM" == "esp32-c3" ]]; then
+    # Thin client: leave nimcache empty so the stub links in. A stale Xtensa
+    # nimcache from an earlier S3 build must not leak into a RISC-V image.
+    ./build_nim.sh clean
+else
+    ./build_nim.sh
+fi
 idf.py -B "$BUILD_DIR" \
     -D SDKCONFIG="$SDKCONFIG_PATH" \
     -D SDKCONFIG_DEFAULTS="$SDKCONFIG_DEFAULTS" \
@@ -91,10 +120,16 @@ file_size() {
     fi
 }
 
-require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
 require_line '^CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192$' "$SDKCONFIG_PATH"
-require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="8MB"$' "$SDKCONFIG_PATH"
-require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"$' "$SDKCONFIG_PATH"
+if [[ "$PLATFORM" == "esp32-c3" ]]; then
+    require_line '^CONFIG_IDF_TARGET="esp32c3"$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="4MB"$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"$' "$SDKCONFIG_PATH"
+else
+    require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="8MB"$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"$' "$SDKCONFIG_PATH"
+fi
 if [[ "$QEMU_SMOKE" == "1" ]]; then
     require_line '^CONFIG_ESP_CONSOLE_UART_DEFAULT=y$' "$SDKCONFIG_PATH"
     require_line '^CONFIG_LOG_DEFAULT_LEVEL_INFO=y$' "$SDKCONFIG_PATH"
@@ -105,10 +140,15 @@ PARTITION_DUMP="$BUILD_DIR/partition-table.generated.csv"
 python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
     "$BUILD_DIR/partition_table/partition-table.bin" > "$PARTITION_DUMP"
 
-require_line '^otadata,data,ota,0xd000,8K,' "$PARTITION_DUMP"
-require_line '^ota_0,app,ota_0,0x10000,3520K,' "$PARTITION_DUMP"
-require_line '^ota_1,app,ota_1,0x380000,3520K,' "$PARTITION_DUMP"
-require_line '^state,data,spiffs,0x6f0000,1M,' "$PARTITION_DUMP"
+if [[ "$PLATFORM" == "esp32-c3" ]]; then
+    require_line '^factory,app,factory,0x10000,3520K,' "$PARTITION_DUMP"
+    require_line '^state,data,spiffs,0x380000,512K,' "$PARTITION_DUMP"
+else
+    require_line '^otadata,data,ota,0xd000,8K,' "$PARTITION_DUMP"
+    require_line '^ota_0,app,ota_0,0x10000,3520K,' "$PARTITION_DUMP"
+    require_line '^ota_1,app,ota_1,0x380000,3520K,' "$PARTITION_DUMP"
+    require_line '^state,data,spiffs,0x6f0000,1M,' "$PARTITION_DUMP"
+fi
 
 APP_BIN="$BUILD_DIR/frameos_esp32.bin"
 MERGED_BIN="$BUILD_DIR/merged-binary.bin"
@@ -116,7 +156,11 @@ BOOTLOADER_BIN="$BUILD_DIR/bootloader/bootloader.bin"
 PARTITION_BIN="$BUILD_DIR/partition_table/partition-table.bin"
 
 APP_SLOT_BYTES=$((3520 * 1024))
-FLASH_BYTES=$((8 * 1024 * 1024))
+if [[ "$PLATFORM" == "esp32-c3" ]]; then
+    FLASH_BYTES=$((4 * 1024 * 1024))
+else
+    FLASH_BYTES=$((8 * 1024 * 1024))
+fi
 
 APP_BYTES="$(file_size "$APP_BIN")"
 MERGED_BYTES="$(file_size "$MERGED_BIN")"

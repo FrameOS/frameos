@@ -29,6 +29,7 @@
 #include "fos_assets_sd.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_http.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -353,12 +354,25 @@ static bool b64_encode(const uint8_t *data, size_t len, char *out, size_t out_le
 
 /* --------------------------------------------------------------- enrollment */
 
+/* Canonical dashed platform names, matching the backend's platform enum.
+ * Cloud capability gating prefix-matches "esp32", so both forms gate alike. */
+static const char *fos_platform_name(void)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+    return "esp32-s3";
+#elif CONFIG_IDF_TARGET_ESP32C3
+    return "esp32-c3";
+#else
+    return "esp32";
+#endif
+}
+
 static void add_hardware_json(cJSON *parent)
 {
     const fos_config_t *config = fos_config();
     cJSON *hw = cJSON_AddObjectToObject(parent, "hardware");
     if (!hw) return;
-    cJSON_AddStringToObject(hw, "platform", "esp32");
+    cJSON_AddStringToObject(hw, "platform", fos_platform_name());
     /* docs/cloud-frames.md calls this "device" (driver name); keep "panel"
      * too so the value is unambiguous for esp32 firmware. */
     cJSON_AddStringToObject(hw, "device", config->panel);
@@ -1055,11 +1069,10 @@ static void asset_job_run_get(const asset_job_t *job)
         return;
     }
     size_t total = (size_t)st.st_size;
-    uint8_t *raw = heap_caps_malloc(FOS_CLOUD_ASSET_CHUNK_BYTES,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *raw = fos_big_malloc(FOS_CLOUD_ASSET_CHUNK_BYTES);
     /* +2 for base64 rounding, +1 for NUL */
     size_t b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8;
-    char *b64 = heap_caps_malloc(b64_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *b64 = fos_big_malloc(b64_cap);
     if (!raw || !b64) {
         free(raw);
         free(b64);
@@ -1126,7 +1139,7 @@ static void asset_stream_buffer(const char *id, const uint8_t *data, size_t tota
                                 const char *content_type)
 {
     size_t b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8;
-    char *b64 = heap_caps_malloc(b64_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *b64 = fos_big_malloc(b64_cap);
     if (!b64) {
         asset_chunk_send_error(id, "no_memory");
         return;

@@ -455,6 +455,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "height": 480
       },
       {
+        "value": "waveshare.EPD_3in97",
+        "label": "Waveshare 3.97\" 800x480 Black/White",
+        "width": 800,
+        "height": 480
+      },
+      {
         "value": "waveshare.EPD_4in0e",
         "label": "Waveshare 4.0\" (E) 600x400 Spectra 6 Color",
         "width": 400,
@@ -661,6 +667,12 @@ export const piDeviceGroups: DeviceGroup[] = [
       {
         "value": "waveshare.EPD_7in5b_V2_old",
         "label": "Waveshare 7.5\" (B V2 OLD) 800x480 Black/White/Red",
+        "width": 800,
+        "height": 480
+      },
+      {
+        "value": "waveshare.EPD_7in5yr",
+        "label": "Waveshare 7.5\" (YR) 800x480 Black/White/Yellow/Red",
         "width": 800,
         "height": 480
       },
@@ -907,6 +919,10 @@ export const esp32Panels: { key: string; label: string }[] = [
     "label": "Waveshare 3.7\" 480x280 4 Grayscale"
   },
   {
+    "key": "EPD_3in97",
+    "label": "Good Display 3.97\" 800x480 Black/White"
+  },
+  {
     "key": "EPD_4in0e",
     "label": "Waveshare 4.0\" (E) 600x400 Spectra 6 Color"
   },
@@ -1029,6 +1045,10 @@ export const esp32Panels: { key: string; label: string }[] = [
   {
     "key": "EPD_7in5b_V2",
     "label": "Waveshare 7.5\" (B V2) 800x480 Black/White/Red"
+  },
+  {
+    "key": "EPD_7in5yr",
+    "label": "TRMNL BWRY 7.5\" (YR) 800x480 Black/White/Yellow/Red"
   },
   {
     "key": "EPD_7in5_HD",

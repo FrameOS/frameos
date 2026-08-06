@@ -44,6 +44,9 @@ const releaseApiUrl =
 const provisioningAssets = [
   { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic.bin" },
   { platform: "esp32-s3-epd7in5v2", suffix: "-esp32-s3-epd7in5v2.bin" },
+  // Thin-client build for PSRAM-less ESP32-C3 boards (TRMNL OG/BWRY,
+  // XTEINK X4): all panel drivers, no on-device renderer.
+  { platform: "esp32-c3-generic", suffix: "-esp32-c3-generic.bin" },
   {
     platform: "raspberry-pi-zero-2-w",
     suffix: "-raspberry-pi-zero-2-w-buildroot.img.gz",
@@ -55,7 +58,11 @@ const provisioningAssets = [
 ] as const;
 
 // Only the ESP32 firmware (a few MB) is streamed from here.
-const streamablePlatforms = new Set(["esp32-s3-generic", "esp32-s3-epd7in5v2"]);
+const streamablePlatforms = new Set([
+  "esp32-s3-generic",
+  "esp32-s3-epd7in5v2",
+  "esp32-c3-generic",
+]);
 
 // Development / self-hosted escape hatch: until a release publishes the
 // all-panels build, FRAMEOS_ESP32_GENERIC_FIRMWARE can point at a locally

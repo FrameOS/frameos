@@ -22,6 +22,7 @@
 
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
+#include "fos_defaults.h"
 #include "fos_buttons.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -40,10 +41,19 @@ static const char *TAG = "frameos";
 #define WIFI_CONNECT_TIMEOUT_MS 45000
 #define SNTP_TIMEOUT_MS 10000
 
-/* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Driving an
- * unconnected GPIO on other boards is harmless. Slow blink = running,
- * fast blink = provisioning portal. */
-#define HEARTBEAT_GPIO 21
+/* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Slow
+ * blink = running, fast blink = provisioning portal. Only the S3 gets a
+ * default: on the C3 boards GPIO 21 is display CS (XTEINK X4) or I2C
+ * (TRMNL), so "unconnected GPIO" no longer holds; boards without a plain
+ * LED disable the task with -1. generated_config.h may override. */
+#ifndef FRAMEOS_HEARTBEAT_GPIO
+#if CONFIG_IDF_TARGET_ESP32S3
+#define FRAMEOS_HEARTBEAT_GPIO 21
+#else
+#define FRAMEOS_HEARTBEAT_GPIO -1
+#endif
+#endif
+#define HEARTBEAT_GPIO FRAMEOS_HEARTBEAT_GPIO
 
 static volatile uint32_t s_blink_period_ms = 2000;
 
@@ -107,7 +117,9 @@ void app_main(void)
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
     }
 
-    xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    if (HEARTBEAT_GPIO >= 0) {
+        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    }
 
     fos_display_config_t display_config = {
         .panel = config->panel,
@@ -132,7 +144,16 @@ void app_main(void)
     if (fos_display_present()) {
         size_t need = fos_display_render_psram_bytes();
         size_t have = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-        if (need > have) {
+        if (have == 0) {
+            /* PSRAM-less module (every supported ESP32-C3 board): thin-client
+             * is the design, not a degradation — keep the log calm. */
+            if (config->render_mode != FOS_RENDER_REMOTE) {
+                ESP_LOGI(TAG, "no PSRAM on this module; running as a thin client "
+                         "(the backend or cloud renders)");
+                config->render_mode = FOS_RENDER_REMOTE;
+            }
+            local_render_ok = false;
+        } else if (need > have) {
             ESP_LOGE(TAG, "panel %s needs ~%u KB PSRAM to render on-device but the module has "
                      "~%u KB; switching to thin-client mode", config->panel,
                      (unsigned)(need / 1024), (unsigned)(have / 1024));

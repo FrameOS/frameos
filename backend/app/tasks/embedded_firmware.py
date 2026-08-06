@@ -49,11 +49,34 @@ from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_EMBEDDED_PLATFORM = "esp32-s3"
-EMBEDDED_PLATFORM_ALIASES = {"", "esp32s3", "esp32-s3-devkitc-1"}
+# Every chip the embedded firmware builds for. ``localRenderSupported`` gates
+# the on-device Nim/pixie/QuickJS renderer: it needs PSRAM (an 800×480 RGBA
+# compose buffer alone is 1.5MB), so PSRAM-less chips run thin-client only and
+# their firmware links the stub instead of the Nim runtime.
+EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
+    "esp32-s3": {
+        "label": "ESP32-S3",
+        "idfTarget": "esp32s3",
+        "aliases": {"", "esp32s3", "esp32-s3-devkitc-1"},
+        "maxGpio": 48,
+        "defaultPsramMB": 8,
+        "sdkconfigOverlay": None,
+        "localRenderSupported": True,
+    },
+    "esp32-c3": {
+        "label": "ESP32-C3",
+        "idfTarget": "esp32c3",
+        "aliases": {"esp32c3", "esp32-c3-devkitm-1"},
+        "maxGpio": 21,
+        "defaultPsramMB": 0,
+        "sdkconfigOverlay": "sdkconfig.defaults.esp32c3",
+        "localRenderSupported": False,
+    },
+}
+EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
-EMBEDDED_IDF_TARGET = "esp32s3"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 45  # All panel drivers in one image; runtime panel selection
+EMBEDDED_FIRMWARE_VERSION = 46  # ESP32-C3 platform, TRMNL/XTEINK/Sticky boards, EPD_7in5yr + EPD_3in97 panels
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -129,6 +152,96 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     },
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
+# TRMNL OG/BWRY (ESP32-C3): EPD on SCK7/MOSI8, wake button GPIO2, battery ADC
+# GPIO3. Pinout from the open usetrmnl/trmnl-firmware DEV_Config.h.
+EMBEDDED_TRMNL_OG_PINS = {
+    "rst": 10,
+    "dc": 5,
+    "cs": 6,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 7,
+    "mosi": 8,
+    "pwr": -1,
+}
+# XTEINK X4 (ESP32-C3): SSD1677-driven 4.26" 800x480 (GDEQ0426T82). Pins from
+# the open X4 firmware community (usetrmnl/trmnl-firmware BOARD_XTEINK_X4).
+# The TF socket shares the display SPI bus (SCK8/MOSI10, CS12/MISO7) and the
+# C3 has one general-purpose SPI host, so SD assets stay off for now.
+EMBEDDED_XTEINK_X4_PINS = {
+    "rst": 5,
+    "dc": 4,
+    "cs": 21,
+    "cs2": -1,
+    "busy": 6,
+    "sck": 8,
+    "mosi": 10,
+    "pwr": -1,
+}
+# Seeed XIAO ePaper Driver Board (the TRMNL DIY kits): XIAO ESP32-S3 Plus
+# carrier with EPD on SCK7/MOSI9, CS44, DC10, RST38, BUSY4.
+EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS = {
+    "rst": 38,
+    "dc": 10,
+    "cs": 44,
+    "cs2": -1,
+    "busy": 4,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": -1,
+}
+# Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): 3.97" 800x480 e-paper on
+# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4.
+EMBEDDED_SEEED_STICKY_PINS = {
+    "rst": 17,
+    "dc": 16,
+    "cs": 15,
+    "cs2": -1,
+    "busy": 18,
+    "sck": 13,
+    "mosi": 14,
+    "pwr": -1,
+}
+# Seeed reTerminal E1001/E1002 (ESP32-S3, 32MB flash, 8MB PSRAM): same EPD
+# wiring on both — SCK7/MOSI9, CS10, DC11, RST12, BUSY13 (Zephyr board DTS
+# and the open usetrmnl/trmnl-firmware agree). Buttons: GPIO3 refresh (green),
+# GPIO4 left, GPIO5 right. The microSD slot's pins are not in either source,
+# so SD assets stay off until confirmed from the schematic.
+EMBEDDED_SEEED_RETERMINAL_E10XX_PINS = {
+    "rst": 12,
+    "dc": 11,
+    "cs": 10,
+    "cs2": -1,
+    "busy": 13,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": -1,
+}
+EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
+    {"pin": 3, "label": "REFRESH"},
+    {"pin": 4, "label": "LEFT"},
+    {"pin": 5, "label": "RIGHT"},
+]
+# Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8): dual-SSD1683 792x272 panel
+# on SCK12/MOSI11, CS45, DC46, RST47, BUSY48 (vendor demo code spi.h).
+# Buttons: HOME=2, EXIT=1, rotary NEXT=4, OK=5, PREV=6.
+EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS = {
+    "rst": 47,
+    "dc": 46,
+    "cs": 45,
+    "cs2": -1,
+    "busy": 48,
+    "sck": 12,
+    "mosi": 11,
+    "pwr": -1,
+}
+EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
+    {"pin": 2, "label": "HOME"},
+    {"pin": 1, "label": "EXIT"},
+    {"pin": 4, "label": "NEXT"},
+    {"pin": 5, "label": "OK"},
+    {"pin": 6, "label": "PREV"},
+]
 EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     "waveshare_esp32_s3_photopainter": {
         "device": "waveshare.EPD_7in3e",
@@ -156,6 +269,72 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
             "mountPath": "/srv/assets",
         },
+    },
+    "trmnl_og": {
+        "device": "waveshare.EPD_7in5_V2",
+        "platform": "esp32-c3",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_TRMNL_OG_PINS,
+        "gpioButtons": [{"pin": 2, "label": "BUTTON"}],
+    },
+    "trmnl_bwry": {
+        "device": "waveshare.EPD_7in5yr",
+        "platform": "esp32-c3",
+        "flashSize": "4MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_TRMNL_OG_PINS,
+        "gpioButtons": [{"pin": 2, "label": "BUTTON"}],
+    },
+    "trmnl_og_diy_kit": {
+        "device": "waveshare.EPD_7in5_V2",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS,
+        "gpioButtons": [{"pin": 0, "label": "BOOT"}, {"pin": 5, "label": "KEY3"}],
+    },
+    "trmnl_4in26_diy_kit": {
+        "device": "waveshare.EPD_4in26",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS,
+        "gpioButtons": [{"pin": 0, "label": "BOOT"}, {"pin": 2, "label": "KEY1"}],
+    },
+    "xteink_x4": {
+        "device": "waveshare.EPD_4in26",
+        "platform": "esp32-c3",
+        "flashSize": "16MB",
+        "psramMB": 0,
+        "pins": EMBEDDED_XTEINK_X4_PINS,
+        "gpioButtons": [{"pin": 3, "label": "POWER"}],
+    },
+    "seeed_reterminal_sticky": {
+        "device": "waveshare.EPD_3in97",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_STICKY_PINS,
+        "gpioButtons": [{"pin": 4, "label": "POWER"}],
+    },
+    "seeed_reterminal_e1001": {
+        "device": "waveshare.EPD_7in5_V2",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+    },
+    "seeed_reterminal_e1002": {
+        "device": "waveshare.EPD_7in3e",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+    },
+    "elecrow_crowpanel_5in79": {
+        "device": "waveshare.EPD_5in79",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
+        "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
     },
 }
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
@@ -240,7 +419,6 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
 # for the Nim heap + QuickJS. Keep the reserve in sync with
 # FOS_RENDER_PSRAM_RESERVE in components/frameos_display/frameos_display.c.
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
-EMBEDDED_DEFAULT_PSRAM_BYTES = 8 * 1024 * 1024
 EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
 EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
 EMBEDDED_DISPLAY_STATE_BYTES = 80
@@ -265,10 +443,33 @@ _build_lock = asyncio.Lock()
 
 
 def normalize_embedded_platform(platform: str | None) -> str:
-    value = (platform or "").strip()
-    if value == SUPPORTED_EMBEDDED_PLATFORM or value in EMBEDDED_PLATFORM_ALIASES:
-        return SUPPORTED_EMBEDDED_PLATFORM
+    value = (platform or "").strip().lower()
+    for key, spec in EMBEDDED_PLATFORMS.items():
+        if value == key or value in spec["aliases"]:
+            return key
     raise ValueError(f"Unsupported embedded platform: {value or '(empty)'}")
+
+
+def embedded_platform_for_frame(frame: Frame) -> str:
+    """Chip target for the frame. A hardware preset pins the platform (it is a
+    physical property of the board); otherwise the frame's stored platform."""
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    if preset_key:
+        return normalize_embedded_platform(
+            EMBEDDED_HARDWARE_PRESETS[preset_key].get("platform", SUPPORTED_EMBEDDED_PLATFORM)
+        )
+    for source in (frame.embedded, frame.device_config):
+        if isinstance(source, dict) and source.get("platform"):
+            return normalize_embedded_platform(str(source.get("platform")))
+    return SUPPORTED_EMBEDDED_PLATFORM
+
+
+def embedded_platform_spec_for_frame(frame: Frame) -> dict[str, Any]:
+    return EMBEDDED_PLATFORMS[embedded_platform_for_frame(frame)]
+
+
+def embedded_max_gpio_for_frame(frame: Frame) -> int:
+    return int(embedded_platform_spec_for_frame(frame)["maxGpio"])
 
 
 def normalize_embedded_flash_size(value: object | None) -> str:
@@ -311,13 +512,20 @@ def embedded_ota_supported_for_frame(frame: Frame) -> bool:
 
 
 def embedded_sdkconfig_defaults_for_frame(frame: Frame) -> str:
-    return ";".join(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
+    files = list(embedded_flash_profile_for_frame(frame)["sdkconfigDefaults"])
+    overlay = embedded_platform_spec_for_frame(frame)["sdkconfigOverlay"]
+    if overlay:
+        files.append(overlay)
+    return ";".join(files)
 
 
 def embedded_required_sdkconfig_for_frame(frame: Frame) -> dict[str, str]:
     profile = embedded_flash_profile_for_frame(frame)
     required = {
         **EMBEDDED_REQUIRED_SDKCONFIG,
+        # A mismatch wipes the shared build dir, which is exactly what a chip
+        # target switch needs: CMake caches cannot survive an IDF_TARGET change.
+        "CONFIG_IDF_TARGET": f'"{embedded_platform_spec_for_frame(frame)["idfTarget"]}"',
         "CONFIG_ESPTOOLPY_FLASHSIZE": f'"{profile["flashSize"]}"',
         "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME": f'"{profile["partitionTable"]}"',
     }
@@ -546,12 +754,15 @@ def embedded_module_psram_bytes(frame: Frame) -> int:
     preset_key = embedded_hardware_preset_for_frame(frame)
     if preset_key:
         return int(EMBEDDED_HARDWARE_PRESETS[preset_key]["psramMB"] * 1024 * 1024)
-    return EMBEDDED_DEFAULT_PSRAM_BYTES
+    return int(embedded_platform_spec_for_frame(frame)["defaultPsramMB"] * 1024 * 1024)
 
 
 def embedded_render_mode_for_frame(frame: Frame) -> int:
     """Default render mode baked into the firmware image: local unless opted
-    into remote/thin-client mode in device_config or embedded metadata."""
+    into remote/thin-client mode in device_config or embedded metadata.
+    Platforms without local-render support (no PSRAM) are always remote."""
+    if not embedded_platform_spec_for_frame(frame)["localRenderSupported"]:
+        return EMBEDDED_RENDER_REMOTE
     for source in (frame.device_config, frame.embedded):
         if isinstance(source, dict):
             value = source.get("renderMode", source.get("render_mode"))
@@ -603,16 +814,23 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
     embedded = dict(frame.embedded or {})
     embedded["hardwarePreset"] = preset_key
     embedded["flashSize"] = preset["flashSize"]
+    embedded["platform"] = normalize_embedded_platform(
+        preset.get("platform", SUPPORTED_EMBEDDED_PLATFORM)
+    )
     frame.embedded = embedded
 
     device_config = dict(embedded_device_config(frame))
     device_config["hardwarePreset"] = preset_key
     device_config["psramMB"] = preset["psramMB"]
     device_config["pins"] = dict(preset["pins"])
-    device_config["sdCardAssets"] = {
-        **preset["sdCardAssets"],
-        "pins": dict(preset["sdCardAssets"]["pins"]),
-    }
+    sd_card_assets = preset.get("sdCardAssets")
+    if isinstance(sd_card_assets, dict):
+        device_config["sdCardAssets"] = {
+            **sd_card_assets,
+            "pins": dict(sd_card_assets["pins"]),
+        }
+    else:
+        device_config.pop("sdCardAssets", None)
     frame.device_config = device_config
     return preset_key
 
@@ -644,11 +862,12 @@ def embedded_pins_for_frame(frame: Frame) -> dict[str, int]:
     raw_pins = embedded_device_config(frame).get("pins")
     if not isinstance(raw_pins, dict):
         return pins
+    max_gpio = embedded_max_gpio_for_frame(frame)
     for key in EMBEDDED_PIN_KEYS:
         raw_value = raw_pins.get(key)
         if raw_value is None and key == "sck":
             raw_value = raw_pins.get("sclk")
-        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= max_gpio:
             pins[key] = raw_value
     return pins
 
@@ -658,7 +877,7 @@ def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
     raw = device_config.get("sdCardAssets", device_config.get("sd_card_assets"))
     preset_key = embedded_hardware_preset_for_frame(frame)
     if not isinstance(raw, dict) and preset_key:
-        raw = EMBEDDED_HARDWARE_PRESETS[preset_key]["sdCardAssets"]
+        raw = EMBEDDED_HARDWARE_PRESETS[preset_key].get("sdCardAssets")
     if not isinstance(raw, dict):
         raw = {}
 
@@ -674,9 +893,10 @@ def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
     raw_pins = raw.get("pins")
     if not isinstance(raw_pins, dict):
         raw_pins = raw
+    max_gpio = embedded_max_gpio_for_frame(frame)
     for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS:
         raw_value = raw_pins.get(key)
-        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= 48:
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool) and -1 <= raw_value <= max_gpio:
             pins[key] = raw_value
 
     raw_frequency = raw.get("maxFrequencyKHz", raw.get("max_frequency_khz"))
@@ -1083,7 +1303,9 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     )
 
     frame.mode = "embedded"
-    apply_embedded_hardware_preset(frame)
+    if apply_embedded_hardware_preset(frame):
+        # The preset knows the board's chip; it overrides a caller-supplied platform.
+        normalized_platform = embedded_platform_for_frame(frame)
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     if not frame.frame_port or frame.frame_port == 8787:
@@ -1472,6 +1694,8 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     current = latest_embedded_firmware(frame) or {}
     started_at = _utc_now()
+    platform = embedded_platform_for_frame(frame)
+    platform_spec = EMBEDDED_PLATFORMS[platform]
     flash_profile = embedded_flash_profile_for_frame(frame)
     sdkconfig_defaults = embedded_sdkconfig_defaults_for_frame(frame)
     required_sdkconfig = embedded_required_sdkconfig_for_frame(frame)
@@ -1479,7 +1703,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         **_preserved_queue_metadata(current),
         "status": "building",
         "requestId": request_id or current.get("requestId"),
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": platform,
         "flashSize": flash_profile["flashSize"],
         "otaSupported": flash_profile["otaSupported"],
         "startedAt": started_at,
@@ -1487,7 +1711,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     })
     selected_panel = embedded_panel_for_frame(frame)
     await log(db, redis, int(frame.id), "stdout",
-              f"Building ESP32-S3 firmware with ESP-IDF at {idf_path} "
+              f"Building {platform_spec['label']} firmware with ESP-IDF at {idf_path} "
               f"(panel={selected_panel}, flash={flash_profile['flashSize']})")
 
     build_dir = EMBEDDED_PROJECT_DIR / "build"
@@ -1498,7 +1722,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         p for p in env.get("PATH", "").split(os.pathsep) if "/.venv/" not in p and not p.endswith("/.venv/bin")
     )
     env["IDF_PATH"] = str(idf_path)
-    env["IDF_TARGET"] = EMBEDDED_IDF_TARGET
+    env["IDF_TARGET"] = str(platform_spec["idfTarget"])
     # All panel drivers are compiled into every firmware image; this env var
     # only sets the default panel a plain checkout would bake in. Per-frame
     # builds get the same value via FRAMEOS_DEFAULT_PANEL in generated_config.h
@@ -1533,9 +1757,13 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         env["FRAMEOS_EXTRA_NIM_FLAGS"] = f"-d:frameosSceneName={scene_name}"
 
     # Cross-compile the Nim runtime. If nim is not installed on the worker the
-    # firmware still builds, thin-client only.
+    # firmware still builds, thin-client only. Platforms without local-render
+    # support skip Nim entirely — and must clear any nimcache a previous build
+    # left behind, because its generated C targets the other chip's ABI.
     nim_step = ""
-    if shutil.which("nim"):
+    if not platform_spec["localRenderSupported"]:
+        nim_step = "./build_nim.sh clean && "
+    elif shutil.which("nim"):
         nim_step = "./build_nim.sh && "
     else:
         await log(db, redis, int(frame.id), "stderr",

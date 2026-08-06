@@ -42,8 +42,13 @@ CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 # the bootup test failing on boards without PSRAM instead of aborting.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
-# HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev
+# HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev.
+# The "common" bundle (43 roots: ISRG/Let's Encrypt, DigiCert, Amazon, Google,
+# GlobalSign, Sectigo, GoDaddy, IdenTrust, ...) covers every public CA our
+# endpoints use and is ~45KB smaller than the full bundle. Private CAs were
+# never in the full bundle either.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 # HTTPS renders happen after Nim/QuickJS have consumed most internal SRAM.
 # Put mbedTLS' large dynamic buffers in PSRAM so image/data apps can fetch

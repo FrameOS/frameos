@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
+#include "soc/soc_caps.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
@@ -43,6 +44,14 @@ esp_err_t fos_assets_sd_mount(const fos_config_t *config)
     if (s_mounted) return ESP_OK;
     if (!config || !config->assets_sd.enabled) return ESP_OK;
 
+#if SOC_SPI_PERIPH_NUM < 3
+    /* SD assets ride a dedicated SPI3 bus so they never contend with the
+     * display on SPI2. Chips with a single general-purpose SPI host (the
+     * ESP32-C3) have no free bus for it — every C3 preset ships with SD
+     * assets off, so only a hand-enabled config can get here. */
+    ESP_LOGW(TAG, "SD assets need a second SPI host; not available on this chip");
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     char pins[FOS_STR_LEN];
     fos_config_format_assets_sd_pins(&config->assets_sd, pins, sizeof(pins));
     if (!valid_config(config)) {
@@ -131,6 +140,7 @@ esp_err_t fos_assets_sd_mount(const fos_config_t *config)
              pins,
              (unsigned long)host.max_freq_khz);
     return ESP_OK;
+#endif /* SOC_SPI_PERIPH_NUM >= 3 */
 }
 
 bool fos_assets_sd_mounted(void)
