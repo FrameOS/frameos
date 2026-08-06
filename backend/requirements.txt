@@ -4,85 +4,103 @@
 #
 #    pip-compile requirements.in
 #
-aiofiles==24.1.0
+aiofiles==25.1.0
     # via -r requirements.in
-aiohappyeyeballs==2.6.2
+aiohappyeyeballs==2.7.1
     # via aiohttp
+aiohttp==3.14.3
+    # via modal
 aiomqtt==2.5.1
     # via -r requirements.in
-aiohttp==3.14.0
-    # via modal
 aiosignal==1.4.0
     # via aiohttp
-alembic==1.11.2
+alembic==1.19.0
     # via -r requirements.in
-annotated-types==0.7.0
+annotated-doc==0.0.5
+    # via
+    #   fastapi
+    #   typer
+annotated-types==0.8.0
     # via pydantic
-anyio==4.7.0
+anyio==4.14.2
     # via
     #   httpx
     #   openai
     #   starlette
     #   watchfiles
-arq==0.26.1
+arq==0.28.0
     # via -r requirements.in
-asyncssh==2.19.0
+ast-serialize==0.7.0
+    # via mypy
+asyncssh==2.24.0
     # via -r requirements.in
 attrs==26.1.0
     # via aiohttp
 backoff==2.2.1
     # via posthog
-build==1.0.3
+build==1.5.0
     # via pip-tools
-cbor2==6.1.2
+cbor2==6.1.4
     # via modal
-certifi==2023.7.22
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
     #   modal
     #   requests
-cffi==1.15.1
+    #   sentry-sdk
+cffi==2.1.1
     # via cryptography
-cfgv==3.4.0
+cfgv==3.5.0
     # via pre-commit
-charset-normalizer==3.2.0
+charset-normalizer==3.4.9
     # via requests
-click==8.1.7
+click==8.4.2
     # via
     #   arq
     #   modal
     #   pip-tools
     #   rich-toolkit
-    #   typer
     #   uvicorn
-cryptography==41.0.3
+cryptography==50.0.0
     # via
+    #   -r requirements.in
     #   asyncssh
     #   jwt
     #   types-pyopenssl
     #   types-redis
-distlib==0.3.8
+detect-installer==0.1.0
+    # via fastapi-cloud-cli
+distlib==0.4.3
     # via virtualenv
 distro==1.9.0
     # via
     #   openai
     #   posthog
-dnspython==2.4.2
+dnspython==2.8.0
     # via email-validator
-ecdsa==0.19.0
+ecdsa==0.19.2
     # via python-jose
-email-validator==2.0.0.post2
+email-validator==2.3.0
     # via
     #   -r requirements.in
     #   fastapi
-fastapi[standard]==0.115.6
+    #   pydantic
+fastapi[standard]==0.141.1
     # via -r requirements.in
-fastapi-cli[standard]==0.0.6
+fastapi-cli[standard]==0.0.32
     # via fastapi
-filelock==3.13.1
-    # via virtualenv
-fonttools==4.55.3
+fastapi-cloud-cli==0.23.0
+    # via fastapi-cli
+fastar==0.11.0
+    # via
+    #   fastapi
+    #   fastapi-cloud-cli
+filelock==3.32.2
+    # via
+    #   python-discovery
+    #   virtualenv
+fonttools==4.63.0
     # via -r requirements.in
 frozenlist==1.8.0
     # via
@@ -90,89 +108,96 @@ frozenlist==1.8.0
     #   aiosignal
 grpclib==0.4.9
     # via modal
-h11==0.14.0
+h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
-h2==4.3.0
+h2==4.4.1
     # via grpclib
-hiredis==3.1.0
+hiredis==3.4.0
     # via redis
-honcho==1.1.0
+honcho==2.0.0
     # via -r requirements.in
-hpack==4.1.0
+hpack==4.2.0
     # via h2
-httpcore==1.0.7
+httpcore==1.0.9
     # via httpx
-httptools==0.6.4
+httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
     # via
+    #   -r requirements.in
     #   fastapi
+    #   fastapi-cloud-cli
     #   openai
 hyperframe==6.1.0
     # via h2
-identify==2.5.33
+identify==2.6.19
     # via pre-commit
-idna==3.4
+idna==3.18
     # via
     #   anyio
     #   email-validator
     #   httpx
     #   requests
     #   yarl
-iniconfig==2.0.0
+iniconfig==2.3.0
     # via pytest
-jinja2==3.1.2
+jinja2==3.1.6
     # via fastapi
-jiter==0.10.0
+jiter==0.16.0
     # via openai
-jwt==1.3.1
+jwt==1.4.0
     # via -r requirements.in
-mako==1.2.4
+librt==0.14.0
+    # via mypy
+mako==1.4.1
     # via alembic
-markdown-it-py==3.0.0
+markdown-it-py==4.2.0
     # via rich
-markupsafe==2.1.3
+markupsafe==3.0.3
     # via
     #   jinja2
     #   mako
     #   werkzeug
 mdurl==0.1.2
     # via markdown-it-py
-modal==1.4.3
+modal==1.5.3
     # via -r requirements.in
 multidict==6.7.1
     # via
     #   aiohttp
     #   grpclib
     #   yarl
-mypy==1.13.0
+mypy==2.3.0
     # via -r requirements.in
-mypy-extensions==1.0.0
+mypy-extensions==1.1.0
     # via mypy
-nodeenv==1.8.0
+nodeenv==1.10.0
     # via pre-commit
-openai==2.15.0
+openai==2.53.0
     # via -r requirements.in
-packaging==23.2
+packaging==26.3
     # via
     #   -r requirements.in
     #   build
     #   pytest
+    #   wheel
 paho-mqtt==2.1.0
     # via aiomqtt
-pillow==11.3.0
+pathspec==1.1.1
+    # via mypy
+pillow==12.3.0
     # via -r requirements.in
-pip-tools==7.5.3
+pip-tools==7.6.0
     # via -r requirements.in
-platformdirs==4.1.0
+platformdirs==4.11.0
     # via virtualenv
-pluggy==1.3.0
+pluggy==1.6.0
     # via pytest
-posthog==7.5.1
+posthog==7.38.0
     # via -r requirements.in
-pre-commit==3.6.0
+pre-commit==4.6.1
     # via -r requirements.in
 propcache==0.5.2
     # via
@@ -180,111 +205,127 @@ propcache==0.5.2
     #   yarl
 protobuf==6.33.6
     # via modal
-pyasn1==0.6.1
+pyasn1==0.6.4
     # via
     #   python-jose
     #   rsa
-pycparser==2.21
+pycparser==3.0
     # via cffi
-pydantic==2.10.3
+pydantic[email]==2.13.4
     # via
     #   fastapi
+    #   fastapi-cloud-cli
     #   openai
+    #   pydantic-extra-types
+    #   pydantic-settings
     #   sqlmodel
-pydantic-core==2.27.1
+pydantic-core==2.46.4
     # via pydantic
-pygments==2.16.1
-    # via rich
-pyproject-hooks==1.0.0
+pydantic-extra-types==2.11.1
+    # via fastapi
+pydantic-settings==2.14.2
+    # via fastapi
+pygments==2.20.0
+    # via
+    #   pytest
+    #   rich
+pyjwt==2.13.0
+    # via redis
+pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
-pytest==7.4.3
+pytest==9.1.1
     # via
     #   -r requirements.in
     #   pytest-asyncio
-pytest-asyncio==0.23.8
+pytest-asyncio==1.4.0
     # via -r requirements.in
-python-dateutil==2.9.0.post0
-    # via posthog
-python-dotenv==1.0.1
-    # via uvicorn
-python-jose==3.3.0
+python-discovery==1.5.1
+    # via virtualenv
+python-dotenv==1.2.2
+    # via
+    #   pydantic-settings
+    #   uvicorn
+python-jose==3.5.0
     # via -r requirements.in
-python-multipart==0.0.19
+python-multipart==0.0.32
     # via fastapi
-pyyaml==6.0.1
+pyyaml==6.0.3
     # via
     #   pre-commit
     #   uvicorn
-redis[hiredis]==4.6.0
+redis[hiredis]==5.3.1
     # via
     #   -r requirements.in
     #   arq
-requests==2.31.0
+requests==2.34.2
     # via
     #   -r requirements.in
     #   posthog
-rich==13.9.4
+rich==15.0.0
     # via
     #   modal
     #   rich-toolkit
     #   typer
-rich-toolkit==0.12.0
-    # via fastapi-cli
-rsa==4.9
+rich-toolkit==0.20.3
+    # via
+    #   fastapi-cli
+    #   fastapi-cloud-cli
+rignore==0.8.1
+    # via fastapi-cloud-cli
+rsa==4.9.1
     # via python-jose
-ruff==0.1.14
+ruff==0.16.1
     # via -r requirements.in
+sentry-sdk==2.66.1
+    # via fastapi-cloud-cli
 shellingham==1.5.4
     # via typer
-six==1.16.0
-    # via
-    #   ecdsa
-    #   posthog
-    #   python-dateutil
+six==1.17.0
+    # via ecdsa
 sniffio==1.3.1
-    # via
-    #   anyio
-    #   openai
-sqlalchemy==2.0.19
+    # via openai
+sqlalchemy==2.0.51
     # via
     #   -r requirements.in
     #   alembic
     #   sqlmodel
-sqlmodel==0.0.22
+sqlmodel==0.0.39
     # via -r requirements.in
-starlette==0.41.3
+starlette==1.4.1
     # via fastapi
-synchronicity==0.12.3
+synchronicity==0.12.5
     # via modal
 toml==0.10.2
     # via modal
-tqdm==4.67.1
+tqdm==4.70.0
     # via openai
-typer==0.15.1
-    # via fastapi-cli
+typer==0.27.1
+    # via
+    #   fastapi-cli
+    #   fastapi-cloud-cli
 types-certifi==2021.10.8.3
     # via modal
-types-cffi==1.16.0.20240331
+types-cffi==2.0.0.20260518
     # via types-pyopenssl
 types-pillow==10.2.0.20240822
     # via -r requirements.in
-types-pyasn1==0.6.0.20250516
+types-pyasn1==0.6.0.20260724
     # via types-python-jose
 types-pyopenssl==24.1.0.20240722
     # via types-redis
-types-python-jose==3.5.0.20250531
+types-python-jose==3.5.0.20260408
     # via -r requirements.in
 types-redis==4.6.0.20241004
     # via -r requirements.in
-types-requests==2.32.0.20241016
+types-requests==2.33.0.20260712
     # via -r requirements.in
-types-setuptools==75.6.0.20241126
+types-setuptools==83.0.0.20260724
     # via types-cffi
 types-toml==0.10.8.20260518
     # via modal
-typing-extensions==4.12.2
+typing-extensions==4.16.0
     # via
     #   aiohttp
     #   aiosignal
@@ -298,33 +339,44 @@ typing-extensions==4.12.2
     #   posthog
     #   pydantic
     #   pydantic-core
+    #   pydantic-extra-types
+    #   pytest-asyncio
     #   rich-toolkit
     #   sqlalchemy
+    #   sqlmodel
+    #   starlette
     #   synchronicity
-    #   typer
-urllib3==2.0.4
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+urllib3==2.7.0
     # via
     #   requests
+    #   sentry-sdk
     #   types-requests
-uvicorn[standard]==0.32.1
+uvicorn[standard]==0.52.1
     # via
     #   fastapi
     #   fastapi-cli
-uvloop==0.21.0
+    #   fastapi-cloud-cli
+uvloop==0.22.1
     # via uvicorn
-virtualenv==20.25.0
+virtualenv==21.7.1
     # via pre-commit
-watchfiles==1.0.3
+watchfiles==1.2.0
     # via
     #   modal
     #   uvicorn
-websockets==14.1
+websockets==17.0.1
     # via uvicorn
-werkzeug==3.1.3
+werkzeug==3.1.8
     # via -r requirements.in
-wheel==0.41.3
+wheel==0.47.0
     # via pip-tools
-yarl==1.24.2
+yarl==1.24.5
     # via aiohttp
 
 # The following packages are considered to be unsafe in a requirements file:
