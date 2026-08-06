@@ -610,3 +610,4 @@ Providers must drop unknown fields, frames must ignore unknown optional
 response fields, and both sides version through `frameos_version` /
 `hello` — there is no separate protocol version until a breaking change
 forces one.
+# CI probe 1786053441
