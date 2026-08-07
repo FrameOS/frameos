@@ -226,7 +226,7 @@ function renderMetricsLog(
               </span>
             ) : null}
           </>
-        ) : hasStandardMetrics ? (
+        ) : (
           <>
             load{' '}
             {load.map((value, index) => (
@@ -254,10 +254,8 @@ function renderMetricsLog(
               </>
             ) : null}
           </>
-        ) : null}
-        {/* Without the standard load/cpu/ram keys (ESP32 frames), a collapsed
-            zero summary is useless — show every reported entry inline. */}
-        {entries.length > 0 && hasStandardMetrics ? (
+        )}
+        {entries.length > 0 ? (
           <button
             type="button"
             className={clsx(
@@ -271,7 +269,7 @@ function renderMetricsLog(
           </button>
         ) : null}
       </span>
-      {expanded || (!hasStandardMetrics && entries.length > 0) ? (
+      {expanded ? (
         <div className="mt-1 flex flex-wrap gap-1.5 text-xs leading-5">
           {entries.map(({ key, value }) => (
             <span
@@ -647,7 +645,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           if (log.type === 'webhook') {
             try {
               const { event, timestamp, ...rest } = JSON.parse(log.line)
-              if (event === 'metrics') {
+              // The metrics renderer's summary + expander is shaped around the
+              // Pi's load/cpu/ram/disk payload. ESP32 samples carry none of
+              // those keys — render them like any other structured log line.
+              const hasStandardMetricKeys =
+                'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
+              if (event === 'metrics' && (hasStandardMetricKeys || typeof rest.state === 'string')) {
                 logLine = renderMetricsLog(
                   rest,
                   expandedMetricLogIds.includes(log.id),
