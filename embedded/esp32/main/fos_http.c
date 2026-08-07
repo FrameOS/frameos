@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_app_desc.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
@@ -1689,6 +1692,94 @@ static esp_err_t event_post_handler(httpd_req_t *req)
     return handle_event_post(req, event_name);
 }
 
+/* ------------------------------------------------------- logs + metrics */
+
+/* {"logs":[{"timestamp":…,"type":"webhook","line":"<raw json>"}…]} — the
+ * same row shape the backend serves, so the standalone/frame-admin Logs
+ * panel renders these identically. */
+static esp_err_t logs_get_handler(httpd_req_t *req)
+{
+    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+    if (!entries) return httpd_resp_send_500(req);
+    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send_chunk(req, "{\"logs\":[", 9);
+    for (size_t i = 0; i < count && err == ESP_OK; i++) {
+        char *escaped = json_escape_dup(entries[i].line);
+        if (!escaped) break;
+        char head[64];
+        int head_len;
+        if (entries[i].timestamp > 1e9) {
+            head_len = snprintf(head, sizeof(head), "%s{\"timestamp\":%.0f,",
+                                i ? "," : "", entries[i].timestamp);
+        } else {
+            head_len = snprintf(head, sizeof(head), "%s{", i ? "," : "");
+        }
+        err = httpd_resp_send_chunk(req, head, head_len);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"type\":\"webhook\",\"line\":\"", 25);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, escaped, strlen(escaped));
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"}", 2);
+        free(escaped);
+    }
+    for (size_t i = 0; i < count; i++) free(entries[i].line);
+    free(entries);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, "]}", 2);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    return err;
+}
+
+static esp_err_t metrics_get_handler(httpd_req_t *req)
+{
+    fos_metrics_sample_t *samples = calloc(32, sizeof(*samples));
+    if (!samples) return httpd_resp_send_500(req);
+    size_t count = fos_client_metrics_recent(samples, 32);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send_chunk(req, "{\"metrics\":[", 12);
+    for (size_t i = 0; i < count && err == ESP_OK; i++) {
+        char head[64];
+        int head_len = snprintf(head, sizeof(head), "%s{%s",
+                                i ? "," : "",
+                                samples[i].timestamp > 1e9 ? "" : "\"timestamp\":null,");
+        if (samples[i].timestamp > 1e9) {
+            head_len = snprintf(head, sizeof(head), "%s{\"timestamp\":%.0f,",
+                                i ? "," : "", samples[i].timestamp);
+        }
+        err = httpd_resp_send_chunk(req, head, head_len);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"metrics\":", 10);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, samples[i].json, strlen(samples[i].json));
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "}", 1);
+    }
+    for (size_t i = 0; i < count; i++) free(samples[i].json);
+    free(samples);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, "]}", 2);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    return err;
+}
+
+/* --------------------------------------------------------- restart action */
+
+static void restart_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(750)); /* let the HTTP response flush first */
+    esp_restart();
+}
+
+/* POST /api/action/restart and /api/action/reboot: on ESP32 the runtime is
+ * the firmware, so both are a chip reset. The backend's restart/reboot
+ * tasks call these instead of systemd-over-SSH. */
+static esp_err_t restart_post_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+    log_http_command_from_path(req, 0);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    if (xTaskCreate(restart_task, "fos_restart", 2048, NULL, 5, NULL) != pdPASS) {
+        esp_restart();
+    }
+    return err;
+}
+
 /* ---------------------------------------------------------- asset routes */
 
 /* Pull a sanitized asset path out of the request's query string. */
@@ -1920,14 +2011,8 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
     if (strcmp(suffix, "/image") == 0 || strncmp(suffix, "/scene_images/", 14) == 0) {
         return preview_bmp_handler(req);
     }
-    if (strcmp(suffix, "/logs") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"logs\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
-    if (strcmp(suffix, "/metrics") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"metrics\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
+    if (strcmp(suffix, "/logs") == 0) return logs_get_handler(req);
+    if (strcmp(suffix, "/metrics") == 0) return metrics_get_handler(req);
     if (strcmp(suffix, "/assets") == 0) return assets_list_get_handler(req);
     if (strcmp(suffix, "/asset") == 0) return asset_file_get_handler(req);
     return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
@@ -2105,9 +2190,13 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
     httpd_uri_t render = {.uri = "/api/action/render", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_render_cb};
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};
+    httpd_uri_t action_restart = {.uri = "/api/action/restart", .method = HTTP_POST, .handler = restart_post_handler};
+    httpd_uri_t action_reboot = {.uri = "/api/action/reboot", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
     REGISTER_ROUTE(render);
     REGISTER_ROUTE(ota);
+    REGISTER_ROUTE(action_restart);
+    REGISTER_ROUTE(action_reboot);
     REGISTER_ROUTE(scene);
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
@@ -2144,7 +2233,7 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
 static void configure_httpd_defaults(httpd_config_t *config)
 {
-    config->max_uri_handlers = 32;
+    config->max_uri_handlers = 40;
     config->max_open_sockets = 7;
     config->backlog_conn = 8;
     config->recv_wait_timeout = 5;

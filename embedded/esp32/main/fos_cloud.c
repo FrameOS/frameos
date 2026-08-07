@@ -644,9 +644,12 @@ static volatile bool s_scene_ack_pending = false;
  * scopes array, cleared with the session. Read from the logging tasks (the
  * tap), written by the WS task; a stale read costs at most one line. */
 static volatile bool s_logs_granted = false;
+static volatile bool s_metrics_granted = false;
 static QueueHandle_t s_log_queue = NULL;
 
 static void ws_backoff_reset(void);
+static void ws_ack(const cJSON *id, bool ok, const char *error);
+static cJSON *log_line_entry(const char *line, double timestamp);
 
 static void ws_send_json(cJSON *msg)
 {
@@ -716,31 +719,11 @@ static void ws_poll_logs(void)
             free(line);
             return;
         }
-        cJSON *payload = cJSON_Parse(line);
-        if (payload != NULL && !cJSON_IsObject(payload)) {
-            cJSON_Delete(payload);
-            payload = NULL;
-        }
-        if (payload == NULL) {
-            /* Same wrapping the backend uploader applies to plain lines. */
-            payload = cJSON_CreateObject();
-            if (payload != NULL) {
-                cJSON_AddStringToObject(payload, "event", "log");
-                cJSON_AddStringToObject(payload, "source", "esp32");
-                cJSON_AddStringToObject(payload, "message", line);
-            }
-        }
-        free(line);
-        if (payload == NULL) continue;
-        cJSON *entry = cJSON_CreateObject();
-        if (entry == NULL) {
-            cJSON_Delete(payload);
-            continue;
-        }
         /* Without SNTP the entry carries no timestamp and the hub stamps
          * its own arrival time — better than a 1970 date. */
-        if (have_time) cJSON_AddNumberToObject(entry, "timestamp", now);
-        cJSON_AddItemToObject(entry, "payload", payload);
+        cJSON *entry = log_line_entry(line, have_time ? now : 0);
+        free(line);
+        if (entry == NULL) continue;
         cJSON_AddItemToArray(logs, entry);
         count++;
     }
@@ -758,6 +741,131 @@ static void ws_poll_logs(void)
     cJSON_AddItemToObject(msg, "logs", logs);
     ws_send_json(msg);
     cJSON_Delete(msg);
+}
+
+/* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
+ * uses; plain lines get the same wrapping the backend uploader applies. */
+static cJSON *log_line_entry(const char *line, double timestamp)
+{
+    cJSON *payload = cJSON_Parse(line);
+    if (payload != NULL && !cJSON_IsObject(payload)) {
+        cJSON_Delete(payload);
+        payload = NULL;
+    }
+    if (payload == NULL) {
+        payload = cJSON_CreateObject();
+        if (payload == NULL) return NULL;
+        cJSON_AddStringToObject(payload, "event", "log");
+        cJSON_AddStringToObject(payload, "source", "esp32");
+        cJSON_AddStringToObject(payload, "message", line);
+    }
+    cJSON *entry = cJSON_CreateObject();
+    if (entry == NULL) {
+        cJSON_Delete(payload);
+        return NULL;
+    }
+    if (timestamp > 1e9) cJSON_AddNumberToObject(entry, "timestamp", timestamp);
+    cJSON_AddItemToObject(entry, "payload", payload);
+    return entry;
+}
+
+/* get_logs: replay the on-device ring as a log_batch with the command id. */
+static void ws_handle_get_logs(const cJSON *root, const cJSON *id)
+{
+    if (!s_logs_granted) {
+        ws_ack(id, false, "insufficient_scope");
+        return;
+    }
+    size_t limit = FOS_NIM_LOG_RING_CAP;
+    const cJSON *limit_item = cJSON_GetObjectItem(root, "limit");
+    if (cJSON_IsNumber(limit_item) && limit_item->valuedouble >= 1 &&
+        limit_item->valuedouble < FOS_NIM_LOG_RING_CAP) {
+        limit = (size_t)limit_item->valuedouble;
+    }
+    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+    if (entries == NULL) {
+        ws_ack(id, false, "no_memory");
+        return;
+    }
+    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+    size_t start = count > limit ? count - limit : 0; /* newest `limit` lines */
+    ws_ack(id, true, NULL);
+    cJSON *msg = cJSON_CreateObject();
+    cJSON *logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
+    if (logs != NULL) {
+        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
+            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
+        }
+        cJSON_AddStringToObject(msg, "type", "log_batch");
+        for (size_t i = start; i < count; i++) {
+            cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
+            if (entry != NULL) cJSON_AddItemToArray(logs, entry);
+        }
+        ws_send_json(msg);
+    }
+    cJSON_Delete(msg);
+    for (size_t i = 0; i < count; i++) free(entries[i].line);
+    free(entries);
+}
+
+/* Push the newest metrics sample once it changes (one per render pass) —
+ * this is what keeps the provider's metrics store live without polling. */
+static double s_metrics_last_pushed = 0;
+
+static void ws_poll_metrics(void)
+{
+    if (!s_ws_client || !s_ws_ready || !s_metrics_granted) return;
+    /* recent() returns oldest-first; the last entry is the newest sample. */
+    fos_metrics_sample_t all[32] = {0};
+    size_t count = fos_client_metrics_recent(all, 32);
+    if (count == 0) return;
+    fos_metrics_sample_t *newest = &all[count - 1];
+    bool fresh = newest->timestamp > s_metrics_last_pushed;
+    if (fresh) {
+        cJSON *sample = cJSON_Parse(newest->json);
+        cJSON *msg = sample ? cJSON_CreateObject() : NULL;
+        if (msg != NULL) {
+            cJSON_AddStringToObject(msg, "type", "metrics");
+            cJSON_AddItemToObject(msg, "metrics", sample);
+            sample = NULL;
+            ws_send_json(msg);
+            s_metrics_last_pushed = newest->timestamp;
+        }
+        cJSON_Delete(sample);
+        cJSON_Delete(msg);
+    }
+    for (size_t i = 0; i < count; i++) free(all[i].json);
+}
+
+/* get_metrics: the wire shape is a single sample ({"metrics": {…}}), so the
+ * reply carries the newest one. */
+static void ws_handle_get_metrics(const cJSON *id)
+{
+    if (!s_metrics_granted) {
+        ws_ack(id, false, "insufficient_scope");
+        return;
+    }
+    fos_metrics_sample_t samples[32] = {0};
+    size_t count = fos_client_metrics_recent(samples, 32);
+    if (count == 0) {
+        ws_ack(id, false, "no_metrics");
+        return;
+    }
+    ws_ack(id, true, NULL);
+    cJSON *sample = cJSON_Parse(samples[count - 1].json);
+    cJSON *msg = cJSON_CreateObject();
+    if (msg != NULL && sample != NULL) {
+        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
+            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
+        }
+        cJSON_AddStringToObject(msg, "type", "metrics");
+        cJSON_AddItemToObject(msg, "metrics", sample);
+        sample = NULL;
+        ws_send_json(msg);
+    }
+    cJSON_Delete(sample);
+    cJSON_Delete(msg);
+    for (size_t i = 0; i < count; i++) free(samples[i].json);
 }
 
 /* Attach the hello-shaped state fields to msg. */
@@ -1536,16 +1644,19 @@ static void ws_handle_message(const char *data, size_t len)
          * its scopes array reflects the provider's current grant, including
          * revocations since enrollment. */
         bool logs_granted = false;
+        bool metrics_granted = false;
         const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
         const cJSON *scope = NULL;
         cJSON_ArrayForEach(scope, scopes) {
-            if (cJSON_IsString(scope) && scope->valuestring &&
-                strcmp(scope->valuestring, "telemetry:logs") == 0) {
+            if (!cJSON_IsString(scope) || !scope->valuestring) continue;
+            if (strcmp(scope->valuestring, "telemetry:logs") == 0) {
                 logs_granted = true;
-                break;
+            } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
+                metrics_granted = true;
             }
         }
         s_logs_granted = logs_granted;
+        s_metrics_granted = metrics_granted;
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
@@ -1588,10 +1699,13 @@ static void ws_handle_message(const char *data, size_t len)
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
         ws_ack(id, true, NULL);
         ws_schedule_reboot();
+    } else if (strcmp(type, "get_logs") == 0) {
+        ws_handle_get_logs(root, id);
+    } else if (strcmp(type, "get_metrics") == 0) {
+        ws_handle_get_metrics(id);
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
     } else if (strcmp(type, "set_schedule") == 0 ||
-               strcmp(type, "get_logs") == 0 || strcmp(type, "get_metrics") == 0 ||
                strcmp(type, "notify_update_available") == 0) {
         /* Documented verbs the esp32 profile does not implement. Answering
          * `unsupported_verb` (not `unknown_verb`) lets a provider tell "this
@@ -1666,6 +1780,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
             s_logs_granted = false; /* re-derived from this session's ready */
+            s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
             ws_send_hello();
@@ -1683,6 +1798,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         case WEBSOCKET_EVENT_CLOSED:
             s_ws_ready = false;
             s_logs_granted = false;
+            s_metrics_granted = false;
             /* 4401: the provider closed an established socket because the
              * signature failed, the auth timed out, or the frame was revoked. */
             if (data && data->close_status_code == FOS_CLOUD_WS_AUTH_CLOSE_CODE) {
@@ -1853,6 +1969,7 @@ static void ws_stop(void)
     s_ws_client = NULL;
     s_ws_ready = false;
     s_logs_granted = false;
+    s_metrics_granted = false;
     ws_drain_log_queue();
     ws_flush_asset_jobs();
     s_scene_ack_pending = false;
@@ -1981,6 +2098,7 @@ static void cloud_task(void *arg)
 #endif
             ws_poll_scene_ack();
             ws_poll_logs();
+            ws_poll_metrics();
             /* Streamed asset replies run here, off the WS task. A 1 s idle
              * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */

@@ -648,7 +648,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|list-assets|get-asset|upload-asset|asset-op> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|list-assets|get-asset|upload-asset|asset-op> ...\n");
         return 1;
     }
 
@@ -755,6 +755,28 @@ static int cmd_usb_api(int argc, char **argv)
         }
         fos_client_render_now();
         usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "logs") == 0) {
+        frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+        if (!entries) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "log snapshot allocation failed");
+            return 1;
+        }
+        size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+        printf("%s %s %u text\n", USB_API_BEGIN, subcommand, (unsigned)count);
+        for (size_t i = 0; i < count; i++) {
+            if (entries[i].timestamp > 1e9) {
+                printf("%.0f %s\n", entries[i].timestamp, entries[i].line);
+            } else {
+                printf("- %s\n", entries[i].line);
+            }
+            free(entries[i].line);
+        }
+        free(entries);
+        printf("%s %s\n", USB_API_END, subcommand);
+        fflush(stdout);
         return 0;
     }
 

@@ -66,9 +66,9 @@ Status legend:
 | Latest image | `GET /api/frames/:id/image` | Full, proxy/cache or backend image | Full, PNG | Full, BMP preview today | UI should tolerate image content type. PNG is preferred where available. |
 | Scene image | `GET /api/frames/:id/scene_images/:sceneId` | Full | Full, current/last image response | Full, BMP preview alias | Same path. Backend may serve per-scene cached assets. |
 | Scene source | `GET /api/frames/:id/scene_source/:scene` | Full | N/A | N/A | Backend-only build/debug helper. |
-| Logs | `GET /api/frames/:id/logs` | Full, DB logs | Full, in-memory UI logs | Partial, empty list | Same `{ logs: [...] }` shape. |
+| Logs | `GET /api/frames/:id/logs` | Full, DB logs | Full, in-memory UI logs | Full, on-device ring (last 128 lines) | Same `{ logs: [...] }` shape. |
 | Full logs | `GET /api/frames/:id/logs/full` | Full | N/A | N/A | Backend-only for historical logs. |
-| Metrics | `GET /api/frames/:id/metrics` | Full, DB metrics | Full, local UI metrics | Partial, empty list | Same `{ metrics: [...] }` shape. |
+| Metrics | `GET /api/frames/:id/metrics` | Full, DB metrics | Full, local UI metrics | Full, ring of last 32 samples (one per render pass) | Same `{ metrics: [...] }` shape. |
 | Recent metrics | `GET /api/frames/:id/metrics/recent` | Full | N/A | N/A | Backend-only historical query. |
 | Asset list | `GET /api/frames/:id/assets` | Full, frame/proxy aware (embedded frames proxy to the device) | Full, local assets | Full, SD walk (`{assets, truncated?, mounted}`) | Same `{ assets: [...] }` shape. |
 | Asset file | `GET /api/frames/:id/asset?path=...` | Full (embedded frames proxy to the device) | Full | Full, streamed off the SD card | Same route for local files. Must preserve path safety. |

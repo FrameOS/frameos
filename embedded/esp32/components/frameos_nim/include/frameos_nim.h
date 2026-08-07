@@ -56,6 +56,16 @@ bool frameos_nim_send_event(const char *event, const char *payload_json);
 
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
+
+/* Recent-log ring (see frameos_nim_glue.c). Entries come back oldest-first;
+ * each `line` is a strdup the caller must free. `timestamp` is epoch seconds
+ * (values before ~1e9 mean the clock was not SNTP-synced yet). */
+#define FOS_NIM_LOG_RING_CAP 128
+typedef struct {
+    double timestamp;
+    char *line;
+} frameos_log_entry_t;
+size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max);
 /* Optional tap invoked with every structured log line (on the logging
  * task!). Used by the cloud client to forward logs over its WebSocket; the
  * tap must be cheap and never block. Pass NULL to remove. */

@@ -210,10 +210,12 @@ subset), `image_get`, and the full asset verb set — `assets_list`,
 against the mounted SD card (shared implementation in `main/fos_assets.c`,
 also behind the local HTTP asset API and the `usb_api` asset commands).
 Write-verb acks are sent after the SD write finishes. Log shipping is
-implemented behind the `telemetry:logs` scope. Documented verbs outside this
-profile — `set_schedule`, `get_logs`, `get_metrics`,
-`notify_update_available` — are acked `unsupported_verb`; anything not in the
-protocol is acked `unknown_verb`. Both are logged.
+implemented behind the `telemetry:logs` scope, with `get_logs` replaying the
+on-device ring (last 128 lines); `get_metrics` returns the newest metrics
+sample and the device pushes a `metrics` message after each render pass when
+`telemetry:metrics` is granted. Documented verbs outside this profile —
+`set_schedule`, `notify_update_available` — are acked `unsupported_verb`;
+anything not in the protocol is acked `unknown_verb`. Both are logged.
 
 Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
 authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote

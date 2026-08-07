@@ -12,6 +12,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "esp_crt_bundle.h"
@@ -512,10 +513,66 @@ void frameos_nim_set_log_tap(void (*tap)(const char *line))
     s_log_tap = tap;
 }
 
+/* Ring of the most recent log lines, independent of the backend upload queue
+ * (which drains on flush) and the cloud tap (live sessions only). Serves
+ * GET /logs, the cloud get_logs verb and `usb_api logs`. Guarded by the same
+ * lock as the upload queue. */
+static frameos_log_entry_t s_log_ring[FOS_NIM_LOG_RING_CAP];
+static size_t s_log_ring_next = 0;
+static size_t s_log_ring_count = 0;
+
+static void ring_log_line(const char *msg)
+{
+    ensure_log_lock();
+    if (s_log_lock == NULL || msg == NULL) return;
+    size_t len = strnlen(msg, FOS_NIM_LOG_MAX_LINE + 1);
+    if (len > FOS_NIM_LOG_MAX_LINE) len = FOS_NIM_LOG_MAX_LINE;
+    char *line = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (line == NULL) line = malloc(len + 1);
+    if (line == NULL) return;
+    memcpy(line, msg, len);
+    line[len] = '\0';
+    /* time() before SNTP reports seconds-since-boot epoch; consumers treat
+     * anything before ~2001 as "no wall clock". */
+    double now = (double)time(NULL);
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) != pdTRUE) {
+        free(line);
+        return;
+    }
+    free(s_log_ring[s_log_ring_next].line);
+    s_log_ring[s_log_ring_next].line = line;
+    s_log_ring[s_log_ring_next].timestamp = now;
+    s_log_ring_next = (s_log_ring_next + 1) % FOS_NIM_LOG_RING_CAP;
+    if (s_log_ring_count < FOS_NIM_LOG_RING_CAP) s_log_ring_count++;
+    xSemaphoreGive(s_log_lock);
+}
+
+size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
+{
+    if (out == NULL || max == 0 || s_log_lock == NULL) return 0;
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return 0;
+    size_t take = s_log_ring_count < max ? s_log_ring_count : max;
+    /* Oldest-first of the newest `take` entries. */
+    size_t start = (s_log_ring_next + FOS_NIM_LOG_RING_CAP - take) % FOS_NIM_LOG_RING_CAP;
+    size_t copied = 0;
+    for (size_t i = 0; i < take; i++) {
+        const frameos_log_entry_t *src = &s_log_ring[(start + i) % FOS_NIM_LOG_RING_CAP];
+        if (src->line == NULL) continue;
+        char *copy = strdup(src->line);
+        if (copy == NULL) break;
+        out[copied].line = copy;
+        out[copied].timestamp = src->timestamp;
+        copied++;
+    }
+    xSemaphoreGive(s_log_lock);
+    return copied;
+}
+
 void frameos_nim_log_hook(const char *msg)
 {
     ESP_LOGI("nim", "%s", msg ? msg : "");
     queue_log_line(msg);
+    ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only
      * copies the line into its own queue (or drops it). */
     void (*tap)(const char *) = s_log_tap;
