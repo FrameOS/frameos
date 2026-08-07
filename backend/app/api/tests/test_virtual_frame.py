@@ -141,3 +141,31 @@ async def test_virtual_render_event(async_client, db, redis):
     frame = await create_virtual_frame(async_client, db)
     response = await async_client.post(f'/api/frames/{frame.id}/event/render')
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_virtual_activation_persists_scene_image(async_client, db, redis):
+    from app.models.scene_image import SceneImage
+
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [
+        {'id': 'scene-a', 'name': 'A', 'nodes': [], 'edges': []},
+        {'id': 'scene-b', 'name': 'B', 'nodes': [], 'edges': []},
+    ]
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/event/setCurrentScene',
+        json={'sceneId': 'scene-b'},
+        headers={'content-type': 'application/json'})
+    assert response.status_code == 200, response.text
+
+    row = db.query(SceneImage).filter_by(frame_id=frame.id, scene_id='scene-b').first()
+    assert row is not None, "SceneImage row should persist for the activated scene"
+    assert row.image and row.width == 320
+
+    # And the UI's reload path serves it.
+    response = await async_client.get(f'/api/frames/{frame.id}/scene_images/scene-b')
+    assert response.status_code == 200, response.text
+    assert response.headers['content-type'].startswith('image/')
