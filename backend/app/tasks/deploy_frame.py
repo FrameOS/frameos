@@ -103,6 +103,20 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
     if not frame:
         raise Exception("Frame not found")
 
+    # Virtual frames: deploying IS rendering — no SSH, no device, ever.
+    # Belt-and-braces with the endpoint gates: this catches every enqueue path.
+    from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
+
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from app.api.virtual_frame import mark_virtual_frame_deployed, refresh_virtual_frame_image
+
+        await refresh_virtual_frame_image(db, redis, frame)
+        await mark_virtual_frame_deployed(db, redis, frame)
+        await log(db, redis, id, type="stdout", line="Virtual frame rendered (deploy = render)")
+        if task_id:
+            await log(db, redis, int(frame.id), type="stdout", line=deploy_task_log_line(task_id, "completed"))
+        return
+
     await register_active_deploy_job(redis, id, job_id)
     try:
         with tempfile.TemporaryDirectory() as temp_dir:

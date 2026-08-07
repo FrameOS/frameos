@@ -1430,7 +1430,10 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if apply_embedded_hardware_preset(frame):
         # The preset knows the board's chip; it overrides a caller-supplied platform.
         normalized_platform = embedded_platform_for_frame(frame)
-    if not frame.frame_host:
+    if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual":
+        # Nothing must ever try to reach a virtual frame over the network.
+        frame.frame_host = ""
+    elif not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     if not frame.frame_port or frame.frame_port == 8787:
         frame.frame_port = 80
