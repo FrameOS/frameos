@@ -1,6 +1,6 @@
 {
   "name": "frameos-editor",
-  "version": "2026.8.10",
+  "version": "2026.8.9",
   "description": "The FrameOS visual scene editor as an embeddable static bundle: serve it from any host, embed it in an iframe, and exchange scenes JSON over postMessage.",
   "keywords": [
     "frameos",

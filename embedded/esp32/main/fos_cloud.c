@@ -1659,6 +1659,26 @@ static void ws_handle_message(const char *data, size_t len)
     const cJSON *id = cJSON_GetObjectItem(root, "id");
     const char *type = cJSON_IsString(type_item) ? type_item->valuestring : "";
 
+    /* One control plane owns the content (docs/cloud-frames.md): enrollment
+     * is refused while a backend is configured, but a device that gained a
+     * backend AFTER enrolling (bench/dev setups) must not let the provider's
+     * stale scene assignment overwrite the backend's set on every reconnect
+     * — the hub re-pushes whenever its assigned checksum differs. Content
+     * mutations defer to the backend; telemetry, assets and OTA still work. */
+    static const char *backend_owned_verbs[] = {
+        "set_scenes", "set_current_scene", "set_settings", "set_schedule",
+    };
+    if (fos_config()->backend_url[0] != '\0') {
+        for (size_t i = 0; i < sizeof(backend_owned_verbs) / sizeof(backend_owned_verbs[0]); i++) {
+            if (strcmp(type, backend_owned_verbs[i]) == 0) {
+                ESP_LOGW(TAG, "ws: refusing %s — this frame is backend-managed", type);
+                ws_ack(id, false, "backend_managed");
+                cJSON_Delete(root);
+                return;
+            }
+        }
+    }
+
     if (strcmp(type, "challenge") == 0) {
         ws_send_auth(root);
     } else if (strcmp(type, "ready") == 0) {
