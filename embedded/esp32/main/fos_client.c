@@ -821,6 +821,7 @@ static void client_task(void *arg)
             }
         }
         log_metrics_sample();
+        frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
         double scene_interval = frameos_nim_scene_interval();

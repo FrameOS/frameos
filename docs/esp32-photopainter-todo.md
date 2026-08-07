@@ -28,6 +28,21 @@ buttons (BOOT/Reset only), TF slot on SPI3. The existing
   console stream into the Logs panel.
 - Browser flash over WebSerial (esptool-js, watchdog reset, SPIFFS preserved).
 
+## Status 2026-08-07 (branch esp32-photopainter)
+
+P0 items 1-6 are DONE and hardware-verified on the bench 13.3E6 against a
+live local backend: assets round-trip over HTTP/cloud-WS/USB, full deploy
+delivered a backend-built image over OTA (device booted from ota_1),
+restart/reboot work from backend tasks, logs+metrics ingest within seconds
+(two silent-failure bugs found and fixed on the way: the 48K TLS-sized
+heap floor muting plain-http log upload, and metrics queued past the last
+flush), and /embedded/settings serves the ETag'd frame object the firmware
+applies live. P1: usb_api provisioning verbs + structured wifi-scan are
+in (with a pre-existing scan-vs-reconnect race fixed); spill dir is wired
+(forced-spill render validation pending); 32MB layout is CI-validated.
+Remaining: frontend USB provisioning UI, cloud OTA verb + signed OTA,
+set_schedule, image_get e2e check.
+
 ## P0 — core gaps (this effort)
 
 1. **Land `fix/cloud-frames-ws-watchdog`** (4 unmerged commits: cloud WS

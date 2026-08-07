@@ -66,8 +66,14 @@ static bool s_log_upload_enabled = false;
 #define FOS_NIM_LOG_MAX_PENDING 128
 #define FOS_NIM_LOG_BATCH_MAX 8
 #define FOS_NIM_LOG_BODY_MAX (8 * 1024)
-#define FOS_NIM_LOG_MIN_INTERNAL_FREE (48 * 1024)
-#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK (16 * 1024)
+/* TLS handshakes genuinely need internal-heap headroom; a plain-http POST
+ * only needs the client struct + a 2K buffer. A single 48K floor silently
+ * disabled log upload forever on frames that idle under it (the 13.3E6
+ * with a dozen scenes loaded sits at ~16-19K internal free). */
+#define FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS (48 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK_TLS (16 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_FREE_PLAIN (14 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK_PLAIN (8 * 1024)
 
 typedef struct fos_nim_log_node {
     struct fos_nim_log_node *next;
@@ -257,10 +263,14 @@ static void ensure_log_lock(void)
 
 static bool log_upload_heap_ready(void)
 {
+    bool tls = strncmp(s_backend_url, "https://", 8) == 0;
+    size_t min_free = tls ? FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS
+                          : FOS_NIM_LOG_MIN_INTERNAL_FREE_PLAIN;
+    size_t min_block = tls ? FOS_NIM_LOG_MIN_INTERNAL_BLOCK_TLS
+                           : FOS_NIM_LOG_MIN_INTERNAL_BLOCK_PLAIN;
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (free_internal < FOS_NIM_LOG_MIN_INTERNAL_FREE ||
-        largest_internal < FOS_NIM_LOG_MIN_INTERNAL_BLOCK) {
+    if (free_internal < min_free || largest_internal < min_block) {
         ESP_LOGD("fos_nim_log", "deferring log upload: internal=%u largest=%u",
                  (unsigned)free_internal, (unsigned)largest_internal);
         return false;
