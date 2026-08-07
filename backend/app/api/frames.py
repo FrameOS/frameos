@@ -2044,12 +2044,18 @@ async def api_frame_get_image(
     # same wasm path their public URLs use) instead of proxying to a
     # nonexistent host.
     if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
-        from .virtual_frame import render_virtual_frame_png
+        # Serve the cached image; render only when there is none. Rendering
+        # on every poll made the preview flash "rendering" continuously —
+        # fresh frames come from deploy/activate/render events, which
+        # publish straight into this cache.
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached is None:
+            from .virtual_frame import render_virtual_frame_png
 
-        png = await render_virtual_frame_png(db, redis, frame)
-        await _store_frame_image(db, redis, frame, png, scene_id=None, publish_rendered=False)
+            cached = await render_virtual_frame_png(db, redis, frame)
+            await _store_frame_image(db, redis, frame, cached, scene_id=None, publish_rendered=False)
         return Response(
-            content=png,
+            content=cached,
             media_type="image/png",
             headers=await read_frame_sync_hint_headers(redis, frame.id),
         )
