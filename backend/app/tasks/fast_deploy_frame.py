@@ -37,6 +37,8 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | No
     if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
         from app.api.virtual_frame import mark_virtual_frame_deployed, refresh_virtual_frame_image
 
+        if task_id:
+            await log(db, redis, id, "stdout", deploy_task_log_line(task_id, "started", "fast"))
         await refresh_virtual_frame_image(db, redis, frame)
         await mark_virtual_frame_deployed(db, redis, frame)
         if task_id:

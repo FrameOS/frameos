@@ -2750,15 +2750,6 @@ async def api_frame_deploy_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     deploy_task_id = _task_id_param(task_id)
-    # Deploying a virtual frame IS rendering it: there is no device, no
-    # firmware, nothing to copy — render into the image cache and succeed.
-    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
-        from .virtual_frame import mark_virtual_frame_deployed, refresh_virtual_frame_image
-
-        await refresh_virtual_frame_image(db, redis, frame)
-        await mark_virtual_frame_deployed(db, redis, frame)
-        await log(db, redis, id, "stdout", "Virtual frame rendered (deploy = render)")
-        return {"message": "Success", "taskId": deploy_task_id}
     try:
         from app.tasks import deploy_frame
         from app.tasks.deploy_frame import cancel_active_deploy
@@ -3133,14 +3124,6 @@ async def api_frame_fast_deploy_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     deploy_task_id = _task_id_param(task_id)
-    # Virtual frames: "update active scenes" is just a render — the renderer
-    # always reads the saved scenes, nothing needs shipping anywhere.
-    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
-        from .virtual_frame import mark_virtual_frame_deployed, refresh_virtual_frame_image
-
-        await refresh_virtual_frame_image(db, redis, frame)
-        await mark_virtual_frame_deployed(db, redis, frame)
-        return {"message": "Success", "taskId": deploy_task_id}
     try:
         from app.tasks import fast_deploy_frame
         from app.tasks.deploy_frame import cancel_active_deploy
