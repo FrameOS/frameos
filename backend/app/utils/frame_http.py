@@ -129,7 +129,11 @@ def _https_certificate_covers_target(frame: Frame, host: str) -> bool:
     if san is not None:
         return target_ip in san.get_values_for_type(x509.IPAddress)
 
-    return any(attr.value == host for attr in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME))
+    # CNs are truncated to X.509's 64-char cap at generation time (utils/tls.py).
+    return any(
+        attr.value in (host, host[:64])
+        for attr in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    )
 
 
 def _add_direct_candidate(

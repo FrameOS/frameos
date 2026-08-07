@@ -11,7 +11,10 @@ from cryptography.x509.oid import NameOID
 
 
 def _name(common_name: str) -> x509.Name:
-    return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    # X.509 caps CN at 64 chars (RFC 5280 ub-common-name); cryptography 50
+    # enforces it. Long frame hosts stay intact in the SAN — the CN is
+    # informational here.
+    return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name[:64])])
 
 
 def _subject_alt_names(frame_host: str) -> list[x509.GeneralName]:
