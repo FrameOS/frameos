@@ -136,6 +136,17 @@ describe("commandMessage", () => {
       type: "reboot",
     });
   });
+
+  it("ships notify_update_available as a bare advisory frame", () => {
+    // The hub's queue is deliberately type-agnostic — the allow-list lives in
+    // auth-web's allowedFrameCommandTypes, which enqueues this verb with no
+    // payload; the wire frame is just id + type and the device does the rest
+    // (signed manifest fetch + verification, docs/cloud-frames.md
+    // "Signed OTA").
+    expect(
+      commandMessage({ id: "cmd-2", payload: null, type: "notify_update_available" }),
+    ).toEqual({ id: "cmd-2", type: "notify_update_available" });
+  });
 });
 
 describe("parseJsonMessage", () => {

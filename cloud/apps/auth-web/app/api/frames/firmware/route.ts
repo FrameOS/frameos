@@ -2,6 +2,14 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../src/lib/device-flow";
+import {
+  fetchLatestRelease,
+  findAsset,
+  provisioningAssets,
+  streamablePlatforms,
+  streamReleaseAssetResponse,
+  type Release,
+} from "../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
@@ -14,7 +22,10 @@ export const runtime = "nodejs";
 // carries no access-control-allow-origin (so the download always fails CORS),
 // and unauthenticated api.github.com is 60 requests/hour *per IP* — one
 // corporate NAT is enough to 403 every user behind it. So both the listing and
-// the bytes come from here, same-origin.
+// the bytes come from here, same-origin. The GitHub plumbing (allow-list,
+// release lookup, host-pinned streaming pipe) lives in
+// src/lib/firmware-release.ts, shared with the device-authed OTA routes
+// (app/api/frames/[frameId]/firmware).
 //
 // Two shapes:
 //   GET /api/frames/firmware
@@ -30,39 +41,6 @@ export const runtime = "nodejs";
 // Like the SD image route this is a dumb byte pipe over public release
 // artifacts, and it is not an "image proxy" in the sense the project forbids:
 // that rule is about frame *content* fetched on every render.
-
-const releaseApiUrl =
-  "https://api.github.com/repos/FrameOS/frameos/releases/latest";
-
-// Explicit allow-list of platform -> exact asset suffix. The upstream host and
-// path are never taken from user input, so this cannot be steered into an SSRF.
-// esp32-s3-generic carries every supported panel driver and selects one at
-// runtime (`set panel` over serial / NVS); esp32-s3-epd7in5v2 is the older
-// single-panel build kept so deployments running this code against an old
-// release still flash something. Keep in sync with the esp32 job in
-// .github/workflows/docker-publish-multi.yml.
-const provisioningAssets = [
-  { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic.bin" },
-  { platform: "esp32-s3-epd7in5v2", suffix: "-esp32-s3-epd7in5v2.bin" },
-  // Thin-client build for PSRAM-less ESP32-C3 boards (TRMNL OG/BWRY,
-  // XTEINK X4): all panel drivers, no on-device renderer.
-  { platform: "esp32-c3-generic", suffix: "-esp32-c3-generic.bin" },
-  {
-    platform: "raspberry-pi-zero-2-w",
-    suffix: "-raspberry-pi-zero-2-w-buildroot.img.gz",
-  },
-  {
-    platform: "raspberry-pi-zero-w",
-    suffix: "-raspberry-pi-zero-w-buildroot.img.gz",
-  },
-] as const;
-
-// Only the ESP32 firmware (a few MB) is streamed from here.
-const streamablePlatforms = new Set([
-  "esp32-s3-generic",
-  "esp32-s3-epd7in5v2",
-  "esp32-c3-generic",
-]);
 
 // Development / self-hosted escape hatch: until a release publishes the
 // all-panels build, FRAMEOS_ESP32_GENERIC_FIRMWARE can point at a locally
@@ -85,23 +63,6 @@ async function localGenericFirmware(): Promise<
   } catch {
     return undefined;
   }
-}
-
-interface ReleaseAsset {
-  browser_download_url: string;
-  name: string;
-  size: number;
-}
-
-interface Release {
-  assets?: ReleaseAsset[];
-  tag_name?: string;
-}
-
-function findAsset(release: Release, suffix: string) {
-  return release.assets?.find(
-    (entry) => entry.name.startsWith("frameos-") && entry.name.endsWith(suffix),
-  );
 }
 
 export async function GET(request: NextRequest) {
@@ -130,15 +91,10 @@ export async function GET(request: NextRequest) {
     return jsonError("invalid_platform", 400);
   }
 
-  const releaseResponse = await fetch(releaseApiUrl, {
-    headers: { accept: "application/vnd.github+json" },
-    // Releases change rarely; caching keeps us far from GitHub's rate limit.
-    next: { revalidate: 300 },
-  });
-  if (!releaseResponse.ok) {
+  const release: Release | undefined = await fetchLatestRelease();
+  if (!release) {
     return jsonError("release_lookup_failed", 502);
   }
-  const release = (await releaseResponse.json()) as Release;
 
   if (listing) {
     const assets = provisioningAssets.flatMap((entry) => {
@@ -189,33 +145,7 @@ export async function GET(request: NextRequest) {
       release: release.tag_name ?? null,
     });
   }
-  // Belt and braces: the URL comes from the GitHub API, but pin the host
-  // anyway so a compromised/unexpected API response cannot redirect us.
-  let assetUrl: URL;
-  try {
-    assetUrl = new URL(asset.browser_download_url);
-  } catch {
-    return jsonError("release_lookup_failed", 502);
-  }
-  if (assetUrl.protocol !== "https:" || assetUrl.host !== "github.com") {
-    return jsonError("release_lookup_failed", 502);
-  }
-
-  const upstream = await fetch(assetUrl, { redirect: "follow" });
-  if (!upstream.ok || !upstream.body) {
-    return jsonError("firmware_download_failed", 502);
-  }
-
-  const headers = new Headers({
-    "cache-control": "private, max-age=300",
-    "content-type": "application/octet-stream",
-    "x-frameos-image-name": asset.name,
-    "x-frameos-release": release.tag_name ?? "",
-  });
-  const contentLength = upstream.headers.get("content-length");
-  if (contentLength) {
-    headers.set("content-length", contentLength);
-  }
-  // Streamed straight through: the route never buffers the firmware.
-  return new NextResponse(upstream.body, { headers, status: 200 });
+  // Host-pinned and streamed straight through: the route never buffers the
+  // firmware (streamReleaseAssetResponse in src/lib/firmware-release.ts).
+  return streamReleaseAssetResponse(asset, release.tag_name ?? "");
 }

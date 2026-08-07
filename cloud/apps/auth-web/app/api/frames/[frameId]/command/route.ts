@@ -11,6 +11,7 @@ import {
   allowedFrameCommandTypes,
   enqueueFrameCommand,
   frameForAccount,
+  supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
@@ -20,6 +21,13 @@ export const runtime = "nodejs";
 // "Now"-commands expire fast: a reboot queued on Monday must not fire when
 // the frame comes back online on Friday.
 const commandTtlMs = 5 * 60 * 1000;
+// An update notification is advisory — the device fetches the manifest and
+// verifies the signature itself (docs/cloud-frames.md "Signed OTA") — and
+// battery frames sleep for hours between connects, so it outlives the action
+// TTL; installing yesterday's suggested update is correct, unlike replaying
+// yesterday's reboot. Repeat clicks supersede the queued one instead of
+// piling up (the verb is idempotent, N notifications = 1 check).
+const updateNotifyTtlMs = 24 * 60 * 60 * 1000;
 
 export async function POST(
   request: NextRequest,
@@ -67,11 +75,14 @@ export async function POST(
     payload = { scene_id: sceneId };
   }
 
+  if (type === "notify_update_available") {
+    await supersedePendingCommands(db, frame.id, type);
+  }
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: session.accountId,
     frameId: frame.id,
     payload,
-    ttlMs: commandTtlMs,
+    ttlMs: type === "notify_update_available" ? updateNotifyTtlMs : commandTtlMs,
     type,
   });
 

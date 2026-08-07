@@ -930,11 +930,18 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* The packed snapshot is in PANEL orientation (the packers rotate while
+     * packing); previews are served in SCENE orientation like the Pi's, so
+     * the UI never shows a sideways image on rotated frames. */
+    int rotate = fos_config()->rotate;
+    int out_width = (rotate == 90 || rotate == 270) ? height : width;
+    int out_height = (rotate == 90 || rotate == 270) ? width : height;
+
     uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
     size_t palette_entries = bit_count == 1 ? 2 : 16;
-    size_t row_payload = (((size_t)width * bit_count) + 7u) / 8u;
+    size_t row_payload = (((size_t)out_width * bit_count) + 7u) / 8u;
     size_t row_stride = (row_payload + 3u) & ~3u;
-    size_t pixel_bytes = row_stride * (size_t)height;
+    size_t pixel_bytes = row_stride * (size_t)out_height;
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
         free(packed);
@@ -953,8 +960,8 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     put_u32le(&bmp[2], (uint32_t)bmp_len);
     put_u32le(&bmp[10], (uint32_t)(54u + palette_bytes));
     put_u32le(&bmp[14], 40);
-    put_u32le(&bmp[18], (uint32_t)width);
-    put_u32le(&bmp[22], (uint32_t)height);
+    put_u32le(&bmp[18], (uint32_t)out_width);
+    put_u32le(&bmp[22], (uint32_t)out_height);
     put_u16le(&bmp[26], 1);
     put_u16le(&bmp[28], bit_count);
     put_u32le(&bmp[34], (uint32_t)pixel_bytes);
@@ -978,11 +985,20 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     }
     uint8_t *pixels = bmp + 54u + palette_bytes;
     size_t row_index = 0;
-    for (int y = height - 1; y >= 0; y--) {
+    for (int y = out_height - 1; y >= 0; y--) {
         uint8_t *row = pixels + row_index * row_stride;
         memset(row, 0, row_stride);
-        for (int x = 0; x < width; x++) {
-            uint8_t index = preview_palette_index(packed, width, height, format, x, y);
+        for (int x = 0; x < out_width; x++) {
+            /* Scene (x,y) → the panel position the packer put it at (the
+             * same mapping embedded_main.panelCoords applies). */
+            int px = x, py = y;
+            switch (rotate) {
+                case 90: px = out_height - 1 - y; py = x; break;
+                case 180: px = out_width - 1 - x; py = out_height - 1 - y; break;
+                case 270: px = y; py = out_width - 1 - x; break;
+                default: break;
+            }
+            uint8_t index = preview_palette_index(packed, width, height, format, px, py);
             if (bit_count == 1) {
                 if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
             } else if (x & 1) {

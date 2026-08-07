@@ -14,7 +14,12 @@ import type { FrameId } from './frameId'
 // and cloud/docs/cloud-frames.md.
 
 /** allowedFrameCommandTypes in cloud/apps/auth-web/src/lib/frames.ts. */
-export type CloudFrameCommand = 'reboot' | 'render' | 'restart_runtime' | 'set_current_scene'
+export type CloudFrameCommand =
+  | 'notify_update_available'
+  | 'reboot'
+  | 'render'
+  | 'restart_runtime'
+  | 'set_current_scene'
 
 // The settings allowlist and its payload builder live in the import-free
 // cloudFrameSettings module (it is unit-tested from the cloud app's node

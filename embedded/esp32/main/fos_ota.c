@@ -18,9 +18,16 @@
 #include "esp_timer.h"
 #include "nvs.h"
 
+#include "mbedtls/base64.h"
+#include "monocypher.h"
+#include "monocypher-ed25519.h"
+
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_http.h"
+#include "fos_ota_pubkey.h"
 #include "fos_wifi.h"
+#include "frameos_nim.h"
 
 static const char *TAG = "fos_ota";
 #define FOS_OTA_MAX_ATTEMPTS 64
@@ -538,4 +545,316 @@ esp_err_t fos_ota_request_check(void)
     ESP_LOGW(TAG, "OTA requested; rebooting into early updater in %d ms",
              FOS_OTA_REBOOT_DELAY_MS);
     return ESP_OK;
+}
+
+/* ----------------------------------------------------------- cloud OTA
+ * docs/cloud-frames.md "Signed OTA": the enrolled provider serves a
+ * device-authed manifest carrying a minisign signature (Ed25519 over
+ * BLAKE2b-512 of the image, tools/sign_firmware.py). The image streams to
+ * the inactive slot with incremental hashing; the boot partition switches
+ * ONLY after the signature verifies against the baked public key
+ * (fos_ota_pubkey.h). Rollback protection stays on top: the new image
+ * boots pending-verify and rolls back unless it reaches Wi-Fi. */
+
+#define FOS_CLOUD_OTA_MANIFEST_MAX (8 * 1024)
+#define FOS_CLOUD_OTA_CHUNK (8 * 1024)
+
+#if CONFIG_IDF_TARGET_ESP32S3
+#define FOS_CLOUD_OTA_PLATFORM "esp32-s3-generic"
+#else
+#define FOS_CLOUD_OTA_PLATFORM "esp32-c3-generic"
+#endif
+
+static volatile bool s_cloud_ota_running = false;
+
+/* Parse the first signature line of a .minisig: base64(ED + keyid8 + sig64).
+ * Trusted-comment lines are ignored (the device trusts only the key). */
+static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
+{
+    const char *line = minisig;
+    while (line != NULL && *line != '\0') {
+        while (*line == '\r' || *line == '\n' || *line == ' ') line++;
+        if (strncmp(line, "untrusted comment:", 18) == 0 ||
+            strncmp(line, "trusted comment:", 16) == 0) {
+            line = strchr(line, '\n');
+            continue;
+        }
+        break;
+    }
+    if (line == NULL || *line == '\0') return false;
+    const char *end = strchr(line, '\n');
+    size_t b64_len = end != NULL ? (size_t)(end - line) : strlen(line);
+    while (b64_len > 0 && (line[b64_len - 1] == '\r' || line[b64_len - 1] == ' ')) b64_len--;
+    uint8_t blob[80];
+    size_t blob_len = 0;
+    if (mbedtls_base64_decode(blob, sizeof(blob), &blob_len,
+                              (const unsigned char *)line, b64_len) != 0) {
+        return false;
+    }
+    if (blob_len != 74 || blob[0] != 'E' || blob[1] != 'D') {
+        ESP_LOGW(TAG, "cloud ota: unsupported signature format");
+        return false;
+    }
+    if (memcmp(blob + 2, FOS_OTA_SIGNING_KEY_ID, 8) != 0) {
+        ESP_LOGW(TAG, "cloud ota: signature key id mismatch");
+        return false;
+    }
+    memcpy(sig_out, blob + 10, 64);
+    return true;
+}
+
+static void cloud_ota_log(const char *status, const char *detail)
+{
+    char line[224];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"ota:cloud\",\"source\":\"esp32\","
+             "\"status\":\"%s\",\"detail\":\"%s\"}",
+             status, detail ? detail : "");
+    frameos_nim_log_hook(line);
+    frameos_nim_flush_logs();
+}
+
+static esp_err_t cloud_ota_download_verify(const char *download_url,
+                                           const char *auth_header,
+                                           const uint8_t sig[64],
+                                           size_t expected_size)
+{
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (target == NULL) return ESP_ERR_NOT_FOUND;
+    if (expected_size > 0 && expected_size > target->size) {
+        ESP_LOGE(TAG, "cloud ota: image (%u) exceeds slot (%u)",
+                 (unsigned)expected_size, (unsigned)target->size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_http_client_config_t config = {
+        .url = download_url,
+        .timeout_ms = 30000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 4096,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) return ESP_ERR_NO_MEM;
+    esp_http_client_set_header(client, "Authorization", auth_header);
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    int64_t content_length = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200) {
+        ESP_LOGW(TAG, "cloud ota: download HTTP %d", status);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    esp_ota_handle_t ota = 0;
+    err = esp_ota_begin(target, content_length > 0 ? (size_t)content_length
+                                                   : OTA_SIZE_UNKNOWN, &ota);
+    if (err != ESP_OK) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
+    uint8_t *chunk = heap_caps_malloc(FOS_CLOUD_OTA_CHUNK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (chunk == NULL) chunk = malloc(FOS_CLOUD_OTA_CHUNK);
+    if (chunk == NULL) {
+        esp_ota_abort(ota);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+
+    crypto_blake2b_ctx hash_ctx;
+    crypto_blake2b_init(&hash_ctx, 64);
+    size_t total = 0;
+    while (true) {
+        int r = esp_http_client_read(client, (char *)chunk, FOS_CLOUD_OTA_CHUNK);
+        if (r < 0) {
+            err = ESP_FAIL;
+            break;
+        }
+        if (r == 0) break;
+        crypto_blake2b_update(&hash_ctx, chunk, (size_t)r);
+        err = esp_ota_write(ota, chunk, (size_t)r);
+        if (err != ESP_OK) break;
+        total += (size_t)r;
+        if ((total % (512 * 1024)) < FOS_CLOUD_OTA_CHUNK) {
+            ESP_LOGW(TAG, "cloud ota: %u bytes written", (unsigned)total);
+        }
+    }
+    free(chunk);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK || total == 0 ||
+        (expected_size > 0 && total != expected_size)) {
+        ESP_LOGE(TAG, "cloud ota: download failed at %u bytes (%s)",
+                 (unsigned)total, esp_err_to_name(err));
+        esp_ota_abort(ota);
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+
+    uint8_t digest[64];
+    crypto_blake2b_final(&hash_ctx, digest);
+    if (crypto_ed25519_check(sig, FOS_OTA_SIGNING_PUBKEY, digest, sizeof(digest)) != 0) {
+        ESP_LOGE(TAG, "cloud ota: SIGNATURE VERIFICATION FAILED — image rejected");
+        esp_ota_abort(ota);
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    err = esp_ota_end(ota);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "cloud ota: image validation failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_ota_set_boot_partition(target);
+    if (err != ESP_OK) return err;
+    ESP_LOGW(TAG, "cloud ota: %u bytes verified and staged in %s; rebooting",
+             (unsigned)total, target->label);
+    return ESP_OK;
+}
+
+static esp_err_t cloud_ota_run(void)
+{
+    char base_url[FOS_URL_LEN];
+    char frame_id[64];
+    char auth[FOS_CLOUD_TOKEN_LEN + 16];
+    if (!fos_cloud_api_access(base_url, sizeof(base_url), frame_id, sizeof(frame_id),
+                              auth, sizeof(auth))) {
+        cloud_ota_log("skipped", "not-enrolled");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char url[FOS_URL_LEN + 128];
+    snprintf(url, sizeof(url), "%s/api/frames/%s/firmware/manifest?platform=%s",
+             base_url, frame_id, FOS_CLOUD_OTA_PLATFORM);
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 20000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 4096,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) return ESP_ERR_NO_MEM;
+    esp_http_client_set_header(client, "Authorization", auth);
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        cloud_ota_log("error", "manifest-connect-failed");
+        return err;
+    }
+    int64_t content_length = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    /* Dev servers (and some proxies) send chunked responses with no
+     * Content-Length — read to EOF under the manifest cap either way. */
+    if (status != 200 || content_length > FOS_CLOUD_OTA_MANIFEST_MAX) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        ESP_LOGW(TAG, "cloud ota: manifest HTTP %d (%lld bytes)", status,
+                 (long long)content_length);
+        cloud_ota_log("error", status == 409 ? "unsigned-release" : "manifest-unavailable");
+        return ESP_FAIL;
+    }
+    char *body = malloc(FOS_CLOUD_OTA_MANIFEST_MAX + 1);
+    if (body == NULL) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+    size_t total = 0;
+    while (total < FOS_CLOUD_OTA_MANIFEST_MAX) {
+        int r = esp_http_client_read(client, body + total,
+                                     FOS_CLOUD_OTA_MANIFEST_MAX - total);
+        if (r <= 0) break;
+        total += (size_t)r;
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    body[total] = '\0';
+
+    cJSON *root = cJSON_ParseWithLength(body, total);
+    free(body);
+    if (root == NULL) {
+        cloud_ota_log("error", "manifest-unparseable");
+        return ESP_FAIL;
+    }
+    const cJSON *version = cJSON_GetObjectItem(root, "version");
+    const cJSON *minisig = cJSON_GetObjectItem(root, "minisig");
+    const cJSON *download = cJSON_GetObjectItem(root, "downloadUrl");
+    const cJSON *size_item = cJSON_GetObjectItem(root, "size");
+    if (!cJSON_IsString(version) || !cJSON_IsString(minisig) ||
+        !cJSON_IsString(download)) {
+        cJSON_Delete(root);
+        cloud_ota_log("error", "manifest-incomplete");
+        return ESP_FAIL;
+    }
+
+    /* Same image → nothing to do. Release versions have no v prefix. */
+    const char *running = esp_app_get_description()->version;
+    if (running[0] == 'v') running++;
+    if (strcmp(running, version->valuestring) == 0) {
+        ESP_LOGI(TAG, "cloud ota: already on %s", version->valuestring);
+        cloud_ota_log("up-to-date", version->valuestring);
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    uint8_t sig[64];
+    if (!parse_minisig(minisig->valuestring, sig)) {
+        cJSON_Delete(root);
+        cloud_ota_log("error", "bad-signature-format");
+        return ESP_FAIL;
+    }
+
+    char download_url[FOS_URL_LEN + 192];
+    if (download->valuestring[0] == '/') {
+        snprintf(download_url, sizeof(download_url), "%s%s", base_url,
+                 download->valuestring);
+    } else {
+        strlcpy(download_url, download->valuestring, sizeof(download_url));
+    }
+    size_t expected = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    cloud_ota_log("downloading", version->valuestring);
+    cJSON_Delete(root);
+
+    err = cloud_ota_download_verify(download_url, auth, sig, expected);
+    if (err == ESP_OK) {
+        cloud_ota_log("verified", "rebooting");
+        vTaskDelay(pdMS_TO_TICKS(750)); /* flush the log line */
+        esp_restart();
+    }
+    cloud_ota_log("error", err == ESP_ERR_INVALID_CRC ? "signature-rejected"
+                                                      : "download-failed");
+    return err;
+}
+
+static void cloud_ota_task(void *arg)
+{
+    (void)arg;
+    s_ota_busy = true;
+    esp_err_t err = cloud_ota_run();
+    s_ota_busy = false;
+    s_cloud_ota_running = false;
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "cloud ota: finished with %s", esp_err_to_name(err));
+    }
+    vTaskDelete(NULL);
+}
+
+void fos_ota_request_cloud_update(void)
+{
+    if (s_cloud_ota_running) {
+        ESP_LOGW(TAG, "cloud ota: already running");
+        return;
+    }
+    s_cloud_ota_running = true;
+    if (xTaskCreate(cloud_ota_task, "fos_cloud_ota", 8192, NULL, 5, NULL) != pdPASS) {
+        s_cloud_ota_running = false;
+        ESP_LOGW(TAG, "cloud ota: task create failed");
+    }
 }

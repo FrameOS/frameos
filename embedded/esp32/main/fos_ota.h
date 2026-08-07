@@ -25,3 +25,11 @@ void fos_ota_start_periodic_task(uint32_t interval_hours);
 /* Request an early-boot OTA check and schedule a reboot into it. The delay
  * lets HTTP and USB callers flush their acknowledgement first. */
 esp_err_t fos_ota_request_check(void);
+
+/* Cloud OTA (docs/cloud-frames.md "Signed OTA"): fetch the device-authed
+ * manifest from the enrolled cloud, download the published generic image
+ * with incremental BLAKE2b hashing, verify its minisign Ed25519 signature
+ * against the baked public key (fos_ota_pubkey.h) BEFORE switching boot
+ * slots, then reboot. Runs in its own one-shot task; a second request while
+ * one runs is ignored. Triggered by the notify_update_available verb. */
+void fos_ota_request_cloud_update(void);

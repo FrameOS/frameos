@@ -14,6 +14,7 @@ import {
   frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
   isEmbeddedHardwareFrame,
+  isEsp32CloudFrame,
   isVirtualFrame,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
@@ -113,11 +114,11 @@ describe("cloud mode keeps what the protocol does implement", () => {
 
 // The mode allow-lists say what a control plane implements; the device
 // profile says what the frame on the other end implements. A cloud-managed
-// frame whose enrollment-reported hardware.platform is "esp32" answers
-// `unsupported_verb` for set_schedule, get_logs, get_metrics and
-// notify_update_available; set_settings it implements for the
-// interval/name subset (docs/cloud-frames.md "Device profiles";
-// embedded/esp32/main/fos_cloud.c).
+// frame whose enrollment-reported hardware.platform is "esp32" historically
+// answered `unsupported_verb` for schedule/settings/telemetry and
+// notify_update_available; the firmware has since implemented all of them —
+// notify_update_available last, via the signed cloud OTA path
+// (docs/cloud-frames.md "Device profiles"; embedded/esp32/main/fos_cloud.c).
 //
 // The profile DISABLES those controls with an explanation - it never hides
 // them (hiding made the workspace look gutted for esp32 frames). And Logs
@@ -175,15 +176,19 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("gates esp32 variants by prefix", () => {
-    // updateNotify is the one capability the esp32 profile still lacks —
-    // prefix-matched so "esp32-s3"/"esp32-c3" variants gate identically.
-    expect(
-      frameCapabilities({ hardware: { platform: "esp32-s3" } }, "cloud").has("updateNotify"),
-    ).toBe(false);
-    expect(
-      frameCapabilities({ hardware: { platform: "esp32-c3" } }, "cloud").has("updateNotify"),
-    ).toBe(false);
+  it("classifies esp32 variants by prefix", () => {
+    // The old probe here (updateNotify missing from the capability set) is
+    // gone for the best reason: the firmware now implements the verb via the
+    // signed cloud OTA path, so the esp32 profile carries the full set.
+    // Prefix matching still gates real surfaces — the Update-firmware menu
+    // entry and the USB serial console are offered exactly to
+    // isEsp32CloudFrame frames — so pin the classifier itself.
+    for (const platform of ["esp32", "esp32-s3", "esp32-c3", "ESP32-S3"]) {
+      expect(isEsp32CloudFrame({ hardware: { platform } }, "cloud")).toBe(true);
+    }
+    expect(isEsp32CloudFrame({ hardware: { platform: "pi-zero2w" } }, "cloud")).toBe(false);
+    expect(isEsp32CloudFrame({ hardware: { platform: "esp32" } }, "backend")).toBe(false);
+    expect(isEsp32CloudFrame(undefined, "cloud")).toBe(false);
   });
 
   it("leaves Pi/Linux cloud frames the full cloud surface", () => {
@@ -211,13 +216,29 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("derives an everything-but-updateNotify capability set for esp32 and a full one otherwise", () => {
-    expect(frameCapabilities(esp32Frame, "cloud")).toEqual(
-      new Set(["logs", "settings", "schedule", "metrics"]),
-    );
-    expect(frameCapabilities(piFrame, "cloud")).toEqual(
-      new Set(["schedule", "settings", "logs", "metrics", "updateNotify"]),
-    );
+  it("derives the FULL capability set for esp32 — updateNotify included — and for everything else", () => {
+    // notify_update_available was the last unsupported verb on the esp32
+    // profile; the firmware's signed OTA path implements it now, so nothing
+    // is gated. The layering stays for the next verb a profile lags on.
+    const fullSet = new Set(["schedule", "settings", "logs", "metrics", "updateNotify"]);
+    expect(frameCapabilities(esp32Frame, "cloud")).toEqual(fullSet);
+    expect(
+      frameCapabilities({ hardware: { platform: "esp32-s3" } }, "cloud"),
+    ).toEqual(fullSet);
+    expect(
+      frameCapabilities({ hardware: { platform: "esp32-c3" } }, "cloud"),
+    ).toEqual(fullSet);
+    expect(frameCapabilities(piFrame, "cloud")).toEqual(fullSet);
+  });
+
+  it("offers the Update firmware action on the cloud alone, enabled for esp32", () => {
+    // The menu entry enqueues notify_update_available; the backend and the
+    // on-device panel have their own firmware flows (deploy drawer / local
+    // deploy), so the action is cloud-only.
+    expect(frameMenuActionIsAllowed("cloud", "updateFirmware", esp32Frame)).toBe(true);
+    expect(frameMenuActionDisabledReason("cloud", "updateFirmware", esp32Frame)).toBeNull();
+    expect(frameMenuActionIsAllowed("backend", "updateFirmware")).toBe(false);
+    expect(frameMenuActionIsAllowed("frameAdmin", "updateFirmware")).toBe(false);
   });
 
   it("offers the USB serial console only to esp32 cloud frames", () => {

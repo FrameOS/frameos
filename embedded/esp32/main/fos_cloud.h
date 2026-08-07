@@ -46,6 +46,8 @@ typedef enum {
  * until cloud_url (+ claim_token) exist in the config and Wi-Fi is up. */
 esp_err_t fos_cloud_start(void);
 
+#define FOS_CLOUD_TOKEN_LEN 256
+
 fos_cloud_state_t fos_cloud_state(void);
 /* "none" | "pending" | "enrolled" | "error" */
 const char *fos_cloud_state_name(void);
@@ -55,6 +57,14 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+
+/* Provider REST access for device-authed routes (cloud OTA manifest and
+ * download): fills the provider base URL, the provider-assigned frame id and
+ * a "Bearer …" Authorization value. False unless enrolled. The token is a
+ * secret — callers must only send it to `url`'s origin. */
+bool fos_cloud_api_access(char *url, size_t url_len,
+                          char *frame_id, size_t frame_id_len,
+                          char *auth_header, size_t auth_len);
 
 /* Is this provider URL safe to carry the claim token, the bearer token and
  * the management session? https:// always is; http:// (and the ws://

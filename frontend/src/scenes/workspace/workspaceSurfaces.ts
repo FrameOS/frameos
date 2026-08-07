@@ -104,6 +104,11 @@ export type FrameMenuAction =
   | 'restart'
   | 'restartRemote'
   | 'stop'
+  // Cloud only: enqueue notify_update_available — an advisory nudge; the
+  // device downloads and signature-verifies the new firmware on its own
+  // (docs/cloud-frames.md "Signed OTA"). The backend's firmware updates ride
+  // its own deploy/OTA drawer instead.
+  | 'updateFirmware'
 
 export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAction[]> = {
   backend: [
@@ -123,7 +128,7 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
   frameAdmin: ['localDeploy', 'rename', 'render'],
   // `delete` = DELETE /api/frames/{id}: revoke the link, then drop the row
   // and everything cascaded to it. The device demotes to standalone.
-  cloud: ['delete', 'reboot', 'rename', 'render', 'restart'],
+  cloud: ['delete', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
 }
 
 /**
@@ -222,10 +227,11 @@ export const addFrameFlows: Record<WorkspaceMode, AddFrameFlow> = {
  * The mode lists say what a control plane implements; this says what the
  * device on the other end implements. Cloud-managed frames report their
  * `hardware` object at enrollment, and a `platform: "esp32"` frame speaks
- * only a subset of the management verbs — it answers `unsupported_verb` for
- * `set_schedule`, `set_settings`, `get_logs`, `get_metrics` and
- * `notify_update_available` (docs/cloud-frames.md, "Device profiles";
- * device-side allowlist in embedded/esp32/main/fos_cloud.c).
+ * the ESP32 profile of the management verbs — historically a subset that
+ * answered `unsupported_verb` for schedule/settings/telemetry and
+ * `notify_update_available`, all since implemented by the firmware
+ * (docs/cloud-frames.md, "Device profiles"; device-side allowlist in
+ * embedded/esp32/main/fos_cloud.c).
  *
  * A missing capability DISABLES the control with an explanation — it never
  * hides it. Hiding made the workspace look gutted for esp32 frames and gave
@@ -262,9 +268,13 @@ const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings'
  * the firmware's set_settings verb (interval/name subset — the control plane
  * refuses the rest for esp32 up front); schedule rides set_schedule
  * (evaluated on-device, fos_schedule.c); metrics arrive as pushed `metrics`
- * messages plus the get_metrics verb. Only updateNotify stays out — no
- * cloud OTA path yet. */
-const esp32CloudCapabilities: readonly FrameCapability[] = ['logs', 'settings', 'schedule', 'metrics']
+ * messages plus the get_metrics verb; updateNotify rides
+ * notify_update_available — the firmware fetches the device-authed OTA
+ * manifest and verifies the image signature itself before switching boot
+ * slots (fos_ota.c; docs/cloud-frames.md "Signed OTA"). The profile
+ * currently gates nothing, but the layering stays: the NEXT verb the
+ * firmware lags on gets a disabled-with-reason control, not a hidden one. */
+const esp32CloudCapabilities: readonly FrameCapability[] = ['logs', 'settings', 'schedule', 'metrics', 'updateNotify']
 
 /** `platform: "esp32"` today; prefix-matched so "esp32-s3" variants gate too. */
 function isEsp32Platform(platform: unknown): boolean {
@@ -367,13 +377,15 @@ const panelCapabilities: Partial<Record<WorkspaceUtilityPanel, FrameCapability>>
 }
 
 /**
- * Which capability a gated "…" menu action rides on. Currently empty: rename
- * used to ride `settings`, but the frame's name is provider-side data
- * (frames.name) — the cloud updates its own row and only enqueues
+ * Which capability a gated "…" menu action rides on. (Rename is deliberately
+ * absent: it used to ride `settings`, but the frame's name is provider-side
+ * data (frames.name) — the cloud updates its own row and only enqueues
  * set_settings for devices that accept it, so renaming works on every
- * platform, ESP32 included.
+ * platform, ESP32 included.)
  */
-const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {}
+const menuActionCapabilities: Partial<Record<FrameMenuAction, FrameCapability>> = {
+  updateFirmware: 'updateNotify', // notify_update_available
+}
 
 /**
  * Tooltip shown on a control its frame's device profile cannot serve. One

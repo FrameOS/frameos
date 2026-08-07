@@ -40,8 +40,10 @@ flush), and /embedded/settings serves the ETag'd frame object the firmware
 applies live. P1: usb_api provisioning verbs + structured wifi-scan are
 in (with a pre-existing scan-vs-reconnect race fixed); spill dir is wired
 (forced-spill render validation pending); 32MB layout is CI-validated.
-Remaining: frontend USB provisioning UI, cloud OTA verb + signed OTA,
-set_schedule, image_get e2e check.
+Remaining: forced-spill render validation, image_get e2e check. Cloud OTA
++ signed OTA landed on branch cloud-ota (verified live: hub verb →
+manifest → streamed download → Ed25519 verify → slot switch → reboot);
+the USB provisioning UI and set_schedule landed in #302.
 
 ## P0 — core gaps (this effort)
 

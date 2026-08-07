@@ -5,6 +5,7 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUturnLeftIcon,
+  CloudArrowDownIcon,
   CommandLineIcon,
   NoSymbolIcon,
   PencilSquareIcon,
@@ -24,6 +25,7 @@ import { workspaceLogic } from './workspaceLogic'
 import {
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
+  isEsp32CloudFrame,
   workspaceMode,
   type FrameMenuAction,
 } from './workspaceSurfaces'
@@ -51,6 +53,7 @@ export function FrameActionsMenu({
     restartFrame,
     setFrameArchived,
     stopFrame,
+    updateFrameFirmware,
   } = useActions(framesModel)
   const { openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
@@ -155,6 +158,25 @@ export function FrameActionsMenu({
                 title: 'Reboot device',
                 onClick: () => rebootFrame(frame.id),
                 icon: <PowerIcon className="h-5 w-5" />,
+              },
+            ]
+          : []),
+        // Firmware-shaped on purpose: only esp32 cloud frames get the entry —
+        // a Pi cloud frame has no firmware image to swap (its update path is
+        // the buildroot release flow, not yet cloud-nudgeable), so an
+        // always-disabled button would explain nothing. The capability check
+        // still rides menuActionCapabilities (updateNotify) for the day a
+        // profile lags behind the verb again.
+        ...(allows('updateFirmware') && isEsp32CloudFrame(frame)
+          ? [
+              {
+                label: 'Update firmware',
+                title:
+                  disabledReason('updateFirmware') ??
+                  'Ask the frame to check for new firmware and install it in the background',
+                disabled: Boolean(disabledReason('updateFirmware')),
+                onClick: () => updateFrameFirmware(frame.id),
+                icon: <CloudArrowDownIcon className="h-5 w-5" />,
               },
             ]
           : []),
