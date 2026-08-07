@@ -555,6 +555,46 @@ EMBEDDED_REQUIRED_SDKCONFIG = {
 # idf.py builds are not safe to run concurrently in the same build directory
 _build_lock = asyncio.Lock()
 
+# The build writes per-frame state (main/generated_config.h, sdkconfig) into
+# the shared in-tree ESP-IDF project before running idf.py, so two frames
+# building at once — even from different worker processes — would corrupt each
+# other's images. The asyncio lock above only covers one process; this redis
+# key is the cross-process guard.
+EMBEDDED_BUILD_LOCK_KEY = "embedded_firmware:build_lock"
+EMBEDDED_BUILD_LOCK_TTL_SECONDS = int(
+    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_TTL_SECONDS", str(2 * 3600))
+)
+EMBEDDED_BUILD_LOCK_WAIT_SECONDS = float(
+    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_WAIT_SECONDS", str(30 * 60))
+)
+EMBEDDED_BUILD_LOCK_POLL_SECONDS = float(
+    os.environ.get("FRAMEOS_EMBEDDED_BUILD_LOCK_POLL_SECONDS", "2")
+)
+
+
+async def _acquire_embedded_build_lock(redis: Redis) -> str:
+    """Blockingly acquire the global firmware build lock; returns the token."""
+    token = secure_token(16)
+    deadline = time.monotonic() + EMBEDDED_BUILD_LOCK_WAIT_SECONDS
+    while not await redis.set(
+        EMBEDDED_BUILD_LOCK_KEY, token, nx=True, ex=EMBEDDED_BUILD_LOCK_TTL_SECONDS
+    ):
+        if time.monotonic() >= deadline:
+            raise ValueError(
+                "Another embedded firmware build is holding the shared build directory; "
+                "try again once it finishes."
+            )
+        await asyncio.sleep(EMBEDDED_BUILD_LOCK_POLL_SECONDS)
+    return token
+
+
+async def _release_embedded_build_lock(redis: Redis, token: str) -> None:
+    # Delete only our own token: the TTL may have expired and another build
+    # may legitimately hold the lock now.
+    current = await redis.get(EMBEDDED_BUILD_LOCK_KEY)
+    if current is not None and current.decode(errors="replace") == token:
+        await redis.delete(EMBEDDED_BUILD_LOCK_KEY)
+
 
 def normalize_embedded_platform(platform: str | None) -> str:
     value = (platform or "").strip().lower()
@@ -580,6 +620,14 @@ def embedded_platform_for_frame(frame: Frame) -> str:
 
 def embedded_platform_spec_for_frame(frame: Frame) -> dict[str, Any]:
     return EMBEDDED_PLATFORMS[embedded_platform_for_frame(frame)]
+
+
+def _embedded_platform_or_default(frame: Frame) -> str:
+    """The frame's chip target, tolerating malformed metadata (error paths)."""
+    try:
+        return embedded_platform_for_frame(frame)
+    except ValueError:
+        return SUPPORTED_EMBEDDED_PLATFORM
 
 
 def embedded_max_gpio_for_frame(frame: Frame) -> int:
@@ -1531,6 +1579,22 @@ def latest_embedded_firmware(frame: Frame) -> dict[str, Any] | None:
                 "error": "The generated firmware was built from older FrameOS sources",
             })
     if firmware.get("status") == "ready":
+        # An esp32-s3 <-> esp32-c3 switch produces a binary for the wrong chip:
+        # the generated config header (and hence configHash) can be identical
+        # across targets, so the chip target is a staleness input of its own.
+        firmware_platform = firmware.get("platform")
+        if isinstance(firmware_platform, str) and firmware_platform:
+            try:
+                normalized_firmware_platform = normalize_embedded_platform(firmware_platform)
+            except ValueError:
+                normalized_firmware_platform = ""
+            if normalized_firmware_platform != embedded_platform_for_frame(frame):
+                return with_embedded_firmware_layout(frame, {
+                    **firmware,
+                    "status": "stale",
+                    "error": "The generated firmware was built for a different chip target",
+                })
+    if firmware.get("status") == "ready":
         try:
             firmware_flash_size = normalize_embedded_flash_size(firmware.get("flashSize") or EMBEDDED_DEFAULT_FLASH_SIZE)
         except ValueError:
@@ -1624,7 +1688,7 @@ async def start_embedded_firmware(
         "status": "queued",
         "requestId": request_id,
         "queueJobId": queue_job_id,
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": _embedded_platform_or_default(frame),
         "flashSize": embedded_flash_size_for_frame(frame),
         "otaSupported": embedded_ota_supported_for_frame(frame),
         "queuedAt": queued_at,
@@ -1810,7 +1874,7 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
             await _set_firmware_status(db, redis, frame, {
                 **_preserved_queue_metadata(current),
                 "status": "error",
-                "platform": SUPPORTED_EMBEDDED_PLATFORM,
+                "platform": _embedded_platform_or_default(frame),
                 "error": str(exc),
                 "completedAt": _utc_now(),
             })
@@ -1880,12 +1944,14 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         env["FRAMEOS_PIXIE_PATH"] = str(pixie_path)
         await log(db, redis, int(frame.id), "stdout", f"Using explicit Pixie override at {pixie_path}")
 
-    # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi)
+    # Per-frame compile-time defaults (backend URL, API key, panel, pins, Wi-Fi).
+    # Written to disk only under the build lock below: the header lives in the
+    # shared in-tree project, so writing it while another frame builds would
+    # bake this frame's credentials into the other frame's image.
     wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
     generated_header = EMBEDDED_PROJECT_DIR / "main" / "generated_config.h"
     generated_config = _generated_config_header(frame, wifi_ssid=wifi_ssid, wifi_password=wifi_password)
     generated_config_hash = hashlib.sha256(generated_config.encode("utf-8")).hexdigest()
-    generated_header.write_text(generated_config)
 
     # Fallback demo-scene parameters: interpreted scenes are loaded at runtime,
     # but this define gives the built-in demo a frame-specific label. Keep the
@@ -1921,39 +1987,44 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
                f'idf.py -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
                'reconfigure >/dev/null && idf.py build merge-bin')
 
-    async with _build_lock:
-        reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
-        if reset_sdkconfig:
-            reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
-            await log(db, redis, int(frame.id), "stdout",
-                      f"Regenerating ESP32 sdkconfig for required defaults: {reset_keys}")
+    build_lock_token = await _acquire_embedded_build_lock(redis)
+    try:
+        async with _build_lock:
+            generated_header.write_text(generated_config)
+            reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
+            if reset_sdkconfig:
+                reset_keys = ", ".join(f"{key}={value}" for key, value in sorted(reset_sdkconfig.items()))
+                await log(db, redis, int(frame.id), "stdout",
+                          f"Regenerating ESP32 sdkconfig for required defaults: {reset_keys}")
 
-        process = await asyncio.create_subprocess_exec(
-            "bash", "-c", command,
-            cwd=str(EMBEDDED_PROJECT_DIR),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        output_tail: list[str] = []
-        assert process.stdout is not None
-        last_heartbeat = datetime.now(timezone.utc)
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            text = line.decode("utf-8", errors="replace").rstrip()
-            if text:
-                output_tail.append(text)
-                del output_tail[:-50]
-            now = datetime.now(timezone.utc)
-            if (now - last_heartbeat).total_seconds() >= 15:
-                last_heartbeat = now
-                frame = get_fresh_frame(db, int(frame.id)) or frame
-                current = latest_embedded_firmware(frame) or {}
-                if current.get("status") == "building":
-                    await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
-        returncode = await process.wait()
+            process = await asyncio.create_subprocess_exec(
+                "bash", "-c", command,
+                cwd=str(EMBEDDED_PROJECT_DIR),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            output_tail: list[str] = []
+            assert process.stdout is not None
+            last_heartbeat = datetime.now(timezone.utc)
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    output_tail.append(text)
+                    del output_tail[:-50]
+                now = datetime.now(timezone.utc)
+                if (now - last_heartbeat).total_seconds() >= 15:
+                    last_heartbeat = now
+                    frame = get_fresh_frame(db, int(frame.id)) or frame
+                    current = latest_embedded_firmware(frame) or {}
+                    if current.get("status") == "building":
+                        await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+            returncode = await process.wait()
+    finally:
+        await _release_embedded_build_lock(redis, build_lock_token)
 
     if returncode != 0:
         tail = "\n".join(output_tail[-20:])
@@ -1980,10 +2051,10 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
 
     artifact_dir = embedded_artifact_dir()
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}.bin"
+    filename = f"frameos-{platform}-frame{frame.id}.bin"
     artifact_path = artifact_dir / filename
     shutil.copyfile(merged_bin, artifact_path)
-    ota_filename = f"frameos-{SUPPORTED_EMBEDDED_PLATFORM}-frame{frame.id}-ota.bin"
+    ota_filename = f"frameos-{platform}-frame{frame.id}-ota.bin"
     ota_artifact_path = artifact_dir / ota_filename
     if flash_profile["otaSupported"]:
         shutil.copyfile(ota_bin, ota_artifact_path)
@@ -1995,7 +2066,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         **_preserved_queue_metadata(current),
         "status": "ready",
         "requestId": request_id or current.get("requestId"),
-        "platform": SUPPORTED_EMBEDDED_PLATFORM,
+        "platform": platform,
         "flashSize": flash_profile["flashSize"],
         "flashBytes": flash_profile["flashBytes"],
         "partitionTable": flash_profile["partitionTable"],
@@ -2026,7 +2097,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         }
     await _set_firmware_status(db, redis, frame, ready_status)
     await log(db, redis, int(frame.id), "stdout",
-              f"ESP32-S3 firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
+              f"{platform_spec['label']} firmware ready: {filename} ({artifact_path.stat().st_size} bytes)")
 
     await request_pending_embedded_firmware_ota(db, redis, frame)
 

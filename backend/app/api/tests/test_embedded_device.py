@@ -263,11 +263,87 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {
+    payload = response.json()
+    frame_object = payload.pop('frame')
+    assert payload == {
         'homeAssistant': {'accessToken': 'not-for-esp'},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
+    assert frame_object['name'] == 'ESP32 Frame'
+
+
+@pytest.mark.asyncio
+async def test_settings_includes_live_frame_settings(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.name = 'Kitchen'
+    frame.interval = 61.5
+    frame.device_config = {
+        **(frame.device_config or {}),
+        'renderMode': 'remote',
+        'deepSleep': True,
+        'wakeSchedule': False,
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.json()['frame'] == {
+        'interval': 61.5,
+        'name': 'Kitchen',
+        'renderMode': 'remote',  # thin client — string form fos_settings.c parses
+        'deepSleep': True,
+        'wakeSchedule': False,
+    }
+
+    # Defaults: local render on PSRAM boards, power flags off
+    frame.device_config = {
+        key: value
+        for key, value in (frame.device_config or {}).items()
+        if key not in ('renderMode', 'deepSleep', 'wakeSchedule')
+    }
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame'] == {
+        'interval': 61.5,
+        'name': 'Kitchen',
+        'renderMode': 'local',
+        'deepSleep': False,
+        'wakeSchedule': False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_settings_etag_supports_cheap_polling(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    etag = response.headers['etag']
+    assert etag.startswith('"') and etag.endswith('"')
+
+    # Unchanged payload + If-None-Match → 304 (device polls between renders)
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 304
+    assert response.headers['etag'] == etag
+
+    # A settings change → new ETag + fresh payload
+    frame.interval = 999
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 200
+    assert response.headers['etag'] != etag
+    assert response.json()['frame']['interval'] == 999.0
 
 
 @pytest.mark.asyncio

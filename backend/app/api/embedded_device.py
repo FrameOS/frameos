@@ -337,14 +337,61 @@ async def api_embedded_device_scenes(
                     headers={"ETag": etag})
 
 
+def embedded_frame_settings(frame: Frame) -> dict:
+    """Live frame settings the device polls between firmware builds.
+
+    Mirrors what the firmware build bakes as compile-time defaults
+    (``_generated_config_header``): the interval, name, render mode, and the
+    power-management flags from ``device_config``, so a settings change takes
+    effect on the next poll instead of the next reflash. ``renderMode`` is
+    derived by the same ``embedded_render_mode_for_frame`` that feeds
+    ``FRAMEOS_DEFAULT_RENDER_MODE``, serialized as the "local"/"remote"
+    string the device parser (fos_settings.c) expects.
+    """
+    from app.tasks.embedded_firmware import (
+        EMBEDDED_RENDER_REMOTE,
+        embedded_device_config,
+        embedded_render_mode_for_frame,
+    )
+
+    device_config = embedded_device_config(frame)
+
+    def _bool_config(*keys: str) -> bool:
+        for key in keys:
+            value = device_config.get(key)
+            if isinstance(value, bool):
+                return value
+        return False
+
+    return {
+        "interval": float(frame.interval or 300),
+        "name": frame.name or "",
+        "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
+        "deepSleep": _bool_config("deepSleep", "deep_sleep"),
+        "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+    }
+
+
 @api_public.get("/frames/{id:int}/embedded/settings")
 async def api_embedded_device_settings(
     id: int,
     db: Session = Depends(get_db),
     authorization: str = Header(None),
+    if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    return embedded_settings_payload(db, frame)
+    payload_dict = {
+        **embedded_settings_payload(db, frame),
+        "frame": embedded_frame_settings(frame),
+    }
+    payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's
+    # sha256, so an unchanged configuration costs the device a 304.
+    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
+    return Response(content=payload, media_type="application/json",
+                    headers={"ETag": etag})
 
 
 # NOTE: Do NOT add a backend image proxy for device rendering here. Frames

@@ -1982,7 +1982,10 @@ export const frameLogic = kea<frameLogicType>([
         ...(values.frame ?? {}),
         ...(values.frameForm ?? {}),
       }
-      const deployPlanMode = (currentFrameForm.mode ?? 'rpios') === 'embedded' ? 'fast' : 'combined'
+      // Embedded frames use 'combined' too: the backend's combined plan for
+      // them carries the fast (HTTP scene upload) section and, for ESP32
+      // targets with OTA support, the full (firmware rebuild + OTA) section.
+      const deployPlanMode = 'combined'
       const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=${deployPlanMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

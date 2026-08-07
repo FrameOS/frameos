@@ -2701,6 +2701,16 @@ async def api_frame_assets_rename(
     return {"message": "Renamed"}
 
 
+def _reject_embedded_frame(frame: Frame, reason: str) -> None:
+    """400 for SSH/agent verbs that have no meaning on a microcontroller.
+
+    Embedded frames have no shell, no systemd service and no FrameOS Remote
+    agent; /restart and /reboot stay available through the device's HTTP API.
+    """
+    if _is_embedded_frame(frame):
+        _bad_request(reason)
+
+
 @api_project.post("/frames/{id:int}/clear_build_cache")
 async def api_frame_clear_build_cache(
     id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
@@ -2708,6 +2718,7 @@ async def api_frame_clear_build_cache(
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    _reject_embedded_frame(frame, "Embedded frames have no on-device build cache to clear")
 
     if await _use_remote(frame, redis):
         try:
@@ -2748,6 +2759,7 @@ async def api_frame_reset_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "Reset over SSH is not available for embedded frames; reflash the firmware instead")
     try:
         from app.tasks import reset_frame
 
@@ -2798,6 +2810,7 @@ async def api_frame_deploy_remote_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import deploy_remote
@@ -2816,6 +2829,7 @@ async def api_frame_restart_remote_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import restart_remote
@@ -2833,6 +2847,10 @@ async def api_frame_stop_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(
+        frame,
+        "Stop is not available for embedded frames — the firmware is the runtime; use restart or reboot instead",
+    )
     try:
         from app.tasks import stop_frame
 
