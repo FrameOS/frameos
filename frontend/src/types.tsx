@@ -7,7 +7,7 @@ import type { FrameId } from './utils/frameId'
 export type { FrameId }
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
-export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
+export type FrameEmbeddedFlashSize = '2MB' | '4MB' | '8MB' | '16MB' | '32MB'
 export type FrameEmbeddedHardwarePreset =
   | 'custom'
   | 'waveshare_esp32_s3_photopainter'
@@ -21,6 +21,11 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
   | 'elecrow_crowpanel_5in79'
+  | 'pimoroni_inky_frame_4'
+  | 'pimoroni_inky_frame_5_7'
+  | 'pimoroni_inky_frame_7_3'
+  | 'pimoroni_inky_frame_7_3_pico2'
+  | 'pimoroni_inky_frame_7_3_spectra'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode
@@ -112,6 +117,13 @@ export interface FrameType {
       sclk?: number
       mosi?: number
       pwr?: number
+      // Pimoroni Inky Frame extras: BUSY and the front buttons live behind a
+      // shift register; consumed by the pico firmware only.
+      sr_clock?: number
+      sr_latch?: number
+      sr_data?: number
+      busy_bit?: number
+      hold_vsys?: number
     }
     sdCardAssets?: {
       enabled?: boolean

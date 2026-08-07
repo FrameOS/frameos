@@ -435,6 +435,71 @@ jobs:
             release-assets/*-esp32-c3-generic.bin
           if-no-files-found: error
 
+  # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
+  # Pimoroni Inky Frame family). Generic on purpose: UF2s flash over BOOTSEL
+  # drag-drop and provision over the USB serial console, the backend never
+  # builds them per-frame.
+  build-pico-firmware:
+    name: Build Pico W / Pico 2 W firmware
+    needs: [update-versions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Install pico toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Cache pico-sdk
+        id: pico-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/pico-sdk
+          key: pico-sdk-2.1.1
+
+      - name: Fetch pico-sdk
+        if: steps.pico-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+          cd ~/pico-sdk
+          git submodule update --init --depth 1 lib/cyw43-driver lib/lwip lib/mbedtls lib/tinyusb
+
+      - name: Build firmware
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cd embedded/pico
+          for board in pico_w pico2_w; do
+            cmake -B "build-$board" -DPICO_BOARD=$board \
+              -DPICO_SDK_PATH=$HOME/pico-sdk \
+              -DFRAMEOS_VERSION="$DOCKER_VERSION" -G Ninja
+            cmake --build "build-$board"
+          done
+          cp build-pico_w/frameos_pico.uf2 \
+            "../../release-assets/frameos-$DOCKER_VERSION-pico-w.uf2"
+          cp build-pico2_w/frameos_pico.uf2 \
+            "../../release-assets/frameos-$DOCKER_VERSION-pico-2w.uf2"
+          ls -lh ../../release-assets/
+
+      - name: Upload Pico firmware
+        uses: actions/upload-artifact@v4
+        with:
+          # github-release downloads artifacts by the frameos-<version>-*
+          # name pattern, so this name must keep that prefix.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-pico
+          path: |
+            release-assets/*-pico-w.uf2
+            release-assets/*-pico-2w.uf2
+          if-no-files-found: error
+
   # Depot builds both platforms remotely with its own persistent layer cache,
   # so there is no separate warm-up build job: push-multiarch is the only
   # image build and pushes the multi-arch manifest directly.
@@ -574,7 +639,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-pico-firmware, update-addon-repo, release-notes]
     runs-on: depot-ubuntu-24.04
     steps:
       # Shallow: this job only needs a working directory for `gh` and the

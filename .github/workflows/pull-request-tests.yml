@@ -627,3 +627,45 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir frontend run build
+
+  pico-firmware:
+    name: Pico W / Pico 2 W firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install pico toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Cache pico-sdk
+        id: pico-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/pico-sdk
+          key: pico-sdk-2.1.1
+
+      - name: Fetch pico-sdk
+        if: steps.pico-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+          cd ~/pico-sdk
+          git submodule update --init --depth 1 lib/cyw43-driver lib/lwip lib/mbedtls lib/tinyusb
+
+      - name: Build Pico W firmware
+        run: |
+          cd embedded/pico
+          cmake -B build-pico-w -DPICO_BOARD=pico_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake --build build-pico-w
+          test -f build-pico-w/frameos_pico.uf2
+
+      - name: Build Pico 2 W firmware
+        run: |
+          cd embedded/pico
+          cmake -B build-pico2-w -DPICO_BOARD=pico2_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake --build build-pico2-w
+          test -f build-pico2-w/frameos_pico.uf2
