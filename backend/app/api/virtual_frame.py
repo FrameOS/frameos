@@ -184,12 +184,28 @@ async def refresh_virtual_frame_image(
     ``scenes_override`` renders unsaved scenes (preview-on-frame) without
     persisting them.
     """
+    import time
+
+    from app.models.log import new_log as log
+
     from .frames import _store_frame_image
 
+    started = time.monotonic()
     png = await _virtual_frame_png(
         db, redis, frame, scenes_override=scenes_override, scene_id_override=scene_id
     )
     await _store_frame_image(db, redis, frame, png, scene_id=scene_id, publish_rendered=True)
+
+    width, height = virtual_frame_dimensions(frame)
+    shown_scene = scene_id or await _active_scene_id(redis, frame)
+    source = scenes_override if scenes_override is not None else frame.scenes
+    names = {s.get("id"): s.get("name") for s in (source or []) if isinstance(s, dict)}
+    label = names.get(shown_scene) or shown_scene or (next(iter(names.values()), None)) or "default scene"
+    await log(
+        db, redis, int(frame.id), "stdout",
+        f'Rendered "{label}"{" (preview)" if scenes_override is not None else ""} '
+        f'{width}x{height} in {int((time.monotonic() - started) * 1000)} ms',
+    )
 
 
 @api_public.get("/frames/{id:int}/virtual/image")
