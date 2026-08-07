@@ -602,6 +602,10 @@ export const framesModel = kea<framesModelType>([
     downloadEmbeddedFirmware: (id: FrameId) => ({ id }),
     updateEmbeddedFirmwareStatus: (id: FrameId, firmware: EmbeddedFirmware) => ({ id, firmware }),
     applyEmbeddedFirmwareOta: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    // Cloud only: enqueue the advisory notify_update_available verb. The
+    // device fetches the signed OTA manifest and installs on its own
+    // schedule (docs/cloud-frames.md "Signed OTA") — nothing to track here.
+    updateFrameFirmware: (id: FrameId) => ({ id }),
     setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
@@ -1216,6 +1220,34 @@ export const framesModel = kea<framesModelType>([
         })
         actions.loadFrame(id)
         throw error
+      }
+    },
+    updateFrameFirmware: async ({ id }) => {
+      // The "Update firmware" menu entry, offered only for esp32 cloud
+      // frames (FrameActionsMenu). One durable notify_update_available in
+      // the queue; the device does the manifest fetch, signature check and
+      // slot switch itself, so the toast finishes immediately — progress, if
+      // any, arrives later as ota:cloud log lines.
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'embeddedOta',
+        title: 'Requesting firmware update',
+        detail: 'Queueing the update notification',
+      })
+      try {
+        await sendCloudFrameCommand(id, 'notify_update_available')
+        longRunningTasksModel.actions.finishTask({
+          frameId: id,
+          kind: 'embeddedOta',
+          status: 'success',
+          detail: 'Update requested — the frame will check for new firmware and install it in the background',
+        })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'embeddedOta',
+          detail: error instanceof Error ? error.message : 'Failed to request the firmware update',
+        })
       }
     },
     [socketLogic.actionTypes.socketReconnected]: () => {

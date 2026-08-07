@@ -141,4 +141,21 @@ describe("FrameActionsMenu in cloud mode", () => {
     expect(rename?.className).not.toContain("cursor-not-allowed");
     expect(rename?.getAttribute("title")).toBe("Rename frame");
   });
+
+  it("offers Update firmware to esp32 frames only, live", () => {
+    // The entry enqueues notify_update_available; the device fetches the
+    // signed OTA manifest and installs on its own (docs/cloud-frames.md
+    // "Signed OTA"). Pi cloud frames have no firmware image to swap, so the
+    // entry is absent — not disabled — for them.
+    renderMenu(cloudFrame("esp32-s3"));
+    const update = menuItem("Update firmware");
+    expect(update).toBeDefined();
+    expect(update?.className).not.toContain("cursor-not-allowed");
+    cleanup();
+    document.body.innerHTML = '<div id="popper"></div><div id="root"></div>';
+    initKea();
+
+    renderMenu(cloudFrame("pi-zero2w"));
+    expect(menuLabels()).not.toContain("Update firmware");
+  });
 });

@@ -124,6 +124,10 @@ export const allowedFrameSettings = new Map<
 ]);
 
 export const allowedFrameCommandTypes = new Set([
+  // Advisory only: the device fetches the manifest and verifies the image
+  // signature itself (docs/cloud-frames.md "Signed OTA") — the queue can
+  // only suggest, never install.
+  "notify_update_available",
   "reboot",
   "render",
   "restart_runtime",

@@ -82,4 +82,12 @@ describe("cloud command verbs", () => {
     expect(allowedFrameCommandTypes.has("reboot")).toBe(true);
     expect(allowedFrameCommandTypes.has("restart_runtime")).toBe(true);
   });
+
+  it("accepts notify_update_available (the Update-firmware menu entry)", () => {
+    // Advisory only: the device fetches the signed OTA manifest and verifies
+    // the image itself (docs/cloud-frames.md "Signed OTA"); the queue can
+    // only suggest. The hub delivers whatever the durable queue holds, so
+    // this allow-list IS the gate.
+    expect(allowedFrameCommandTypes.has("notify_update_available")).toBe(true);
+  });
 });

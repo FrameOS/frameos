@@ -422,6 +422,44 @@ jobs:
             '
           ls -lh release-assets/
 
+      # Detached minisign-compatible signatures (<asset>.minisig) next to
+      # every firmware image. The device verifies the Ed25519/BLAKE2b-512
+      # signature against the public key baked into the firmware BEFORE
+      # switching boot slots, and the cloud's OTA manifest route answers
+      # 409 unsigned_release for a release without them — so a missing
+      # signing secret must fail the release here, loudly: an unsigned
+      # release is worse than a failed one.
+      - name: Sign ESP32 firmware
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
+            exit 1
+          fi
+          # Ubuntu 24.04 pip is PEP 668 "externally managed"; the fallback
+          # keeps this working if the runner image ever stops being.
+          python3 -m pip install --quiet --break-system-packages cryptography \
+            || python3 -m pip install --quiet cryptography
+          keyfile=$(mktemp)
+          # The secret is the small text file sign_firmware.py keygen wrote:
+          # a comment line + base64(ED + keyid8 + seed32).
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" \
+            release-assets/frameos-*.bin || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          # The CI secret must be the counterpart of the committed public key
+          # (the one baked into shipped firmware) — a rotated-but-not-updated
+          # secret would sign images no device accepts.
+          for bin in release-assets/frameos-*.bin; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$bin"
+          done
+          ls -lh release-assets/
+
       - name: Upload ESP32 firmware
         uses: actions/upload-artifact@v4
         with:
@@ -431,8 +469,11 @@ jobs:
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
           path: |
             release-assets/*-esp32-s3-generic.bin
+            release-assets/*-esp32-s3-generic.bin.minisig
             release-assets/*-esp32-s3-epd7in5v2.bin
+            release-assets/*-esp32-s3-epd7in5v2.bin.minisig
             release-assets/*-esp32-c3-generic.bin
+            release-assets/*-esp32-c3-generic.bin.minisig
           if-no-files-found: error
 
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
