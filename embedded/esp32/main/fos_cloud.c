@@ -30,6 +30,7 @@
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_http.h"
+#include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_wifi.h"
@@ -49,7 +50,6 @@
 static const char *TAG = "fos_cloud";
 static const char *NVS_NS = "frameos";
 
-#define FOS_CLOUD_TOKEN_LEN 256
 #define FOS_CLOUD_FRAME_ID_LEN 64
 #define FOS_CLOUD_WS_PATH_LEN 128
 #define FOS_CLOUD_HTTP_TIMEOUT_MS 20000
@@ -129,6 +129,27 @@ const char *fos_cloud_state_name(void)
 
 const char *fos_cloud_last_error(void) { return s_last_error; }
 const char *fos_cloud_frame_id(void) { return s_frame_id; }
+
+bool fos_cloud_api_access(char *url, size_t url_len,
+                          char *frame_id, size_t frame_id_len,
+                          char *auth_header, size_t auth_len)
+{
+    const fos_config_t *config = fos_config();
+    if (s_state != FOS_CLOUD_ENROLLED || s_access_token[0] == '\0' ||
+        s_frame_id[0] == '\0' || config->cloud_url[0] == '\0') {
+        return false;
+    }
+    if (url != NULL) {
+        strlcpy(url, config->cloud_url, url_len);
+        size_t len = strlen(url);
+        while (len > 0 && url[len - 1] == '/') url[--len] = '\0';
+    }
+    if (frame_id != NULL) strlcpy(frame_id, s_frame_id, frame_id_len);
+    if (auth_header != NULL) {
+        snprintf(auth_header, auth_len, "Bearer %s", s_access_token);
+    }
+    return true;
+}
 bool fos_cloud_ws_connected(void) { return s_ws_ready; }
 
 static void set_last_error(const char *message)
@@ -1722,15 +1743,16 @@ static void ws_handle_message(const char *data, size_t len)
         ws_handle_get_logs(root, id);
     } else if (strcmp(type, "get_metrics") == 0) {
         ws_handle_get_metrics(id);
+    } else if (strcmp(type, "notify_update_available") == 0) {
+        /* Signed cloud OTA (docs/cloud-frames.md): fetch the manifest,
+         * verify the minisign signature, apply. Runs in its own task —
+         * the ack only means "the check was accepted". */
+        ws_ack(id, true, NULL);
+        fos_ota_request_cloud_update();
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
-    } else if (strcmp(type, "notify_update_available") == 0) {
-        /* Documented verbs the esp32 profile does not implement. Answering
-         * `unsupported_verb` (not `unknown_verb`) lets a provider tell "this
-         * device profile is smaller" apart from "you sent something that is
-         * not in the protocol at all". See docs/cloud-frames.md. */
-        ESP_LOGW(TAG, "ws: verb \"%s\" not supported on the esp32 profile", type);
-        ws_ack(id, false, "unsupported_verb");
+        /* Every documented verb is now implemented on this profile —
+         * `unsupported_verb` retired with the last holdout (cloud OTA). */
     } else {
         /* Audit-log and refuse everything not in the allowlist. */
         ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
