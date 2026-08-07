@@ -5,7 +5,7 @@ import { Bounds } from '@visx/brush/lib/types'
 import BaseBrush from '@visx/brush/lib/BaseBrush'
 import { PatternLines } from '@visx/pattern'
 import { Group } from '@visx/group'
-import { max } from '@visx/vendor/d3-array'
+import { max, min } from '@visx/vendor/d3-array'
 import { BrushHandleRenderProps } from '@visx/brush/lib/BrushHandle'
 import { AreaChart } from './AreaChart'
 import { WithParentSizeProps } from '@visx/responsive/lib/enhancers/withParentSize'
@@ -45,6 +45,12 @@ function getDataTimeRange(data: MetricPoint[]): TimeRange {
 
 function getValueMax(data: MetricPoint[]): number {
   return Math.max(max(data, getValue) || 0, 1)
+}
+
+/* Negative series (wifiRssi on ESP32 frames is around -60) need the domain
+ * floor to follow the data — a hardcoded 0 plotted them below the chart. */
+function getValueMin(data: MetricPoint[]): number {
+  return Math.min(min(data, getValue) || 0, 0)
 }
 
 function getBrushPosition(timeRange: TimeRange, scale: (date: Date) => number | undefined, width: number) {
@@ -154,7 +160,10 @@ export function BrushChart({
     () =>
       scaleLinear<number>({
         range: [yMax, 0],
-        domain: [0, getValueMax(filteredLeftData.length > 0 ? filteredLeftData : filteredData)],
+        domain: [
+          getValueMin(filteredLeftData.length > 0 ? filteredLeftData : filteredData),
+          getValueMax(filteredLeftData.length > 0 ? filteredLeftData : filteredData),
+        ],
         nice: true,
       }),
     [yMax, filteredData, filteredLeftData]
@@ -163,7 +172,7 @@ export function BrushChart({
     () =>
       scaleLinear<number>({
         range: [yMax, 0],
-        domain: [0, Math.max(getValueMax(filteredRightData), 100)],
+        domain: [getValueMin(filteredRightData), Math.max(getValueMax(filteredRightData), 100)],
         nice: true,
       }),
     [yMax, filteredRightData]
@@ -180,7 +189,10 @@ export function BrushChart({
     () =>
       scaleLinear({
         range: [yBrushMax, 0],
-        domain: [0, getValueMax(leftData.length > 0 ? leftData : allData)],
+        domain: [
+          getValueMin(leftData.length > 0 ? leftData : allData),
+          getValueMax(leftData.length > 0 ? leftData : allData),
+        ],
         nice: true,
       }),
     [yBrushMax, allData, leftData]
@@ -189,7 +201,7 @@ export function BrushChart({
     () =>
       scaleLinear({
         range: [yBrushMax, 0],
-        domain: [0, Math.max(getValueMax(rightData), 100)],
+        domain: [getValueMin(rightData), Math.max(getValueMax(rightData), 100)],
         nice: true,
       }),
     [yBrushMax, rightData]
