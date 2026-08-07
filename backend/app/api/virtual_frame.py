@@ -111,7 +111,14 @@ def _quantize(image, mode: str):
     return out
 
 
-async def _virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
+async def _virtual_frame_png(
+    db: Session,
+    redis,
+    frame: Frame,
+    *,
+    scenes_override: list | None = None,
+    scene_id_override: str | None = None,
+) -> bytes:
     from PIL import Image
 
     width, height = virtual_frame_dimensions(frame)
@@ -119,8 +126,9 @@ async def _virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
         frame,
         width,
         height,
-        scene_id=await _active_scene_id(redis, frame),
+        scene_id=scene_id_override or await _active_scene_id(redis, frame),
         settings=embedded_settings_payload(db, frame),
+        scenes_override=scenes_override,
     )
     if rgba is not None:
         image = Image.frombytes("RGBA", (width, height), rgba).convert("RGB")
@@ -137,16 +145,27 @@ async def render_virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
     return await _virtual_frame_png(db, redis, frame)
 
 
-async def refresh_virtual_frame_image(db: Session, redis, frame: Frame) -> None:
+async def refresh_virtual_frame_image(
+    db: Session,
+    redis,
+    frame: Frame,
+    *,
+    scenes_override: list | None = None,
+    scene_id: str | None = None,
+) -> None:
     """Render now and publish into the frame image cache.
 
     The virtual equivalent of "the device rendered": deploy, scene
-    activation and render-now events all reduce to this.
+    activation, render-now and scene previews all reduce to this.
+    ``scenes_override`` renders unsaved scenes (preview-on-frame) without
+    persisting them.
     """
     from .frames import _store_frame_image
 
-    png = await _virtual_frame_png(db, redis, frame)
-    await _store_frame_image(db, redis, frame, png, scene_id=None, publish_rendered=True)
+    png = await _virtual_frame_png(
+        db, redis, frame, scenes_override=scenes_override, scene_id_override=scene_id
+    )
+    await _store_frame_image(db, redis, frame, png, scene_id=scene_id, publish_rendered=True)
 
 
 @api_public.get("/frames/{id:int}/virtual/image")

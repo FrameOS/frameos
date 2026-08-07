@@ -45,6 +45,8 @@ import type {
 } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { secureToken } from '../../utils/secureToken'
+import { Button } from '../../components/Button'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { normalizedTimezone } from '../../utils/timezone'
 import {
@@ -1825,6 +1827,19 @@ function EmbeddedFirmwareSection({
   // View-only credential, never the device API key: leaking a kiosk URL
   // grants nothing but the picture.
   const virtualUrlToken = frame.device_config?.viewToken || '<view-token>'
+  const { loadFrame } = useActions(framesModel)
+  const rotateVirtualViewToken = async (): Promise<void> => {
+    const response = await apiFetch(`/api/frames/${frame.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_config: { ...(frame.device_config ?? {}), viewToken: secureToken(32) },
+      }),
+    })
+    if (response.ok) {
+      loadFrame(frame.id)
+    }
+  }
   const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
   const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const flashSize = embeddedFlashSize(frame)
@@ -1896,6 +1911,14 @@ function EmbeddedFirmwareSection({
         <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
           <VirtualFrameUrlRow label="Image URL (PNG)" url={virtualImageUrl} />
           <VirtualFrameUrlRow label="Kiosk page URL (self-refreshing)" url={virtualPageUrl} />
+          <div className="flex items-center gap-3">
+            <Button size="small" color="secondary" onClick={rotateVirtualViewToken}>
+              Rotate view token
+            </Button>
+            <span className="frame-tool-muted text-xs leading-4">
+              Mints a new token and invalidates every shared URL immediately.
+            </span>
+          </div>
         </div>
       ) : isPicoPlatform ? null : (
         <>

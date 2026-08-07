@@ -1366,6 +1366,7 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    scenes = None
     if event == "uploadScenes":
         scenes, body = _normalize_upload_scenes_payload(body)
         scene_id = body.get("sceneId")
@@ -1376,11 +1377,15 @@ async def api_frame_event(
         from .virtual_frame import refresh_virtual_frame_image
 
         scene_id = body.get("sceneId") if isinstance(body, dict) else None
+        scene_id = scene_id if isinstance(scene_id, str) else None
         if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
-            await _mark_frame_states_cache_stale(
-                redis, frame, scene_id=scene_id if isinstance(scene_id, str) else None
-            )
-        await refresh_virtual_frame_image(db, redis, frame)
+            await _mark_frame_states_cache_stale(redis, frame, scene_id=scene_id)
+        # uploadScenes = preview-on-frame: render the posted (possibly
+        # unsaved) scenes without persisting them.
+        upload = scenes if event == "uploadScenes" else None
+        await refresh_virtual_frame_image(
+            db, redis, frame, scenes_override=upload, scene_id=scene_id
+        )
         return "OK"
     try:
         await _forward_frame_request(
@@ -3121,6 +3126,13 @@ async def api_frame_fast_deploy_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     deploy_task_id = _task_id_param(task_id)
+    # Virtual frames: "update active scenes" is just a render — the renderer
+    # always reads the saved scenes, nothing needs shipping anywhere.
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from .virtual_frame import refresh_virtual_frame_image
+
+        await refresh_virtual_frame_image(db, redis, frame)
+        return {"message": "Success", "taskId": deploy_task_id}
     try:
         from app.tasks import fast_deploy_frame
         from app.tasks.deploy_frame import cancel_active_deploy
