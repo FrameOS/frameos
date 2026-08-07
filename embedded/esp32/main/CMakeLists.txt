@@ -12,6 +12,7 @@ idf_component_register(
         "fos_console.c"
         "fos_scenes.c"
         "fos_battery.c"
+        "fos_assets.c"
         "fos_assets_sd.c"
     PRIV_REQUIRES
         nvs_flash

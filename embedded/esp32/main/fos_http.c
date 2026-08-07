@@ -19,6 +19,7 @@
 #include "mbedtls/base64.h"
 
 #include "cJSON.h"
+#include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
@@ -1688,6 +1689,201 @@ static esp_err_t event_post_handler(httpd_req_t *req)
     return handle_event_post(req, event_name);
 }
 
+/* ---------------------------------------------------------- asset routes */
+
+/* Pull a sanitized asset path out of the request's query string. */
+static bool asset_query_path(httpd_req_t *req, bool write_rule, char *out, size_t out_len)
+{
+    char query[FOS_ASSETS_PATH_MAX + 64];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) return false;
+    char raw[FOS_ASSETS_PATH_MAX];
+    if (httpd_query_key_value(query, "path", raw, sizeof(raw)) != ESP_OK) return false;
+    url_decode(raw);
+    return write_rule ? fos_assets_sanitize_write_path(raw, out, out_len)
+                      : fos_assets_sanitize_path(raw, out, out_len);
+}
+
+static esp_err_t assets_list_get_handler(httpd_req_t *req)
+{
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return httpd_resp_send_500(req);
+    cJSON *assets = cJSON_AddArrayToObject(msg, "assets");
+    bool truncated = false;
+    bool ok = assets && fos_assets_list_json(assets, &truncated);
+    if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
+    cJSON_AddBoolToObject(msg, "mounted", fos_assets_available());
+    char *body = ok ? cJSON_PrintUnformatted(msg) : NULL;
+    cJSON_Delete(msg);
+    if (!body) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_sendstr(req, body);
+    cJSON_free(body);
+    return err;
+}
+
+static esp_err_t asset_file_get_handler(httpd_req_t *req)
+{
+    char rel[FOS_ASSETS_PATH_MAX];
+    if (!asset_query_path(req, false, rel, sizeof(rel))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    struct stat st;
+    if (fos_assets_stat(rel, &st) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    if (S_ISDIR(st.st_mode)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "is a directory");
+    }
+    char full[FOS_ASSETS_FULL_PATH_MAX];
+    fos_assets_full_path(full, sizeof(full), rel);
+    FILE *file = fopen(full, "rb");
+    if (!file) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    httpd_resp_set_type(req, fos_assets_content_type(rel));
+    size_t cap = 16 * 1024;
+    char *chunk = fos_big_malloc(cap);
+    if (!chunk) {
+        cap = 4096;
+        chunk = malloc(cap);
+    }
+    if (!chunk) {
+        fclose(file);
+        return httpd_resp_send_500(req);
+    }
+    esp_err_t err = ESP_OK;
+    while (err == ESP_OK) {
+        size_t r = fread(chunk, 1, cap, file);
+        if (ferror(file)) {
+            err = ESP_FAIL;
+            break;
+        }
+        err = httpd_resp_send_chunk(req, chunk, r);
+        if (r == 0) break; /* final zero-length chunk ends the response */
+    }
+    free(chunk);
+    fclose(file);
+    return err;
+}
+
+static esp_err_t asset_upload_post_handler(httpd_req_t *req)
+{
+    keep_awake_for_http_mutation();
+    char rel[FOS_ASSETS_PATH_MAX];
+    if (!asset_query_path(req, true, rel, sizeof(rel))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    if (!fos_assets_available()) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "assets storage not mounted");
+    }
+    int total = req->content_len;
+    if (total <= 0) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    const char *asset_err = NULL;
+    fos_assets_writer_t writer;
+    if (fos_assets_write_begin(rel, &writer, &asset_err) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   asset_err ? asset_err : "write failed");
+    }
+    size_t cap = 16 * 1024;
+    char *chunk = fos_big_malloc(cap);
+    if (!chunk) {
+        cap = 4096;
+        chunk = malloc(cap);
+    }
+    if (!chunk) {
+        fos_assets_write_abort(&writer);
+        return httpd_resp_send_500(req);
+    }
+    int received = 0;
+    esp_err_t err = ESP_OK;
+    while (received < total) {
+        int want = total - received;
+        if (want > (int)cap) want = (int)cap;
+        int r = httpd_req_recv(req, chunk, want);
+        if (r <= 0) {
+            err = ESP_FAIL;
+            break;
+        }
+        if (fos_assets_write_chunk(&writer, chunk, (size_t)r) != ESP_OK) {
+            err = ESP_FAIL;
+            break;
+        }
+        received += r;
+    }
+    free(chunk);
+    if (err != ESP_OK) {
+        fos_assets_write_abort(&writer);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
+    }
+    if (fos_assets_write_commit(&writer, &asset_err) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   asset_err ? asset_err : "write failed");
+    }
+    log_http_command(req, "assetUpload", (size_t)total);
+    struct stat st;
+    bool have_stat = fos_assets_stat(rel, &st) == ESP_OK;
+    char *escaped = json_escape_dup(rel);
+    if (!escaped) return httpd_resp_send_500(req);
+    char reply[FOS_ASSETS_PATH_MAX * 2 + 96];
+    snprintf(reply, sizeof(reply),
+             "{\"path\":\"%s\",\"size\":%lld,\"mtime\":%lld,\"is_dir\":false}",
+             escaped,
+             (long long)(have_stat ? st.st_size : total),
+             (long long)(have_stat ? st.st_mtime : 0));
+    free(escaped);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, reply);
+}
+
+/* mkdir + delete share a form body of `path=...`; rename reads src + dst. */
+static esp_err_t asset_mutate_post_handler(httpd_req_t *req, const char *op)
+{
+    keep_awake_for_http_mutation();
+    char *body = NULL;
+    if (read_request_body(req, 2048, false, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    char raw[FOS_ASSETS_PATH_MAX];
+    char rel[FOS_ASSETS_PATH_MAX];
+    char dst_rel[FOS_ASSETS_PATH_MAX];
+    bool ok_paths = false;
+    if (strcmp(op, "rename") == 0) {
+        char raw_dst[FOS_ASSETS_PATH_MAX];
+        ok_paths = form_value(body, "src", raw, sizeof(raw)) &&
+                   form_value(body, "dst", raw_dst, sizeof(raw_dst)) &&
+                   fos_assets_sanitize_write_path(raw, rel, sizeof(rel)) &&
+                   fos_assets_sanitize_write_path(raw_dst, dst_rel, sizeof(dst_rel));
+    } else {
+        ok_paths = form_value(body, "path", raw, sizeof(raw)) &&
+                   fos_assets_sanitize_write_path(raw, rel, sizeof(rel));
+    }
+    free(body);
+    if (!ok_paths) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    const char *asset_err = NULL;
+    esp_err_t err;
+    if (strcmp(op, "mkdir") == 0) {
+        err = fos_assets_mkdir(rel, &asset_err);
+    } else if (strcmp(op, "delete") == 0) {
+        err = fos_assets_delete(rel, &asset_err);
+    } else {
+        err = fos_assets_rename(rel, dst_rel, &asset_err);
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(
+            req,
+            err == ESP_ERR_NOT_FOUND ? HTTPD_404_NOT_FOUND
+                                     : HTTPD_500_INTERNAL_SERVER_ERROR,
+            asset_err ? asset_err : "failed");
+    }
+    log_http_command_from_path(req, 0);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 {
     char path[256];
@@ -1732,10 +1928,8 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, "{\"metrics\":[]}", HTTPD_RESP_USE_STRLEN);
     }
-    if (strcmp(suffix, "/assets") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"assets\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
+    if (strcmp(suffix, "/assets") == 0) return assets_list_get_handler(req);
+    if (strcmp(suffix, "/asset") == 0) return asset_file_get_handler(req);
     return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
 }
 
@@ -1754,6 +1948,10 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
         strcmp(suffix, "/uploaded_scenes") == 0) {
         return scenes_post_handler(req);
     }
+    if (strcmp(suffix, "/assets/upload") == 0) return asset_upload_post_handler(req);
+    if (strcmp(suffix, "/assets/mkdir") == 0) return asset_mutate_post_handler(req, "mkdir");
+    if (strcmp(suffix, "/assets/delete") == 0) return asset_mutate_post_handler(req, "delete");
+    if (strcmp(suffix, "/assets/rename") == 0) return asset_mutate_post_handler(req, "rename");
     const char *event_prefix = "/event/";
     if (strncmp(suffix, event_prefix, strlen(event_prefix)) == 0) {
         char event_name[96];

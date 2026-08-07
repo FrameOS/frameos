@@ -202,13 +202,18 @@ When enrolled, the firmware dials the management WebSocket
 hello/challenge/auth/ready handshake, signing the base64-**decoded** nonce
 bytes with the device key. Implemented verbs: `get_state`, `render`,
 `reboot`, `restart_runtime` (same as reboot on ESP32), `set_current_scene`,
-and `set_scenes` (stored through the same interpreted-scene path as
+`set_scenes` (stored through the same interpreted-scene path as
 `usb_api upload-scenes`; `scene_ack` is sent only after the render task has
-actually hot-loaded the payload). Documented verbs outside this profile —
-`set_settings`, `set_schedule`, `get_logs`, `get_metrics`,
+actually hot-loaded the payload), `set_settings` (the `interval`/`name`
+subset), `image_get`, and the full asset verb set — `assets_list`,
+`asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` —
+against the mounted SD card (shared implementation in `main/fos_assets.c`,
+also behind the local HTTP asset API and the `usb_api` asset commands).
+Write-verb acks are sent after the SD write finishes. Log shipping is
+implemented behind the `telemetry:logs` scope. Documented verbs outside this
+profile — `set_schedule`, `get_logs`, `get_metrics`,
 `notify_update_available` — are acked `unsupported_verb`; anything not in the
-protocol is acked `unknown_verb`. Both are logged. Log shipping and
-declarative settings are TODO.
+protocol is acked `unknown_verb`. Both are logged.
 
 Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
 authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote

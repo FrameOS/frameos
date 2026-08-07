@@ -98,7 +98,9 @@ from app.utils.remote_exec import (
 from app.utils.frame_http import (
     _fetch_frame_http_bytes,
     _frame_scheme_port,
+    _is_embedded_frame,
 )
+from app.utils import embedded_assets
 from app.api.frame_sync import (
     apply_frame_sync,
     get_frame_sync_status,
@@ -1665,6 +1667,64 @@ async def api_frame_local_binary_zip(
     return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
+async def _embedded_asset_file_response(
+    redis: Redis,
+    frame: Frame,
+    *,
+    full_path: str,
+    rel_path: str,
+    mode: str,
+    filename: str,
+    thumb: bool,
+) -> StreamingResponse:
+    """Serve one asset from an embedded frame by proxying the device HTTP API.
+
+    Thumbnails are generated on the backend (the device has no ImageMagick) and
+    cached in redis keyed by the md5 of the original bytes, mirroring the
+    SSH/agent code path's `asset:thumb:{md5}` cache."""
+    try:
+        data, _device_content_type = await embedded_assets.download_asset(frame, redis, full_path)
+    except HTTPException as exc:
+        if exc.status_code == HTTPStatus.NOT_FOUND:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+        raise
+
+    if thumb:
+        full_md5 = hashlib.md5(data).hexdigest()
+        cache_key = f"asset:thumb:{full_md5}"
+        if cached := await redis.get(cache_key):
+            return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
+        thumb_data = embedded_assets.thumbnail_jpeg(data)
+        if thumb_data is None:
+            # Undecodable image (or Pillow missing): serve the original bytes.
+            media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
+            return StreamingResponse(io.BytesIO(data), media_type=media_type)
+        await redis.set(cache_key, thumb_data, ex=86400 * 30)
+        return StreamingResponse(io.BytesIO(thumb_data), media_type="image/jpeg")
+
+    md5 = hashlib.md5(data).hexdigest()
+    await redis.set(f"asset:{md5}", data, ex=86400 * 30)
+
+    media_type = "application/octet-stream"
+    if mode == "image":
+        media_type = (
+            mimetypes.guess_type(filename or rel_path)[0]
+            or "application/octet-stream"
+        )
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f"{'attachment' if mode == 'download' else 'inline'}; "
+                f'filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
+
+
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
 async def api_frame_get_asset(
     project_id: int,
@@ -1699,17 +1759,28 @@ async def api_frame_get_asset(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    if thumb:
-        if os.path.splitext(rel_path)[1].lower() not in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".webp",
-        }:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
+    if thumb and os.path.splitext(rel_path)[1].lower() not in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".webp",
+    }:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
 
+    if _is_embedded_frame(frame):
+        return await _embedded_asset_file_response(
+            redis,
+            frame,
+            full_path=full_path,
+            rel_path=rel_path,
+            mode=mode,
+            filename=filename,
+            thumb=thumb,
+        )
+
+    if thumb:
         md5_key = f"asset-md5:{full_path}"
         cached_md5 = await redis.get(md5_key)
         if cached_md5:
@@ -2249,6 +2320,9 @@ async def _load_frame_assets(
     frame: Frame,
     assets_path: str,
 ) -> list[dict[str, Any]]:
+    if _is_embedded_frame(frame):
+        return await embedded_assets.list_assets(frame, redis)
+
     if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
@@ -2420,6 +2494,11 @@ async def api_frame_assets_sync(
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if _is_embedded_frame(frame):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Asset sync is not supported for embedded frames — fonts are compiled into the firmware",
+        )
     try:
         from app.models.assets import sync_assets
 
@@ -2457,20 +2536,26 @@ async def api_frame_assets_upload_image(
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
 
-    await make_dir(db, redis, frame, upload_dir)
-
-    exists_status, _, _ = await run_command(
-        db,
-        redis,
-        frame,
-        f"test -f {shlex.quote(combined_path)}",
-        log_output=False,
-        log_command=False,
-    )
-    uploaded = False
-    if exists_status != 0:
-        await upload_file(db, redis, frame, combined_path, data)
+    if _is_embedded_frame(frame):
+        # The device API creates parent dirs and replaces in place; the
+        # md5-derived filename keeps re-uploads of identical bytes idempotent.
+        await embedded_assets.upload_asset(frame, redis, combined_path, data)
         uploaded = True
+    else:
+        await make_dir(db, redis, frame, upload_dir)
+
+        exists_status, _, _ = await run_command(
+            db,
+            redis,
+            frame,
+            f"test -f {shlex.quote(combined_path)}",
+            log_output=False,
+            log_command=False,
+        )
+        uploaded = False
+        if exists_status != 0:
+            await upload_file(db, redis, frame, combined_path, data)
+            uploaded = True
 
     if uploaded:
         await _invalidate_frame_assets_cache(redis, frame, assets_path)
@@ -2510,7 +2595,10 @@ async def api_frame_assets_upload(
 
     data = await file.read()
 
-    await upload_file(db, redis, frame, combined_path, data)
+    if _is_embedded_frame(frame):
+        await embedded_assets.upload_asset(frame, redis, combined_path, data)
+    else:
+        await upload_file(db, redis, frame, combined_path, data)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
     rel = os.path.relpath(combined_path, assets_path)
@@ -2543,7 +2631,10 @@ async def api_frame_assets_mkdir(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    await make_dir(db, redis, frame, full_path)
+    if _is_embedded_frame(frame):
+        await embedded_assets.make_dir(frame, redis, full_path)
+    else:
+        await make_dir(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Created"}
 
@@ -2569,7 +2660,10 @@ async def api_frame_assets_delete(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    await delete_path(db, redis, frame, full_path)
+    if _is_embedded_frame(frame):
+        await embedded_assets.delete_path(frame, redis, full_path)
+    else:
+        await delete_path(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Deleted"}
 
@@ -2599,7 +2693,10 @@ async def api_frame_assets_rename(
     ) or not dst_full.startswith(os.path.normpath(assets_path)):
         _bad_request("Invalid asset path")
 
-    await rename_path(db, redis, frame, src_full, dst_full)
+    if _is_embedded_frame(frame):
+        await embedded_assets.rename_path(frame, redis, src_full, dst_full)
+    else:
+        await rename_path(db, redis, frame, src_full, dst_full)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Renamed"}
 

@@ -70,12 +70,12 @@ Status legend:
 | Full logs | `GET /api/frames/:id/logs/full` | Full | N/A | N/A | Backend-only for historical logs. |
 | Metrics | `GET /api/frames/:id/metrics` | Full, DB metrics | Full, local UI metrics | Partial, empty list | Same `{ metrics: [...] }` shape. |
 | Recent metrics | `GET /api/frames/:id/metrics/recent` | Full | N/A | N/A | Backend-only historical query. |
-| Asset list | `GET /api/frames/:id/assets` | Full, frame/proxy aware | Full, local assets | Partial, empty list | Same `{ assets: [...] }` shape. |
-| Asset file | `GET /api/frames/:id/asset?path=...` | Full | Full | Planned | Same route for local files. Must preserve path safety. |
-| Asset sync | `POST /api/frames/:id/assets/sync` | Full | N/A | N/A | Backend-only or future local asset rescan. |
-| Asset upload image | `POST /api/frames/:id/assets/upload_image` | Full | Available through Pi admin asset API, not canonical frame API | Planned | Add canonical Pi/ESP32 routes before using from shared standalone UI. |
-| Asset upload file | `POST /api/frames/:id/assets/upload` | Full | Available through Pi admin asset API, not canonical frame API | Planned | Same as above. |
-| Asset mkdir/delete/rename | `POST /api/frames/:id/assets/{mkdir,delete,rename}` | Full | Available through Pi admin asset API, not canonical frame API | Planned | Add canonical aliases if local asset management is part of standalone UI. |
+| Asset list | `GET /api/frames/:id/assets` | Full, frame/proxy aware (embedded frames proxy to the device) | Full, local assets | Full, SD walk (`{assets, truncated?, mounted}`) | Same `{ assets: [...] }` shape. |
+| Asset file | `GET /api/frames/:id/asset?path=...` | Full (embedded frames proxy to the device) | Full | Full, streamed off the SD card | Same route for local files. Must preserve path safety. |
+| Asset sync | `POST /api/frames/:id/assets/sync` | Full (400 for embedded — fonts are compiled in) | N/A | N/A | Backend-only or future local asset rescan. |
+| Asset upload image | `POST /api/frames/:id/assets/upload_image` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Via `POST /api/frames/:id/assets/upload` | Add canonical Pi routes before using from shared standalone UI. |
+| Asset upload file | `POST /api/frames/:id/assets/upload` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Full, raw body + `?path=` query, streamed to SD | Same as above. |
+| Asset mkdir/delete/rename | `POST /api/frames/:id/assets/{mkdir,delete,rename}` | Full (embedded frames proxy to the device) | Available through Pi admin asset API, not canonical frame API | Full, form-encoded | Add canonical aliases if local asset management is part of standalone UI. |
 | Clear build cache | `POST /api/frames/:id/clear_build_cache` | Backend only | N/A | N/A | Build cache is backend-owned. |
 | Reset frame | `POST /api/frames/:id/reset` | Backend only | N/A | N/A | Backend operation; local reset should become an explicit local command if needed. |
 | Restart/reboot/stop | `POST /api/frames/:id/{restart,reboot,stop}` | Backend only | Alias via events/reload where meaningful | Partial via events/reload where meaningful | Avoid exposing unsupported power controls in local mode. |

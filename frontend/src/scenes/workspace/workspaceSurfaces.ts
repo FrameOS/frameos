@@ -61,9 +61,9 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
   // The on-device panel is the frame: no SSH shell, and pinging yourself is
   // pointless.
   frameAdmin: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets', 'debug'],
-  // The cloud protocol has no shell or diagnostic verbs. Assets are the
-  // read-only assets_list/asset_get pair (docs/cloud-frames.md) — the panel
-  // itself drops every mutation affordance in cloud mode.
+  // The cloud protocol has no shell or diagnostic verbs. Assets speak the
+  // full assets_list/asset_get/asset_put/asset_mkdir/asset_delete/
+  // asset_rename verb set (docs/cloud-frames.md); only font sync is absent.
   cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets'],
 }
 

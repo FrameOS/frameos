@@ -49,8 +49,8 @@ file only lists what is left to do. When an item ships, delete it here.
 - Spill follow-ups (optional): proactive Content-Length trigger;
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.
-- **FAT long filenames** — SD listings show 8.3 short names (`02_SYS~1`);
-  enable LFN in the FAT config. Cosmetic.
+- ~~**FAT long filenames**~~ — DONE: `CONFIG_FATFS_LFN_HEAP` in
+  sdkconfig.defaults + the dev sdkconfig; listings show full names.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
@@ -100,8 +100,9 @@ file only lists what is left to do. When an item ships, delete it here.
 
 ## Canonical API gaps (matrix in docs/api-triality.md)
 
-- ESP32: fonts list/file routes, asset file route, canonical asset
-  management (upload/mkdir/delete/rename), full web admin shell parity.
+- ESP32: fonts list/file routes, full web admin shell parity. (Asset
+  file/upload/mkdir/delete/rename routes DONE — device HTTP + cloud verbs +
+  usb_api + backend proxy, 2026-08.)
 - Pi: canonical asset upload/mkdir/delete/rename routes (exist via the
   admin asset API, not the canonical frame API).
 - Frame import/adoption: standalone export/source payloads; backend
