@@ -299,6 +299,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'deepSleep': True,
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,  # no timezone set on the frame
+        'rotate': 0,
     }
 
     # Defaults: local render on PSRAM boards, power flags off
@@ -318,6 +319,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'deepSleep': False,
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,
+        'rotate': 0,
     }
 
 

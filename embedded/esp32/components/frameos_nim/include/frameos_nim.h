@@ -23,7 +23,7 @@ bool frameos_nim_available(void);
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       uint32_t frame_id, const char *api_key,
-                      bool server_send_logs);
+                      bool server_send_logs, int rotate);
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);

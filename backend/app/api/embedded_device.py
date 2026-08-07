@@ -369,6 +369,9 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+        # 0/90/180/270 — the firmware restarts itself to re-init the renderer
+        # when this changes (scene canvases are sized at init).
+        "rotate": int(frame.rotate or 0) % 360,
         # The device matches schedule events in frame-local wall-clock time
         # but carries no tz database — it applies this offset to UTC. Sent as
         # the CURRENT offset, so a DST shift propagates on the next poll.

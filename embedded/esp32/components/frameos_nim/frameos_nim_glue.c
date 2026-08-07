@@ -40,7 +40,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize)
 
 extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
-                              const char *backend_url, int frame_id);
+                              const char *backend_url, int frame_id, int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
@@ -281,7 +281,7 @@ static bool log_upload_heap_ready(void)
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       uint32_t frame_id, const char *api_key,
-                      bool server_send_logs)
+                      bool server_send_logs, int rotate)
 {
     s_frame_width = width;
     s_frame_height = height;
@@ -301,7 +301,7 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
         s_nim_started = true;
     }
     s_nim_ready = fos_nim_init_impl(width, height, frame_name, (int)max_http_response_bytes,
-                                    s_backend_url, (int)frame_id);
+                                    s_backend_url, (int)frame_id, rotate);
     nim_lock_give();
     return s_nim_ready;
 }

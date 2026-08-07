@@ -6,10 +6,11 @@ bool frameos_nim_available(void) { return false; }
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       uint32_t frame_id, const char *api_key,
-                      bool server_send_logs)
+                      bool server_send_logs, int rotate)
 {
     (void)width; (void)height; (void)frame_name; (void)max_http_response_bytes;
     (void)backend_url; (void)frame_id; (void)api_key; (void)server_send_logs;
+    (void)rotate;
     return false;
 }
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)

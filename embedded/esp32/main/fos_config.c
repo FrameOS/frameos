@@ -29,6 +29,7 @@ static void load_defaults(void)
     strlcpy(s_config.hardware_preset, FRAMEOS_DEFAULT_HARDWARE_PRESET, sizeof(s_config.hardware_preset));
     strlcpy(s_config.panel, FRAMEOS_DEFAULT_PANEL, sizeof(s_config.panel));
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
+    s_config.rotate = FRAMEOS_DEFAULT_ROTATE;
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
@@ -123,6 +124,11 @@ esp_err_t fos_config_init(void)
     uint32_t u32;
     if (nvs_get_u32(nvs, "frame_id", &u32) == ESP_OK) s_config.frame_id = u32;
     if (nvs_get_u32(nvs, "interval", &u32) == ESP_OK) s_config.interval_sec = u32;
+    uint16_t rotate_u16 = 0;
+    if (nvs_get_u16(nvs, "rotate", &rotate_u16) == ESP_OK &&
+        (rotate_u16 == 0 || rotate_u16 == 90 || rotate_u16 == 180 || rotate_u16 == 270)) {
+        s_config.rotate = rotate_u16;
+    }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
@@ -191,6 +197,7 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
+    nvs_set_u16(nvs, "rotate", s_config.rotate);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);

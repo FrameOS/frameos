@@ -69,6 +69,7 @@ typedef struct {
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
+    uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */
     uint32_t max_http_response_bytes;
     bool server_send_logs;         /* upload runtime/render logs to backend */
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */

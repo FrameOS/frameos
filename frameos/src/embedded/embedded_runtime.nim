@@ -93,7 +93,7 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 # ------------------------------------------------------------------- setup
 
 proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
-    backendUrl = "", frameId = 0) =
+    backendUrl = "", frameId = 0, rotate = 0) =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Logs go synchronously to the firmware's ESP_LOG hook; events (e.g. a
   ## "render" dispatched from a scene) set a flag the C render loop polls.
@@ -118,7 +118,10 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
       pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
     ),
     maxHttpResponseBytes: httpResponseLimit,
-    rotate: 0,
+    # width/height are the PANEL's; the interpreter creates the scene canvas
+    # at the rotated dimensions (same contract as runner.renderSceneImage on
+    # Pi) and the embedded packers rotate while packing.
+    rotate: (rotate + 1080) mod 360,
     flip: "",
     scalingMode: "cover",
     imageEngine: "pixie",

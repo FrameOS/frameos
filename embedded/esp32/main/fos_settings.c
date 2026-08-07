@@ -4,9 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 #include "cJSON.h"
 #include "fos_config.h"
@@ -23,6 +27,14 @@ static const char *TAG = "fos_settings";
 /* RAM-only: settings are refetched once per boot, then 304 thereafter. */
 static char s_etag[SETTINGS_ETAG_LEN] = "";
 static volatile bool s_sync_requested = false;
+static bool s_restart_after_apply = false;
+
+static void settings_restart_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(750)); /* let the applied-settings log flush */
+    esp_restart();
+}
 
 void fos_settings_request_sync(void)
 {
@@ -97,6 +109,19 @@ static bool apply_frame_settings(const cJSON *frame)
         config->wake_schedule != (bool)cJSON_IsTrue(wake_schedule)) {
         config->wake_schedule = cJSON_IsTrue(wake_schedule);
         changed = true;
+    }
+
+    const cJSON *rotate = cJSON_GetObjectItem(frame, "rotate");
+    if (cJSON_IsNumber(rotate)) {
+        int rot = (((int)rotate->valuedouble % 360) + 360) % 360;
+        if ((rot == 0 || rot == 90 || rot == 180 || rot == 270) &&
+            (int)config->rotate != rot) {
+            config->rotate = (uint16_t)rot;
+            /* The Nim runtime sizes the scene canvas at init; a rotation
+             * change needs a restart to take effect. */
+            s_restart_after_apply = true;
+            changed = true;
+        }
     }
 
     return changed;
@@ -243,12 +268,20 @@ esp_err_t fos_settings_sync(bool force)
             log_settings_event("error", "persist-failed");
             return ESP_FAIL;
         }
-        log_settings_event("applied", "");
-        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d)",
-                 (unsigned long)config->interval_sec, (int)config->render_mode);
+        log_settings_event("applied", s_restart_after_apply ? "restarting" : "");
+        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u)",
+                 (unsigned long)config->interval_sec, (int)config->render_mode,
+                 (unsigned)config->rotate);
     }
     if (response_etag[0]) {
         strlcpy(s_etag, response_etag, sizeof(s_etag));
+    }
+    if (s_restart_after_apply) {
+        s_restart_after_apply = false;
+        ESP_LOGW(TAG, "rotation changed; restarting to re-init the renderer");
+        if (xTaskCreate(settings_restart_task, "fos_set_restart", 2048, NULL, 5, NULL) != pdPASS) {
+            esp_restart();
+        }
     }
     return ESP_OK;
 }

@@ -110,6 +110,7 @@ static int cmd_status(int argc, char **argv)
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
+    printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("assets:      path=%s sd=%d pins=%s freq=%lu kHz\n",
            config->assets_path, (int)config->assets_sd.enabled, sd_pins,
@@ -137,7 +138,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "hardware|panel|render_mode|"
+               "hardware|panel|render_mode|rotate|"
                "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
         return 1;
@@ -295,6 +296,14 @@ static int cmd_set(int argc, char **argv)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
+    else if (strcmp(key, "rotate") == 0) {
+        unsigned long rot = strtoul(value, NULL, 10) % 360;
+        if (rot != 0 && rot != 90 && rot != 180 && rot != 270) {
+            printf("bad rotate value, want 0, 90, 180 or 270\n");
+            return 1;
+        }
+        config->rotate = (uint16_t)rot;
+    }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     else if (strcmp(key, "assets_sd") == 0) config->assets_sd.enabled = atoi(value) != 0;
