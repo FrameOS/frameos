@@ -47,7 +47,7 @@ async def test_virtual_image_rejected_for_hardware_frames(async_client, no_auth_
     db.commit()
 
     response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/virtual/image?k={frame.server_api_key}')
+        f'/api/frames/{frame.id}/virtual/image?k=any-token')
     assert response.status_code == 400
 
 
@@ -59,7 +59,7 @@ async def test_virtual_image_serves_png_at_configured_size(async_client, no_auth
 
     frame = await create_virtual_frame(async_client, db)
     response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/virtual/image?k={frame.server_api_key}')
+        f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}')
     assert response.status_code == 200, response.text
     assert response.headers['content-type'] == 'image/png'
     assert response.headers['cache-control'] == 'no-store'
@@ -79,7 +79,7 @@ async def test_virtual_image_bw_color_mode(async_client, no_auth_client, db):
     db.commit()
 
     response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/virtual/image?k={frame.server_api_key}')
+        f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}')
     assert response.status_code == 200
     image = Image.open(io.BytesIO(response.content)).convert('RGB')
     colors = image.getcolors(maxcolors=16)
@@ -96,10 +96,10 @@ async def test_virtual_page_embeds_image_and_interval(async_client, no_auth_clie
     db.commit()
 
     response = await no_auth_client.get(
-        f'/api/frames/{frame.id}/virtual/page?k={frame.server_api_key}')
+        f'/api/frames/{frame.id}/virtual/page?k={frame.device_config["viewToken"]}')
     assert response.status_code == 200
     body = response.text
-    assert f'/api/frames/{frame.id}/virtual/image?k={frame.server_api_key}' in body
+    assert f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}' in body
     assert '60000' in body  # refresh interval in ms
 
 

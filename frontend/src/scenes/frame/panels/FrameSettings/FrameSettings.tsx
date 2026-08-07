@@ -1143,8 +1143,10 @@ export function FrameSettings({
   // ESP32 hardware controls (panel, pins, flash, presets) are hidden.
   const isVirtualPlatform =
     isEmbeddedMode && (frameForm.embedded?.platform ?? frame.embedded?.platform) === EMBEDDED_VIRTUAL
-  const virtualServerApiKey = frameForm.server_api_key ?? frame.server_api_key ?? ''
-  const virtualUrlToken = virtualServerApiKey || '<backend-api-key>'
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture. Rotate via device_config.viewToken.
+  const virtualViewToken = frameForm.device_config?.viewToken ?? frame.device_config?.viewToken ?? ''
+  const virtualUrlToken = virtualViewToken || '<view-token>'
   const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
   const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
   const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
@@ -2073,13 +2075,12 @@ export function FrameSettings({
             </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <p className="frameos-muted text-sm">
-                The backend renders this frame and serves it at the URLs below. The token is the frame's backend API
-                key, so treat these URLs like passwords — regenerating the key invalidates them.
+                The backend renders this frame and serves it at the URLs below. The token only grants viewing this
+                frame's image — still, treat the URLs as semi-private; save a new view token to invalidate them.
               </p>
-              {!virtualServerApiKey ? (
+              {!virtualViewToken ? (
                 <p className="text-sm font-semibold text-amber-600">
-                  No backend API key is set for this frame yet. Generate one in the "Backend access" section below,
-                  save, and the URLs will fill in.
+                  No view token is set for this frame yet. Save the frame once and the URLs will fill in.
                 </p>
               ) : null}
               <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />

@@ -111,6 +111,8 @@ export interface FrameType {
     /** Virtual frames only: how the backend quantizes the rendered image.
      * Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py. */
     colorMode?: FrameVirtualColorMode
+    // View-only credential for the virtual image/page URLs
+    viewToken?: string
     pins?: {
       rst?: number
       dc?: number

@@ -1822,7 +1822,9 @@ function EmbeddedFirmwareSection({
   // instead of firmware the section shows the image and kiosk page URLs.
   const isVirtualPlatform = platformLabel === EMBEDDED_VIRTUAL
   const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
-  const virtualUrlToken = frame.server_api_key || '<backend-api-key>'
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture.
+  const virtualUrlToken = frame.device_config?.viewToken || '<view-token>'
   const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
   const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const flashSize = embeddedFlashSize(frame)

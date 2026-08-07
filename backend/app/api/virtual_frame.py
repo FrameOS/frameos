@@ -58,11 +58,17 @@ VIRTUAL_COLOR_MODES = ("rgb", "bw", "gray4", "bwyr", "sevencolor", "spectra6")
 def _virtual_frame(db: Session, frame_id: int, token: str | None) -> Frame:
     if not token:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Missing token")
-    frame = db.query(Frame).filter_by(server_api_key=token).first()
-    if not frame or int(frame.id) != frame_id:
+    frame = db.get(Frame, frame_id)
+    if frame is None:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     if embedded_platform_spec_for_frame(frame)["family"] != "virtual":
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not a virtual frame")
+    # View-only credential: grants exactly "see the rendered frame", never the
+    # device API surface. Rotate by regenerating device_config.viewToken.
+    device_config = frame.device_config if isinstance(frame.device_config, dict) else {}
+    view_token = device_config.get("viewToken")
+    if not isinstance(view_token, str) or not view_token or token != view_token:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     return frame
 
 
@@ -124,6 +130,11 @@ async def _virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+async def render_virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
+    """Public entry for other endpoints (workspace image previews)."""
+    return await _virtual_frame_png(db, redis, frame)
 
 
 @api_public.get("/frames/{id:int}/virtual/image")

@@ -1475,6 +1475,11 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     frame.max_http_response_bytes = embedded_max_http_response_bytes_for_frame(frame)
 
     device_config = dict(embedded_device_config(frame))
+    if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual" and not device_config.get("viewToken"):
+        # View-only credential for the image/page URLs — deliberately not the
+        # server_api_key, so a shared kiosk URL grants nothing but the picture
+        # and can be rotated without touching the device identity.
+        device_config["viewToken"] = secure_token(32)
     device_config["pins"] = embedded_pins_for_frame(frame)
     if "sdCardAssets" in device_config or "sd_card_assets" in device_config:
         device_config.pop("sd_card_assets", None)

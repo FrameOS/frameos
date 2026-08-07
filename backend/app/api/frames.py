@@ -134,6 +134,7 @@ from app.tasks.embedded_firmware import (
     embedded_ota_supported_for_frame,
     embedded_toolchain_available,
     latest_embedded_firmware,
+    embedded_platform_spec_for_frame,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
     request_or_queue_embedded_firmware_ota,
@@ -2021,6 +2022,20 @@ async def api_frame_get_image(
 
     cache_key = _frame_image_cache_key(frame.id)
     path = "/image"
+
+    # Virtual frames have no device to fetch from: render server-side (the
+    # same wasm path their public URLs use) instead of proxying to a
+    # nonexistent host.
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from .virtual_frame import render_virtual_frame_png
+
+        png = await render_virtual_frame_png(db, redis, frame)
+        await _store_frame_image(db, redis, frame, png, scene_id=None, publish_rendered=False)
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers=await read_frame_sync_hint_headers(redis, frame.id),
+        )
 
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)
