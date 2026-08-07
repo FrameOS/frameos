@@ -276,6 +276,9 @@ esp_err_t fos_settings_sync(bool force)
     if (response_etag[0]) {
         strlcpy(s_etag, response_etag, sizeof(s_etag));
     }
+    /* New backend content (200, not 304): the app-secret keys may have
+     * changed too — drop the Nim side's cached copy so apps refetch. */
+    frameos_nim_invalidate_settings();
     if (s_restart_after_apply) {
         s_restart_after_apply = false;
         ESP_LOGW(TAG, "rotation changed; restarting to re-init the renderer");

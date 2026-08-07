@@ -49,6 +49,7 @@ extern const char *fos_nim_scene_info_json_impl(void);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
+extern void fos_nim_invalidate_settings_impl(void);
 extern double fos_nim_scene_interval_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
@@ -517,6 +518,14 @@ static void queue_log_line(const char *msg)
 }
 
 static void (*s_log_tap)(const char *line) = NULL;
+
+void frameos_nim_invalidate_settings(void)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_invalidate_settings_impl();
+    nim_lock_give();
+}
 
 void frameos_nim_set_log_tap(void (*tap)(const char *line))
 {

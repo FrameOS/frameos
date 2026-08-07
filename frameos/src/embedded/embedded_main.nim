@@ -16,6 +16,7 @@ import pixie
 
 import embedded_scene
 import embedded_runtime
+from frameos/apps import invalidateEmbeddedServiceSettings
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -349,6 +350,11 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   except CatchableError as e:
     log("nim init failed: " & e.msg)
     false
+
+proc fos_nim_invalidate_settings_impl() {.exportc, cdecl.} =
+  ## Firmware's ETag'd settings poll saw new content: drop the cached
+  ## service-settings so apps refetch their keys on the next render.
+  invalidateEmbeddedServiceSettings(getFrameConfig())
 
 proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Install interpreted scenes from JSON (backend scenes.json format).

@@ -47,7 +47,8 @@ proc maxImageResponseBytes*(self: AppRoot): int {.inline.} =
     else:
       DefaultMaxHttpResponseBytes
 
-proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true): bool =
+proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true,
+    force = false): bool =
   when defined(frameosEmbedded):
     if config == nil:
       return false
@@ -56,6 +57,13 @@ proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true): boo
     if config.settings{"embedded"} == nil or config.settings{"embedded"}.kind != JObject:
       config.settings["embedded"] = %*{}
     let embedded = config.settings["embedded"]
+    # Fetch once, then serve from the cached copy: without this every
+    # secret-using app refetched the payload on every render. The firmware's
+    # ETag'd settings sync clears the flag when the backend content changes
+    # (fos_settings.c → frameos_nim_invalidate_settings), so key edits still
+    # reach apps within one render pass.
+    if not force and embedded{"settingsLoaded"}.getBool(false):
+      return true
     let url = embedded{"settingsUrl"}.getStr()
     if url.len == 0:
       return false
@@ -84,7 +92,17 @@ proc ensureEmbeddedServiceSettings*(config: FrameConfig) =
   discard config.loadEmbeddedServiceSettings(raiseOnError = true)
 
 proc refreshEmbeddedServiceSettings*(config: FrameConfig): bool =
-  config.loadEmbeddedServiceSettings(raiseOnError = false)
+  config.loadEmbeddedServiceSettings(raiseOnError = false, force = true)
+
+proc invalidateEmbeddedServiceSettings*(config: FrameConfig) =
+  ## The next ensureEmbeddedServiceSettings() refetches. Called by the
+  ## firmware when its ETag'd settings poll sees new backend content.
+  when defined(frameosEmbedded):
+    if config != nil and config.settings != nil and
+        config.settings.kind == JObject and
+        config.settings{"embedded"} != nil and
+        config.settings{"embedded"}.kind == JObject:
+      config.settings["embedded"]["settingsLoaded"] = %false
 
 proc ensureEmbeddedServiceSettings*(self: AppRoot) =
   if self != nil:

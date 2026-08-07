@@ -18,6 +18,7 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     (void)buf; (void)len; (void)pixel_format;
     return -1;
 }
+void frameos_nim_invalidate_settings(void) {}
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
     (void)pixel_format;

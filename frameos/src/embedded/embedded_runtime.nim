@@ -92,6 +92,9 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 
 # ------------------------------------------------------------------- setup
 
+proc getFrameConfig*(): FrameConfig =
+  frameConfig
+
 proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     backendUrl = "", frameId = 0, rotate = 0) =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
