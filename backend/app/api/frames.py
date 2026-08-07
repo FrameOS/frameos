@@ -2053,7 +2053,11 @@ async def api_frame_get_image(
             from .virtual_frame import render_virtual_frame_png
 
             cached = await render_virtual_frame_png(db, redis, frame)
-            await _store_frame_image(db, redis, frame, cached, scene_id=None, publish_rendered=False)
+            active_scene = await _active_scene_id_from_cache(redis, frame.id)
+            await _store_frame_image(
+                db, redis, frame, cached,
+                scene_id=active_scene or None, publish_rendered=False,
+            )
         return Response(
             content=cached,
             media_type="image/png",

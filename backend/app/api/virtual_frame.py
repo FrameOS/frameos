@@ -212,7 +212,9 @@ async def refresh_virtual_frame_image(
     png = await _virtual_frame_png(
         db, redis, frame, scenes_override=scenes_override, scene_id_override=scene_id
     )
-    await _store_frame_image(db, redis, frame, png, scene_id=scene_id, publish_rendered=True)
+    # Store under the scene that was actually shown so the per-scene
+    # snapshot lands in the SceneImage table and survives restarts.
+    await _store_frame_image(db, redis, frame, png, scene_id=shown_scene, publish_rendered=True)
     await log(db, redis, int(frame.id), "webhook", json.dumps({
         "event": "render:done",
         "sceneId": shown_scene,
