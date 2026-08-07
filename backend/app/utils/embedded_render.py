@@ -8,10 +8,11 @@ lived Node subprocess (backend/tools/embedded_wasm_render.mjs).
 
 Sandbox posture: user scene code (QuickJS) executes inside the wasm module,
 never natively on the backend. The wasm runtime has no filesystem or socket
-access; its only HTTP hook is a browser-style synchronous XHR bridge, which
-does not exist under Node — so outbound requests from scene apps fail closed.
-The subprocess itself is bounded by a wall-clock timeout and a concurrency
-cap so render storms cannot pile up Node processes.
+access; its HTTP hook goes through the harness' synchronous fetch shim,
+giving scene apps the same outbound HTTP a physical frame has (the cloud
+metadata address is blocked). The subprocess itself is bounded by a
+wall-clock timeout and a concurrency cap so render storms cannot pile up
+Node processes.
 """
 
 from __future__ import annotations
