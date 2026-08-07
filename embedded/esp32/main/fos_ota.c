@@ -750,8 +750,9 @@ static esp_err_t cloud_ota_run(void)
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
-    if (status != 200 || content_length <= 0 ||
-        content_length > FOS_CLOUD_OTA_MANIFEST_MAX) {
+    /* Dev servers (and some proxies) send chunked responses with no
+     * Content-Length — read to EOF under the manifest cap either way. */
+    if (status != 200 || content_length > FOS_CLOUD_OTA_MANIFEST_MAX) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         ESP_LOGW(TAG, "cloud ota: manifest HTTP %d (%lld bytes)", status,
@@ -759,16 +760,16 @@ static esp_err_t cloud_ota_run(void)
         cloud_ota_log("error", status == 409 ? "unsigned-release" : "manifest-unavailable");
         return ESP_FAIL;
     }
-    char *body = malloc((size_t)content_length + 1);
+    char *body = malloc(FOS_CLOUD_OTA_MANIFEST_MAX + 1);
     if (body == NULL) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return ESP_ERR_NO_MEM;
     }
     size_t total = 0;
-    while (total < (size_t)content_length) {
+    while (total < FOS_CLOUD_OTA_MANIFEST_MAX) {
         int r = esp_http_client_read(client, body + total,
-                                     (size_t)content_length - total);
+                                     FOS_CLOUD_OTA_MANIFEST_MAX - total);
         if (r <= 0) break;
         total += (size_t)r;
     }
