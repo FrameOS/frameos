@@ -1,6 +1,5 @@
 #include "fos_cloud.h"
 
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +25,7 @@
 #include "monocypher-ed25519.h"
 #include "nvs.h"
 
-#include "fos_assets_sd.h"
+#include "fos_assets.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -645,9 +644,12 @@ static volatile bool s_scene_ack_pending = false;
  * scopes array, cleared with the session. Read from the logging tasks (the
  * tap), written by the WS task; a stale read costs at most one line. */
 static volatile bool s_logs_granted = false;
+static volatile bool s_metrics_granted = false;
 static QueueHandle_t s_log_queue = NULL;
 
 static void ws_backoff_reset(void);
+static void ws_ack(const cJSON *id, bool ok, const char *error);
+static cJSON *log_line_entry(const char *line, double timestamp);
 
 static void ws_send_json(cJSON *msg)
 {
@@ -717,31 +719,11 @@ static void ws_poll_logs(void)
             free(line);
             return;
         }
-        cJSON *payload = cJSON_Parse(line);
-        if (payload != NULL && !cJSON_IsObject(payload)) {
-            cJSON_Delete(payload);
-            payload = NULL;
-        }
-        if (payload == NULL) {
-            /* Same wrapping the backend uploader applies to plain lines. */
-            payload = cJSON_CreateObject();
-            if (payload != NULL) {
-                cJSON_AddStringToObject(payload, "event", "log");
-                cJSON_AddStringToObject(payload, "source", "esp32");
-                cJSON_AddStringToObject(payload, "message", line);
-            }
-        }
-        free(line);
-        if (payload == NULL) continue;
-        cJSON *entry = cJSON_CreateObject();
-        if (entry == NULL) {
-            cJSON_Delete(payload);
-            continue;
-        }
         /* Without SNTP the entry carries no timestamp and the hub stamps
          * its own arrival time — better than a 1970 date. */
-        if (have_time) cJSON_AddNumberToObject(entry, "timestamp", now);
-        cJSON_AddItemToObject(entry, "payload", payload);
+        cJSON *entry = log_line_entry(line, have_time ? now : 0);
+        free(line);
+        if (entry == NULL) continue;
         cJSON_AddItemToArray(logs, entry);
         count++;
     }
@@ -759,6 +741,131 @@ static void ws_poll_logs(void)
     cJSON_AddItemToObject(msg, "logs", logs);
     ws_send_json(msg);
     cJSON_Delete(msg);
+}
+
+/* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
+ * uses; plain lines get the same wrapping the backend uploader applies. */
+static cJSON *log_line_entry(const char *line, double timestamp)
+{
+    cJSON *payload = cJSON_Parse(line);
+    if (payload != NULL && !cJSON_IsObject(payload)) {
+        cJSON_Delete(payload);
+        payload = NULL;
+    }
+    if (payload == NULL) {
+        payload = cJSON_CreateObject();
+        if (payload == NULL) return NULL;
+        cJSON_AddStringToObject(payload, "event", "log");
+        cJSON_AddStringToObject(payload, "source", "esp32");
+        cJSON_AddStringToObject(payload, "message", line);
+    }
+    cJSON *entry = cJSON_CreateObject();
+    if (entry == NULL) {
+        cJSON_Delete(payload);
+        return NULL;
+    }
+    if (timestamp > 1e9) cJSON_AddNumberToObject(entry, "timestamp", timestamp);
+    cJSON_AddItemToObject(entry, "payload", payload);
+    return entry;
+}
+
+/* get_logs: replay the on-device ring as a log_batch with the command id. */
+static void ws_handle_get_logs(const cJSON *root, const cJSON *id)
+{
+    if (!s_logs_granted) {
+        ws_ack(id, false, "insufficient_scope");
+        return;
+    }
+    size_t limit = FOS_NIM_LOG_RING_CAP;
+    const cJSON *limit_item = cJSON_GetObjectItem(root, "limit");
+    if (cJSON_IsNumber(limit_item) && limit_item->valuedouble >= 1 &&
+        limit_item->valuedouble < FOS_NIM_LOG_RING_CAP) {
+        limit = (size_t)limit_item->valuedouble;
+    }
+    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+    if (entries == NULL) {
+        ws_ack(id, false, "no_memory");
+        return;
+    }
+    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+    size_t start = count > limit ? count - limit : 0; /* newest `limit` lines */
+    ws_ack(id, true, NULL);
+    cJSON *msg = cJSON_CreateObject();
+    cJSON *logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
+    if (logs != NULL) {
+        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
+            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
+        }
+        cJSON_AddStringToObject(msg, "type", "log_batch");
+        for (size_t i = start; i < count; i++) {
+            cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
+            if (entry != NULL) cJSON_AddItemToArray(logs, entry);
+        }
+        ws_send_json(msg);
+    }
+    cJSON_Delete(msg);
+    for (size_t i = 0; i < count; i++) free(entries[i].line);
+    free(entries);
+}
+
+/* Push the newest metrics sample once it changes (one per render pass) —
+ * this is what keeps the provider's metrics store live without polling. */
+static double s_metrics_last_pushed = 0;
+
+static void ws_poll_metrics(void)
+{
+    if (!s_ws_client || !s_ws_ready || !s_metrics_granted) return;
+    /* recent() returns oldest-first; the last entry is the newest sample. */
+    fos_metrics_sample_t all[32] = {0};
+    size_t count = fos_client_metrics_recent(all, 32);
+    if (count == 0) return;
+    fos_metrics_sample_t *newest = &all[count - 1];
+    bool fresh = newest->timestamp > s_metrics_last_pushed;
+    if (fresh) {
+        cJSON *sample = cJSON_Parse(newest->json);
+        cJSON *msg = sample ? cJSON_CreateObject() : NULL;
+        if (msg != NULL) {
+            cJSON_AddStringToObject(msg, "type", "metrics");
+            cJSON_AddItemToObject(msg, "metrics", sample);
+            sample = NULL;
+            ws_send_json(msg);
+            s_metrics_last_pushed = newest->timestamp;
+        }
+        cJSON_Delete(sample);
+        cJSON_Delete(msg);
+    }
+    for (size_t i = 0; i < count; i++) free(all[i].json);
+}
+
+/* get_metrics: the wire shape is a single sample ({"metrics": {…}}), so the
+ * reply carries the newest one. */
+static void ws_handle_get_metrics(const cJSON *id)
+{
+    if (!s_metrics_granted) {
+        ws_ack(id, false, "insufficient_scope");
+        return;
+    }
+    fos_metrics_sample_t samples[32] = {0};
+    size_t count = fos_client_metrics_recent(samples, 32);
+    if (count == 0) {
+        ws_ack(id, false, "no_metrics");
+        return;
+    }
+    ws_ack(id, true, NULL);
+    cJSON *sample = cJSON_Parse(samples[count - 1].json);
+    cJSON *msg = cJSON_CreateObject();
+    if (msg != NULL && sample != NULL) {
+        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
+            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
+        }
+        cJSON_AddStringToObject(msg, "type", "metrics");
+        cJSON_AddItemToObject(msg, "metrics", sample);
+        sample = NULL;
+        ws_send_json(msg);
+    }
+    cJSON_Delete(sample);
+    cJSON_Delete(msg);
+    for (size_t i = 0; i < count; i++) free(samples[i].json);
 }
 
 /* Attach the hello-shaped state fields to msg. */
@@ -912,117 +1019,26 @@ static void ws_poll_scene_ack(void)
 
 /* ------------------------------------------------------------- asset verbs */
 
-typedef enum { ASSET_JOB_LIST = 0, ASSET_JOB_GET = 1, ASSET_JOB_IMAGE = 2 } asset_job_kind_t;
+typedef enum {
+    ASSET_JOB_LIST = 0,
+    ASSET_JOB_GET = 1,
+    ASSET_JOB_IMAGE = 2,
+    ASSET_JOB_PUT = 3,
+    ASSET_JOB_MKDIR = 4,
+    ASSET_JOB_DELETE = 5,
+    ASSET_JOB_RENAME = 6,
+} asset_job_kind_t;
 
 typedef struct {
     uint8_t kind;
     char id[48]; /* command uuid, echoed on every reply frame */
     char path[FOS_CLOUD_ASSET_PATH_MAX];
+    char dst[FOS_CLOUD_ASSET_PATH_MAX]; /* rename destination */
+    uint8_t *data;                      /* asset_put payload, owned by the job */
+    size_t data_len;
 } asset_job_t;
 
 static QueueHandle_t s_asset_jobs = NULL;
-
-/* Relative, inside the assets root, no dot-segments. Returns false on
- * anything a provider should never send (the provider validates too, but the
- * device is the enforcement point). */
-static bool asset_path_sanitize(const char *raw, char *out, size_t out_len)
-{
-    if (!raw) return false;
-    while (raw[0] == '/' || (raw[0] == '.' && raw[1] == '/')) {
-        raw += (raw[0] == '/') ? 1 : 2;
-    }
-    size_t len = strlen(raw);
-    if (len == 0 || len >= out_len) return false;
-    const char *p = raw;
-    while (*p) {
-        const char *slash = strchr(p, '/');
-        size_t seg = slash ? (size_t)(slash - p) : strlen(p);
-        if (seg == 0) return false;                       /* "a//b" */
-        if (seg == 2 && p[0] == '.' && p[1] == '.') return false;
-        p += seg;
-        if (*p == '/') p++;
-    }
-    memcpy(out, raw, len + 1);
-    return true;
-}
-
-static const char *asset_content_type(const char *path)
-{
-    const char *dot = strrchr(path, '.');
-    if (!dot) return "application/octet-stream";
-    if (!strcasecmp(dot, ".png")) return "image/png";
-    if (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg")) return "image/jpeg";
-    if (!strcasecmp(dot, ".gif")) return "image/gif";
-    if (!strcasecmp(dot, ".bmp")) return "image/bmp";
-    if (!strcasecmp(dot, ".webp")) return "image/webp";
-    if (!strcasecmp(dot, ".svg")) return "image/svg+xml";
-    if (!strcasecmp(dot, ".txt") || !strcasecmp(dot, ".log")) return "text/plain";
-    if (!strcasecmp(dot, ".json")) return "application/json";
-    return "application/octet-stream";
-}
-
-static void asset_full_path(char *out, size_t out_len, const char *rel)
-{
-    const fos_config_t *config = fos_config();
-    const char *root = config->assets_path[0] ? config->assets_path : "/srv/assets";
-    snprintf(out, out_len, "%s/%s", root, rel);
-}
-
-/* Recursive SD walk for assets_list. Dotfiles stay local (same rule as the
- * Linux firmware); entries beyond the cap flip `truncated` instead of
- * silently stopping. Returns false only on allocation failure. */
-static bool asset_list_walk(cJSON *assets, char *rel, size_t rel_cap,
-                            int depth, int *count, bool *truncated)
-{
-    if (depth > FOS_CLOUD_ASSET_LIST_MAX_DEPTH) return true;
-    char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
-    asset_full_path(full, sizeof(full), rel);
-    DIR *dir = opendir(rel[0] ? full : full); /* rel=="" walks the root */
-    if (!dir) return true;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        if (*count >= FOS_CLOUD_ASSET_LIST_MAX_ENTRIES) {
-            *truncated = true;
-            break;
-        }
-        size_t rel_len = strlen(rel);
-        size_t name_len = strlen(entry->d_name);
-        if (rel_len + name_len + 2 >= rel_cap) continue;
-        if (rel_len > 0) {
-            rel[rel_len] = '/';
-            memcpy(rel + rel_len + 1, entry->d_name, name_len + 1);
-        } else {
-            memcpy(rel, entry->d_name, name_len + 1);
-        }
-        asset_full_path(full, sizeof(full), rel);
-        struct stat st;
-        if (stat(full, &st) == 0) {
-            cJSON *item = cJSON_CreateObject();
-            if (!item) {
-                closedir(dir);
-                rel[rel_len] = '\0';
-                return false;
-            }
-            cJSON_AddStringToObject(item, "path", rel);
-            bool is_dir = S_ISDIR(st.st_mode);
-            cJSON_AddNumberToObject(item, "size", is_dir ? 0 : (double)st.st_size);
-            cJSON_AddNumberToObject(item, "mtime", (double)st.st_mtime);
-            cJSON_AddBoolToObject(item, "is_dir", is_dir);
-            cJSON_AddItemToArray(assets, item);
-            (*count)++;
-            if (is_dir &&
-                !asset_list_walk(assets, rel, rel_cap, depth + 1, count, truncated)) {
-                closedir(dir);
-                rel[rel_len] = '\0';
-                return false;
-            }
-        }
-        rel[rel_len] = '\0';
-    }
-    closedir(dir);
-    return true;
-}
 
 static void asset_job_run_list(const asset_job_t *job)
 {
@@ -1032,11 +1048,7 @@ static void asset_job_run_list(const asset_job_t *job)
     cJSON_AddStringToObject(msg, "type", "assets");
     cJSON *assets = cJSON_AddArrayToObject(msg, "assets");
     bool truncated = false;
-    if (assets && fos_assets_sd_mounted()) {
-        char rel[FOS_CLOUD_ASSET_PATH_MAX] = "";
-        int count = 0;
-        asset_list_walk(assets, rel, sizeof(rel), 0, &count, &truncated);
-    }
+    if (assets) fos_assets_list_json(assets, &truncated);
     if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
     ws_send_json(msg);
     cJSON_Delete(msg);
@@ -1056,10 +1068,10 @@ static void asset_chunk_send_error(const char *id, const char *error)
 
 static void asset_job_run_get(const asset_job_t *job)
 {
-    char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
-    asset_full_path(full, sizeof(full), job->path);
+    char full[FOS_ASSETS_FULL_PATH_MAX];
+    fos_assets_full_path(full, sizeof(full), job->path);
     struct stat st;
-    if (!fos_assets_sd_mounted() || stat(full, &st) != 0) {
+    if (!fos_assets_available() || stat(full, &st) != 0) {
         asset_chunk_send_error(job->id, "not_found");
         return;
     }
@@ -1114,7 +1126,7 @@ static void asset_job_run_get(const asset_job_t *job)
         if (seq == 0) {
             cJSON_AddNumberToObject(msg, "size", (double)total);
             cJSON_AddNumberToObject(msg, "mtime", (double)st.st_mtime);
-            cJSON_AddStringToObject(msg, "content_type", asset_content_type(job->path));
+            cJSON_AddStringToObject(msg, "content_type", fos_assets_content_type(job->path));
         }
         if (!s_ws_client || !s_ws_ready) {
             /* Socket went away mid-stream: the provider discards partials and
@@ -1203,7 +1215,47 @@ static void asset_job_run_image(const asset_job_t *job)
     free(bmp);
 }
 
-/* Drain queued asset jobs. Called from the cloud task — file reads over SPI
+/* Write verbs ack from the job (the ack carries the result), so the SPI
+ * writes happen on the cloud task like every other asset job. */
+static void asset_job_ack(const char *id, bool ok, const char *error)
+{
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    if (id[0]) cJSON_AddStringToObject(msg, "id", id);
+    cJSON_AddStringToObject(msg, "type", "ack");
+    cJSON_AddBoolToObject(msg, "ok", ok);
+    if (!ok && error) cJSON_AddStringToObject(msg, "error", error);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+}
+
+static void asset_job_run_put(const asset_job_t *job)
+{
+    const char *err = NULL;
+    if (fos_assets_write_file(job->path, job->data, job->data_len, &err) != ESP_OK) {
+        asset_job_ack(job->id, false, err ? err : "write_failed");
+        return;
+    }
+    struct stat st;
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
+    cJSON_AddStringToObject(msg, "type", "ack");
+    cJSON_AddBoolToObject(msg, "ok", true);
+    cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
+    if (asset) {
+        cJSON_AddStringToObject(asset, "path", job->path);
+        bool have_stat = fos_assets_stat(job->path, &st) == ESP_OK;
+        cJSON_AddNumberToObject(asset, "size",
+                                have_stat ? (double)st.st_size : (double)job->data_len);
+        cJSON_AddNumberToObject(asset, "mtime", have_stat ? (double)st.st_mtime : 0);
+        cJSON_AddBoolToObject(asset, "is_dir", false);
+    }
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+}
+
+/* Drain queued asset jobs. Called from the cloud task — file I/O over SPI
  * plus multi-frame sends must never run inside the WS event handler. */
 static bool ws_process_asset_jobs(void)
 {
@@ -1212,24 +1264,55 @@ static bool ws_process_asset_jobs(void)
     asset_job_t job;
     while (s_ws_client && s_ws_ready &&
            xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
-        if (job.kind == ASSET_JOB_LIST) {
-            asset_job_run_list(&job);
-        } else if (job.kind == ASSET_JOB_IMAGE) {
-            asset_job_run_image(&job);
-        } else {
-            asset_job_run_get(&job);
+        const char *err = NULL;
+        switch (job.kind) {
+            case ASSET_JOB_LIST: asset_job_run_list(&job); break;
+            case ASSET_JOB_IMAGE: asset_job_run_image(&job); break;
+            case ASSET_JOB_GET: asset_job_run_get(&job); break;
+            case ASSET_JOB_PUT:
+                asset_job_run_put(&job);
+                break;
+            case ASSET_JOB_MKDIR:
+                asset_job_ack(job.id, fos_assets_mkdir(job.path, &err) == ESP_OK, err);
+                break;
+            case ASSET_JOB_DELETE:
+                asset_job_ack(job.id, fos_assets_delete(job.path, &err) == ESP_OK, err);
+                break;
+            case ASSET_JOB_RENAME:
+                asset_job_ack(job.id,
+                              fos_assets_rename(job.path, job.dst, &err) == ESP_OK, err);
+                break;
+            default: break;
         }
+        free(job.data);
+        job.data = NULL;
         worked = true;
     }
     return worked;
 }
 
+/* Free the payloads of any jobs abandoned by a dropped session. The provider
+ * redelivers the commands on the next session, so dropping is correct — the
+ * heap buffers must not go with them. */
+static void ws_flush_asset_jobs(void)
+{
+    if (!s_asset_jobs) return;
+    asset_job_t job;
+    while (xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
+        free(job.data);
+    }
+}
+
 /* WS-handler side: validate cheaply (a stat, no reads), ack, and hand the
  * heavy part to the cloud task. A full queue is an honest `busy` — the
- * provider's queue redelivers or the browser retries. */
+ * provider's queue redelivers or the browser retries. Write verbs skip the
+ * handler ack entirely: their ack carries the result, so it is sent from the
+ * job once the SPI write finished. */
 static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
 {
-    asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "" };
+    asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "", .dst = "",
+                        .data = NULL, .data_len = 0 };
+    bool ack_now = true; /* read verbs: bare ack, then reply frames */
     if (cJSON_IsString(id) && id->valuestring &&
         strlen(id->valuestring) < sizeof(job.id)) {
         strlcpy(job.id, id->valuestring, sizeof(job.id));
@@ -1237,18 +1320,16 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
     if (kind == ASSET_JOB_GET) {
         const cJSON *path_item = cJSON_GetObjectItem(root, "path");
         const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
-        if (!asset_path_sanitize(raw, job.path, sizeof(job.path))) {
+        if (!fos_assets_sanitize_path(raw, job.path, sizeof(job.path))) {
             ws_ack(id, false, "invalid_path");
             return;
         }
-        if (!fos_assets_sd_mounted()) {
+        if (!fos_assets_available()) {
             ws_ack(id, false, "not_found");
             return;
         }
-        char full[FOS_CLOUD_ASSET_PATH_MAX + 128];
-        asset_full_path(full, sizeof(full), job.path);
         struct stat st;
-        if (stat(full, &st) != 0) {
+        if (fos_assets_stat(job.path, &st) != ESP_OK) {
             ws_ack(id, false, "not_found");
             return;
         }
@@ -1262,15 +1343,61 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
         }
         /* `thumb` is accepted and ignored: no thumbnailer on this profile,
          * the original bytes are the reply (docs/cloud-frames.md). */
+    } else if (kind == ASSET_JOB_PUT || kind == ASSET_JOB_MKDIR ||
+               kind == ASSET_JOB_DELETE) {
+        const cJSON *path_item = cJSON_GetObjectItem(root, "path");
+        const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
+        if (!fos_assets_sanitize_write_path(raw, job.path, sizeof(job.path))) {
+            ws_ack(id, false, "invalid_path");
+            return;
+        }
+        ack_now = false;
+    } else if (kind == ASSET_JOB_RENAME) {
+        const cJSON *src_item = cJSON_GetObjectItem(root, "src");
+        const cJSON *dst_item = cJSON_GetObjectItem(root, "dst");
+        const char *src = cJSON_IsString(src_item) ? src_item->valuestring : NULL;
+        const char *dst = cJSON_IsString(dst_item) ? dst_item->valuestring : NULL;
+        if (!fos_assets_sanitize_write_path(src, job.path, sizeof(job.path)) ||
+            !fos_assets_sanitize_write_path(dst, job.dst, sizeof(job.dst))) {
+            ws_ack(id, false, "invalid_path");
+            return;
+        }
+        ack_now = false;
+    }
+    if (kind == ASSET_JOB_PUT) {
+        const cJSON *data_item = cJSON_GetObjectItem(root, "data");
+        const char *b64 = cJSON_IsString(data_item) ? data_item->valuestring : NULL;
+        size_t b64_len = b64 ? strlen(b64) : 0;
+        if (!b64 || b64_len == 0) {
+            ws_ack(id, false, "invalid_data");
+            return;
+        }
+        size_t raw_cap = (b64_len / 4) * 3 + 4;
+        uint8_t *raw = fos_big_malloc(raw_cap);
+        if (!raw) {
+            ws_ack(id, false, "no_memory");
+            return;
+        }
+        size_t raw_len = 0;
+        if (mbedtls_base64_decode(raw, raw_cap, &raw_len,
+                                  (const unsigned char *)b64, b64_len) != 0 ||
+            raw_len == 0) {
+            free(raw);
+            ws_ack(id, false, "invalid_data");
+            return;
+        }
+        job.data = raw;
+        job.data_len = raw_len;
     }
     if (!s_asset_jobs) {
         s_asset_jobs = xQueueCreate(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t));
     }
     if (!s_asset_jobs || xQueueSend(s_asset_jobs, &job, 0) != pdTRUE) {
+        free(job.data);
         ws_ack(id, false, "busy");
         return;
     }
-    ws_ack(id, true, NULL);
+    if (ack_now) ws_ack(id, true, NULL);
 }
 
 /* set_scenes: same storage the USB `usb_api upload-scenes` command uses —
@@ -1517,16 +1644,19 @@ static void ws_handle_message(const char *data, size_t len)
          * its scopes array reflects the provider's current grant, including
          * revocations since enrollment. */
         bool logs_granted = false;
+        bool metrics_granted = false;
         const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
         const cJSON *scope = NULL;
         cJSON_ArrayForEach(scope, scopes) {
-            if (cJSON_IsString(scope) && scope->valuestring &&
-                strcmp(scope->valuestring, "telemetry:logs") == 0) {
+            if (!cJSON_IsString(scope) || !scope->valuestring) continue;
+            if (strcmp(scope->valuestring, "telemetry:logs") == 0) {
                 logs_granted = true;
-                break;
+            } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
+                metrics_granted = true;
             }
         }
         s_logs_granted = logs_granted;
+        s_metrics_granted = metrics_granted;
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
@@ -1555,19 +1685,28 @@ static void ws_handle_message(const char *data, size_t len)
         ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
     } else if (strcmp(type, "asset_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_GET, root, id);
+    } else if (strcmp(type, "asset_put") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_PUT, root, id);
+    } else if (strcmp(type, "asset_mkdir") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_MKDIR, root, id);
+    } else if (strcmp(type, "asset_delete") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_DELETE, root, id);
+    } else if (strcmp(type, "asset_rename") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
     } else if (strcmp(type, "image_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
         ws_ack(id, true, NULL);
         ws_schedule_reboot();
+    } else if (strcmp(type, "get_logs") == 0) {
+        ws_handle_get_logs(root, id);
+    } else if (strcmp(type, "get_metrics") == 0) {
+        ws_handle_get_metrics(id);
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
     } else if (strcmp(type, "set_schedule") == 0 ||
-               strcmp(type, "get_logs") == 0 || strcmp(type, "get_metrics") == 0 ||
-               strcmp(type, "notify_update_available") == 0 ||
-               strcmp(type, "asset_put") == 0 || strcmp(type, "asset_mkdir") == 0 ||
-               strcmp(type, "asset_delete") == 0 || strcmp(type, "asset_rename") == 0) {
+               strcmp(type, "notify_update_available") == 0) {
         /* Documented verbs the esp32 profile does not implement. Answering
          * `unsupported_verb` (not `unknown_verb`) lets a provider tell "this
          * device profile is smaller" apart from "you sent something that is
@@ -1641,6 +1780,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
             s_logs_granted = false; /* re-derived from this session's ready */
+            s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
             ws_send_hello();
@@ -1658,6 +1798,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         case WEBSOCKET_EVENT_CLOSED:
             s_ws_ready = false;
             s_logs_granted = false;
+            s_metrics_granted = false;
             /* 4401: the provider closed an established socket because the
              * signature failed, the auth timed out, or the frame was revoked. */
             if (data && data->close_status_code == FOS_CLOUD_WS_AUTH_CLOSE_CODE) {
@@ -1828,7 +1969,9 @@ static void ws_stop(void)
     s_ws_client = NULL;
     s_ws_ready = false;
     s_logs_granted = false;
+    s_metrics_granted = false;
     ws_drain_log_queue();
+    ws_flush_asset_jobs();
     s_scene_ack_pending = false;
     free(s_ws_rx); /* the ws task is gone; nothing else touches this */
     s_ws_rx = NULL;
@@ -1955,6 +2098,7 @@ static void cloud_task(void *arg)
 #endif
             ws_poll_scene_ack();
             ws_poll_logs();
+            ws_poll_metrics();
             /* Streamed asset replies run here, off the WS task. A 1 s idle
              * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */

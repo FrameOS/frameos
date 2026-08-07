@@ -26,6 +26,7 @@
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -83,6 +84,81 @@ static void load_display_state(void);
 uint32_t fos_client_render_count(void) { return s_render_count; }
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
 bool fos_client_last_refresh_skipped(void) { return s_last_refresh_skipped; }
+
+/* ------------------------------------------------------------- metrics */
+
+/* One sample per render pass, kept in a small ring for GET /metrics and the
+ * cloud get_metrics verb; each sample is also emitted as an `event: metrics`
+ * log line, which is how the backend's Metrics panel ingests it. */
+#define FOS_METRICS_RING_CAP 32
+
+static SemaphoreHandle_t s_metrics_lock = NULL;
+static fos_metrics_sample_t s_metrics_ring[FOS_METRICS_RING_CAP];
+static size_t s_metrics_next = 0;
+static size_t s_metrics_count = 0;
+
+static void log_metrics_sample(void)
+{
+    char json[512];
+    int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
+    size_t used = (size_t)snprintf(
+        json, sizeof(json),
+        "{\"event\":\"metrics\",\"source\":\"esp32\","
+        "\"uptimeSeconds\":%lld,"
+        "\"freeHeapKB\":%u,\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
+        "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
+        "\"loadedScenes\":%d",
+        (long long)(esp_timer_get_time() / 1000000),
+        (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+        (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
+        fos_scenes_loaded());
+    if (battery_pct >= 0 && used < sizeof(json) - 96) {
+        used += (size_t)snprintf(json + used, sizeof(json) - used,
+                                 ",\"batteryPercent\":%d,\"batteryMillivolts\":%d",
+                                 battery_pct, fos_battery_millivolts());
+    }
+    if (used < sizeof(json) - 2) {
+        snprintf(json + used, sizeof(json) - used, "}");
+    } else {
+        return; /* truncated JSON is worse than a missing sample */
+    }
+    frameos_nim_log_hook(json);
+
+    if (s_metrics_lock == NULL) s_metrics_lock = xSemaphoreCreateMutex();
+    if (s_metrics_lock == NULL) return;
+    char *copy = strdup(json);
+    if (copy == NULL) return;
+    double now = (double)time(NULL);
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    free(s_metrics_ring[s_metrics_next].json);
+    s_metrics_ring[s_metrics_next].json = copy;
+    s_metrics_ring[s_metrics_next].timestamp = now;
+    s_metrics_next = (s_metrics_next + 1) % FOS_METRICS_RING_CAP;
+    if (s_metrics_count < FOS_METRICS_RING_CAP) s_metrics_count++;
+    xSemaphoreGive(s_metrics_lock);
+}
+
+size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max)
+{
+    if (out == NULL || max == 0 || s_metrics_lock == NULL) return 0;
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    size_t take = s_metrics_count < max ? s_metrics_count : max;
+    size_t start = (s_metrics_next + FOS_METRICS_RING_CAP - take) % FOS_METRICS_RING_CAP;
+    size_t copied = 0;
+    for (size_t i = 0; i < take; i++) {
+        const fos_metrics_sample_t *src = &s_metrics_ring[(start + i) % FOS_METRICS_RING_CAP];
+        if (src->json == NULL) continue;
+        char *copy = strdup(src->json);
+        if (copy == NULL) break;
+        out[copied].json = copy;
+        out[copied].timestamp = src->timestamp;
+        copied++;
+    }
+    xSemaphoreGive(s_metrics_lock);
+    return copied;
+}
 
 const char *fos_client_snapshot_mode(void)
 {
@@ -724,6 +800,10 @@ static void client_task(void *arg)
             fos_buttons_process_events();
         }
 
+        /* Live settings: pick up backend-side interval/name/render-mode
+         * changes without a rebuild. ETag'd, so steady state is a 304. */
+        fos_settings_sync(false);
+
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
          * cycling the display down to a damaging voltage. */
@@ -740,6 +820,8 @@ static void client_task(void *arg)
                 render_once();
             }
         }
+        log_metrics_sample();
+        frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
         double scene_interval = frameos_nim_scene_interval();

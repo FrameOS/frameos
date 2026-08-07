@@ -1330,3 +1330,102 @@ def test_embedded_source_fingerprint_uses_contents_without_git(tmp_path, monkeyp
     lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-two"}}}\n', encoding="utf-8")
     monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
     assert embedded_firmware_source_fingerprint() != second
+
+
+@pytest.mark.asyncio
+async def test_ssh_agent_endpoints_reject_embedded_frames(async_client, redis):
+    frame = await create_embedded_frame(async_client)
+
+    for action in ('reset', 'stop', 'deploy_remote', 'restart_remote', 'clear_build_cache'):
+        response = await async_client.post(f"/api/frames/{frame['id']}/{action}")
+        assert response.status_code == 400, (action, response.text)
+
+    # Restart and reboot stay available: they run over the device's HTTP API.
+    for action in ('restart', 'reboot'):
+        response = await async_client.post(f"/api/frames/{frame['id']}/{action}")
+        assert response.status_code == 200, (action, response.text)
+
+
+@pytest.mark.asyncio
+async def test_deploy_plan_combined_for_embedded_includes_full_ota_plan(async_client):
+    frame = await create_embedded_frame(async_client)
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/deploy_plan?mode=combined")
+    assert response.status_code == 200, response.text
+    plan = response.json()['plan']
+    assert plan['mode'] == 'combined'
+    assert plan['fast_deploy']['action'] == 'http_upload_scenes_reload'
+    assert plan['full_deploy']['embedded']['platform'] == 'esp32-s3'
+    assert plan['full_deploy']['embedded']['otaSupported'] is True
+    assert plan['full_deploy']['embedded']['needsFirmwareBuild'] is True
+    # FullDeployPlanResponse shape stays intact for the drawer
+    assert plan['full_deploy']['packages'] == []
+    assert plan['full_deploy']['target']['distro'] == 'esp-idf'
+
+
+@pytest.mark.asyncio
+async def test_deploy_plan_full_for_embedded_pico_is_unavailable(async_client, db):
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+    frame.embedded = {'platform': 'pico-w', 'flashSize': '2MB'}
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame.id}/deploy_plan?mode=combined")
+    assert response.status_code == 200, response.text
+    plan = response.json()['plan']
+    assert plan['full_deploy'] is None
+    assert any(note.startswith('Full deploy unavailable:') for note in plan['notes'])
+
+
+@pytest.mark.asyncio
+async def test_ready_firmware_goes_stale_when_platform_changes(async_client, db, tmp_path):
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+    ensure_embedded_frame_defaults(frame)
+    firmware_file = tmp_path / 'frameos.bin'
+    firmware_file.write_bytes(b'\xe9firmware')
+    embedded = dict(frame.embedded or {})
+    embedded['firmware'] = {
+        'status': 'ready',
+        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+        'platform': 'esp32-s3',
+        'flashSize': embedded_flash_size_for_frame(frame),
+        'path': str(firmware_file),
+        'otaPath': str(firmware_file),
+        'panel': embedded_panel_for_frame(frame),
+        'configHash': embedded_firmware_config_hash(frame),
+    }
+    frame.embedded = embedded
+    db.add(frame)
+    db.commit()
+
+    firmware = latest_embedded_firmware(frame)
+    assert firmware['status'] == 'ready'
+
+    # Same everything, different chip target → stale
+    frame.embedded = {**frame.embedded, 'platform': 'esp32-c3'}
+    frame.device_config = {**(frame.device_config or {}), 'platform': 'esp32-c3'}
+    firmware = latest_embedded_firmware(frame)
+    assert firmware['status'] == 'stale'
+    assert 'different chip target' in firmware['error']
+
+
+@pytest.mark.asyncio
+async def test_embedded_build_lock_is_globally_exclusive(redis, monkeypatch):
+    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_WAIT_SECONDS', 0.05)
+    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_POLL_SECONDS', 0.01)
+
+    token = await embedded_firmware_module._acquire_embedded_build_lock(redis)
+    assert token
+
+    # A second builder (any worker process) cannot take the lock
+    with pytest.raises(ValueError, match='Another embedded firmware build'):
+        await embedded_firmware_module._acquire_embedded_build_lock(redis)
+
+    # Releasing with the wrong token leaves the lock alone
+    await embedded_firmware_module._release_embedded_build_lock(redis, 'not-the-token')
+    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is not None
+
+    await embedded_firmware_module._release_embedded_build_lock(redis, token)
+    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is None

@@ -61,9 +61,9 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
   // The on-device panel is the frame: no SSH shell, and pinging yourself is
   // pointless.
   frameAdmin: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets', 'debug'],
-  // The cloud protocol has no shell or diagnostic verbs. Assets are the
-  // read-only assets_list/asset_get pair (docs/cloud-frames.md) — the panel
-  // itself drops every mutation affordance in cloud mode.
+  // The cloud protocol has no shell or diagnostic verbs. Assets speak the
+  // full assets_list/asset_get/asset_put/asset_mkdir/asset_delete/
+  // asset_rename verb set (docs/cloud-frames.md); only font sync is absent.
   cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets'],
 }
 
@@ -305,6 +305,40 @@ const virtualFrameHiddenMenuActions: readonly FrameMenuAction[] = [
 ]
 
 /**
+ * An embedded-mode frame with real hardware (ESP32 or Pico family — any
+ * embedded.platform except the no-hardware 'virtual' one above). The platform
+ * string is the backend's embedded.platform ('esp32-s3', 'esp32-c3',
+ * 'pico-w', ...), set for every embedded frame.
+ */
+export function isEmbeddedHardwareFrame(frame?: FrameCapabilityInput | null): boolean {
+  const platform = frame?.embedded?.platform
+  return typeof platform === 'string' && platform !== '' && platform !== 'virtual'
+}
+
+/**
+ * Like virtual frames, embedded hardware HIDES rather than disables: a
+ * microcontroller has no shell to open and the backend never pings it over
+ * SSH, so a disabled Terminal/Ping button would have nothing to explain.
+ * Assets, logs, metrics, schedule and settings stay — the firmware serves
+ * all of them over its HTTP API.
+ */
+const embeddedHardwareHiddenPanels: readonly WorkspaceUtilityPanel[] = ['terminal', 'ping']
+
+/**
+ * SSH/agent verbs that don't exist on a microcontroller (the backend answers
+ * 400 for them): SD-card builds are a Linux install path, FrameOS Remote
+ * never runs on the chip, and "stop" is meaningless when the firmware IS the
+ * runtime. Reboot, restart, render and deploy stay — they ride the device's
+ * HTTP API and the firmware build/OTA pipeline.
+ */
+const embeddedHardwareHiddenMenuActions: readonly FrameMenuAction[] = [
+  'buildSdCard',
+  'deployRemote',
+  'restartRemote',
+  'stop',
+]
+
+/**
  * The management verbs this frame's device profile supports. Only the cloud
  * control plane carries the profile distinction: backend- and admin-managed
  * ESP32 frames get their logs, schedule and settings through channels of
@@ -369,9 +403,10 @@ function capabilityDisabledReason(
 
 // Visibility is the mode's business alone — see the capability block comment
 // above for why the device profile disables rather than hides — with one
-// exception: virtual frames hide the surfaces whose concepts don't exist for
-// them at all (virtualFrameHiddenPanels/-MenuActions above). Callers with a
-// frame in hand pass it; without one the mode-level answer stands.
+// exception: virtual and embedded-hardware frames hide the surfaces whose
+// concepts don't exist for them at all (virtualFrameHiddenPanels/-MenuActions
+// and embeddedHardwareHidden* above). Callers with a frame in hand pass it;
+// without one the mode-level answer stands.
 
 export function frameToolPanelIsAllowed(
   mode: WorkspaceMode,
@@ -379,6 +414,9 @@ export function frameToolPanelIsAllowed(
   frame?: FrameCapabilityInput | null
 ): boolean {
   if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
     return false
   }
   return allows(allowedFrameToolPanels, mode, panel)
@@ -399,6 +437,9 @@ export function sceneToolPanelIsAllowed(
   frame?: FrameCapabilityInput | null
 ): boolean {
   if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
+  if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenPanels.includes(panel)) {
     return false
   }
   return allows(allowedSceneToolPanels, mode, panel)
@@ -422,6 +463,9 @@ export function frameMenuActionIsAllowed(
   frame?: FrameCapabilityInput | null
 ): boolean {
   if (isVirtualFrame(frame) && virtualFrameHiddenMenuActions.includes(action)) {
+    return false
+  }
+  if (isEmbeddedHardwareFrame(frame) && embeddedHardwareHiddenMenuActions.includes(action)) {
     return false
   }
   return allows(allowedFrameMenuActions, mode, action)

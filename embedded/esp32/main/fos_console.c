@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -19,6 +20,8 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#include "cJSON.h"
+#include "fos_assets.h"
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -343,8 +346,10 @@ static int cmd_wifi_scan(int argc, char **argv)
         printf("wifi-scan: get mode failed: %s\n", esp_err_to_name(err));
         return 1;
     }
+    /* scan_only suppresses the auto-reconnect for the whole scan window —
+     * otherwise a connected STA races the scan ("STA is connecting"). */
+    fos_wifi_set_scan_only(true);
     if (mode == WIFI_MODE_AP) {
-        fos_wifi_set_scan_only(true);
         err = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (err != ESP_OK) {
             fos_wifi_set_scan_only(false);
@@ -363,6 +368,7 @@ static int cmd_wifi_scan(int argc, char **argv)
     err = esp_wifi_scan_start(&scan_config, true);
     fos_wifi_set_scan_only(false);
     if (err != ESP_OK) {
+        esp_wifi_connect();
         printf("wifi-scan: scan failed: %s\n", esp_err_to_name(err));
         return 1;
     }
@@ -372,6 +378,7 @@ static int cmd_wifi_scan(int argc, char **argv)
     uint16_t count = total > 20 ? 20 : total;
     wifi_ap_record_t records[20] = {0};
     err = esp_wifi_scan_get_ap_records(&count, records);
+    esp_wifi_connect(); /* resume the STA link the scan dropped */
     if (err != ESP_OK) {
         esp_wifi_clear_ap_list();
         printf("wifi-scan: read results failed: %s\n", esp_err_to_name(err));
@@ -573,6 +580,28 @@ static void usb_api_payload_timeout_error(const char *name, size_t read, size_t 
     usb_api_error(name, ESP_ERR_TIMEOUT, message);
 }
 
+/* Console args split on whitespace, so asset paths travel percent-encoded. */
+static bool usb_api_decode_asset_path(const char *encoded, bool write_rule,
+                                      char *out, size_t out_len)
+{
+    if (!encoded) return false;
+    char raw[FOS_ASSETS_PATH_MAX];
+    size_t used = 0;
+    for (const char *p = encoded; *p && used + 1 < sizeof(raw); p++) {
+        if (*p == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+            char hex[3] = {p[1], p[2], 0};
+            raw[used++] = (char)strtol(hex, NULL, 16);
+            p += 2;
+        } else {
+            raw[used++] = *p;
+        }
+    }
+    if (used == 0 || used + 1 >= sizeof(raw)) return false;
+    raw[used] = '\0';
+    return write_rule ? fos_assets_sanitize_write_path(raw, out, out_len)
+                      : fos_assets_sanitize_path(raw, out, out_len);
+}
+
 static void usb_api_payload_text(const char *name, const char *text)
 {
     size_t len = text ? strlen(text) : 0;
@@ -623,7 +652,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|get-asset|upload-asset|asset-op> ...\n");
         return 1;
     }
 
@@ -729,6 +758,289 @@ static int cmd_usb_api(int argc, char **argv)
             return 1;
         }
         fos_client_render_now();
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "set") == 0) {
+        /* Machine-framed config write: same implementation as the human
+         * `set` command, with an OK/ERROR marker the browser can await
+         * instead of scraping free-form console text. */
+        if (argc < 4) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: set <key> <value...>");
+            return 1;
+        }
+        int rc = cmd_set(argc - 1, argv + 1);
+        if (rc == 0) {
+            usb_api_ok(subcommand);
+        } else {
+            usb_api_error(subcommand, ESP_FAIL, "set failed (see console output)");
+        }
+        return rc;
+    }
+
+    if (strcmp(subcommand, "wifi") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: wifi <ssid> [pass]");
+            return 1;
+        }
+        fos_config_t *config = fos_config();
+        strlcpy(config->wifi_ssid, argv[2], sizeof(config->wifi_ssid));
+        strlcpy(config->wifi_pass, argc >= 4 ? argv[3] : "", sizeof(config->wifi_pass));
+        if (fos_config_save() != ESP_OK) {
+            usb_api_error(subcommand, ESP_FAIL, "persist failed");
+            return 1;
+        }
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250)); /* let the marker flush */
+        esp_restart();
+        return 0;
+    }
+
+    if (strcmp(subcommand, "wifi-scan") == 0) {
+        wifi_ap_record_t records[20] = {0};
+        uint16_t total = 0;
+        wifi_mode_t mode = WIFI_MODE_NULL;
+        esp_err_t err = esp_wifi_get_mode(&mode);
+        /* scan_only suppresses the auto-reconnect for the whole window —
+         * otherwise the STA races the scan ("STA is connecting"). */
+        fos_wifi_set_scan_only(true);
+        if (err == ESP_OK && mode == WIFI_MODE_AP) {
+            err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+            if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        if (err == ESP_OK) {
+            esp_wifi_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            wifi_scan_config_t scan_config = { .show_hidden = true };
+            err = esp_wifi_scan_start(&scan_config, true);
+        }
+        fos_wifi_set_scan_only(false);
+        uint16_t count = 0;
+        if (err == ESP_OK) {
+            esp_wifi_scan_get_ap_num(&total);
+            count = total > 20 ? 20 : total;
+            err = esp_wifi_scan_get_ap_records(&count, records);
+            if (err != ESP_OK) esp_wifi_clear_ap_list();
+        }
+        esp_wifi_connect(); /* resume the STA link the scan dropped */
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, "wifi scan failed");
+            return 1;
+        }
+        cJSON *msg = cJSON_CreateObject();
+        cJSON *networks = msg ? cJSON_AddArrayToObject(msg, "networks") : NULL;
+        if (networks) {
+            for (uint16_t i = 0; i < count; i++) {
+                cJSON *net = cJSON_CreateObject();
+                if (!net) break;
+                cJSON_AddStringToObject(net, "ssid", (const char *)records[i].ssid);
+                cJSON_AddNumberToObject(net, "rssi", records[i].rssi);
+                cJSON_AddNumberToObject(net, "channel", records[i].primary);
+                cJSON_AddStringToObject(net, "auth", auth_mode_name(records[i].authmode));
+                cJSON_AddItemToArray(networks, net);
+            }
+            cJSON_AddNumberToObject(msg, "total", total);
+        }
+        char *json = networks ? cJSON_PrintUnformatted(msg) : NULL;
+        cJSON_Delete(msg);
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "scan json allocation failed");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        cJSON_free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "restart") == 0) {
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250));
+        esp_restart();
+        return 0;
+    }
+
+    if (strcmp(subcommand, "factory-reset") == 0) {
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250));
+        fos_config_erase();
+        esp_restart();
+        return 0;
+    }
+
+    if (strcmp(subcommand, "logs") == 0) {
+        frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+        if (!entries) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "log snapshot allocation failed");
+            return 1;
+        }
+        size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+        printf("%s %s %u text\n", USB_API_BEGIN, subcommand, (unsigned)count);
+        for (size_t i = 0; i < count; i++) {
+            if (entries[i].timestamp > 1e9) {
+                printf("%.0f %s\n", entries[i].timestamp, entries[i].line);
+            } else {
+                printf("- %s\n", entries[i].line);
+            }
+            free(entries[i].line);
+        }
+        free(entries);
+        printf("%s %s\n", USB_API_END, subcommand);
+        fflush(stdout);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "list-assets") == 0) {
+        cJSON *msg = cJSON_CreateObject();
+        cJSON *assets = msg ? cJSON_AddArrayToObject(msg, "assets") : NULL;
+        bool truncated = false;
+        bool ok = assets && fos_assets_list_json(assets, &truncated);
+        if (ok && truncated) cJSON_AddBoolToObject(msg, "truncated", true);
+        if (ok) cJSON_AddBoolToObject(msg, "mounted", fos_assets_available());
+        char *json = ok ? cJSON_PrintUnformatted(msg) : NULL;
+        cJSON_Delete(msg);
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "asset list allocation failed");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        cJSON_free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "get-asset") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing path");
+            return 1;
+        }
+        char rel[FOS_ASSETS_PATH_MAX];
+        if (!usb_api_decode_asset_path(argv[2], false, rel, sizeof(rel))) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
+            return 1;
+        }
+        struct stat st;
+        if (fos_assets_stat(rel, &st) != ESP_OK || S_ISDIR(st.st_mode)) {
+            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "asset not found");
+            return 1;
+        }
+        char full[FOS_ASSETS_FULL_PATH_MAX];
+        fos_assets_full_path(full, sizeof(full), rel);
+        FILE *file = fopen(full, "rb");
+        if (!file) {
+            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "asset not found");
+            return 1;
+        }
+        char metadata[FOS_ASSETS_PATH_MAX + 64];
+        snprintf(metadata, sizeof(metadata), "content_type=%s",
+                 fos_assets_content_type(rel));
+        /* Same framing as `image`, streamed straight off the card. */
+        uint8_t raw[FOS_USB_API_RAW_CHUNK];
+        char encoded[((FOS_USB_API_RAW_CHUNK + 2) / 3) * 4 + 1];
+        printf("%s %s %u base64 %s\n", USB_API_BEGIN, subcommand,
+               (unsigned)st.st_size, metadata);
+        size_t remaining = (size_t)st.st_size;
+        bool failed = false;
+        while (remaining > 0) {
+            size_t want = remaining > sizeof(raw) ? sizeof(raw) : remaining;
+            size_t r = fread(raw, 1, want, file);
+            if (r == 0) {
+                failed = true;
+                break;
+            }
+            size_t encoded_len = usb_api_base64_encode(raw, r, encoded);
+            fwrite(encoded, 1, encoded_len, stdout);
+            fputc('\n', stdout);
+            remaining -= r;
+        }
+        fclose(file);
+        printf("%s %s\n", USB_API_END, subcommand);
+        fflush(stdout);
+        if (failed) {
+            usb_api_error(subcommand, ESP_FAIL, "asset read failed");
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(subcommand, "upload-asset") == 0) {
+        if (argc < 4) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: upload-asset <len> <urlencoded-path>");
+            return 1;
+        }
+        size_t len = (size_t)strtoul(argv[2], NULL, 10);
+        if (len == 0 || len > FOS_USB_API_MAX_UPLOAD) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
+            return 1;
+        }
+        char rel[FOS_ASSETS_PATH_MAX];
+        if (!usb_api_decode_asset_path(argv[3], true, rel, sizeof(rel))) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
+            return 1;
+        }
+        if (!fos_assets_available()) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_STATE, "assets storage not mounted");
+            return 1;
+        }
+        uint8_t *body = fos_big_malloc(len);
+        if (!body) body = malloc(len);
+        if (!body) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
+            return 1;
+        }
+        usb_api_ready(subcommand);
+        size_t bytes_read = 0;
+        if (!usb_api_read_exact(body, len, pdMS_TO_TICKS(FOS_USB_API_PAYLOAD_TIMEOUT_MS), &bytes_read)) {
+            free(body);
+            usb_api_payload_timeout_error(subcommand, bytes_read, len);
+            return 1;
+        }
+        const char *asset_err = NULL;
+        esp_err_t err = fos_assets_write_file(rel, body, len, &asset_err);
+        free(body);
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, asset_err ? asset_err : "asset write failed");
+            return 1;
+        }
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "asset-op") == 0) {
+        if (argc < 4) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG,
+                          "usage: asset-op <mkdir|delete|rename> <urlencoded-path> [urlencoded-dst]");
+            return 1;
+        }
+        const char *op = argv[2];
+        char rel[FOS_ASSETS_PATH_MAX];
+        if (!usb_api_decode_asset_path(argv[3], true, rel, sizeof(rel))) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
+            return 1;
+        }
+        const char *asset_err = NULL;
+        esp_err_t err;
+        if (strcmp(op, "mkdir") == 0) {
+            err = fos_assets_mkdir(rel, &asset_err);
+        } else if (strcmp(op, "delete") == 0) {
+            err = fos_assets_delete(rel, &asset_err);
+        } else if (strcmp(op, "rename") == 0) {
+            char dst[FOS_ASSETS_PATH_MAX];
+            if (argc < 5 || !usb_api_decode_asset_path(argv[4], true, dst, sizeof(dst))) {
+                usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid destination");
+                return 1;
+            }
+            err = fos_assets_rename(rel, dst, &asset_err);
+        } else {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "unknown asset op");
+            return 1;
+        }
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, asset_err ? asset_err : "asset op failed");
+            return 1;
+        }
         usb_api_ok(subcommand);
         return 0;
     }

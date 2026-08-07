@@ -178,6 +178,11 @@ static void set_scene_simple_error(const char *message, size_t payload_len)
 
 /* ------------------------------------------------------------- storage */
 
+bool fos_scenes_state_mounted(void)
+{
+    return s_mounted;
+}
+
 static esp_err_t mount_state(void)
 {
     if (s_mounted) return ESP_OK;

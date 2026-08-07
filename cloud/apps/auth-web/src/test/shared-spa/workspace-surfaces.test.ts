@@ -13,6 +13,8 @@ import {
   frameSupportsUsbSerialConsole,
   frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
+  isEmbeddedHardwareFrame,
+  isVirtualFrame,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
   sceneUtilityPanelIsAllowed,
@@ -233,6 +235,78 @@ describe("the esp32 cloud device profile", () => {
     expect(frameSupportsUsbSerialConsole(piFrame, "cloud")).toBe(false);
     expect(frameSupportsUsbSerialConsole(esp32Frame, "backend")).toBe(false);
     expect(frameSupportsUsbSerialConsole(undefined, "cloud")).toBe(false);
+  });
+});
+
+// Embedded-hardware frames (backend-managed ESP32/Pico boards, i.e.
+// mode === 'embedded' with any platform except the no-hardware 'virtual')
+// HIDE the surfaces whose concepts don't exist on a microcontroller: there is
+// no shell to open and no SSH to ping over, no SD card to build, no FrameOS
+// Remote agent, and no "stop" when the firmware IS the runtime. Everything
+// the firmware's HTTP API serves — assets, logs, metrics, schedule, settings,
+// reboot/restart/render/deploy — stays visible.
+describe("embedded-hardware frames on the backend control plane", () => {
+  const esp32Frame = { embedded: { platform: "esp32-s3" } };
+  const esp32c3Frame = { embedded: { platform: "esp32-c3" } };
+  const picoFrame = { embedded: { platform: "pico-w" } };
+  const virtualFrame = { embedded: { platform: "virtual" } };
+
+  it("classifies platforms", () => {
+    expect(isEmbeddedHardwareFrame(esp32Frame)).toBe(true);
+    expect(isEmbeddedHardwareFrame(esp32c3Frame)).toBe(true);
+    expect(isEmbeddedHardwareFrame(picoFrame)).toBe(true);
+    expect(isEmbeddedHardwareFrame(virtualFrame)).toBe(false);
+    expect(isVirtualFrame(virtualFrame)).toBe(true);
+    for (const frame of [undefined, null, {}, { embedded: null }, { embedded: {} }]) {
+      expect(isEmbeddedHardwareFrame(frame)).toBe(false);
+    }
+  });
+
+  it("hides the Terminal and Ping panels (no shell, no SSH)", () => {
+    for (const panel of ["terminal", "ping"] as const) {
+      expect(frameToolPanelIsAllowed("backend", panel, esp32Frame)).toBe(false);
+      expect(sceneToolPanelIsAllowed("backend", panel, esp32Frame)).toBe(false);
+    }
+  });
+
+  it("keeps assets, logs, metrics, schedule and settings (served by the firmware HTTP API)", () => {
+    for (const panel of ["assets", "logs", "metrics", "schedule", "settings"] as const) {
+      expect(frameToolPanelIsAllowed("backend", panel, esp32Frame)).toBe(true);
+      expect(frameToolPanelDisabledReason("backend", panel, esp32Frame)).toBeNull();
+    }
+  });
+
+  it("hides SD-card build, Remote deploy/restart and stop", () => {
+    for (const action of [
+      "buildSdCard",
+      "deployRemote",
+      "restartRemote",
+      "stop",
+    ] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, esp32Frame)).toBe(false);
+      expect(frameMenuActionIsAllowed("backend", action, picoFrame)).toBe(false);
+    }
+  });
+
+  it("keeps reboot, restart, render and deploy", () => {
+    for (const action of ["reboot", "restart", "render", "deploy"] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, esp32Frame)).toBe(true);
+      expect(frameMenuActionDisabledReason("backend", action, esp32Frame)).toBeNull();
+    }
+  });
+
+  it("leaves virtual frames to the stricter virtual gating", () => {
+    // Virtual frames additionally hide assets/metrics and reboot/restart;
+    // the embedded-hardware list must not soften that.
+    expect(frameToolPanelIsAllowed("backend", "assets", virtualFrame)).toBe(false);
+    expect(frameMenuActionIsAllowed("backend", "reboot", virtualFrame)).toBe(false);
+  });
+
+  it("leaves Linux frames the full backend surface", () => {
+    for (const frame of [undefined, {}, { embedded: null }]) {
+      expect(frameToolPanelIsAllowed("backend", "terminal", frame)).toBe(true);
+      expect(frameMenuActionIsAllowed("backend", "stop", frame)).toBe(true);
+    }
   });
 });
 

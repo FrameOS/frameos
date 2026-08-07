@@ -2048,6 +2048,16 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
   const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
+  const embeddedPlatform = frameForm.embedded?.platform ?? frame.embedded?.platform ?? ''
+  // ESP32 targets get a real full deploy: rebuild the firmware and deliver it
+  // over the air. The Pico family runs a generic UF2 the backend never builds,
+  // and 2/4MB flash profiles have a single app slot (no OTA), so both keep
+  // fast deploy only.
+  const embeddedFullDeploySupported =
+    isEmbeddedFrame &&
+    embeddedPlatform !== EMBEDDED_VIRTUAL &&
+    !embeddedPlatform.startsWith('pico') &&
+    embeddedOtaSupported(frame)
   const hasSuccessfulDeploy = Boolean(
     frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady
   )
@@ -2405,9 +2415,14 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              {!isEmbeddedFrame ? (
+              {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
+                  title={
+                    isEmbeddedFrame
+                      ? 'Rebuild the firmware and update the frame over the air (OTA)'
+                      : undefined
+                  }
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
