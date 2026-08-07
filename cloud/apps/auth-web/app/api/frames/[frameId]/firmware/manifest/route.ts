@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import {
+  devFirmwareOverride,
   fetchLatestRelease,
   fetchReleaseAssetText,
   findAsset,
@@ -64,6 +65,20 @@ export async function GET(
   const platform = request.nextUrl.searchParams.get("platform");
   if (!platform || !streamablePlatforms.has(platform)) {
     return jsonError("invalid_platform", 400);
+  }
+
+  const dev = await devFirmwareOverride(platform);
+  if (dev) {
+    return NextResponse.json(
+      {
+        platform,
+        version: dev.version,
+        size: dev.size,
+        minisig: dev.minisig,
+        downloadUrl: `/api/frames/${auth.frame.id}/firmware/download?platform=${platform}`,
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
   }
 
   const release = await fetchLatestRelease();

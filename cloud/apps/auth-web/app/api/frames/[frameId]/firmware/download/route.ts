@@ -6,6 +6,8 @@ import {
   findAsset,
   provisioningAssets,
   streamablePlatforms,
+  devFirmwareOverride,
+  streamDevFirmwareResponse,
   streamReleaseAssetResponse,
 } from "../../../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -52,6 +54,11 @@ export async function GET(
   const platform = request.nextUrl.searchParams.get("platform");
   if (!platform || !streamablePlatforms.has(platform)) {
     return jsonError("invalid_platform", 400);
+  }
+
+  const dev = await devFirmwareOverride(platform);
+  if (dev) {
+    return streamDevFirmwareResponse(dev);
   }
 
   const release = await fetchLatestRelease();

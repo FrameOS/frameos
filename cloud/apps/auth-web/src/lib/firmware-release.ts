@@ -9,6 +9,8 @@
 // bytes flow through these helpers, and the download is a straight pipe —
 // the firmware is never buffered here.
 
+import { promises as fs } from "fs";
+import path from "path";
 import { NextResponse } from "next/server";
 import { jsonError } from "./device-flow";
 
@@ -155,4 +157,61 @@ export async function fetchReleaseAssetText(
     return undefined;
   }
   return text;
+}
+
+// ---------------------------------------------------------------- dev mode
+// Local firmware for OTA testing without a GitHub release: drop
+// `<platform>.bin`, `<platform>.bin.minisig` and `version.txt` into a
+// `.dev-firmware/` directory (next to the auth-web app, or two levels up at
+// the cloud workspace root). Disabled in production builds.
+
+export interface DevFirmware {
+  version: string;
+  size: number;
+  minisig: string;
+  filePath: string;
+}
+
+export async function devFirmwareOverride(
+  platform: string,
+): Promise<DevFirmware | undefined> {
+  if (process.env.NODE_ENV === "production") {
+    return undefined;
+  }
+  const candidates = [
+    path.join(process.cwd(), ".dev-firmware"),
+    path.join(process.cwd(), "..", "..", ".dev-firmware"),
+  ];
+  for (const dir of candidates) {
+    try {
+      const filePath = path.join(dir, `${platform}.bin`);
+      const stat = await fs.stat(filePath);
+      const minisig = await fs.readFile(`${filePath}.minisig`, "utf8");
+      const version = (
+        await fs.readFile(path.join(dir, "version.txt"), "utf8")
+      ).trim();
+      if (!version || stat.size === 0) {
+        continue;
+      }
+      return { version, size: stat.size, minisig, filePath };
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+/** Stream a dev-override firmware file (dev builds only). */
+export async function streamDevFirmwareResponse(
+  dev: DevFirmware,
+): Promise<NextResponse> {
+  const data = await fs.readFile(dev.filePath);
+  return new NextResponse(new Uint8Array(data), {
+    status: 200,
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-length": String(data.byteLength),
+      "cache-control": "no-store",
+    },
+  });
 }
