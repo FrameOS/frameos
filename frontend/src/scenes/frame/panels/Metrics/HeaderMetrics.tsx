@@ -4,7 +4,7 @@ import { A } from 'kea-router'
 import clsx from 'clsx'
 import { ParentSize } from '@visx/responsive'
 import { scaleLinear, scaleTime } from '@visx/scale'
-import { max } from '@visx/vendor/d3-array'
+import { max, min } from '@visx/vendor/d3-array'
 
 import { AreaChart } from './AreaChart'
 import { type MetricPoint, type MetricSeries, type TimeRange } from './metricsLogic'
@@ -35,6 +35,11 @@ function flattenSeriesData(series: MetricSeries[]): MetricPoint[] {
 
 function getValueMax(data: MetricPoint[]): number {
   return Math.max(max(data, getValue) || 0, 1)
+}
+
+/* Negative series (ESP32 wifiRssi) need the floor to follow the data. */
+function getValueMin(data: MetricPoint[]): number {
+  return Math.min(min(data, getValue) || 0, 0)
 }
 
 function HeaderMetricChart({
@@ -70,7 +75,7 @@ function HeaderMetricChart({
           })
           const yScale = scaleLinear<number>({
             range: [yMax, 0],
-            domain: [0, getValueMax(allData)],
+            domain: [getValueMin(allData), getValueMax(allData)],
             nice: true,
           })
 

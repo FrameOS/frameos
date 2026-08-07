@@ -23,7 +23,7 @@ bool frameos_nim_available(void);
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       uint32_t frame_id, const char *api_key,
-                      bool server_send_logs);
+                      bool server_send_logs, int rotate);
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
@@ -47,6 +47,9 @@ bool frameos_nim_set_scene(const char *scene_id);
  * library. Returns the number of scenes loaded (0 = bad payload or runtime
  * unavailable). Hot-swaps live scenes. */
 int frameos_nim_load_scenes(const char *json);
+/* Drop the Nim side's cached service settings (app secrets); the next app
+ * use refetches them. Called when the ETag'd settings poll sees changes. */
+void frameos_nim_invalidate_settings(void);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
 double frameos_nim_scene_interval(void);
 /* True once when a scene event requested a redraw (clears the flag). */

@@ -27,7 +27,8 @@ import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand } from './embeddedUsbLogsModel'
+import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand, usbRestart } from './embeddedUsbLogsModel'
+import { frameSupportsUsbSerialConsole } from '../scenes/workspace/workspaceSurfaces'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -340,6 +341,25 @@ async function refreshEmbeddedUsbFrameImage(frameId: FrameId): Promise<void> {
     }
   } finally {
     embeddedUsbImageRefreshesInFlight.delete(frameId)
+  }
+}
+
+/**
+ * Restart/Reboot fallback for embedded frames: when the network path fails
+ * but a USB serial session is connected, reboot the board over the console.
+ * Returns true when the USB restart succeeded.
+ */
+async function restartEmbeddedFrameOverUsb(frameId: FrameId, frame?: FrameType): Promise<boolean> {
+  const isEmbedded = (frame?.mode ?? 'rpios') === 'embedded' || frameSupportsUsbSerialConsole(frame)
+  if (!isEmbedded || !embeddedUsbApiCanUse(frameId)) {
+    return false
+  }
+  try {
+    await usbRestart(frameId)
+    return true
+  } catch (error) {
+    // Stale/busy USB port — let the caller surface the original network error.
+    return false
   }
 }
 
@@ -969,21 +989,40 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      if (isCloudMode()) {
-        await sendCloudFrameCommand(id, 'restart_runtime')
-        return
-      }
-      const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
-      if (!response.ok) {
-        throw new Error('Failed to restart frame')
+      try {
+        if (isCloudMode()) {
+          await sendCloudFrameCommand(id, 'restart_runtime')
+          return
+        }
+        const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to restart frame')
+        }
+      } catch (error) {
+        // An embedded board that never joined Wi-Fi (or joined the wrong
+        // network) has no reachable network path, but a connected USB serial
+        // session can still reboot it.
+        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+          throw error
+        }
       }
     },
     rebootFrame: async ({ id }) => {
-      if (isCloudMode()) {
-        await sendCloudFrameCommand(id, 'reboot')
-        return
+      try {
+        if (isCloudMode()) {
+          await sendCloudFrameCommand(id, 'reboot')
+          return
+        }
+        const response = await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to reboot frame')
+        }
+      } catch (error) {
+        // On embedded frames restart and reboot are the same esp_restart().
+        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+          throw error
+        }
       }
-      await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
     deployRemote: async ({ id, recompile, transport }) => {
       longRunningTasksModel.actions.startTask({

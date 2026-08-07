@@ -141,14 +141,10 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("disables schedule and metrics with a reason", () => {
+  it("keeps schedule and metrics enabled — the firmware speaks set_schedule and pushes metrics", () => {
     for (const panel of ["schedule", "metrics"] as const) {
-      expect(frameToolPanelDisabledReason("cloud", panel, esp32Frame)).toEqual(
-        expect.stringContaining("ESP32"),
-      );
-      expect(sceneToolPanelDisabledReason("cloud", panel, esp32Frame)).toEqual(
-        expect.stringContaining("ESP32"),
-      );
+      expect(frameToolPanelDisabledReason("cloud", panel, esp32Frame)).toBeNull();
+      expect(sceneToolPanelDisabledReason("cloud", panel, esp32Frame)).toBeNull();
     }
   });
 
@@ -180,11 +176,14 @@ describe("the esp32 cloud device profile", () => {
   });
 
   it("gates esp32 variants by prefix", () => {
+    // updateNotify is the one capability the esp32 profile still lacks —
+    // prefix-matched so "esp32-s3"/"esp32-c3" variants gate identically.
     expect(
-      frameToolPanelDisabledReason("cloud", "schedule", {
-        hardware: { platform: "esp32-s3" },
-      }),
-    ).not.toBeNull();
+      frameCapabilities({ hardware: { platform: "esp32-s3" } }, "cloud").has("updateNotify"),
+    ).toBe(false);
+    expect(
+      frameCapabilities({ hardware: { platform: "esp32-c3" } }, "cloud").has("updateNotify"),
+    ).toBe(false);
   });
 
   it("leaves Pi/Linux cloud frames the full cloud surface", () => {
@@ -212,9 +211,9 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("derives a logs+settings capability set for esp32 and a full one otherwise", () => {
+  it("derives an everything-but-updateNotify capability set for esp32 and a full one otherwise", () => {
     expect(frameCapabilities(esp32Frame, "cloud")).toEqual(
-      new Set(["logs", "settings"]),
+      new Set(["logs", "settings", "schedule", "metrics"]),
     );
     expect(frameCapabilities(piFrame, "cloud")).toEqual(
       new Set(["schedule", "settings", "logs", "metrics", "updateNotify"]),

@@ -645,7 +645,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           if (log.type === 'webhook') {
             try {
               const { event, timestamp, ...rest } = JSON.parse(log.line)
-              if (event === 'metrics') {
+              // The metrics renderer's summary + expander is shaped around the
+              // Pi's load/cpu/ram/disk payload. ESP32 samples carry none of
+              // those keys — render them like any other structured log line.
+              const hasStandardMetricKeys =
+                'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
+              if (event === 'metrics' && (hasStandardMetricKeys || typeof rest.state === 'string')) {
                 logLine = renderMetricsLog(
                   rest,
                   expandedMetricLogIds.includes(log.id),

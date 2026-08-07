@@ -213,9 +213,14 @@ Write-verb acks are sent after the SD write finishes. Log shipping is
 implemented behind the `telemetry:logs` scope, with `get_logs` replaying the
 on-device ring (last 128 lines); `get_metrics` returns the newest metrics
 sample and the device pushes a `metrics` message after each render pass when
-`telemetry:metrics` is granted. Documented verbs outside this profile —
-`set_schedule`, `notify_update_available` — are acked `unsupported_verb`;
-anything not in the protocol is acked `unknown_verb`. Both are logged.
+`telemetry:metrics` is granted. `set_schedule` stores the schedule to
+`/state/schedule.json` and `main/fos_schedule.c` evaluates it once per
+wall-clock minute on the render task (same event model as the Pi
+scheduler: minute/hour/weekday 0=daily 1-7 8=weekdays 9=weekends), in
+frame-local time via a backend-supplied UTC offset. The one documented
+verb outside this profile — `notify_update_available` — is acked
+`unsupported_verb`; anything not in the protocol is acked `unknown_verb`.
+Both are logged.
 
 Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
 authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote

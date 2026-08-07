@@ -265,6 +265,7 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
     assert response.status_code == 200, response.text
     payload = response.json()
     frame_object = payload.pop('frame')
+    payload.pop('schedule')  # covered by test_settings_includes_schedule_and_utc_offset
     assert payload == {
         'homeAssistant': {'accessToken': 'not-for-esp'},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
@@ -278,6 +279,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     frame = await device_frame(async_client, db)
     frame.name = 'Kitchen'
     frame.interval = 61.5
+    frame.timezone = None  # deterministic utcOffsetMinutes
     frame.device_config = {
         **(frame.device_config or {}),
         'renderMode': 'remote',
@@ -296,6 +298,8 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderMode': 'remote',  # thin client — string form fos_settings.c parses
         'deepSleep': True,
         'wakeSchedule': False,
+        'utcOffsetMinutes': 0,  # no timezone set on the frame
+        'rotate': 0,
     }
 
     # Defaults: local render on PSRAM boards, power flags off
@@ -314,7 +318,46 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'renderMode': 'local',
         'deepSleep': False,
         'wakeSchedule': False,
+        'utcOffsetMinutes': 0,
+        'rotate': 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_settings_includes_schedule_and_utc_offset(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.schedule = {
+        'events': [
+            {'id': 'a', 'minute': 0, 'hour': 7, 'weekday': 8,
+             'event': 'setCurrentScene', 'payload': {'sceneId': 'morning'}},
+        ]
+    }
+    frame.timezone = 'UTC'
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['schedule'] == frame.schedule
+    assert body['frame']['utcOffsetMinutes'] == 0
+
+    # A real zone produces its current offset; UTC+ zones are positive.
+    frame.timezone = 'Etc/GMT-2'  # POSIX sign convention: this is UTC+2
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['utcOffsetMinutes'] == 120
+
+    # No schedule → explicit null, so the device clears a stored one.
+    frame.schedule = None
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['schedule'] is None
 
 
 @pytest.mark.asyncio

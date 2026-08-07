@@ -1416,6 +1416,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_PANEL {c_str(embedded_panel_for_frame(frame))}",
         f"#define FRAMEOS_DEFAULT_RENDER_MODE {embedded_render_mode_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_INTERVAL_SEC {max(5, int(frame.interval or 300))}",
+        f"#define FRAMEOS_DEFAULT_ROTATE {int(frame.rotate or 0) % 360}",
         f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {embedded_max_http_response_bytes_for_frame(frame)}",
         f"#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS {1 if frame.server_send_logs is not False else 0}",
         f"#define FRAMEOS_DEFAULT_TLS_ENABLE {1 if https_proxy.get('enable') else 0}",

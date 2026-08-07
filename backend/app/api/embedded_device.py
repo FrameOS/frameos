@@ -369,7 +369,28 @@ def embedded_frame_settings(frame: Frame) -> dict:
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+        # 0/90/180/270 — the firmware restarts itself to re-init the renderer
+        # when this changes (scene canvases are sized at init).
+        "rotate": int(frame.rotate or 0) % 360,
+        # The device matches schedule events in frame-local wall-clock time
+        # but carries no tz database — it applies this offset to UTC. Sent as
+        # the CURRENT offset, so a DST shift propagates on the next poll.
+        "utcOffsetMinutes": _frame_utc_offset_minutes(frame),
     }
+
+
+def _frame_utc_offset_minutes(frame: Frame) -> int:
+    tz_name = (getattr(frame, "timezone", None) or "").strip()
+    if not tz_name:
+        return 0
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        offset = datetime.now(ZoneInfo(tz_name)).utcoffset()
+        return int(offset.total_seconds() // 60) if offset else 0
+    except Exception:
+        return 0
 
 
 @api_public.get("/frames/{id:int}/embedded/settings")
@@ -383,6 +404,9 @@ async def api_embedded_device_settings(
     payload_dict = {
         **embedded_settings_payload(db, frame),
         "frame": embedded_frame_settings(frame),
+        # The scene schedule ({"events": [...]}) — the device evaluates it
+        # on-device (fos_schedule.c), same event model as the Pi scheduler.
+        "schedule": frame.schedule if isinstance(frame.schedule, dict) else None,
     }
     payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
     # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's

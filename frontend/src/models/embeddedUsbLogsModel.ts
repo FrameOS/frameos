@@ -27,6 +27,14 @@ const USB_PAYLOAD_READY_TIMEOUT_MS = 30000
 const USB_PAYLOAD_CHUNK_SIZE = 4096
 const OPEN_RETRY_DELAY_MS = 250
 const OPEN_RETRY_ATTEMPTS = 20
+// Reboot-acking commands (restart / factory-reset / wifi) flush their OK
+// marker and reset ~250ms later: wait for the device to actually fall off
+// the bus before probing for its replacement port, then poll until the
+// USB API answers again.
+const USB_REBOOT_PORT_DROP_WAIT_MS = 1500
+const USB_REBOOT_RECONNECT_TIMEOUT_MS = 60000
+const USB_REBOOT_RECONNECT_POLL_MS = 750
+const USB_REBOOT_PROBE_TIMEOUT_MS = 4000
 
 let nextUsbLogId = -1
 
@@ -56,6 +64,11 @@ interface EmbeddedUsbApiCommandOptions {
   // USB-Serial/JTAG boards — use this when polling (e.g. waiting for the
   // board to boot after flashing).
   keepOpen?: boolean
+  // The command acks OK and then reboots the board (~250ms later), dropping
+  // and re-enumerating the USB device. Resolve on the OK marker, then run
+  // the flasher's reconnect flow (resolveLiveSerialPort) instead of
+  // surfacing the dead port as a read error.
+  expectReboot?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -567,6 +580,75 @@ async function runUsbApiCommandOnPort(
   }
 }
 
+// After an expected reboot the SerialPort we hold dies and the device
+// re-enumerates. Reuse the flasher's reconnect handling: poll getPorts()
+// for the (single) matching board, then probe `status` until the USB API
+// answers again. Runs inside the command lock, so queued commands wait for
+// the board to come back instead of racing its boot.
+async function reconnectAfterExpectedUsbReboot(
+  frameId: FrameId,
+  port: SerialPort,
+  resumeLogStream: boolean
+): Promise<void> {
+  await closePort(port)
+  appendUsbLine(frameId, '[USB API] device is rebooting; waiting for the USB port to come back')
+  embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+    message: 'Device is rebooting. Waiting for the USB port to come back.',
+    status: 'connecting',
+  })
+  await sleep(USB_REBOOT_PORT_DROP_WAIT_MS)
+  const deadline = Date.now() + USB_REBOOT_RECONNECT_TIMEOUT_MS
+  let livePort: SerialPort | null = null
+  while (Date.now() < deadline) {
+    const candidate = await resolveLiveSerialPort(port)
+    if (!candidate) {
+      if (serialPortReconnectRequiresReselection(port)) {
+        break
+      }
+      await sleep(USB_REBOOT_RECONNECT_POLL_MS)
+      continue
+    }
+    try {
+      // keepOpen: open/close churn toggles DTR/RTS, which can spuriously
+      // reset USB-Serial/JTAG boards mid-boot.
+      await runUsbApiCommandOnPort(candidate, 'status', undefined, USB_REBOOT_PROBE_TIMEOUT_MS, undefined, true)
+      livePort = candidate
+      break
+    } catch (error) {
+      await sleep(USB_REBOOT_RECONNECT_POLL_MS)
+    }
+  }
+  if (!livePort) {
+    if (lastPorts.get(frameId) === port) {
+      lastPorts.delete(frameId)
+    }
+    appendUsbLine(frameId, '[USB API] USB port did not come back after the reboot; select the port again to reconnect')
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: null,
+      status: 'idle',
+      stoppedAt: new Date().toISOString(),
+    })
+    return
+  }
+  appendUsbLine(
+    frameId,
+    livePort === port
+      ? '[USB API] USB port is back after the reboot'
+      : '[USB API] USB device re-enumerated after the reboot; reconnected to the new port'
+  )
+  appendSelectedUsbPort(frameId, livePort)
+  if (resumeLogStream) {
+    await startEmbeddedUsbLogStream(frameId, livePort)
+  } else {
+    await closePort(livePort)
+    embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
+      message: null,
+      status: 'idle',
+      stoppedAt: new Date().toISOString(),
+    })
+  }
+}
+
 export async function runEmbeddedUsbApiCommand(
   frameId: FrameId,
   command: string,
@@ -625,6 +707,7 @@ async function runEmbeddedUsbApiCommandLocked(
       pendingCommandLogLine = ''
     }
   }
+  let rebootAcknowledged = false
   try {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
       message: `Sending USB command: ${command}`,
@@ -667,13 +750,16 @@ async function runEmbeddedUsbApiCommandLocked(
     }
     flushCommandLogText()
     appendUsbLine(frameId, `[USB API] ${command} complete`)
+    rebootAcknowledged = options?.expectReboot === true
     return result
   } catch (error) {
     flushCommandLogText()
     appendUsbLine(frameId, `[USB API] ${command} failed: ${serialErrorMessage(error)}`)
     throw error
   } finally {
-    if (hadLogStream) {
+    if (rebootAcknowledged) {
+      await reconnectAfterExpectedUsbReboot(frameId, port, hadLogStream)
+    } else if (hadLogStream) {
       await startEmbeddedUsbLogStream(frameId, port)
     } else {
       if (!options?.keepOpen) {
@@ -868,3 +954,186 @@ export const embeddedUsbLogsModel = kea<embeddedUsbLogsModelType>([
     },
   })),
 ])
+
+// ----- Typed helpers over the firmware's usb_api subcommands -----
+
+/** Keys accepted by `usb_api set <key> <value...>` (fos_console.c cmd_set). */
+export type EmbeddedUsbConfigKey =
+  | 'wifi_ssid'
+  | 'wifi_pass'
+  | 'backend'
+  | 'api_key'
+  | 'cloud_url'
+  | 'claim_token'
+  | 'frame_id'
+  | 'hardware'
+  | 'panel'
+  | 'render_mode'
+  | 'interval'
+  | 'server_send_logs'
+  | 'assets_path'
+  | 'assets_sd'
+  | 'deep_sleep'
+  | 'wake_schedule'
+  | 'pins'
+  | 'gpio_buttons'
+
+export interface EmbeddedUsbWifiNetwork {
+  ssid: string
+  rssi: number
+  channel: number
+  auth: string
+}
+
+export interface EmbeddedUsbWifiScanResult {
+  networks: EmbeddedUsbWifiNetwork[]
+  total: number
+}
+
+/** Subset of fos_http_status_json() the UI cares about; the device sends more. */
+export interface EmbeddedUsbStatus {
+  app?: string
+  version?: string
+  uptimeSec?: number
+  wifi?: { state?: number; ip?: string; rssi?: number; timeSynced?: boolean }
+  cloud?: { state?: string; url?: string; frameId?: string; wsConnected?: boolean; error?: string }
+  config?: {
+    frameId?: number
+    panel?: string
+    renderMode?: string
+    intervalSec?: number
+    backendUrl?: string
+    wifiSsid?: string
+  }
+  scenes?: { loaded?: number; available?: number; hasScene?: boolean }
+  render?: { count?: number; lastMs?: number }
+  [key: string]: unknown
+}
+
+export interface EmbeddedUsbLogEntry {
+  /** Unix epoch seconds, or null when the device had no synced clock. */
+  epoch: number | null
+  line: string
+}
+
+const USB_STATUS_TIMEOUT_MS = 10000
+const USB_SET_TIMEOUT_MS = 15000
+// The scan itself takes ~3-6s and briefly drops the device's Wi-Fi.
+const USB_WIFI_SCAN_TIMEOUT_MS = 30000
+const USB_LOGS_TIMEOUT_MS = 15000
+const USB_REBOOT_COMMAND_TIMEOUT_MS = 10000
+
+/** `usb_api status` — parsed device status JSON. */
+export async function usbStatus(frameId: FrameId): Promise<EmbeddedUsbStatus> {
+  const result = await runEmbeddedUsbApiCommand(frameId, 'status', {
+    timeoutMs: USB_STATUS_TIMEOUT_MS,
+    mirrorOutput: false,
+  })
+  try {
+    return JSON.parse(result.text ?? '') as EmbeddedUsbStatus
+  } catch (error) {
+    throw new Error('USB status command returned invalid JSON')
+  }
+}
+
+/**
+ * `usb_api set <key> <value...>` — persist one config value. Values may
+ * contain spaces (the console re-joins the arguments), but runs of
+ * whitespace collapse to single spaces and empty values are rejected by
+ * the console's argument parser.
+ */
+export async function usbSet(frameId: FrameId, key: EmbeddedUsbConfigKey, value: string): Promise<void> {
+  if (!value.trim()) {
+    throw new Error(`The USB console cannot store an empty value for ${key}`)
+  }
+  await runEmbeddedUsbApiCommand(frameId, `set ${key} ${value}`, { timeoutMs: USB_SET_TIMEOUT_MS })
+}
+
+/** `usb_api wifi-scan` — list visible networks (strongest first). */
+export async function usbWifiScan(frameId: FrameId): Promise<EmbeddedUsbWifiScanResult> {
+  const result = await runEmbeddedUsbApiCommand(frameId, 'wifi-scan', {
+    timeoutMs: USB_WIFI_SCAN_TIMEOUT_MS,
+    mirrorOutput: false,
+  })
+  let parsed: { networks?: unknown; total?: unknown }
+  try {
+    parsed = JSON.parse(result.text ?? '')
+  } catch (error) {
+    throw new Error('USB wifi-scan command returned invalid JSON')
+  }
+  const networks = (Array.isArray(parsed.networks) ? parsed.networks : [])
+    .map((network: Record<string, unknown>) => ({
+      ssid: typeof network?.ssid === 'string' ? network.ssid : '',
+      rssi: Number(network?.rssi ?? -100),
+      channel: Number(network?.channel ?? 0),
+      auth: typeof network?.auth === 'string' ? network.auth : 'unknown',
+    }))
+    .sort((a, b) => b.rssi - a.rssi)
+  return { networks, total: Number(parsed.total ?? networks.length) }
+}
+
+/** `usb_api restart` — acks OK, reboots, then reconnects the serial session. */
+export async function usbRestart(frameId: FrameId): Promise<void> {
+  await runEmbeddedUsbApiCommand(frameId, 'restart', {
+    timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
+    expectReboot: true,
+  })
+}
+
+/** `usb_api factory-reset` — erases the device config, reboots, reconnects. */
+export async function usbFactoryReset(frameId: FrameId): Promise<void> {
+  await runEmbeddedUsbApiCommand(frameId, 'factory-reset', {
+    timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
+    expectReboot: true,
+  })
+}
+
+/** `usb_api logs` — the device's recent in-memory log ring. */
+export async function usbLogsTail(frameId: FrameId): Promise<EmbeddedUsbLogEntry[]> {
+  const result = await runEmbeddedUsbApiCommand(frameId, 'logs', {
+    timeoutMs: USB_LOGS_TIMEOUT_MS,
+    mirrorOutput: false,
+  })
+  const text = result.text ?? ''
+  if (!text) {
+    return []
+  }
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const match = line.match(/^(\d+|-) (.*)$/)
+      if (!match) {
+        return { epoch: null, line }
+      }
+      return { epoch: match[1] === '-' ? null : Number(match[1]), line: match[2] }
+    })
+}
+
+/**
+ * Provision Wi-Fi credentials and reboot into them. Uses `set wifi_ssid` +
+ * `set wifi_pass` + `restart` (NOT the positional `wifi <ssid> <pass>`),
+ * so SSIDs and passwords containing spaces survive the console's argument
+ * splitting. Open networks fall back to `wifi <ssid>` because `set` cannot
+ * store an empty wifi_pass — that path only works for SSIDs without spaces.
+ */
+export async function usbProvisionWifi(frameId: FrameId, ssid: string, password: string): Promise<void> {
+  if (!ssid.trim()) {
+    throw new Error('Wi-Fi network name is required')
+  }
+  if (!password) {
+    if (/\s/.test(ssid)) {
+      throw new Error(
+        'The device console cannot join an open network whose name contains spaces. Set a password, or rename the network.'
+      )
+    }
+    await runEmbeddedUsbApiCommand(frameId, `wifi ${ssid}`, {
+      timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
+      expectReboot: true,
+    })
+    return
+  }
+  await usbSet(frameId, 'wifi_ssid', ssid)
+  await usbSet(frameId, 'wifi_pass', password)
+  await usbRestart(frameId)
+}

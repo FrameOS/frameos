@@ -534,6 +534,11 @@ esp_err_t fos_scenes_sync(bool force)
     }
     if (!config->backend_url[0] || config->frame_id == 0) return ESP_ERR_INVALID_STATE;
     if (fos_wifi_state() != FOS_WIFI_CONNECTED) return ESP_ERR_INVALID_STATE;
+    /* A locally-pushed payload (uploadScenes over HTTP/USB — e.g. the Assets
+     * panel's Play button) wins until a deploy or an explicit sync request:
+     * without this, the next pass refetched the backend set and clobbered
+     * the local push before it was even applied. */
+    if (!force && strcmp(s_etag, "local") == 0) return ESP_OK;
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
 

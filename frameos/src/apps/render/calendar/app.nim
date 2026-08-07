@@ -609,6 +609,15 @@ proc run*(self: App, context: ExecutionContext) =
 proc get*(self: App, context: ExecutionContext): Image =
   result = if self.appConfig.inputImage.isSome:
     self.appConfig.inputImage.get()
+  elif not context.decodeTargetImage.isNil:
+    # The interpreter's into-canvas hint: this node feeds a full-frame
+    # render/image directly, so draw into the canvas instead of allocating
+    # a second full-frame image (render() fills the background first).
+    # Consume the hint so nothing downstream reuses the live canvas.
+    let target = context.decodeTargetImage
+    context.decodeTargetImage = nil
+    context.decodeTargetScalingMode = ""
+    target
   elif context.hasImage:
     newImage(context.image.width, context.image.height)
   else:
