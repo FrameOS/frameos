@@ -119,6 +119,11 @@ jobs:
               bash embedded/esp32/ci_build_image.sh
               FRAMEOS_ESP32_QEMU=1 FRAMEOS_ESP32_BUILD_DIR=build-ci-qemu \
                 bash embedded/esp32/ci_build_image.sh
+              # The 32MB layout (13.3E6-class boards) — build-validated here
+              # because no release job covers it. Same S3 nimcache, so the
+              # incremental cost is one IDF configure+link.
+              FRAMEOS_ESP32_PLATFORM=esp32-s3-32mb FRAMEOS_ESP32_BUILD_DIR=build-ci-32mb \
+                bash embedded/esp32/ci_build_image.sh
             '
 
   build-and-test:

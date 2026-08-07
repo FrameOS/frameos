@@ -29,6 +29,17 @@ case "$PLATFORM" in
         IDF_TARGET_NAME="esp32s3"
         DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults"
         ;;
+    esp32-s3-32mb)
+        # The 32MB/16MB-PSRAM boards (e.g. ESP32-S3-ePaper-13.3E6): same
+        # firmware as esp32-s3, bigger OTA slots + 24M state partition.
+        # Validated here because nobody else build-tests this layout.
+        IDF_TARGET_NAME="esp32s3"
+        DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.defaults.32mb-ota"
+        if [[ "$QEMU_SMOKE" == "1" ]]; then
+            echo "QEMU smoke only covers the 8MB esp32-s3 layout" >&2
+            exit 1
+        fi
+        ;;
     esp32-c3)
         IDF_TARGET_NAME="esp32c3"
         DEFAULT_SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.defaults.4mb-no-ota;$SCRIPT_DIR/sdkconfig.defaults.esp32c3"
@@ -38,7 +49,7 @@ case "$PLATFORM" in
         fi
         ;;
     *)
-        echo "Unsupported FRAMEOS_ESP32_PLATFORM: $PLATFORM (expected esp32-s3 or esp32-c3)" >&2
+        echo "Unsupported FRAMEOS_ESP32_PLATFORM: $PLATFORM (expected esp32-s3, esp32-s3-32mb or esp32-c3)" >&2
         exit 1
         ;;
 esac
@@ -125,6 +136,13 @@ if [[ "$PLATFORM" == "esp32-c3" ]]; then
     require_line '^CONFIG_IDF_TARGET="esp32c3"$' "$SDKCONFIG_PATH"
     require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="4MB"$' "$SDKCONFIG_PATH"
     require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"$' "$SDKCONFIG_PATH"
+elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
+    require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="32MB"$' "$SDKCONFIG_PATH"
+    require_line '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_32mb.csv"$' "$SDKCONFIG_PATH"
+    # 24M SPIFFS needs 512-byte pages; 256-byte pages cap out at 16MB and the
+    # mount fails ESP_ERR_INVALID_ARG at runtime (scene upload 500s).
+    require_line '^CONFIG_SPIFFS_PAGE_SIZE=512$' "$SDKCONFIG_PATH"
 else
     require_line '^CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y$' "$SDKCONFIG_PATH"
     require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="8MB"$' "$SDKCONFIG_PATH"
@@ -143,6 +161,11 @@ python3 "$IDF_PATH/components/partition_table/gen_esp32part.py" \
 if [[ "$PLATFORM" == "esp32-c3" ]]; then
     require_line '^factory,app,factory,0x10000,3520K,' "$PARTITION_DUMP"
     require_line '^state,data,spiffs,0x380000,512K,' "$PARTITION_DUMP"
+elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
+    require_line '^otadata,data,ota,0xf000,8K,' "$PARTITION_DUMP"
+    require_line '^ota_0,app,ota_0,0x20000,4032K,' "$PARTITION_DUMP"
+    require_line '^ota_1,app,ota_1,0x410000,4032K,' "$PARTITION_DUMP"
+    require_line '^state,data,spiffs,0x800000,24M,' "$PARTITION_DUMP"
 else
     require_line '^otadata,data,ota,0xd000,8K,' "$PARTITION_DUMP"
     require_line '^ota_0,app,ota_0,0x10000,3520K,' "$PARTITION_DUMP"
@@ -158,6 +181,9 @@ PARTITION_BIN="$BUILD_DIR/partition_table/partition-table.bin"
 APP_SLOT_BYTES=$((3520 * 1024))
 if [[ "$PLATFORM" == "esp32-c3" ]]; then
     FLASH_BYTES=$((4 * 1024 * 1024))
+elif [[ "$PLATFORM" == "esp32-s3-32mb" ]]; then
+    APP_SLOT_BYTES=$((4032 * 1024))
+    FLASH_BYTES=$((32 * 1024 * 1024))
 else
     FLASH_BYTES=$((8 * 1024 * 1024))
 fi

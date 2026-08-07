@@ -8,7 +8,10 @@
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
  */
+#include <dirent.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -215,6 +218,40 @@ void app_main(void)
      * the render task applies it and keeps it synced with the backend. */
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
+    }
+
+    /* Oversized HTTP bodies (multi-MB gallery images) spill to storage
+     * instead of failing on PSRAM pressure (cloud/docs/esp32-large-image-
+     * spill.md). Prefer the SD card — a dot-directory stays invisible to the
+     * asset API — over the /state SPIFFS partition. Sweep leftovers from a
+     * crash before registering. */
+    {
+        const char *spill_dir = NULL;
+        char sd_spill[160];
+        if (fos_assets_sd_mounted()) {
+            snprintf(sd_spill, sizeof(sd_spill), "%s/.cache",
+                     config->assets_path[0] ? config->assets_path : "/srv/assets");
+            mkdir(sd_spill, 0775);
+            spill_dir = sd_spill;
+        } else if (fos_scenes_state_mounted()) {
+            spill_dir = "/state";
+        }
+        if (spill_dir != NULL) {
+            DIR *dir = opendir(spill_dir);
+            if (dir != NULL) {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (strncmp(entry->d_name, "http-spill-", 11) != 0) continue;
+                    char stale[448];
+                    snprintf(stale, sizeof(stale), "%s/%s", spill_dir, entry->d_name);
+                    unlink(stale);
+                    ESP_LOGW(TAG, "removed stale spill file %s", stale);
+                }
+                closedir(dir);
+            }
+            fos_nim_http_set_spill_dir(spill_dir, 8 * 1024 * 1024);
+            ESP_LOGI(TAG, "http spill dir: %s", spill_dir);
+        }
     }
 
     fos_console_start();

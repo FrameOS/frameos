@@ -46,6 +46,10 @@ file only lists what is left to do. When an item ships, delete it here.
   of leftover `http-spill-*.tmp`, then validate on the bench PhotoPainter
   (12-scene workload, ~3 MB gallery JPEG, confirm the PSRAM floor during
   spill+decode). Full design: `cloud/docs/esp32-large-image-spill.md`.
+  UPDATE 2026-08: `fos_nim_http_set_spill_dir` is now wired in main.c
+  (SD `.cache` dot-dir preferred, `/state` fallback, boot sweep of
+  `http-spill-*.tmp`); a forced-spill render on the bench 13.3E6 is still
+  pending validation.
 - Spill follow-ups (optional): proactive Content-Length trigger;
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.

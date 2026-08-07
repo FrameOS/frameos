@@ -346,8 +346,10 @@ static int cmd_wifi_scan(int argc, char **argv)
         printf("wifi-scan: get mode failed: %s\n", esp_err_to_name(err));
         return 1;
     }
+    /* scan_only suppresses the auto-reconnect for the whole scan window —
+     * otherwise a connected STA races the scan ("STA is connecting"). */
+    fos_wifi_set_scan_only(true);
     if (mode == WIFI_MODE_AP) {
-        fos_wifi_set_scan_only(true);
         err = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (err != ESP_OK) {
             fos_wifi_set_scan_only(false);
@@ -366,6 +368,7 @@ static int cmd_wifi_scan(int argc, char **argv)
     err = esp_wifi_scan_start(&scan_config, true);
     fos_wifi_set_scan_only(false);
     if (err != ESP_OK) {
+        esp_wifi_connect();
         printf("wifi-scan: scan failed: %s\n", esp_err_to_name(err));
         return 1;
     }
@@ -375,6 +378,7 @@ static int cmd_wifi_scan(int argc, char **argv)
     uint16_t count = total > 20 ? 20 : total;
     wifi_ap_record_t records[20] = {0};
     err = esp_wifi_scan_get_ap_records(&count, records);
+    esp_wifi_connect(); /* resume the STA link the scan dropped */
     if (err != ESP_OK) {
         esp_wifi_clear_ap_list();
         printf("wifi-scan: read results failed: %s\n", esp_err_to_name(err));
@@ -648,7 +652,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|list-assets|get-asset|upload-asset|asset-op> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|get-asset|upload-asset|asset-op> ...\n");
         return 1;
     }
 
@@ -755,6 +759,115 @@ static int cmd_usb_api(int argc, char **argv)
         }
         fos_client_render_now();
         usb_api_ok(subcommand);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "set") == 0) {
+        /* Machine-framed config write: same implementation as the human
+         * `set` command, with an OK/ERROR marker the browser can await
+         * instead of scraping free-form console text. */
+        if (argc < 4) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: set <key> <value...>");
+            return 1;
+        }
+        int rc = cmd_set(argc - 1, argv + 1);
+        if (rc == 0) {
+            usb_api_ok(subcommand);
+        } else {
+            usb_api_error(subcommand, ESP_FAIL, "set failed (see console output)");
+        }
+        return rc;
+    }
+
+    if (strcmp(subcommand, "wifi") == 0) {
+        if (argc < 3) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: wifi <ssid> [pass]");
+            return 1;
+        }
+        fos_config_t *config = fos_config();
+        strlcpy(config->wifi_ssid, argv[2], sizeof(config->wifi_ssid));
+        strlcpy(config->wifi_pass, argc >= 4 ? argv[3] : "", sizeof(config->wifi_pass));
+        if (fos_config_save() != ESP_OK) {
+            usb_api_error(subcommand, ESP_FAIL, "persist failed");
+            return 1;
+        }
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250)); /* let the marker flush */
+        esp_restart();
+        return 0;
+    }
+
+    if (strcmp(subcommand, "wifi-scan") == 0) {
+        wifi_ap_record_t records[20] = {0};
+        uint16_t total = 0;
+        wifi_mode_t mode = WIFI_MODE_NULL;
+        esp_err_t err = esp_wifi_get_mode(&mode);
+        /* scan_only suppresses the auto-reconnect for the whole window —
+         * otherwise the STA races the scan ("STA is connecting"). */
+        fos_wifi_set_scan_only(true);
+        if (err == ESP_OK && mode == WIFI_MODE_AP) {
+            err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+            if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        if (err == ESP_OK) {
+            esp_wifi_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            wifi_scan_config_t scan_config = { .show_hidden = true };
+            err = esp_wifi_scan_start(&scan_config, true);
+        }
+        fos_wifi_set_scan_only(false);
+        uint16_t count = 0;
+        if (err == ESP_OK) {
+            esp_wifi_scan_get_ap_num(&total);
+            count = total > 20 ? 20 : total;
+            err = esp_wifi_scan_get_ap_records(&count, records);
+            if (err != ESP_OK) esp_wifi_clear_ap_list();
+        }
+        esp_wifi_connect(); /* resume the STA link the scan dropped */
+        if (err != ESP_OK) {
+            usb_api_error(subcommand, err, "wifi scan failed");
+            return 1;
+        }
+        cJSON *msg = cJSON_CreateObject();
+        cJSON *networks = msg ? cJSON_AddArrayToObject(msg, "networks") : NULL;
+        if (networks) {
+            for (uint16_t i = 0; i < count; i++) {
+                cJSON *net = cJSON_CreateObject();
+                if (!net) break;
+                cJSON_AddStringToObject(net, "ssid", (const char *)records[i].ssid);
+                cJSON_AddNumberToObject(net, "rssi", records[i].rssi);
+                cJSON_AddNumberToObject(net, "channel", records[i].primary);
+                cJSON_AddStringToObject(net, "auth", auth_mode_name(records[i].authmode));
+                cJSON_AddItemToArray(networks, net);
+            }
+            cJSON_AddNumberToObject(msg, "total", total);
+        }
+        char *json = networks ? cJSON_PrintUnformatted(msg) : NULL;
+        cJSON_Delete(msg);
+        if (!json) {
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "scan json allocation failed");
+            return 1;
+        }
+        usb_api_payload_text(subcommand, json);
+        cJSON_free(json);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "restart") == 0) {
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250));
+        esp_restart();
+        return 0;
+    }
+
+    if (strcmp(subcommand, "factory-reset") == 0) {
+        usb_api_ok(subcommand);
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(250));
+        fos_config_erase();
+        esp_restart();
         return 0;
     }
 

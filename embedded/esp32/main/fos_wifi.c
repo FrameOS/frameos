@@ -130,10 +130,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         } else if (s_state == FOS_WIFI_CONNECTING) {
             xEventGroupSetBits(s_events, WIFI_FAILED_BIT);
         } else if (s_state == FOS_WIFI_CONNECTED) {
-            ESP_LOGW(TAG, "connection lost, reconnecting");
-            s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
-            s_retries = 0;
-            esp_wifi_connect();
+            /* A scan-initiated disconnect must not race the scan with an
+             * immediate reconnect ("STA is connecting, scan not allowed");
+             * the scanner reconnects when it is done. */
+            if (s_scan_only) {
+                s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
+                s_retries = 0;
+            } else {
+                ESP_LOGW(TAG, "connection lost, reconnecting");
+                s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
+                s_retries = 0;
+                esp_wifi_connect();
+            }
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
