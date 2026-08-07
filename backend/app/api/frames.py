@@ -1370,6 +1370,18 @@ async def api_frame_event(
         scenes, body = _normalize_upload_scenes_payload(body)
         scene_id = body.get("sceneId")
         _validate_upload_scenes_payload(scenes, scene_id)
+    # Virtual frames have no device to forward to: every event reduces to
+    # "note the scene choice, render the image, done".
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from .virtual_frame import refresh_virtual_frame_image
+
+        scene_id = body.get("sceneId") if isinstance(body, dict) else None
+        if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
+            await _mark_frame_states_cache_stale(
+                redis, frame, scene_id=scene_id if isinstance(scene_id, str) else None
+            )
+        await refresh_virtual_frame_image(db, redis, frame)
+        return "OK"
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -2727,6 +2739,14 @@ async def api_frame_deploy_event(
 ):
     frame = _project_frame(db, id) or _not_found()
     deploy_task_id = _task_id_param(task_id)
+    # Deploying a virtual frame IS rendering it: there is no device, no
+    # firmware, nothing to copy — render into the image cache and succeed.
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from .virtual_frame import refresh_virtual_frame_image
+
+        await refresh_virtual_frame_image(db, redis, frame)
+        await log(db, redis, id, "stdout", "Virtual frame rendered (deploy = render)")
+        return {"message": "Success", "taskId": deploy_task_id}
     try:
         from app.tasks import deploy_frame
         from app.tasks.deploy_frame import cancel_active_deploy

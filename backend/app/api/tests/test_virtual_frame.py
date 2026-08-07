@@ -108,3 +108,36 @@ async def test_virtual_frame_defaults(async_client, db):
     frame = await create_virtual_frame(async_client, db)
     assert frame.device == 'virtual'
     assert frame.embedded['platform'] == 'virtual'
+
+
+@pytest.mark.asyncio
+async def test_virtual_deploy_renders_and_succeeds(async_client, db, redis):
+    frame = await create_virtual_frame(async_client, db)
+    response = await async_client.post(f'/api/frames/{frame.id}/deploy')
+    assert response.status_code == 200, response.text
+    assert response.json()['message'] == 'Success'
+
+
+@pytest.mark.asyncio
+async def test_virtual_set_current_scene_event(async_client, db, redis):
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [
+        {'id': 'scene-a', 'name': 'A', 'nodes': [], 'edges': []},
+        {'id': 'scene-b', 'name': 'B', 'nodes': [], 'edges': []},
+    ]
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(
+        f'/api/frames/{frame.id}/event/setCurrentScene',
+        json={'sceneId': 'scene-b'},
+        headers={'content-type': 'application/json'})
+    assert response.status_code == 200, response.text
+    assert await redis.get(f'frame:{frame.id}:active_scene') in (b'scene-b', 'scene-b')
+
+
+@pytest.mark.asyncio
+async def test_virtual_render_event(async_client, db, redis):
+    frame = await create_virtual_frame(async_client, db)
+    response = await async_client.post(f'/api/frames/{frame.id}/event/render')
+    assert response.status_code == 200, response.text

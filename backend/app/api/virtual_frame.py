@@ -137,6 +137,18 @@ async def render_virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
     return await _virtual_frame_png(db, redis, frame)
 
 
+async def refresh_virtual_frame_image(db: Session, redis, frame: Frame) -> None:
+    """Render now and publish into the frame image cache.
+
+    The virtual equivalent of "the device rendered": deploy, scene
+    activation and render-now events all reduce to this.
+    """
+    from .frames import _store_frame_image
+
+    png = await _virtual_frame_png(db, redis, frame)
+    await _store_frame_image(db, redis, frame, png, scene_id=None, publish_rendered=True)
+
+
 @api_public.get("/frames/{id:int}/virtual/image")
 async def api_virtual_frame_image(
     id: int,
