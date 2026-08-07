@@ -88,27 +88,30 @@ def virtual_color_mode(frame: Frame) -> str:
 
 
 def _quantize(image, mode: str):
+    from PIL import Image
+
     if mode == "rgb":
         return image
     if mode == "bw":
+        # convert("1") applies Floyd-Steinberg by default.
         return image.convert("1").convert("RGB")
     if mode == "gray4":
-        gray = image.convert("L")
-        return gray.point(lambda v: round(v * 3 / 255) * 85).convert("RGB")
-    palette = {
-        "bwyr": [p for p in BWYR_PALETTE],
-        "sevencolor": [p for p in SEVEN_COLOR_PALETTE],
-        # Palette index 4 is the "missing" Spectra slot; filter the sentinel.
-        "spectra6": [p for p in SPECTRA6_PALETTE if p[0] <= 255],
-    }[mode]
-    rgb = image.convert("RGB")
-    out = rgb.copy()
-    pixels = out.load()
-    source = rgb.load()
-    for y in range(rgb.height):
-        for x in range(rgb.width):
-            pixels[x, y] = palette[_nearest_palette_index(source[x, y], palette)]
-    return out
+        palette = [(v, v, v) for v in (0, 85, 170, 255)]
+    else:
+        palette = {
+            "bwyr": list(BWYR_PALETTE),
+            "sevencolor": list(SEVEN_COLOR_PALETTE),
+            # Palette index 4 is the "missing" Spectra slot; filter the sentinel.
+            "spectra6": [p for p in SPECTRA6_PALETTE if p[0] <= 255],
+        }[mode]
+    # Floyd-Steinberg dither against the panel palette — nearest-color alone
+    # looks terrible on photographic content.
+    palette_image = Image.new("P", (1, 1))
+    flat = [channel for color in palette for channel in color]
+    palette_image.putpalette(flat + flat[:3] * (256 - len(palette)))
+    return image.convert("RGB").quantize(
+        palette=palette_image, dither=Image.Dither.FLOYDSTEINBERG
+    ).convert("RGB")
 
 
 async def _virtual_frame_png(

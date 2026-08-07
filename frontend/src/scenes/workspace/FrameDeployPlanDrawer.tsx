@@ -2299,7 +2299,25 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           )}
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          {activeDeployDrawerView !== 'main' ? (
+          {(frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                title="Save changes and render this frame's scenes now"
+                onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Deploy
+              </button>
+            </>
+          ) : activeDeployDrawerView !== 'main' ? (
             <button
               type="button"
               onClick={closeOnlyDrawerView ? closeDrawer : showMainDeployView}
