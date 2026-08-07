@@ -134,6 +134,7 @@ from app.tasks.embedded_firmware import (
     embedded_ota_supported_for_frame,
     embedded_toolchain_available,
     latest_embedded_firmware,
+    embedded_platform_spec_for_frame,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
     request_or_queue_embedded_firmware_ota,
@@ -1365,10 +1366,27 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    scenes = None
     if event == "uploadScenes":
         scenes, body = _normalize_upload_scenes_payload(body)
         scene_id = body.get("sceneId")
         _validate_upload_scenes_payload(scenes, scene_id)
+    # Virtual frames have no device to forward to: every event reduces to
+    # "note the scene choice, render the image, done".
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        from .virtual_frame import refresh_virtual_frame_image
+
+        scene_id = body.get("sceneId") if isinstance(body, dict) else None
+        scene_id = scene_id if isinstance(scene_id, str) else None
+        if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
+            await _mark_frame_states_cache_stale(redis, frame, scene_id=scene_id)
+        # uploadScenes = preview-on-frame: render the posted (possibly
+        # unsaved) scenes without persisting them.
+        upload = scenes if event == "uploadScenes" else None
+        await refresh_virtual_frame_image(
+            db, redis, frame, scenes_override=upload, scene_id=scene_id
+        )
+        return "OK"
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -2021,6 +2039,30 @@ async def api_frame_get_image(
 
     cache_key = _frame_image_cache_key(frame.id)
     path = "/image"
+
+    # Virtual frames have no device to fetch from: render server-side (the
+    # same wasm path their public URLs use) instead of proxying to a
+    # nonexistent host.
+    if frame.mode == "embedded" and embedded_platform_spec_for_frame(frame)["family"] == "virtual":
+        # Serve the cached image; render only when there is none. Rendering
+        # on every poll made the preview flash "rendering" continuously —
+        # fresh frames come from deploy/activate/render events, which
+        # publish straight into this cache.
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached is None:
+            from .virtual_frame import render_virtual_frame_png
+
+            cached = await render_virtual_frame_png(db, redis, frame)
+            active_scene = await _active_scene_id_from_cache(redis, frame.id)
+            await _store_frame_image(
+                db, redis, frame, cached,
+                scene_id=active_scene or None, publish_rendered=False,
+            )
+        return Response(
+            content=cached,
+            media_type="image/png",
+            headers=await read_frame_sync_hint_headers(redis, frame.id),
+        )
 
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)

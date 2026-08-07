@@ -155,6 +155,9 @@ export function frameRootUrl(frame: FrameType): string {
 }
 
 export function frameUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame)
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
@@ -168,6 +171,9 @@ function frameControlPath(frame: FrameType): string {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame) + frameControlPath(frame)
   if (frame.frame_access === 'public' || !frame.frame_access_key) {
     return url
@@ -177,14 +183,22 @@ export function frameControlUrl(frame: FrameType): string | null {
 }
 
 export function frameAdminUrl(frame: FrameType): string | null {
-  if (!frame.frame_admin_auth?.enabled) {
+  // Virtual frames have no host at all; nothing to link to.
+  if (!frame.frame_admin_auth?.enabled || !frame.frame_host) {
     return null
   }
   const url = frameRootUrl(frame) + frameAdminPath()
-  return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
+  try {
+    return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
+  } catch {
+    return null
+  }
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame) + `/image`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url

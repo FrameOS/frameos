@@ -318,7 +318,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             buttonClassName="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 !px-0 !py-0 text-slate-700 shadow-sm transition"
             buttonContent={<DeployToFrameIcon className="h-7 w-7" />}
           />
-        ) : !frameMenuActionIsAllowed(workspaceMode(), 'deploy') ? null : (
+        ) : !frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame) ? null : (
           <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
         )}
         <div className="min-w-0">
@@ -678,9 +678,11 @@ function FrameScenesBlock({
   // Allow-list per control plane — see workspaceSurfaces.ts. The frame's
   // device profile never removes a shortcut; it disables it with a tooltip
   // (an esp32 cloud frame keeps Logs — pushed to the cloud and read back —
-  // while Schedule/Settings/Metrics show why they cannot work).
+  // while Schedule/Settings/Metrics show why they cannot work). Virtual
+  // frames are the exception: shortcuts whose concepts don't exist for them
+  // (terminal, ping, assets, metrics) are hidden outright.
   const visibleSceneToolButtons = sceneToolButtons
-    .filter(({ panel }) => sceneToolPanelIsAllowed(workspaceMode(), panel))
+    .filter(({ panel }) => sceneToolPanelIsAllowed(workspaceMode(), panel, frame))
     .map((button) => ({
       ...button,
       disabledReason: sceneToolPanelDisabledReason(workspaceMode(), button.panel, frame),

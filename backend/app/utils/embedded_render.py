@@ -8,10 +8,11 @@ lived Node subprocess (backend/tools/embedded_wasm_render.mjs).
 
 Sandbox posture: user scene code (QuickJS) executes inside the wasm module,
 never natively on the backend. The wasm runtime has no filesystem or socket
-access; its only HTTP hook is a browser-style synchronous XHR bridge, which
-does not exist under Node — so outbound requests from scene apps fail closed.
-The subprocess itself is bounded by a wall-clock timeout and a concurrency
-cap so render storms cannot pile up Node processes.
+access; its HTTP hook goes through the harness' synchronous fetch shim,
+giving scene apps the same outbound HTTP a physical frame has (the cloud
+metadata address is blocked). The subprocess itself is bounded by a
+wall-clock timeout and a concurrency cap so render storms cannot pile up
+Node processes.
 """
 
 from __future__ import annotations
@@ -62,6 +63,7 @@ async def render_scene_rgba(
     *,
     scene_id: str | None = None,
     settings: dict | None = None,
+    scenes_override: list | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> bytes | None:
     """One frame of the scene as width*height*4 RGBA bytes, or None.
@@ -71,7 +73,8 @@ async def render_scene_rgba(
     expected operational states here, not exceptions: the device keeps
     polling, and a broken scene must not take the endpoint down with it.
     """
-    scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+    source = scenes_override if scenes_override is not None else frame.scenes
+    scenes = [scene for scene in (source or []) if isinstance(scene, dict)]
     if not scenes:
         return None
     node = shutil.which("node")

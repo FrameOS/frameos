@@ -184,6 +184,11 @@ def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pix
     or the wasm scene render is unavailable/fails, so the device always has
     a deterministic bitmap to fetch end to end.
     """
+    return pack_image_for_panel(embedded_diagnostic_image(frame, width, height), pixel_format)
+
+
+def embedded_diagnostic_image(frame: Frame, width: int, height: int):
+    """The diagnostic card as a PIL RGB image (also used by virtual frames)."""
     from PIL import Image, ImageDraw
 
     image = Image.new("RGB", (width, height), (255, 255, 255))
@@ -209,7 +214,7 @@ def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pix
     draw.text((32, height * 0.50), f"Backend diagnostic bitmap - {stamp}", fill=(0, 0, 0))
     draw.text((32, height * 0.60), "Scenes render on-device in local mode", fill=(0, 0, 0))
 
-    return pack_image_for_panel(image, pixel_format)
+    return image
 
 
 def pack_image_for_panel(image, pixel_format: int) -> bytes:

@@ -93,6 +93,18 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
         "defaultPsramMB": 0,
         "localRenderSupported": False,
     },
+    # No hardware at all: the backend renders (same wasm path as the thin
+    # clients) and serves the frame as an image/page URL — for browser
+    # kiosks, old tablets, or any device that can show a picture.
+    # Self-hosted backends only.
+    "virtual": {
+        "label": "Virtual frame (backend renderer)",
+        "family": "virtual",
+        "aliases": {"backend-renderer", "virtual-frame"},
+        "maxGpio": -1,
+        "defaultPsramMB": 0,
+        "localRenderSupported": False,
+    },
 }
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
@@ -1418,7 +1430,10 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if apply_embedded_hardware_preset(frame):
         # The preset knows the board's chip; it overrides a caller-supplied platform.
         normalized_platform = embedded_platform_for_frame(frame)
-    if not frame.frame_host:
+    if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual":
+        # Nothing must ever try to reach a virtual frame over the network.
+        frame.frame_host = ""
+    elif not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     if not frame.frame_port or frame.frame_port == 8787:
         frame.frame_port = 80
@@ -1455,11 +1470,19 @@ def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) ->
     if not frame.server_api_key:
         frame.server_api_key = secure_token(32)
     if not frame.device or frame.device == "web_only":
-        frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
+        if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual":
+            frame.device = "virtual"
+        else:
+            frame.device = f"waveshare.{EMBEDDED_DEFAULT_PANEL}"
 
     frame.max_http_response_bytes = embedded_max_http_response_bytes_for_frame(frame)
 
     device_config = dict(embedded_device_config(frame))
+    if EMBEDDED_PLATFORMS[normalized_platform]["family"] == "virtual" and not device_config.get("viewToken"):
+        # View-only credential for the image/page URLs — deliberately not the
+        # server_api_key, so a shared kiosk URL grants nothing but the picture
+        # and can be rotated without touching the device identity.
+        device_config["viewToken"] = secure_token(32)
     device_config["pins"] = embedded_pins_for_frame(frame)
     if "sdCardAssets" in device_config or "sd_card_assets" in device_config:
         device_config.pop("sd_card_assets", None)
@@ -1796,7 +1819,13 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
 
 
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
-    if embedded_platform_spec_for_frame(frame)["family"] != "esp32":
+    family = embedded_platform_spec_for_frame(frame)["family"]
+    if family == "virtual":
+        raise ValueError(
+            "Virtual frames have no firmware — the backend renders them; "
+            "use the image URL from the frame's settings."
+        )
+    if family != "esp32":
         raise ValueError(
             "This platform uses the generic prebuilt firmware: flash the "
             "frameos-<version>-pico-w.uf2 (or -pico-2w.uf2) release asset over "

@@ -248,6 +248,7 @@ export const EMBEDDED_ESP32_S3 = 'esp32-s3'
 export const EMBEDDED_ESP32_C3 = 'esp32-c3'
 export const EMBEDDED_PICO_W = 'pico-w'
 export const EMBEDDED_PICO_2W = 'pico-2w'
+export const EMBEDDED_VIRTUAL = 'virtual'
 
 export const embeddedPlatforms: Option[] = [
   { value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' },
@@ -257,6 +258,28 @@ export const embeddedPlatforms: Option[] = [
   // serial — the backend never builds per-frame firmware for these.
   { value: EMBEDDED_PICO_W, label: 'Raspberry Pi Pico W (thin client)' },
   { value: EMBEDDED_PICO_2W, label: 'Raspberry Pi Pico 2 W (thin client)' },
+  // No hardware at all: the backend renders the frame and serves it as an
+  // image/page URL. Mirrors EMBEDDED_PLATFORMS["virtual"] in
+  // backend/app/tasks/embedded_firmware.py.
+  { value: EMBEDDED_VIRTUAL, label: 'Virtual frame (backend renderer)' },
+]
+
+// ESP32-C3 and the Pico family have no PSRAM to render scenes on-device:
+// their firmware runs thin-client only, with the backend doing the rendering.
+// Used to tag hardware presets for those boards in the preset dropdowns.
+export function isThinClientEmbeddedPlatform(platform?: string | null): boolean {
+  return platform === EMBEDDED_ESP32_C3 || platform === EMBEDDED_PICO_W || platform === EMBEDDED_PICO_2W
+}
+
+// How the backend quantizes a virtual frame's rendered image.
+// Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py.
+export const virtualColorModes: Option[] = [
+  { value: 'rgb', label: 'Full color' },
+  { value: 'bw', label: 'Black & white' },
+  { value: 'gray4', label: '4-level grayscale' },
+  { value: 'bwyr', label: 'Black/White/Yellow/Red' },
+  { value: 'sevencolor', label: '7-color ACeP' },
+  { value: 'spectra6', label: 'Spectra 6' },
 ]
 
 export const rpiOSPlatforms: Option[] = [

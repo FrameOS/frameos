@@ -27,6 +27,7 @@ from .cloud import *  # noqa: E402, F403
 from .cloud_backups import *  # noqa: E402, F403
 from .cloud_store import *  # noqa: E402, F403
 from .embedded_device import *  # noqa: E402, F403
+from .virtual_frame import *  # noqa: E402, F403
 from .frame_bootstrap import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403

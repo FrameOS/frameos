@@ -25,6 +25,7 @@ import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
 import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_VIRTUAL,
   buildrootPlatforms,
   devices,
   partialRefreshDefaultsByDevice,
@@ -44,6 +45,8 @@ import type {
 } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { secureToken } from '../../utils/secureToken'
+import { Button } from '../../components/Button'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { normalizedTimezone } from '../../utils/timezone'
 import {
@@ -1775,6 +1778,29 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
   )
 }
 
+function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{label}</div>
+      <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+        <code>{url}</code>
+      </pre>
+      <button
+        type="button"
+        onClick={() => {
+          copy(url)
+          setCopied(true)
+        }}
+        className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <ClipboardDocumentIcon className="h-4 w-4" />
+        {copied ? 'Copied' : 'Copy URL'}
+      </button>
+    </div>
+  )
+}
+
 function EmbeddedFirmwareSection({
   frame,
   onBack,
@@ -1794,6 +1820,28 @@ function EmbeddedFirmwareSection({
   // provisioned over the USB serial console: no per-frame firmware builds, no
   // esptool, no browser flashing, no OTA. Hide all of those controls.
   const isPicoPlatform = platformLabel.startsWith('pico')
+  // Virtual frames have no hardware at all: the backend renders them, so
+  // instead of firmware the section shows the image and kiosk page URLs.
+  const isVirtualPlatform = platformLabel === EMBEDDED_VIRTUAL
+  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture.
+  const virtualUrlToken = frame.device_config?.viewToken || '<view-token>'
+  const { loadFrame } = useActions(framesModel)
+  const rotateVirtualViewToken = async (): Promise<void> => {
+    const response = await apiFetch(`/api/frames/${frame.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_config: { ...(frame.device_config ?? {}), viewToken: secureToken(32) },
+      }),
+    })
+    if (response.ok) {
+      loadFrame(frame.id)
+    }
+  }
+  const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
+  const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const flashSize = embeddedFlashSize(frame)
   const otaSupported = embeddedOtaSupported(frame)
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
@@ -1817,16 +1865,30 @@ function EmbeddedFirmwareSection({
       <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>
         <span className="inline-flex items-center gap-2">
           {onBack ? <BackToDeployButton onClick={onBack} /> : null}
-          <span>Firmware</span>
+          <span>{isVirtualPlatform ? 'Virtual frame' : 'Firmware'}</span>
         </span>
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          {isPicoPlatform ? (
+          {isVirtualPlatform ? (
+            <>
+              Nothing to flash: the backend renders this frame. Point any browser, tablet, or signage player at the
+              kiosk page URL, or fetch the image URL for a PNG.
+            </>
+          ) : isPicoPlatform ? (
             <>
               This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
               over BOOTSEL drag-and-drop and provision it over the USB serial console. The backend does not build
-              per-frame firmware for it.
+              per-frame firmware for it.{' '}
+              <a
+                href="https://github.com/FrameOS/frameos/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Download frameos-&lt;version&gt;-{platformLabel}.uf2 from the latest release
+              </a>
+              .
             </>
           ) : (
             <>
@@ -1835,12 +1897,12 @@ function EmbeddedFirmwareSection({
             </>
           )}
         </div>
-        {firmware?.status ? (
+        {firmware?.status && !isVirtualPlatform ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
             Status: {firmware.status}
           </div>
         ) : null}
-        {firmware?.error ? (
+        {firmware?.error && !isVirtualPlatform ? (
           <div
             className={clsx(
               'mt-2 text-sm font-semibold',
@@ -1854,7 +1916,20 @@ function EmbeddedFirmwareSection({
           </div>
         ) : null}
       </div>
-      {isPicoPlatform ? null : (
+      {isVirtualPlatform ? (
+        <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+          <VirtualFrameUrlRow label="Image URL (PNG)" url={virtualImageUrl} />
+          <VirtualFrameUrlRow label="Kiosk page URL (self-refreshing)" url={virtualPageUrl} />
+          <div className="flex items-center gap-3">
+            <Button size="small" color="secondary" onClick={rotateVirtualViewToken}>
+              Rotate view token
+            </Button>
+            <span className="frame-tool-muted text-xs leading-4">
+              Mints a new token and invalidates every shared URL immediately.
+            </span>
+          </div>
+        </div>
+      ) : isPicoPlatform ? null : (
         <>
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="frame-tool-muted text-sm leading-5">
@@ -2233,7 +2308,25 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           )}
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          {activeDeployDrawerView !== 'main' ? (
+          {(frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                title="Save changes and render this frame's scenes now"
+                onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Deploy
+              </button>
+            </>
+          ) : activeDeployDrawerView !== 'main' ? (
             <button
               type="button"
               onClick={closeOnlyDrawerView ? closeDrawer : showMainDeployView}

@@ -1,5 +1,7 @@
 import { useActions, useValues } from 'kea'
+import { useState } from 'react'
 import clsx from 'clsx'
+import copy from 'copy-to-clipboard'
 import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
@@ -31,7 +33,10 @@ import {
   EMBEDDED_ESP32_S3,
   EMBEDDED_PICO_2W,
   EMBEDDED_PICO_W,
+  EMBEDDED_VIRTUAL,
+  isThinClientEmbeddedPlatform,
   modes,
+  virtualColorModes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
@@ -181,6 +186,34 @@ const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
   { value: '16MB', label: '16MB' },
   { value: '32MB', label: '32MB' },
 ]
+
+function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Field name="_noop" label={label}>
+      <div className="flex w-full items-start gap-2">
+        <A
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="frameos-link min-w-0 flex-1 break-all font-mono text-xs leading-5 hover:underline"
+        >
+          {url}
+        </A>
+        <Button
+          color="secondary"
+          size="small"
+          onClick={() => {
+            copy(url)
+            setCopied(true)
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+    </Field>
+  )
+}
 
 const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'immich', 'unsplash'] as const
 
@@ -783,7 +816,12 @@ const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset,
 
 const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
   { value: 'custom', label: 'Custom ESP32 board' },
-  ...Object.entries(ESP32_HARDWARE_PRESET_CONFIGS).map(([value, config]) => ({ value, label: config.label })),
+  ...Object.entries(ESP32_HARDWARE_PRESET_CONFIGS).map(([value, config]) => ({
+    value,
+    // Boards without PSRAM cannot render on-device; flag them so it is clear
+    // the backend does the rendering for these presets.
+    label: isThinClientEmbeddedPlatform(config.platform) ? `${config.label} — Thin client` : config.label,
+  })),
 ]
 
 function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
@@ -1100,6 +1138,18 @@ export function FrameSettings({
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
   const isEmbeddedMode = mode === 'embedded'
+  // Virtual frames have no board at all: the backend renders them and serves
+  // the result at the URLs shown in the "Virtual frame" section below, so all
+  // ESP32 hardware controls (panel, pins, flash, presets) are hidden.
+  const isVirtualPlatform =
+    isEmbeddedMode && (frameForm.embedded?.platform ?? frame.embedded?.platform) === EMBEDDED_VIRTUAL
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture. Rotate via device_config.viewToken.
+  const virtualViewToken = frameForm.device_config?.viewToken ?? frame.device_config?.viewToken ?? ''
+  const virtualUrlToken = virtualViewToken || '<view-token>'
+  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
+  const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const configuredGpioButtons = !isEmbeddedMode ? configuredGpioButtonsForDevice(frameForm.device) : null
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
   const maxHttpResponsePlaceholder = String(
@@ -1510,12 +1560,17 @@ export function FrameSettings({
               )}
             </Field>
           ) : null}
+          {isVirtualPlatform ? null : (
           <Field name="device" label="Display driver">
             {({ value, onChange }) => (
               <Select
                 name="device"
                 value={(value as string) || ''}
-                options={devices}
+                options={
+                  // Embedded frames can be headless: device "none" maps to the
+                  // firmware's panel "none", so surface it as a real choice.
+                  isEmbeddedMode ? [{ value: 'none', label: 'No display panel' }, ...devices] : devices
+                }
                 onChange={(nextDevice) => {
                   const previousDevice = (value as string) || ''
                   onChange(nextDevice)
@@ -1563,6 +1618,7 @@ export function FrameSettings({
               />
             )}
           </Field>
+          )}
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
               <Field name="vcom" label="VCOM">
@@ -1707,6 +1763,8 @@ export function FrameSettings({
                 <Field name="platform" label="Platform">
                   <Select name="embedded.platform" options={embeddedPlatforms} />
                 </Field>
+                {isVirtualPlatform ? null : (
+                <>
                 <Field
                   name="hardwarePreset"
                   label="Hardware preset"
@@ -1745,7 +1803,10 @@ export function FrameSettings({
                     />
                   )}
                 </Field>
+                </>
+                )}
               </Group>
+              {isVirtualPlatform ? null : (
               <Group name="device_config">
                 <Field
                   name="pins"
@@ -1950,6 +2011,7 @@ export function FrameSettings({
                   }}
                 </Field>
               </Group>
+              )}
             </>
           ) : null}
           {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
@@ -2005,6 +2067,52 @@ export function FrameSettings({
             </Field>
           ) : null}
         </div>
+
+        {isVirtualPlatform ? (
+          <>
+            <H6 id="frame-settings-virtual" className="mt-2">
+              Virtual frame
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <p className="frameos-muted text-sm">
+                The backend renders this frame and serves it at the URLs below. The token only grants viewing this
+                frame's image — still, treat the URLs as semi-private; save a new view token to invalidate them.
+              </p>
+              {!virtualViewToken ? (
+                <p className="text-sm font-semibold text-amber-600">
+                  No view token is set for this frame yet. Save the frame once and the URLs will fill in.
+                </p>
+              ) : null}
+              <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />
+              <VirtualFrameUrlRow
+                label={`Kiosk page URL (refreshes every ${frameForm.interval ?? frame.interval ?? 300} seconds)`}
+                url={virtualPageUrl}
+              />
+              <Field name="width" label="Width">
+                <TextInput name="width" placeholder="800" />
+              </Field>
+              <Field name="height" label="Height">
+                <TextInput name="height" placeholder="480" />
+              </Field>
+              <Group name="device_config">
+                <Field
+                  name="colorMode"
+                  label="Color mode"
+                  tooltip="How the backend quantizes the rendered image — pick an e-ink palette to preview how a scene would look on a physical panel."
+                >
+                  {({ value, onChange }) => (
+                    <Select
+                      name="device_config.colorMode"
+                      value={(value as string) || 'rgb'}
+                      options={virtualColorModes}
+                      onChange={onChange}
+                    />
+                  )}
+                </Field>
+              </Group>
+            </div>
+          </>
+        ) : null}
 
         {!inFrameAdminMode && !hideForCloud ? (
           <>
