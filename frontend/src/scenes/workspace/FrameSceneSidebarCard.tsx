@@ -53,8 +53,8 @@ export function FrameSceneSidebarCard({
   // uploadScenes shim. Save stays because it maps onto the declarative
   // settings push (utils/cloudFrameApi.ts).
   const mode = workspaceMode()
-  const canDeploy = frameMenuActionIsAllowed(mode, 'deploy')
-  const canLocalDeploy = frameMenuActionIsAllowed(mode, 'localDeploy')
+  const canDeploy = frameMenuActionIsAllowed(mode, 'deploy', frame)
+  const canLocalDeploy = frameMenuActionIsAllowed(mode, 'localDeploy', frame)
   const cloudDeploy = mode === 'cloud'
 
   // Cloud-managed ESP32 frames don't push logs to the cloud yet, so their

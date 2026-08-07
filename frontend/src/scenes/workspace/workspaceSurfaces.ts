@@ -246,12 +246,13 @@ export const addFrameFlows: Record<WorkspaceMode, AddFrameFlow> = {
 export type FrameCapability = 'schedule' | 'settings' | 'logs' | 'metrics' | 'updateNotify'
 
 /**
- * The one frame field capability gating reads. Structurally a subset of
+ * The frame fields capability gating reads. Structurally a subset of
  * FrameType, declared locally so this module keeps importing nothing beyond
  * the two mode probes.
  */
 export interface FrameCapabilityInput {
   hardware?: { platform?: string | null } | null
+  embedded?: { platform?: string | null } | null
 }
 
 const allFrameCapabilities: readonly FrameCapability[] = ['schedule', 'settings', 'logs', 'metrics', 'updateNotify']
@@ -272,6 +273,36 @@ function isEsp32Platform(platform: unknown): boolean {
 export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: WorkspaceMode = workspaceMode()): boolean {
   return mode === 'cloud' && isEsp32Platform(frame?.hardware?.platform)
 }
+
+/**
+ * An embedded-mode frame on the "virtual" platform (devices.ts
+ * EMBEDDED_VIRTUAL; string literal here so this module stays import-free):
+ * no hardware at all — the backend renders the frame and serves it as an
+ * image/page URL.
+ */
+export function isVirtualFrame(frame?: FrameCapabilityInput | null): boolean {
+  return frame?.embedded?.platform === 'virtual'
+}
+
+/**
+ * Unlike the esp32 cloud profile above — which DISABLES controls, because the
+ * verbs exist and the firmware merely doesn't answer them yet — a virtual
+ * frame HIDES these surfaces: the concepts themselves don't exist. There is
+ * no shell to open, no device to ping or reboot, no on-device storage to
+ * browse, and no host to chart metrics for, so a disabled button would have
+ * nothing to explain.
+ */
+const virtualFrameHiddenPanels: readonly WorkspaceUtilityPanel[] = ['terminal', 'ping', 'assets', 'metrics']
+
+const virtualFrameHiddenMenuActions: readonly FrameMenuAction[] = [
+  'buildSdCard',
+  'deployRemote',
+  'localDeploy',
+  'reboot',
+  'restart',
+  'restartRemote',
+  'stop',
+]
 
 /**
  * The management verbs this frame's device profile supports. Only the cloud
@@ -337,9 +368,19 @@ function capabilityDisabledReason(
 }
 
 // Visibility is the mode's business alone — see the capability block comment
-// above for why the device profile disables rather than hides.
+// above for why the device profile disables rather than hides — with one
+// exception: virtual frames hide the surfaces whose concepts don't exist for
+// them at all (virtualFrameHiddenPanels/-MenuActions above). Callers with a
+// frame in hand pass it; without one the mode-level answer stands.
 
-export function frameToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
+export function frameToolPanelIsAllowed(
+  mode: WorkspaceMode,
+  panel: WorkspaceUtilityPanel,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
   return allows(allowedFrameToolPanels, mode, panel)
 }
 
@@ -352,7 +393,14 @@ export function frameToolPanelDisabledReason(
   return capabilityDisabledReason(panelCapabilities[panel], mode, frame)
 }
 
-export function sceneToolPanelIsAllowed(mode: WorkspaceMode, panel: WorkspaceUtilityPanel): boolean {
+export function sceneToolPanelIsAllowed(
+  mode: WorkspaceMode,
+  panel: WorkspaceUtilityPanel,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  if (isVirtualFrame(frame) && virtualFrameHiddenPanels.includes(panel)) {
+    return false
+  }
   return allows(allowedSceneToolPanels, mode, panel)
 }
 
@@ -368,7 +416,14 @@ export function sceneUtilityPanelIsAllowed(mode: WorkspaceMode, panel: Workspace
   return allows(allowedSceneUtilityPanels, mode, panel)
 }
 
-export function frameMenuActionIsAllowed(mode: WorkspaceMode, action: FrameMenuAction): boolean {
+export function frameMenuActionIsAllowed(
+  mode: WorkspaceMode,
+  action: FrameMenuAction,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  if (isVirtualFrame(frame) && virtualFrameHiddenMenuActions.includes(action)) {
+    return false
+  }
   return allows(allowedFrameMenuActions, mode, action)
 }
 

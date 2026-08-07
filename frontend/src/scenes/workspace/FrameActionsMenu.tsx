@@ -61,9 +61,11 @@ export function FrameActionsMenu({
   // backend bookkeeping do not. The frame's device profile never hides an
   // entry — an esp32 cloud frame shows Rename disabled with the reason (it
   // rides the set_settings verb, which that firmware answers
-  // `unsupported_verb` for) instead of quietly dropping it.
+  // `unsupported_verb` for) instead of quietly dropping it. Virtual frames
+  // are the exception: device-shaped actions (reboot, stop, SD cards …) are
+  // hidden because there is no device — see workspaceSurfaces.ts.
   const mode = workspaceMode()
-  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action)
+  const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
   const disabledReason = (action: FrameMenuAction): string | null =>
     frameMenuActionDisabledReason(mode, action, frame)
   const renameDisabledReason = disabledReason('rename')

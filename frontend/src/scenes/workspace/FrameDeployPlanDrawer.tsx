@@ -1879,7 +1879,16 @@ function EmbeddedFirmwareSection({
             <>
               This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
               over BOOTSEL drag-and-drop and provision it over the USB serial console. The backend does not build
-              per-frame firmware for it.
+              per-frame firmware for it.{' '}
+              <a
+                href="https://github.com/FrameOS/frameos/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Download frameos-&lt;version&gt;-{platformLabel}.uf2 from the latest release
+              </a>
+              .
             </>
           ) : (
             <>

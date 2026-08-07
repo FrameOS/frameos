@@ -265,13 +265,15 @@ const frameToolDefinitions: FrameToolDefinition[] = [
 // invisible in every mode until it is listed there. The frame's device
 // profile never hides a panel — it disables it with an explanation (e.g.
 // Schedule on an esp32 cloud frame, whose firmware refuses `set_schedule`),
-// so the workspace keeps its shape whatever the hardware.
+// so the workspace keeps its shape whatever the hardware. Virtual frames are
+// the one exception: panels whose concepts don't exist for them (terminal,
+// ping, assets, metrics) are hidden outright — see workspaceSurfaces.ts.
 function frameToolDefinitionsForMode(
   mode: WorkspaceMode = workspaceMode(),
   frame?: FrameType | null
 ): FrameToolDefinition[] {
   return frameToolDefinitions
-    .filter((definition) => frameToolPanelIsAllowed(mode, definition.panel))
+    .filter((definition) => frameToolPanelIsAllowed(mode, definition.panel, frame))
     .map((definition) => ({
       ...definition,
       disabledReason: frameToolPanelDisabledReason(mode, definition.panel, frame),
@@ -1347,7 +1349,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   if (frameToolPanelIsAllowed(mode, 'terminal')) {
     // The cloud protocol has no shell, so terminalLogic must never mount
     // there. The mode is constant for the app's lifetime, so this
-    // conditional hook is stable across renders.
+    // conditional hook is stable across renders. Deliberately mode-only: the
+    // frame loads asynchronously, so frame-aware gating (virtual frames hide
+    // the terminal) would flip this hook mid-life. For virtual frames the
+    // panel itself is hidden via frameToolDefinitionsForMode below, and the
+    // mounted logic sits inert until a session is opened.
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useMountedLogic(terminalLogic(frameLogicProps))
   }

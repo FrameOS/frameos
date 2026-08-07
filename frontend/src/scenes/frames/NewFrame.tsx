@@ -937,8 +937,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
-              title="Flash ESP32 (EXPERIMENTAL)"
-              description="Build firmware for an ESP32 and flash it over USB."
+              title="Flash embedded device"
+              description="ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel."
             >
               <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
