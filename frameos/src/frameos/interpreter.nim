@@ -348,7 +348,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       # producers keeps the hint away from transformer chains (resizeImage,
       # rotateImage, code nodes) whose output is not the final canvas, and
       # away from node caches that would otherwise store the live canvas.
-      const decodeTargetProducers = ["data/localImage"]
+      # The list also carries full-frame GENERATORS whose get() renders into
+      # the hint target (they fill their background, so the canvas contents
+      # never bleed through): a generated 1200x1600 intermediate is the same
+      # 7.7MB a decode is, and OOM'd the 16MB-PSRAM ESP32 boards the same way
+      # (render/calendar was the repro). Add producers here only after their
+      # get() consumes context.decodeTargetImage.
+      const decodeTargetProducers = ["data/localImage", "render/calendar"]
       var setDecodeTargetHint = false
       var directImageProducer = false
       if keyword == "render/image" and not asDataNode and cacheEnabled == false and
@@ -398,6 +404,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           for inputName in ["placement", "offsetX", "offsetY", "blendMode", "inputImage"]:
             if inline.hasKey(inputName):
               fullFrameDraw = false
+        if placement == "":
+          # Scene JSON only stores explicitly-set config values; an absent
+          # placement means the schema default (config.json: "cover").
+          placement = "cover"
         if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
           context.decodeTargetImage = context.image
           context.decodeTargetScalingMode = placement
@@ -1216,7 +1226,12 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       applyPublicStateFromPayload(scene, context.payload["state"])
   of "render":
     if not context.hasImage or context.image.isNil:
-      context.image = newImage(self.frameConfig.width, self.frameConfig.height)
+      # Same rotation contract as runner.renderSceneImage: scenes render at
+      # the rotated dimensions; the output is rotated back to panel space
+      # afterwards (Pi: rotateDegrees; embedded: rotation-aware packers).
+      context.image = case self.frameConfig.rotate:
+        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+        else: newImage(self.frameConfig.width, self.frameConfig.height)
       context.hasImage = true
     context.image.fill(scene.backgroundColor)
   else:
