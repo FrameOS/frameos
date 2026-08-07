@@ -26,6 +26,7 @@
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -855,6 +856,9 @@ static void client_task(void *arg)
             if (bits & RENDER_NOW_BIT) break;
             if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
                 fos_buttons_process_events();
+                /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
+                 * evaluated on the render task, like every Nim call. */
+                if (fos_schedule_tick()) break;
             }
             if (frameos_nim_render_requested()) break;
             remaining_ms -= slice;

@@ -11,6 +11,7 @@
 #include "cJSON.h"
 #include "fos_config.h"
 #include "fos_mem.h"
+#include "fos_schedule.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -101,6 +102,16 @@ static bool apply_frame_settings(const cJSON *frame)
     return changed;
 }
 
+static void log_settings_exit(const char *why)
+{
+    /* Once per boot per reason would be ideal; once per pass is acceptable
+     * noise for a sync that should never silently die again. */
+    static const char *s_last_why = NULL;
+    if (why == s_last_why) return;
+    s_last_why = why;
+    log_settings_event("skipped", why);
+}
+
 esp_err_t fos_settings_sync(bool force)
 {
     fos_config_t *config = fos_config();
@@ -109,9 +120,14 @@ esp_err_t fos_settings_sync(bool force)
         s_sync_requested = false;
     }
     if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) {
+        log_settings_exit("unconfigured");
         return ESP_ERR_INVALID_STATE;
     }
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return ESP_ERR_INVALID_STATE;
+    if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
+        log_settings_exit("wifi");
+        return ESP_ERR_INVALID_STATE;
+    }
+    log_settings_exit(NULL); /* configured + online: fetch follows */
 
     char url[FOS_URL_LEN + 64];
     snprintf(url, sizeof(url), "%s/api/frames/%lu/embedded/settings",
@@ -129,7 +145,10 @@ esp_err_t fos_settings_sync(bool force)
         .user_data = response_etag,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (client == NULL) return ESP_FAIL;
+    if (client == NULL) {
+        log_settings_event("error", "client-init-failed");
+        return ESP_FAIL;
+    }
     esp_http_client_set_header(client, "Authorization", auth);
     if (!force && s_etag[0]) {
         esp_http_client_set_header(client, "If-None-Match", s_etag);
@@ -137,11 +156,20 @@ esp_err_t fos_settings_sync(bool force)
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "settings sync: connect failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
         return err;
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
+    if (status != 304) {
+        char status_line[192];
+        snprintf(status_line, sizeof(status_line),
+                 "{\"event\":\"settings:sync\",\"source\":\"esp32\","
+                 "\"status\":\"fetched\",\"httpStatus\":%d,\"bytes\":%lld}",
+                 status, (long long)content_length);
+        frameos_nim_log_hook(status_line);
+    }
 
     if (status == 304) {
         esp_http_client_close(client);
@@ -188,10 +216,26 @@ esp_err_t fos_settings_sync(bool force)
         return ESP_FAIL;
     }
 
-    /* Only the `frame` object is applied today; the app-secret keys in the
-     * payload (homeAssistant/openAI/...) have no on-device consumer yet. */
+    /* The `frame` object and `schedule` are applied; the app-secret keys in
+     * the payload (homeAssistant/openAI/...) have no on-device consumer yet. */
     const cJSON *frame = cJSON_GetObjectItem(root, "frame");
     bool changed = cJSON_IsObject(frame) ? apply_frame_settings(frame) : false;
+    const cJSON *offset = cJSON_IsObject(frame)
+                              ? cJSON_GetObjectItem(frame, "utcOffsetMinutes")
+                              : NULL;
+    if (cJSON_IsNumber(offset)) {
+        fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
+    }
+    const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
+    if (cJSON_IsObject(schedule)) {
+        char *printed = cJSON_PrintUnformatted(schedule);
+        if (printed != NULL) {
+            fos_schedule_set_json(printed, strlen(printed));
+            cJSON_free(printed);
+        }
+    } else if (cJSON_IsNull(schedule)) {
+        fos_schedule_set_json(NULL, 0);
+    }
     cJSON_Delete(root);
 
     if (changed) {

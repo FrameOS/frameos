@@ -226,7 +226,7 @@ function renderMetricsLog(
               </span>
             ) : null}
           </>
-        ) : (
+        ) : hasStandardMetrics ? (
           <>
             load{' '}
             {load.map((value, index) => (
@@ -254,8 +254,10 @@ function renderMetricsLog(
               </>
             ) : null}
           </>
-        )}
-        {entries.length > 0 ? (
+        ) : null}
+        {/* Without the standard load/cpu/ram keys (ESP32 frames), a collapsed
+            zero summary is useless — show every reported entry inline. */}
+        {entries.length > 0 && hasStandardMetrics ? (
           <button
             type="button"
             className={clsx(
@@ -269,7 +271,7 @@ function renderMetricsLog(
           </button>
         ) : null}
       </span>
-      {expanded ? (
+      {expanded || (!hasStandardMetrics && entries.length > 0) ? (
         <div className="mt-1 flex flex-wrap gap-1.5 text-xs leading-5">
           {entries.map(({ key, value }) => (
             <span

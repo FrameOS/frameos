@@ -31,6 +31,7 @@
 #include "fos_mem.h"
 #include "fos_http.h"
 #include "fos_scenes.h"
+#include "fos_schedule.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1699,14 +1700,31 @@ static void ws_handle_message(const char *data, size_t len)
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
         ws_ack(id, true, NULL);
         ws_schedule_reboot();
+    } else if (strcmp(type, "set_schedule") == 0) {
+        const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
+        if (schedule == NULL || cJSON_IsNull(schedule)) {
+            fos_schedule_set_json(NULL, 0);
+            ws_ack(id, true, NULL);
+        } else if (!cJSON_IsObject(schedule)) {
+            ws_ack(id, false, "invalid_schedule");
+        } else {
+            char *printed = cJSON_PrintUnformatted(schedule);
+            if (printed == NULL) {
+                ws_ack(id, false, "no_memory");
+            } else if (fos_schedule_set_json(printed, strlen(printed)) == ESP_OK) {
+                ws_ack(id, true, NULL);
+            } else {
+                ws_ack(id, false, "invalid_schedule");
+            }
+            cJSON_free(printed);
+        }
     } else if (strcmp(type, "get_logs") == 0) {
         ws_handle_get_logs(root, id);
     } else if (strcmp(type, "get_metrics") == 0) {
         ws_handle_get_metrics(id);
     } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
         /* provider-side notices; nothing to do */
-    } else if (strcmp(type, "set_schedule") == 0 ||
-               strcmp(type, "notify_update_available") == 0) {
+    } else if (strcmp(type, "notify_update_available") == 0) {
         /* Documented verbs the esp32 profile does not implement. Answering
          * `unsupported_verb` (not `unknown_verb`) lets a provider tell "this
          * device profile is smaller" apart from "you sent something that is

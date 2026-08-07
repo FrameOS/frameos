@@ -34,6 +34,7 @@
 #include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_schedule.h"
 #include "fos_status_screen.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -219,6 +220,7 @@ void app_main(void)
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
+    fos_schedule_init();
 
     /* Oversized HTTP bodies (multi-MB gallery images) spill to storage
      * instead of failing on PSRAM pressure (cloud/docs/esp32-large-image-

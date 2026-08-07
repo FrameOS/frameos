@@ -62,6 +62,7 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
+import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -1890,12 +1891,7 @@ function EmbeddedFirmwareSection({
               </a>
               .
             </>
-          ) : (
-            <>
-              Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial.
-              The firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
-            </>
-          )}
+          ) : null}
         </div>
         {firmware?.status && !isVirtualPlatform ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
@@ -1947,6 +1943,7 @@ function EmbeddedFirmwareSection({
             </div>
             <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
           </div>
+          <EmbeddedUsbSetup frame={frame} />
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
