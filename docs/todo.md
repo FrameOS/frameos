@@ -28,15 +28,36 @@ Constraints and direction:
 
 Known gaps from the 2026-08-08 audit (in flight or open):
 
-- **Service-settings delivery to cloud-managed frames** — account API keys
-  (Unsplash/OpenAI/HA/…) now persist on the cloud and feed previews, but no
-  path carries them to the device: `set_settings` is allow-listed to
-  name/rotate/interval/scaling_mode/timezone/debug and refuses unknown keys
-  wholesale (`hub_client.nim` CLOUD_SETTINGS_ALLOWLIST). Needs a deliberate
-  protocol change (new verb like `set_service_settings`, or a device-bearer
-  `/embedded/settings`-style pull route on auth-web mirroring
-  `backend/app/api/embedded_device.py`) updated in lockstep: docs/cloud-frames.md,
-  hub allow-lists, Nim handler + tests, ESP32 fos_cloud/fos_settings, C3 stub.
+- **Service-settings delivery: the DEVICE half** — the protocol and the whole
+  provider side shipped 2026-08-08 (docs/cloud-frames.md "Service settings"):
+  device-authed `GET /api/frames/{id}/service-settings` with ETag→304 and
+  `Cache-Control: no-store`, the `settings:services` scope (granted at
+  enrollment, never backfilled; owner toggle at
+  `POST .../service-settings/enabled`), the zero-payload
+  `refresh_service_settings` nudge verb, and per-frame narrowing to the groups
+  the frame's own scenes declare (`frames.service_setting_groups`). Keys ride
+  HTTPS, never the command queue — `frame_commands` rows are never deleted.
+  **No device implements the client yet**, so end to end this still does
+  nothing. Remaining, in order:
+  1. **Nim runtime (Pi)**: a fetch module + a `refresh_service_settings`
+     handler in `hub_client.nim` (gated on the scope), a pull at `ready` and
+     on a long timer, `403 insufficient_scope` → clear all six groups,
+     `401` → the existing demotion counter. Apply via a sibling of
+     `persistFrameAdminSettingsUpdate` (`server/api.nim`), which already does
+     the six-group merge into frame.json.
+  2. **ESP32**: source-select in `fos_settings.c` (backend poll today; cloud
+     URL when `fos_cloud_api_access()` is set — note the backend poll bails
+     out entirely for cloud-only frames), the verb in `fos_cloud.c`, one new
+     glue export, and the matching no-op in `frameos_nim_stub.c` (C3 links
+     the stub — a missing symbol only explodes in the release job).
+  3. **Cleanup once 1–2 land**: delete the duplicate Nim-side fetch
+     (`apps.nim loadEmbeddedServiceSettings` + the `settingsUrl` seed in
+     `embedded_runtime.nim`, and `should_authorize_backend_url` in the glue) —
+     the ESP32 currently fetches the same payload twice per boot.
+  Also open: `frameSummary` returns nothing about the scope, so the workspace
+  cannot yet show whether a frame receives keys; and assigning a scene that
+  newly declares a group writes the column but sends no nudge (the frame picks
+  it up at its next `ready`).
 - Cloud metrics responses omit the backend's `reboots` markers (cosmetic;
   SPA degrades gracefully).
 - Terminal / ping / debug panels are backend-only by design (no shell verbs
