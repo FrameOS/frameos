@@ -45,6 +45,16 @@ export interface FrameType {
   /** Which control plane manages this frame. Cloud-managed frames are
    * interpreted-only: no SSH, no compiled scenes, no shell-flagged apps. */
   managed_by?: 'backend' | 'cloud'
+  /** Cloud-managed frames: which service-settings groups ("unsplash",
+   * "openAI", …) this frame's assigned scenes declare. Group NAMES only —
+   * the keys themselves only ever travel over the device's own authenticated
+   * pull (cloud/docs/cloud-frames.md, "Service settings"). */
+  service_setting_groups?: string[]
+  /** Cloud-managed frames: whether the frame's link still holds
+   * `settings:services`, i.e. whether those keys are actually delivered. The
+   * owner toggles it per frame; absent means "not reported" (hub broadcasts
+   * that do not carry the link), never "off". */
+  service_settings_enabled?: boolean
   /** The hardware object the device reported at cloud enrollment (frames.hardware
    * jsonb on the cloud; absent on backend-managed frames). `platform` drives the
    * device-profile capability gating in workspaceSurfaces.ts: an "esp32" frame

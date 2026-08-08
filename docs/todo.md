@@ -26,68 +26,22 @@ Constraints and direction:
   scene state/control, USB provisioning. Track gaps in the parity matrix
   (`docs/api-triality.md`) and delete items here as they ship.
 
-Known gaps from the 2026-08-08 audit (in flight or open):
+Known gaps (last swept 2026-08-09):
 
-- **Service-settings follow-ups** — the feature shipped end to end 2026-08-08
-  (contract in docs/cloud-frames.md "Service settings"; provider routes +
-  `settings:services` scope + `refresh_service_settings` nudge, Nim runtime
-  client, ESP32 client). What is left is smaller:
-  1. **Delete the duplicate ESP32 fetch**: `apps.nim`
-     `loadEmbeddedServiceSettings`/`ensureEmbeddedServiceSettings`, the
-     `settingsUrl` seed in `embedded_runtime.nim`, `should_authorize_backend_url`
-     in the glue, and the `ensureEmbeddedServiceSettings()` calls in the ~8 app
-     files. The device now fetches the same payload twice per boot on backend
-     frames; firmware and Nim ship as one binary, so there is no version skew
-     to fear. Harmless today (the lazy path can only re-merge identical values
-     and cannot resurrect a deleted group) — it is dead weight, not a bug.
-  2. **Surface it in the workspace**: `frameSummary` returns nothing about the
-     scope, so nothing can show whether a frame receives keys or which groups
-     its scenes declare (`frames.service_setting_groups` already holds the
-     latter). Adding a field means updating frame-hub's `protocol.test.ts`
-     fixture in the same commit.
-  3. **Nudge on scene assignment**: assigning a scene that newly declares a
-     group writes the column but sends no `refresh_service_settings`, so the
-     frame learns about it at its next `ready` or settings save.
-  4. Hardware verification: no cloud-managed frame has run the pull against a
-     real provider yet — both clients are unit-tested and build-verified only.
-- Cloud metrics responses omit the backend's `reboots` markers (cosmetic;
-  SPA degrades gracefully).
+- **Service settings — hardware verification**: no cloud-managed frame has
+  run the pull against a real provider yet; both clients are unit-tested and
+  build-verified only. (The feature itself, the workspace surface, the
+  scene-assignment nudge and the removal of the device's duplicate fetch all
+  shipped — contract in docs/cloud-frames.md "Service settings".)
 - Terminal / ping / debug panels are backend-only by design (no shell verbs
   in the cloud protocol — structural, not a gap to close).
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Re-ENROLL an already-enrolled cloud frame** — *updating* the firmware of
-  an enrolled board shipped 2026-08-08: the deploy dialog's Firmware section
-  has "Update over USB" (`EmbeddedUsbFirmwareUpdate`), which writes the
-  published image around the board's NVS partition
-  (`embeddedFlashImage.ts`), so Wi-Fi, settings and the cloud enrollment all
-  survive and no claim token is involved. What is still missing is
-  RE-enrollment — pointing an already-owned board at a different account, or
-  recovering one whose NVS was blanked (a factory reset, or a full 0x0 flash
-  from the "Add frame" panel). That still forks a duplicate frame row.
-  `Esp32CloudFlasher`
-  (`cloud-frontend/src/components/Esp32CloudFlasher.tsx`) is an *enrollment*
-  flow end to end: `mintEnrollmentCode()` always POSTs
-  `/api/frames/claim-tokens` for a FRESH single-use token, provisions it over
-  serial, and then watches the frame list for a frame id it has not seen
-  before. Point that at a board that already owns a frame row and the account
-  ends up with two rows for one device (the old one orphaned, still counting
-  against `maxFramesPerAccount`), which is worse than not offering the button.
-  What is missing is server-side, and none of it exists today:
-  1. A claim token BOUND to an existing frame. `app/api/frames/claim-tokens/route.ts`
-     accepts only `name`/`multi_use`/`max_uses`/`ttl_days` and
-     `frameEnrollmentTokens` has no frame column — add an optional
-     `frame_id` (ownership-checked against the session account, forced
-     `max_uses: 1`, short TTL) so redemption can re-key an existing row
-     instead of inserting one.
-  2. Redemption that re-keys rather than creates: the enrollment path must,
-     for a frame-bound token, rotate that frame's device credentials in
-     place and leave `frames.id`, its scenes, assets and logs alone.
-  3. A flasher mode that takes a known `frameId` + its bound token, skips
-     the new-frame watch entirely, and reports success against the row the
-     user started from.
-  Until 1–3 land, MOVING an enrolled board (or rescuing a blanked one) stays a
-  delete-and-re-enroll.
+- **Re-enrollment — hardware verification**: frame-bound claim tokens, the
+  re-keying redemption path and the flasher's "Re-enroll over USB" mode
+  shipped 2026-08-09 (docs/cloud-frames.md "A2. Re-enrollment"), covered by
+  integration tests but not yet run against a real blanked board. Moving a
+  board to a DIFFERENT account remains delete-and-enroll by design.
 - **Cloud OTA needs a released `-app.bin`** — fixed 2026-08-08 in the release
   workflow and the manifest/download routes, but every release up to and
   including v2026.8.12 published only the merged flash image, which an OTA

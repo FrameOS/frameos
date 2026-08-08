@@ -7,6 +7,7 @@ import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
 import {
   frameForAccount,
   frameSummary,
+  linkedClientForFrame,
   revokeFrame,
 } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -43,7 +44,7 @@ export async function GET(
   }
   return NextResponse.json({
     frame: {
-      ...frameSummary(frame),
+      ...frameSummary(frame, await linkedClientForFrame(db, frame)),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
     },

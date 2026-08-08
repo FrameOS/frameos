@@ -7,9 +7,6 @@ import checksums/md5
 import frameos/types
 import frameos/utils/system
 
-when defined(frameosEmbedded):
-  import frameos/utils/http_client
-
 proc renderWidth*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.height else: config.width
 
@@ -47,62 +44,11 @@ proc maxImageResponseBytes*(self: AppRoot): int {.inline.} =
     else:
       DefaultMaxHttpResponseBytes
 
-proc loadEmbeddedServiceSettings*(config: FrameConfig, raiseOnError = true,
-    force = false): bool =
-  when defined(frameosEmbedded):
-    if config == nil:
-      return false
-    if config.settings == nil or config.settings.kind != JObject:
-      config.settings = %*{}
-    if config.settings{"embedded"} == nil or config.settings{"embedded"}.kind != JObject:
-      config.settings["embedded"] = %*{}
-    let embedded = config.settings["embedded"]
-    # Fetch once, then serve from the cached copy: without this every
-    # secret-using app refetched the payload on every render. The firmware's
-    # ETag'd settings sync clears the flag when the backend content changes
-    # (fos_settings.c → frameos_nim_invalidate_settings), so key edits still
-    # reach apps within one render pass.
-    if not force and embedded{"settingsLoaded"}.getBool(false):
-      return true
-    let url = embedded{"settingsUrl"}.getStr()
-    if url.len == 0:
-      return false
-    try:
-      let body = boundedGetContent(url, timeoutMs = 10000, maxBytes = 16 * 1024,
-                                   maxSeconds = 12)
-      let fetched = parseJson(body)
-      if fetched.kind == JObject:
-        for key, value in fetched.pairs:
-          if key == "embedded" and value.kind == JObject:
-            for embeddedKey, embeddedValue in value.pairs:
-              if embeddedKey != "settingsUrl":
-                embedded[embeddedKey] = embeddedValue
-          else:
-            config.settings[key] = value
-      embedded["settingsLoaded"] = %true
-      return true
-    except CatchableError:
-      if raiseOnError:
-        raise
-      return false
-  else:
-    return false
-
-proc ensureEmbeddedServiceSettings*(config: FrameConfig) =
-  discard config.loadEmbeddedServiceSettings(raiseOnError = true)
-
-proc refreshEmbeddedServiceSettings*(config: FrameConfig): bool =
-  config.loadEmbeddedServiceSettings(raiseOnError = false, force = true)
-
-proc invalidateEmbeddedServiceSettings*(config: FrameConfig) =
-  ## The next ensureEmbeddedServiceSettings() refetches. Called by the
-  ## firmware when its ETag'd settings poll sees new backend content.
-  when defined(frameosEmbedded):
-    if config != nil and config.settings != nil and
-        config.settings.kind == JObject and
-        config.settings{"embedded"} != nil and
-        config.settings{"embedded"}.kind == JObject:
-      config.settings["embedded"]["settingsLoaded"] = %false
+## Service settings on embedded frames arrive ONE way: the firmware's ETag'd
+## settings poll (embedded/esp32/main/fos_settings.c) hands the payload to
+## `applyServiceSettings` below, for backend and cloud sources alike. There is
+## deliberately no Nim-side fetch — apps read `config.settings` and never go
+## looking for keys themselves.
 
 const CloudServiceSettingsGroups* = [
   "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
@@ -191,15 +137,6 @@ proc applyServiceSettings*(config: FrameConfig, json: string): bool {.discardabl
   if parsed == nil or parsed.kind != JObject:
     return false
   config.applyServiceSettings(parsed)
-
-proc ensureEmbeddedServiceSettings*(self: AppRoot) =
-  if self != nil:
-    self.frameConfig.ensureEmbeddedServiceSettings()
-
-proc refreshEmbeddedServiceSettings*(self: AppRoot): bool =
-  if self != nil:
-    return self.frameConfig.refreshEmbeddedServiceSettings()
-  false
 
 proc appName(self: AppRoot): string =
   if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName

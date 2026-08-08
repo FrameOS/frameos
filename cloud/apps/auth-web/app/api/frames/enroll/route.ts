@@ -15,6 +15,7 @@ import {
 } from "../../../../src/lib/device-flow";
 import {
   countFramesForAccount,
+  frameCommandsNotifyChannel,
   frameManagedScope,
   frameServiceSettingsScope,
   frameTelemetryLogsScope,
@@ -201,6 +202,13 @@ async function enrollWithClaimToken(
     return replay;
   }
 
+  // Re-enrollment: a token minted FOR an existing frame re-keys that frame in
+  // place instead of inserting a second row for the same board.
+  const rebind = await rebindEnrollment(db, wsUrl, input, accessToken);
+  if (rebind) {
+    return rebind;
+  }
+
   const displayName = input.name ?? null;
 
   // Everything or nothing, and the budget is spent LAST-but-inside: the
@@ -379,6 +387,132 @@ async function replayEnrollment(
     frame_id: existing.frame.id,
     scope: claimTokenScopeString,
     status: existing.frame.status,
+    token_type: "Bearer",
+    ws_path: wsPath,
+    ...(wsUrl ? { ws_url: wsUrl } : {}),
+  });
+}
+
+// Re-enrollment (docs/cloud-frames.md, "Re-enrollment"): a claim token minted
+// with `frame_id` re-keys THAT frame instead of creating one. The board keeps
+// nothing across a factory reset or a full flash — it generates a new device
+// keypair and has no link token — so the cloud side must accept a new public
+// key for a row it already has, and the alternative (enroll fresh) forks a
+// duplicate frame that orphans the original's scenes, assets and logs.
+//
+// What re-keying touches: frames.public_key, the reported hardware/version,
+// and the link's token. What it must NOT touch: frames.id, the frame's name,
+// scenes, assets, logs, schedule, settings, status, or the link's SCOPES —
+// re-enrolling is not a fresh grant, so a `settings:services` the owner
+// revoked stays revoked.
+//
+// Returns undefined when the token is not a frame-bound one, so the ordinary
+// enrollment path runs; a NextResponse (success or 400) when it is.
+async function rebindEnrollment(
+  db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
+  wsUrl: string | undefined,
+  input: EnrollInput & { claimToken: string },
+  accessToken: ReturnType<typeof createEncryptedSecretToken>,
+) {
+  const [token] = await db
+    .select()
+    .from(frameEnrollmentTokens)
+    .where(eq(frameEnrollmentTokens.tokenHash, hashSecret(input.claimToken)))
+    .limit(1);
+  if (!token?.boundFrameId) {
+    return undefined;
+  }
+  if (token.expiresAt <= new Date()) {
+    return jsonError("invalid_claim_token", 400);
+  }
+
+  // The frame must still be there, still belong to the minting account, and
+  // still have a live link. Anything else and the token means nothing.
+  const [row] = await db
+    .select({ frame: frames, linkedClient: linkedClients })
+    .from(frames)
+    .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+    .where(
+      and(
+        eq(frames.id, token.boundFrameId),
+        eq(frames.accountId, token.accountId),
+        isNull(linkedClients.revokedAt),
+      ),
+    )
+    .limit(1);
+  if (!row || row.frame.status === "revoked") {
+    return jsonError("invalid_claim_token", 400);
+  }
+
+  // Spend the budget, or recognise the one device allowed to replay it. A
+  // spent token is only good to the key that spent it: the device whose
+  // response was lost retries and gets a fresh access token, while anyone
+  // else holding the same string gets nothing. redeemClaimToken's atomic
+  // use_count guard also settles a two-device race — the loser lands here
+  // with a different key and is refused.
+  if (token.useCount === 0) {
+    const spent = await redeemClaimToken(db, input.claimToken, hashSecret);
+    if (!spent && row.frame.publicKey !== input.publicKey) {
+      return jsonError("invalid_claim_token", 400);
+    }
+  } else if (row.frame.publicKey !== input.publicKey) {
+    return jsonError("invalid_claim_token", 400);
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(frames)
+      .set({
+        frameosVersion: input.frameosVersion ?? row.frame.frameosVersion,
+        hardware: input.hardware ?? row.frame.hardware,
+        publicKey: input.publicKey,
+        updatedAt: new Date(),
+      })
+      .where(eq(frames.id, row.frame.id));
+    // No grace window here, unlike the lost-response rotation above: the
+    // point of a re-enrollment is that the previous credential is being
+    // replaced, so it dies now.
+    await tx
+      .update(linkedClients)
+      .set({
+        lastTokenRotationAt: new Date(),
+        previousTokenExpiresAt: null,
+        previousTokenReference: null,
+        tokenReference: accessToken.tokenReference,
+        updatedAt: new Date(),
+      })
+      .where(eq(linkedClients.id, row.frame.linkedClientId));
+    await tx
+      .update(frameEnrollmentTokens)
+      .set({ frameId: row.frame.id })
+      .where(eq(frameEnrollmentTokens.id, token.id));
+  });
+
+  // Wake the hub: a socket the OLD device still holds was authenticated with
+  // the credential just replaced, and the hub's session check compares the
+  // frame's public key against the one the session enrolled with.
+  await db.execute(
+    sql`select pg_notify(${frameCommandsNotifyChannel}, ${row.frame.id})`,
+  );
+
+  await recordAuditEvent(db, {
+    accountId: row.frame.accountId,
+    actor: { claimTokenId: token.id, kind: "frame_enrollment" },
+    eventType: "frame.re_enrolled",
+    metadata: { via: "claim_token" },
+    target: {
+      frameId: row.frame.id,
+      linkedClientId: row.frame.linkedClientId,
+    },
+  });
+
+  return NextResponse.json({
+    access_token: accessToken.token,
+    frame_id: row.frame.id,
+    // The link's CURRENT scopes, not the mint-time grant: re-enrollment
+    // re-keys a device, it does not re-approve anything.
+    scope: linkedClientScopes(row.linkedClient).join(" "),
+    status: row.frame.status,
     token_type: "Bearer",
     ws_path: wsPath,
     ...(wsUrl ? { ws_url: wsUrl } : {}),

@@ -197,10 +197,15 @@ export function newMetricsEvent(
 }
 
 // update_frame event data: the summary the frames API serves, extended with
-// the live state the hub owns.
-export function frameUpdateEvent(frame: FrameRow) {
+// the live state the hub owns. The linked client is optional here for the
+// same reason it is in frameSummary — broadcasts that do not carry it leave
+// `service_settings_enabled` out, and the SPA keeps the value it has.
+export function frameUpdateEvent(
+  frame: FrameRow,
+  linkedClient?: { providerClientMetadata: unknown },
+) {
   return {
-    ...frameSummary(frame),
+    ...frameSummary(frame, linkedClient),
     last_metrics: frame.lastMetrics,
     last_state: frame.lastState,
   };

@@ -212,7 +212,7 @@ void app_main(void)
         char frame_name[64];
         snprintf(frame_name, sizeof(frame_name), "frame %lu", (unsigned long)config->frame_id);
         if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes,
-                             config->backend_url, config->frame_id, config->api_key,
+                             config->backend_url, config->api_key,
                              config->server_send_logs, config->rotate)) {
             ESP_LOGI(TAG, "nim runtime up: %s", frameos_nim_info());
         } else {

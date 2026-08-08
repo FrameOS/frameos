@@ -196,6 +196,14 @@ async function seedFrames(accountId: string, count: number) {
   }
 }
 
+async function frameRow(frameId: string) {
+  const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
+  if (!row) {
+    throw new Error("frame not found");
+  }
+  return row;
+}
+
 async function claimTokenUseCount(claimToken: string) {
   const [row] = await db
     .select()
@@ -798,6 +806,192 @@ describe("cloud-managed frame enrollment", () => {
       ),
     );
     expect(response.status).toBe(403);
+  });
+});
+
+// Re-enrollment: a claim token minted for an EXISTING frame re-keys that row
+// instead of forking a duplicate. The scenario is a board that lost its NVS
+// (factory reset, full 0x0 flash) or one being pointed at a frame the account
+// already has: the device shows up with a brand new keypair and no link
+// token, and the workspace must end up with the SAME frame, scenes included.
+describe("frame re-enrollment (frame-bound claim tokens)", () => {
+  async function mintBoundToken(
+    frameId: string,
+    body: Record<string, unknown> = {},
+  ) {
+    return mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { frame_id: frameId, ...body },
+        { origin: baseUrl },
+      ),
+    );
+  }
+
+  it("re-keys the frame in place, keeping its id, name and scenes", async () => {
+    const frame = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame.frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame.frame_id),
+    );
+    const scene = await createStoreScene(frame.accountId, { name: "Clock" });
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(assign.status).toBe(200);
+
+    const mint = await mintBoundToken(frame.frame_id);
+    expect(mint.status).toBe(200);
+    const minted = (await mint.json()) as {
+      claim_token: string;
+      expires_at: string;
+      frame_id: string;
+      max_uses: number;
+    };
+    // Echoed back so the flasher knows which row it is provisioning, and
+    // deliberately short-lived and single-use.
+    expect(minted.frame_id).toBe(frame.frame_id);
+    expect(minted.max_uses).toBe(1);
+    expect(Date.parse(minted.expires_at) - Date.now()).toBeLessThanOrEqual(
+      60 * 60 * 1000,
+    );
+
+    // The board comes back with a NEW keypair, as it would after a reset.
+    const replacement = deviceKeypair();
+    const response = await enroll(
+      minted.claim_token,
+      replacement.publicKeyBase64,
+      { name: "frameos" },
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.frame_id).toBe(frame.frame_id);
+    expect(payload.status).toBe("active");
+    expect(typeof payload.access_token).toBe("string");
+    expect(payload.access_token).not.toBe(frame.access_token);
+
+    // Same row: id, name and scene assignments all survive; only the device
+    // key changed.
+    const [row] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.accountId, frame.accountId));
+    expect(row?.id).toBe(frame.frame_id);
+    expect(row?.name).toBe("Kitchen frame");
+    expect(row?.publicKey).toBe(replacement.publicKeyBase64);
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, frame.frame_id)),
+    ).toHaveLength(1);
+    // Exactly one frame for the account — the duplicate-row bug this exists
+    // to prevent.
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, frame.accountId)),
+    ).toHaveLength(1);
+  });
+
+  it("kills the old link token immediately and hands out a working new one", async () => {
+    const frame = await enrolledFrame();
+    const before = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, (await frameRow(frame.frame_id)).linkedClientId));
+
+    const mint = await mintBoundToken(frame.frame_id);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(
+      claim_token,
+      deviceKeypair().publicKeyBase64,
+    );
+    const { access_token } = (await response.json()) as { access_token: string };
+
+    const [after] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, before[0]!.id));
+    expect(after?.tokenReference).not.toBe(before[0]!.tokenReference);
+    // No grace window: a re-enrollment REPLACES the credential, so the old
+    // one cannot be presented afterwards even for a few minutes.
+    expect(after?.previousTokenReference).toBeNull();
+    expect(after?.previousTokenExpiresAt).toBeNull();
+    expect(typeof access_token).toBe("string");
+    // Scopes are untouched — re-keying is not a fresh consent.
+    expect(after?.providerClientMetadata).toEqual(
+      before[0]!.providerClientMetadata,
+    );
+  });
+
+  it("is single-use, and replayable only by the device that spent it", async () => {
+    const frame = await enrolledFrame();
+    const mint = await mintBoundToken(frame.frame_id);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const device = deviceKeypair();
+
+    expect((await enroll(claim_token, device.publicKeyBase64)).status).toBe(200);
+
+    // The same device retrying a lost response gets a fresh token back.
+    const retry = await enroll(claim_token, device.publicKeyBase64);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { frame_id: string }).frame_id).toBe(
+      frame.frame_id,
+    );
+
+    // Anyone else holding the same string gets nothing.
+    const stranger = await enroll(claim_token, deviceKeypair().publicKeyBase64);
+    expect(stranger.status).toBe(400);
+    expect(((await stranger.json()) as { error: string }).error).toBe(
+      "invalid_claim_token",
+    );
+  });
+
+  it("refuses to bind to another account's frame, a revoked one, or multiple uses", async () => {
+    const frame = await enrolledFrame();
+
+    // Someone else's frame is invisible, not forbidden.
+    await signIn();
+    const foreign = await mintBoundToken(frame.frame_id);
+    expect(foreign.status).toBe(404);
+
+    const own = await enrolledFrame();
+    const multi = await mintBoundToken(own.frame_id, { multi_use: true });
+    expect(multi.status).toBe(400);
+    expect(((await multi.json()) as { error: string }).error).toBe(
+      "invalid_max_uses",
+    );
+
+    const revoke = await revokeFrameRoute(
+      postJson(`/api/frames/${own.frame_id}/revoke`, {}, { origin: baseUrl }),
+      routeParams(own.frame_id),
+    );
+    expect(revoke.status).toBe(200);
+    const revoked = await mintBoundToken(own.frame_id);
+    expect(revoked.status).toBe(409);
+    expect(((await revoked.json()) as { error: string }).error).toBe(
+      "frame_revoked",
+    );
+  });
+
+  it("works when the account is already at its frame quota", async () => {
+    const frame = await enrolledFrame();
+    // Re-keying creates nothing, so the quota that stops "Add frame" must not
+    // stop a rescue.
+    await seedFrames(frame.accountId, maxFramesPerAccount - 1);
+
+    const mint = await mintBoundToken(frame.frame_id);
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, deviceKeypair().publicKeyBase64);
+    expect(response.status).toBe(200);
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, frame.accountId)),
+    ).toHaveLength(maxFramesPerAccount);
   });
 });
 

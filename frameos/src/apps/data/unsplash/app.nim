@@ -27,7 +27,6 @@ proc error*(self: App, context: ExecutionContext, message: string): Image =
   result = self.renderErrorForContext(context, message)
 
 proc get*(self: App, context: ExecutionContext): Image =
-  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"unsplash"}{"accessKey"}.getStr
   if apiKey == "":
     return self.error(context, "Please provide an Unsplash API key in the settings.")

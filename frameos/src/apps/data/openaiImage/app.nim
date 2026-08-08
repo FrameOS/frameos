@@ -47,7 +47,6 @@ proc get*(self: App, context: ExecutionContext): Image =
   let prompt = self.appConfig.prompt
   if prompt == "":
     return self.error(context, "No prompt provided in app config.")
-  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"openAI"}{"apiKey"}.getStr
   if apiKey == "":
     return self.error(context, "Please provide an OpenAI API key in the settings.")

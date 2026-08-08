@@ -16,7 +16,7 @@ import pixie
 
 import embedded_scene
 import embedded_runtime
-from frameos/apps import invalidateEmbeddedServiceSettings, applyServiceSettings
+from frameos/apps import applyServiceSettings
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -324,7 +324,7 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 # ------------------------------------------------------------------ C API
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
-    backendUrl: cstring, frameId: cint, rotate: cint): bool {.exportc, cdecl.} =
+    rotate: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
   frameHeight = height.int
   frameRotate = ((rotate.int mod 360) + 360) mod 360
@@ -333,13 +333,7 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   frameName = $name
   try:
     armEmergencyReserve()
-    let backend =
-      if backendUrl == nil or ($backendUrl).len == 0:
-        ""
-      else:
-        $backendUrl
-    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, backend,
-      frameId.int, frameRotate)
+    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
     initScene()
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
         &"\"{frameName}\", nim {NimVersion}")
@@ -350,11 +344,6 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   except CatchableError as e:
     log("nim init failed: " & e.msg)
     false
-
-proc fos_nim_invalidate_settings_impl() {.exportc, cdecl.} =
-  ## Firmware's ETag'd settings poll saw new content: drop the cached
-  ## service-settings so apps refetch their keys on the next render.
-  invalidateEmbeddedServiceSettings(getFrameConfig())
 
 proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
   ## The firmware's settings poll (fos_settings.c) delivered the cloud-owned

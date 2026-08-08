@@ -18,6 +18,7 @@ import { GET as getFrameMetricsRecent } from "../../../app/api/frames/[frameId]/
 import {
   maxMetricsPerFrame,
   maxMetricsSampleBytes,
+  storeFrameLogs,
   storeFrameMetrics,
 } from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -217,6 +218,105 @@ describe("GET /api/frames/{id}/metrics/recent", () => {
       );
       expect((await response.json()).metrics).toHaveLength(1);
     }
+  });
+});
+
+describe("reboot markers", () => {
+  it("derives them from the device's bootup log lines", async () => {
+    const { frame } = await activeFrame();
+    await storeFrameLogs(db, frame.id, [
+      {
+        payload: { event: "render", message: "rendering" },
+        timestamp: new Date("2026-08-01T09:59:00.000Z"),
+      },
+      {
+        payload: {
+          event: "bootup",
+          reboot: {
+            bootId: "boot-2",
+            exitCode: "0",
+            previousBootId: "boot-1",
+            reason: "Rebooting device after boot config changes",
+            serviceResult: "success",
+            source: "backend",
+          },
+        },
+        timestamp: new Date("2026-08-01T10:00:00.000Z"),
+      },
+      // The ESP32 ships a bare bootup line: still a marker, just no detail.
+      {
+        payload: { event: "bootup", source: "esp32", version: "2026.8.12" },
+        timestamp: new Date("2026-08-01T11:00:00.000Z"),
+      },
+    ]);
+
+    const response = await getFrameMetrics(
+      getRequest(`/api/frames/${frame.id}/metrics`),
+      metricsParams(frame.id),
+    );
+    const payload = await response.json();
+    expect(payload.reboots).toHaveLength(2);
+    expect(payload.reboots[0]).toMatchObject({
+      boot_id: "boot-2",
+      exit_code: "0",
+      // service_result "success" means the last run exited cleanly, so the
+      // reboot was initiated — the backend's derivation, mirrored.
+      kind: "initiated",
+      previous_boot_id: "boot-1",
+      service_result: "success",
+      source: "backend",
+      timestamp: "2026-08-01T10:00:00.000Z",
+    });
+    expect(payload.reboots[1]).toEqual({
+      log_id: expect.any(String),
+      timestamp: "2026-08-01T11:00:00.000Z",
+    });
+  });
+
+  it("names the kind an OOM kill even when the device did not", async () => {
+    const { frame } = await activeFrame();
+    await storeFrameLogs(db, frame.id, [
+      {
+        payload: { event: "bootup", reboot: { service_result: "oom-kill" } },
+        timestamp: new Date("2026-08-01T10:00:00.000Z"),
+      },
+    ]);
+
+    const response = await getFrameMetrics(
+      getRequest(`/api/frames/${frame.id}/metrics`),
+      metricsParams(frame.id),
+    );
+    expect((await response.json()).reboots[0]).toMatchObject({
+      kind: "oom",
+      service_result: "oom-kill",
+    });
+  });
+
+  it("limits /metrics/recent markers to the ?since= window", async () => {
+    const { frame } = await activeFrame();
+    await storeFrameLogs(db, frame.id, [
+      {
+        payload: { event: "bootup" },
+        timestamp: new Date("2026-08-01T09:00:00.000Z"),
+      },
+      {
+        payload: { event: "bootup" },
+        timestamp: new Date("2026-08-01T11:00:00.000Z"),
+      },
+    ]);
+
+    const response = await getFrameMetricsRecent(
+      getRequest(
+        `/api/frames/${frame.id}/metrics/recent?since=${encodeURIComponent(
+          "2026-08-01T10:00:00.000Z",
+        )}`,
+      ),
+      metricsParams(frame.id),
+    );
+    const payload = await response.json();
+    expect(payload.reboots.map((row: { timestamp: string }) => row.timestamp)).toEqual([
+      "2026-08-01T11:00:00.000Z",
+    ]);
   });
 });
 

@@ -18,12 +18,12 @@ extern "C" {
 
 /* True when the Nim runtime is compiled in. */
 bool frameos_nim_available(void);
-/* One-time init: panel dimensions + frame/backend identity. Safe to call when
- * unavailable (returns false). Allocates the Nim heap (PSRAM via malloc). */
+/* One-time init: panel dimensions + the backend credentials the runtime's own
+ * uploads use. Safe to call when unavailable (returns false). Allocates the
+ * Nim heap (PSRAM via malloc). */
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key,
-                      bool server_send_logs, int rotate);
+                      const char *api_key, bool server_send_logs, int rotate);
 /* Render the current scene into `buf` using the FOS_PIXEL_* wire format.
  * Returns 0 on success. */
 int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
@@ -47,9 +47,6 @@ bool frameos_nim_set_scene(const char *scene_id);
  * library. Returns the number of scenes loaded (0 = bad payload or runtime
  * unavailable). Hot-swaps live scenes. */
 int frameos_nim_load_scenes(const char *json);
-/* Drop the Nim side's cached service settings (app secrets); the next app
- * use refetches them. Called when the ETag'd settings poll sees changes. */
-void frameos_nim_invalidate_settings(void);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,

@@ -20,6 +20,7 @@ import {
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
+import { linkedClientScopes } from "./backend-auth";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
@@ -85,6 +86,12 @@ export const maxClaimTokensPerAccount = limitFromEnv(
 );
 export const claimTokenTtlMs =
   limitFromEnv("FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS", 24) * 60 * 60 * 1000;
+// A frame-bound (re-enrollment) token is redeemed within one flashing
+// session, minutes after it is minted, and it is far more powerful than an
+// ordinary claim code: redeeming it hands a device the identity of an
+// existing frame, with its scenes, assets and logs. Hence one hour, not a
+// day, and single-use always.
+export const boundClaimTokenTtlMs = 60 * 60 * 1000;
 // Hard per-frame log retention cap. Retained bytes count toward the
 // account's storage usage; db-cleanup.sh prunes by age as well.
 export const maxLogsPerFrame = 5000;
@@ -399,7 +406,17 @@ export function verifyFrameSignature(
   }
 }
 
-export function frameSummary(frame: typeof frames.$inferSelect) {
+export function frameSummary(
+  frame: typeof frames.$inferSelect,
+  // The frame's linked client, when the caller already holds it. Its scope
+  // list is the ONLY record of "does this frame receive the account's service
+  // keys" — the owner's per-frame switch grants or revokes
+  // `settings:services` on the link itself (see the enabled route) — so
+  // `service_settings_enabled` is OMITTED, not false, when the caller cannot
+  // answer. The SPA merges update_frame events over the row it already has,
+  // so an omitted field keeps its last known value instead of flickering off.
+  linkedClient?: { providerClientMetadata: unknown },
+) {
   return {
     // The last-pushed settings round-trip as TOP-LEVEL fields in the
     // device's own spelling (interval, rotate, …) because that is how the
@@ -419,6 +436,18 @@ export function frameSummary(frame: typeof frames.$inferSelect) {
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,
     schedule: frame.schedule,
+    // Which service-settings groups this frame's assigned scenes declare —
+    // group NAMES only, never a field or a value. `[]` covers both "declares
+    // nothing" and the NULL column of a frame assigned scenes before the
+    // column existed; the device pull backfills that on its next poll.
+    service_setting_groups: readServiceSettingGroups(frame.serviceSettingGroups) ?? [],
+    ...(linkedClient
+      ? {
+          service_settings_enabled: linkedClientScopes(linkedClient).includes(
+            frameServiceSettingsScope,
+          ),
+        }
+      : {}),
     status: frame.status,
   };
 }
@@ -447,6 +476,20 @@ export async function frameForAccount(
     .where(and(eq(frames.id, frameId), eq(frames.accountId, accountId)))
     .limit(1);
   return frame;
+}
+
+// The link behind a frame, for callers that need its scopes (frameSummary's
+// `service_settings_enabled`). Undefined if the row is gone.
+export async function linkedClientForFrame(
+  db: ReturnType<typeof createDb>,
+  frame: { linkedClientId: string },
+) {
+  const [linkedClient] = await db
+    .select()
+    .from(linkedClients)
+    .where(eq(linkedClients.id, frame.linkedClientId))
+    .limit(1);
+  return linkedClient;
 }
 
 export async function frameForLinkedClient(
@@ -557,6 +600,42 @@ export async function enqueueServiceSettingsRefresh(
     ttlMs: serviceSettingsRefreshTtlMs,
     type: "refresh_service_settings",
   });
+}
+
+// Nudge ONE frame, if it can actually act on it: an inactive frame or a
+// linked client without `settings:services` gets a 403 from the pull, so
+// waking it would spend a battery frame's radio on nothing. Mirrors the
+// per-account fan-out in app/api/settings/route.ts (nudgeManagedFrames).
+// Failures are swallowed for the same reason they are there: the caller's
+// real work (a scene assignment, a settings save) is already committed, and
+// an un-nudged frame re-pulls at its next `ready` anyway.
+export async function enqueueServiceSettingsRefreshIfScoped(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+) {
+  try {
+    const [row] = await db
+      .select({
+        providerClientMetadata: linkedClients.providerClientMetadata,
+        status: frames.status,
+      })
+      .from(frames)
+      .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+      .where(and(eq(frames.id, frameId), isNull(linkedClients.revokedAt)))
+      .limit(1);
+    if (!row || row.status !== "active") {
+      return;
+    }
+    if (!linkedClientScopes(row).includes(frameServiceSettingsScope)) {
+      return;
+    }
+    await enqueueServiceSettingsRefresh(db, frameId);
+  } catch (error) {
+    console.error(
+      "frames: service-settings nudge failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+  }
 }
 
 // Read frames.service_setting_groups. `undefined` means "never computed"

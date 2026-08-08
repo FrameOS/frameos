@@ -284,13 +284,22 @@ export async function startFrameHub(
   }
 
   async function broadcastFrameUpdate(frameId: string) {
-    const [frame] = await db
-      .select()
+    // The link comes along so the broadcast can carry
+    // `service_settings_enabled` (the owner's per-frame switch lives in the
+    // link's scope list). LEFT join: a frame whose link row is gone still
+    // gets its update, minus that one field.
+    const [row] = await db
+      .select({ frame: frames, linkedClient: linkedClients })
       .from(frames)
+      .leftJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
       .where(eq(frames.id, frameId))
       .limit(1);
-    if (frame) {
-      broadcastToBrowsers(frame, "update_frame", frameUpdateEvent(frame));
+    if (row) {
+      broadcastToBrowsers(
+        row.frame,
+        "update_frame",
+        frameUpdateEvent(row.frame, row.linkedClient ?? undefined),
+      );
     }
   }
 
@@ -428,16 +437,33 @@ export async function startFrameHub(
   // paths (NOTIFY and the 30s sweep) recheck and close a revoked frame's
   // live socket with 4401 — the same code the device treats as "link is
   // dead" — instead of draining commands to it.
-  async function isFrameRevoked(session: DeviceSession) {
+  //
+  // The device public key is checked for the same reason: re-enrollment
+  // (a frame-bound claim token) re-keys the frame in place, so a socket held
+  // by the device that USED to own this row was authenticated with a
+  // credential that no longer exists. It has to go the same way a revoked
+  // one does — auth-web NOTIFYs this channel right after re-keying.
+  async function isFrameSessionStale(session: DeviceSession) {
     const [row] = await db
-      .select({ revokedAt: linkedClients.revokedAt, status: frames.status })
+      .select({
+        publicKey: frames.publicKey,
+        revokedAt: linkedClients.revokedAt,
+        status: frames.status,
+      })
       .from(frames)
       .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
       .where(eq(frames.id, session.frame.id))
       .limit(1);
-    return !row || row.status === "revoked" || row.revokedAt !== null;
+    return (
+      !row ||
+      row.status === "revoked" ||
+      row.revokedAt !== null ||
+      row.publicKey !== session.frame.publicKey
+    );
   }
 
+  // Also the exit for a session left behind by a re-enrollment: from the
+  // device's side both are "this link is no longer mine".
   async function kickRevokedSession(session: DeviceSession) {
     logInfo("device.kicked_revoked", { frameId: session.frame.id });
     // Mark disconnected (connected=false + update_frame broadcast) before
@@ -451,7 +477,7 @@ export async function startFrameHub(
     if (!session.ready || session.closed) {
       return;
     }
-    if (await isFrameRevoked(session)) {
+    if (await isFrameSessionStale(session)) {
       await kickRevokedSession(session);
       return;
     }
@@ -467,7 +493,7 @@ export async function startFrameHub(
     // Revocation can land between the Bearer check at upgrade and the end of
     // the challenge handshake; without this recheck the frame would be marked
     // connected until the next sweep, up to 30s later.
-    if (await isFrameRevoked(session)) {
+    if (await isFrameSessionStale(session)) {
       logInfo("device.activate_revoked", { frameId: session.frame.id });
       session.ws.close(closeAuthFailed, "frame_revoked");
       return;
