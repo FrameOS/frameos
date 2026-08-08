@@ -41,6 +41,7 @@ int frameos_nim_load_scenes(const char *json)
     return 0;
 }
 double frameos_nim_scene_interval(void) { return 0; }
+double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
 bool frameos_nim_send_event(const char *event, const char *payload_json)
 {
@@ -74,3 +75,4 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
 {
     (void)dir; (void)max_spill_bytes;
 }
+void fos_nim_http_set_spill_force_bytes(size_t threshold) { (void)threshold; }

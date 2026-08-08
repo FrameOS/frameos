@@ -542,6 +542,18 @@ proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
     log("scene interval failed: " & e.msg)
     0.cdouble
 
+proc fos_nim_next_sleep_impl(): cdouble {.exportc, cdecl.} =
+  ## Sleep override set by the just-finished render (logic/nextSleepDuration);
+  ## negative means "no override" and the interval logic applies.
+  try:
+    sceneNextSleepSeconds().cdouble
+  except Defect as e:
+    log("next sleep failed (defect): " & e.msg)
+    -1.cdouble
+  except CatchableError as e:
+    log("next sleep failed: " & e.msg)
+    -1.cdouble
+
 proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a
   ## redraw; clears the flag.

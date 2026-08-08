@@ -252,7 +252,9 @@ void app_main(void)
                 closedir(dir);
             }
             fos_nim_http_set_spill_dir(spill_dir, 8 * 1024 * 1024);
-            ESP_LOGI(TAG, "http spill dir: %s", spill_dir);
+            fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+            ESP_LOGI(TAG, "http spill dir: %s%s", spill_dir,
+                     config->http_spill_force_bytes ? " (forced)" : "");
         }
     }
 

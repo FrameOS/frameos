@@ -52,6 +52,9 @@ int frameos_nim_load_scenes(const char *json);
 void frameos_nim_invalidate_settings(void);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
 double frameos_nim_scene_interval(void);
+/* Sleep override from the scene's last render (logic/nextSleepDuration);
+ * negative = no override. Consult only right after a successful render. */
+double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
 /* Deliver a JSON event payload to the current interpreted scene. */
@@ -135,6 +138,10 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
  * before renders start; leftover http-spill-*.tmp files from a crash should
  * be swept at boot. */
 void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes);
+/* Debug knob: force bodies to spill once `threshold` bytes are buffered,
+ * even with PSRAM free (0 = off). Lets the spill decode path be validated
+ * on frames that would otherwise never hit real memory pressure. */
+void fos_nim_http_set_spill_force_bytes(size_t threshold);
 
 #ifdef __cplusplus
 }

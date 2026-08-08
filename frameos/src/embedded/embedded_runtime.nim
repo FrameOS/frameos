@@ -272,9 +272,18 @@ proc sceneRefreshSeconds*(): float =
     return currentExported.refreshInterval
   0.0
 
+var lastNextSleep: float = -1
+
+proc sceneNextSleepSeconds*(): float =
+  ## Per-render sleep override the scene's last render set through
+  ## logic/nextSleepDuration (context.nextSleep on the Pi runner);
+  ## negative = no override, use the interval logic.
+  lastNextSleep
+
 proc renderCurrentScene*(): Option[Image] =
   ## Render the active interpreted scene; none() when no scenes are loaded
   ## (the caller falls back to the baked demo scene).
+  lastNextSleep = -1
   if not ensureScene():
     return none(Image)
   let context = ExecutionContext(
@@ -283,10 +292,12 @@ proc renderCurrentScene*(): Option[Image] =
     payload: %*{},
     hasImage: false,
     loopIndex: 0,
-    loopKey: "."
+    loopKey: ".",
+    nextSleep: -1
   )
   let image = interpreter.render(currentScene, context)
   if image.isNil:
     log("render returned no image")
     return none(Image)
+  lastNextSleep = context.nextSleep
   some(image)
