@@ -22,6 +22,8 @@ export default tseslint.config(
       // Same exclusion, same reason: mounts the real framesModel, whose
       // import graph reaches the legacy workspace components.
       "**/src/test/shared-spa/cloud-scene-deploy.test.ts",
+      // Same exclusion, same reason: renders the whole deploy drawer.
+      "**/src/test/shared-spa/cloud-deploy-dialog.test.tsx",
     ],
   },
   js.configs.recommended,

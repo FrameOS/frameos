@@ -25,8 +25,8 @@ import {
 
 // The shared SPA (frontend/src) renders the cloud fleet UI as well as the
 // self-hosted backend and the on-device admin panel. Cloud-managed frames
-// speak a four-verb protocol over an outbound WebSocket: no shell, no files,
-// no deploy, no SSH. Gating used to be `isCloudMode()` sprinkled across eight
+// speak a four-verb protocol over an outbound WebSocket: no shell, no SSH,
+// no compiled builds. Gating used to be `isCloudMode()` sprinkled across eight
 // components — a deny-list, so anything new was cloud-visible by default and
 // shipped a button that always errored.
 //
@@ -59,12 +59,11 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     expect(allowedSceneUtilityPanels.cloud).not.toContain("source");
   });
 
-  it("offers no deploy, SD-card build, stop or archive action", () => {
+  it("offers no SD-card build, remote-agent, stop or archive action", () => {
     for (const action of [
       "archive",
       "buildSdCard",
       "cancelDeploy",
-      "deploy",
       "deployRemote",
       "localDeploy",
       "restartRemote",
@@ -76,6 +75,23 @@ describe("cloud mode hides everything the protocol cannot do", () => {
 
   it("offers delete (revoke + drop the row, DELETE /api/frames/{id})", () => {
     expect(frameMenuActionIsAllowed("cloud", "delete")).toBe(true);
+  });
+
+  it("offers deploy — the ENTRY POINT, not the backend's transport", () => {
+    // This list used to pin "no deploy on the cloud", reasoning from the
+    // transport: there is no /deploy endpoint, no build host and no
+    // fast/full distinction (cloud frames are interpreted-only). But the
+    // action is what OPENS the deploy dialog, and the cloud has three
+    // deploy-shaped things to put in it: the settings push + one checksummed
+    // set_scenes, the notify_update_available firmware nudge, and WebSerial
+    // USB provisioning for esp32 boards. Hiding the action hid all three:
+    // the "…" menu had no Deploy entry, the dashboard tile was gated off,
+    // and the scene sidebar's Deploy button fired a push immediately with no
+    // dialog and no summary of what it would send. The dialog's CONTENTS are
+    // the control plane's business — FrameDeployPlanDrawer renders its cloud
+    // branch (CloudDeploySection), never the SSH/deploy-plan/SD-card UI.
+    expect(frameMenuActionIsAllowed("cloud", "deploy")).toBe(true);
+    expect(frameMenuActionDisabledReason("cloud", "deploy", { hardware: { platform: "esp32" } })).toBeNull();
   });
 
   it("links to no SSH, Remote-agent or backend-access settings section", () => {
@@ -239,8 +255,10 @@ describe("the esp32 cloud device profile", () => {
     // gone for the best reason: the firmware now implements the verb via the
     // signed cloud OTA path, so the esp32 profile carries the full set.
     // Prefix matching still gates real surfaces — the Update-firmware menu
-    // entry and the USB serial console are offered exactly to
-    // isEsp32CloudFrame frames — so pin the classifier itself.
+    // entry, the USB serial console, and the deploy dialog's USB setup block
+    // (EmbeddedUsbSetup: status, Wi-Fi scan/provision, restart, factory
+    // reset, all over WebSerial) are offered exactly to isEsp32CloudFrame
+    // frames — so pin the classifier itself.
     for (const platform of ["esp32", "esp32-s3", "esp32-c3", "ESP32-S3"]) {
       expect(isEsp32CloudFrame({ hardware: { platform } }, "cloud")).toBe(true);
     }

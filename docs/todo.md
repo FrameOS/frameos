@@ -43,6 +43,33 @@ Known gaps from the 2026-08-08 audit (in flight or open):
   in the cloud protocol — structural, not a gap to close).
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
+- **Re-flash an ALREADY-ENROLLED cloud frame** — the deploy dialog now offers
+  cloud esp32 frames the full USB *provisioning* set (status, Wi-Fi
+  scan/apply, restart, factory reset — `EmbeddedUsbSetup`, pure WebSerial),
+  but deliberately NOT a "flash firmware" button, because browser flashing
+  currently forks a duplicate frame row. `Esp32CloudFlasher`
+  (`cloud-frontend/src/components/Esp32CloudFlasher.tsx`) is an *enrollment*
+  flow end to end: `mintEnrollmentCode()` always POSTs
+  `/api/frames/claim-tokens` for a FRESH single-use token, provisions it over
+  serial, and then watches the frame list for a frame id it has not seen
+  before. Point that at a board that already owns a frame row and the account
+  ends up with two rows for one device (the old one orphaned, still counting
+  against `maxFramesPerAccount`), which is worse than not offering the button.
+  What is missing is server-side, and none of it exists today:
+  1. A claim token BOUND to an existing frame. `app/api/frames/claim-tokens/route.ts`
+     accepts only `name`/`multi_use`/`max_uses`/`ttl_days` and
+     `frameEnrollmentTokens` has no frame column — add an optional
+     `frame_id` (ownership-checked against the session account, forced
+     `max_uses: 1`, short TTL) so redemption can re-key an existing row
+     instead of inserting one.
+  2. Redemption that re-keys rather than creates: the enrollment path must,
+     for a frame-bound token, rotate that frame's device credentials in
+     place and leave `frames.id`, its scenes, assets and logs alone.
+  3. A flasher mode that takes a known `frameId` + its bound token, skips
+     the new-frame watch entirely, and reports success against the row the
+     user started from.
+  Until 1–3 land, re-flashing an enrolled board stays a delete-and-re-enroll
+  (or a manual esptool flash + factory reset over the USB setup block).
 
 ## Cloud-managed frames
 

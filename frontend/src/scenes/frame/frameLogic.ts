@@ -2064,6 +2064,14 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     showDeployPlanModal: () => {
+      // The cloud's deploy dialog (FrameDeployPlanDrawer's cloud branch)
+      // shows no build plan: there is no POST /api/frames/{id}/deploy_plan
+      // and no /sync on that control plane, so fetching either only parked a
+      // 404 in the drawer's error slot. Its own state — unsaved changes,
+      // scene count, connection — comes from the frame row.
+      if (isCloudMode()) {
+        return
+      }
       if (
         !values.frameSyncStatusLoading &&
         shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)

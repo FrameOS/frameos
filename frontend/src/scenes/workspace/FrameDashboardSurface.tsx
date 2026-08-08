@@ -371,19 +371,28 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     ? 'deploy now'
     : 'up to date'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
+  // Same predicate as the deploy tile above and the "…" menu: this link is
+  // one more way into the deploy dialog, so it exists exactly where that
+  // dialog does. Unsaved changes open their own drawer and are never gated.
+  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const canOpenDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
 
   return (
     <div className="frameos-muted truncate text-sm text-slate-500">
-      <button
-        type="button"
-        onClick={() => openFrameChangeDrawer(frame.id, unsavedChanges ? 'unsaved' : 'deploy')}
-        className={clsx(
-          'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-          frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
-        )}
-      >
-        {changeLabel}
-      </button>
+      {canOpenDrawer ? (
+        <button
+          type="button"
+          onClick={() => openFrameChangeDrawer(frame.id, drawerKind)}
+          className={clsx(
+            'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
+          )}
+        >
+          {changeLabel}
+        </button>
+      ) : (
+        <span className="font-medium">{changeLabel}</span>
+      )}
       <span> - </span>
       {frameStatus(frame)}
     </div>

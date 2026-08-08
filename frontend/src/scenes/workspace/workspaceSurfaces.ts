@@ -31,7 +31,10 @@ export type WorkspaceUtilityPanel =
 //   backend    the FrameOS backend — SSH, compiled deploys, shell, files
 //   frameAdmin the on-device admin panel — local frame, no SSH/ping
 //   cloud      FrameOS Cloud — an outbound WebSocket carrying four command
-//              verbs and a settings allowlist. No shell, no files, no deploy.
+//              verbs and a settings allowlist. No shell, no SSH, no compiled
+//              builds — but it does have a deploy: the settings push plus one
+//              checksummed set_scenes, and (for esp32 boards) USB
+//              provisioning straight from the browser.
 //
 // These are ALLOW-lists on purpose. The gating used to be `isCloudMode()`
 // booleans sprinkled across eight components, so every panel added to
@@ -85,8 +88,10 @@ export const allowedSceneUtilityPanels: Record<WorkspaceMode, readonly Workspace
 /**
  * Actions in the frame's "…" menu. `render`, `reboot` and `restart` map onto
  * the cloud's allowedFrameCommandTypes (reboot, render, restart_runtime,
- * set_current_scene); `rename` maps onto its settings allowlist. Everything
- * else needs SSH, a build host, or backend bookkeeping.
+ * set_current_scene); `rename` maps onto its settings allowlist; `deploy`
+ * opens the deploy dialog, whose contents are the control plane's business
+ * (see below). Everything else needs SSH, a build host, or backend
+ * bookkeeping.
  */
 export type FrameMenuAction =
   | 'archive'
@@ -128,7 +133,18 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
   frameAdmin: ['localDeploy', 'rename', 'render'],
   // `delete` = DELETE /api/frames/{id}: revoke the link, then drop the row
   // and everything cascaded to it. The device demotes to standalone.
-  cloud: ['delete', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
+  //
+  // `deploy` is allowed here even though the cloud has no /deploy endpoint,
+  // no build host and no fast/full distinction. It is the ENTRY POINT, not
+  // the transport: it opens the deploy dialog, which on the cloud offers the
+  // settings push + one checksummed set_scenes (framesModel.deployFrame's
+  // cloud branch), the firmware-update nudge, and — for esp32 boards — USB
+  // provisioning over WebSerial. Leaving it off the list is what used to
+  // hide every deploy affordance on the cloud, so the only way to push
+  // scenes was a bare button in the scene sidebar that opened no dialog at
+  // all and gave no confirmation of what it would send. See
+  // FrameDeployPlanDrawer's cloud branch for what the dialog renders.
+  cloud: ['delete', 'deploy', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
 }
 
 /**

@@ -75,10 +75,13 @@ export function isHiddenOrJunkAssetPath(path: string): boolean {
   if (parts.length === 0) {
     return false
   }
-  for (let index = 0; index < parts.length - 1; index++) {
-    if (isJunkDirName(parts[index])) {
+  // Indexing is checked under the cloud app's stricter tsconfig, which
+  // typechecks this shared file too — hence the explicit reads.
+  const leaf = parts[parts.length - 1] ?? ''
+  for (const part of parts.slice(0, -1)) {
+    if (isJunkDirName(part)) {
       return true
     }
   }
-  return isHiddenOrJunkFileName(parts[parts.length - 1])
+  return isHiddenOrJunkFileName(leaf)
 }
