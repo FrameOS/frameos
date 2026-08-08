@@ -1742,6 +1742,14 @@ static void ws_handle_message(const char *data, size_t len)
         ws_ack(id, true, NULL);
         ws_schedule_reboot();
     } else if (strcmp(type, "set_schedule") == 0) {
+        /* The chip carries no tz database, so the provider sends the frame's
+         * current UTC offset alongside the schedule (the backend poll does the
+         * same via the `frame` object). Apply it first: without it a
+         * cloud-only frame evaluates every event in UTC. */
+        const cJSON *offset = cJSON_GetObjectItem(root, "utcOffsetMinutes");
+        if (cJSON_IsNumber(offset)) {
+            fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
+        }
         const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
         if (schedule == NULL || cJSON_IsNull(schedule)) {
             fos_schedule_set_json(NULL, 0);
