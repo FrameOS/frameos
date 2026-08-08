@@ -5,6 +5,7 @@ import {
   cloudFrameUrl,
   cloudFramesUrl,
   cloudRouteBasePath,
+  cloudSettingsUrl,
 } from "@frameos/cloud-frontend/src/routes";
 import { urls } from "../../../../../../frontend/src/urls";
 
@@ -52,5 +53,27 @@ describe("cloud SPA route helpers", () => {
   it("passes the tool query through the same way urls.frame does", () => {
     const fromSpa = withCloudSpaConfig(() => urls.frame("abc", "settings"));
     expect(cloudFrameUrl("abc", "settings")).toBe(fromSpa);
+  });
+
+  it("agrees with the SPA's own urls.settings()", () => {
+    expect(cloudSettingsUrl()).toBe("/frames/settings");
+    expect(cloudSettingsUrl()).toBe(withCloudSpaConfig(() => urls.settings()));
+  });
+
+  it("registers the account settings scene at /frames/settings", async () => {
+    // The page 404'd client-side before the scene was registered: urls
+    // helpers linked to /frames/settings but the SPA's route table had no
+    // entry. The specifier is a variable ON PURPOSE: scenes.tsx transitively
+    // imports the whole React SPA, and a static (or literal-dynamic) import
+    // would drag all of it into this app's stricter tsc program — vitest
+    // resolves the runtime import fine either way.
+    const scenesModulePath = "@frameos/cloud-frontend/src/scenes/scenes";
+    const { getRoutes, scenes } = (await import(scenesModulePath)) as {
+      getRoutes: () => Record<string, string>;
+      scenes: Record<string, unknown>;
+    };
+    const routes = withCloudSpaConfig(() => getRoutes());
+    expect(routes[cloudSettingsUrl()]).toBe("settings");
+    expect(scenes).toHaveProperty("settings");
   });
 });

@@ -27,10 +27,12 @@ import {
   GET as getFrameScenes,
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
+import { POST as pushFrameSchedule } from "../../../app/api/frames/[frameId]/schedule/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
 import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
 import {
   allowedFrameSettings,
+  esp32SettableKeys,
   maxClaimTokensPerAccount,
   maxFramesPerAccount,
   maxScenesPayloadBytes,
@@ -298,9 +300,10 @@ describe("cloud-managed frame enrollment", () => {
     expect(payload.status).toBe("pending");
     expect(payload.token_type).toBe("Bearer");
     // The FULL grant, not just frame:managed — the device stores this string
-    // as its local scope list and gates its telemetry push loops on it.
+    // as its local scope list and gates its telemetry push loops (and its
+    // service-settings pull) on it.
     expect(payload.scope).toBe(
-      "frame:managed telemetry:logs telemetry:metrics",
+      "frame:managed settings:services telemetry:logs telemetry:metrics",
     );
     expect(payload.ws_path).toBe("/api/frames/ws");
     expect(typeof payload.access_token).toBe("string");
@@ -1125,6 +1128,14 @@ describe("frame management API", () => {
     expect([...allowedFrameSettings.keys()].sort()).toEqual(
       ["debug", "interval", "name", "rotate", "scaling_mode", "timezone"].sort(),
     );
+    // The ESP32 profile is a strict subset of that list: exactly what
+    // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies.
+    expect([...esp32SettableKeys].sort()).toEqual(
+      ["interval", "name", "rotate"].sort(),
+    );
+    for (const key of esp32SettableKeys) {
+      expect(allowedFrameSettings.has(key)).toBe(true);
+    }
 
     const { frame_id } = await enrolledFrame();
     await confirmFrame(
@@ -1159,10 +1170,11 @@ describe("frame management API", () => {
   });
 
   // The frame's name is provider-side data (frames.name, what frameSummary
-  // returns) — the device never has to accept it. The ESP32 firmware answers
-  // `unsupported_verb` for set_settings, so the route applies `name` directly
-  // to the row and skips the enqueue for esp32 platforms; anything else in
-  // the payload is refused up front so nothing is half-applied.
+  // returns) — the device never has to accept it, and older firmware without
+  // the set_settings verb would refuse the push for nothing. So the route
+  // applies a name-only payload directly to the row and skips the enqueue
+  // for esp32 platforms; anything outside the device's subset is refused up
+  // front so nothing is half-applied.
   it("renames an esp32 frame in the DB without enqueueing set_settings", async () => {
     const accountId = await signIn();
     const keys = deviceKeypair();
@@ -1204,9 +1216,10 @@ describe("frame management API", () => {
     expect(commands.filter((c) => c.type === "set_settings")).toHaveLength(0);
   });
 
-  it("queues set_settings toward an esp32 for its interval/name subset", async () => {
-    // The firmware's set_settings persists interval (render cadence) and
-    // name (hostname); the provider enqueues those and refuses the rest.
+  it("queues set_settings toward an esp32 for its interval/name/rotate subset", async () => {
+    // The firmware's set_settings applies interval (render cadence), name
+    // (hostname) and rotate (renderer canvas, deferred reboot); the provider
+    // enqueues those and refuses the rest.
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -1222,7 +1235,7 @@ describe("frame management API", () => {
     const response = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { interval: 600, name: "Desk, renamed" } },
+        { settings: { interval: 600, name: "Desk, renamed", rotate: 90 } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),
@@ -1242,14 +1255,96 @@ describe("frame management API", () => {
     const settingsCommands = commands.filter((c) => c.type === "set_settings");
     expect(settingsCommands).toHaveLength(1);
     expect(settingsCommands[0]?.payload).toEqual({
-      settings: { interval: 600, name: "Desk, renamed" },
+      settings: { interval: 600, name: "Desk, renamed", rotate: 90 },
     });
-    // The rename also applied provider-side.
+    // The rename also applied provider-side, and the device-side keys are
+    // mirrored into frames.settings (never the name — frames.name owns it).
     const [frame] = await db
       .select()
       .from(frames)
       .where(eq(frames.id, frame_id));
     expect(frame?.name).toBe("Desk, renamed");
+    expect(frame?.settings).toEqual({ interval: 600, rotate: 90 });
+
+    // …and GET /api/frames/{id} hands them back as top-level fields, which
+    // is what the Settings panel hydrates from. Without this the Interval
+    // and Rotation controls rendered blank after every reload.
+    const detail = await getFrameDetail(
+      new NextRequest(`${baseUrl}/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    expect(detail.status).toBe(200);
+    const detailBody = (await detail.json()) as {
+      frame: { interval?: number; name?: string; rotate?: number };
+    };
+    expect(detailBody.frame.interval).toBe(600);
+    expect(detailBody.frame.rotate).toBe(90);
+    expect(detailBody.frame.name).toBe("Desk, renamed");
+
+    // A later one-key push merges rather than blanking the rest.
+    const again = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { rotate: 270 } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(again.status).toBe(200);
+    const [merged] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(merged?.settings).toEqual({ interval: 600, rotate: 270 });
+  });
+
+  it("refuses the settings an esp32 has no consumer for", async () => {
+    // scaling_mode and debug are not fields of fos_config_t at all, and
+    // timezone is unimplementable on a device with no tz database (its only
+    // timezone concept is the utcOffsetMinutes riding with set_schedule).
+    // The firmware refuses the whole verb on any of them; the route says so
+    // first, so nothing is half-applied.
+    const keys = deviceKeypair();
+    await signIn();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    for (const settings of [
+      { scaling_mode: "cover" },
+      { debug: true },
+      { timezone: "Europe/Tallinn" },
+    ]) {
+      const refused = await pushFrameSettings(
+        postJson(
+          `/api/frames/${frame_id}/settings`,
+          { settings },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { error: string }).error).toBe(
+        "settings_not_supported_by_device",
+      );
+    }
+
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.settings).toBeNull();
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(0);
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
@@ -1273,7 +1368,7 @@ describe("frame management API", () => {
     const refused = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { name: "Half-applied", rotate: 90 } },
+        { settings: { name: "Half-applied", scaling_mode: "cover" } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),
@@ -1378,6 +1473,201 @@ describe("frame management API", () => {
     expect(commands).toHaveLength(0);
   });
 
+  // The Schedule panel's write path. The full schedule — disabled events
+  // included — is provider-side state the panel round-trips via
+  // GET /api/frames/{id}; the device push carries only the events it should
+  // actually fire (devices fire everything they are given), and gets no TTL:
+  // a schedule is declarative, and a battery frame that connects tomorrow
+  // should still receive today's schedule.
+  const scheduleEvent = (overrides: Record<string, unknown> = {}) => ({
+    event: "setCurrentScene",
+    hour: 8,
+    id: "on",
+    minute: 30,
+    payload: { sceneId: "scene-1", state: {} },
+    weekday: 0,
+    ...overrides,
+  });
+
+  it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const onEvent = scheduleEvent();
+    const offEvent = scheduleEvent({ disabled: true, id: "off" });
+    const response = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [onEvent, offEvent] }, utcOffsetMinutes: 120 },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      command_id: string | null;
+      status: string;
+    };
+    expect(body.status).toBe("queued");
+    expect(body.command_id).toBeTruthy();
+
+    // The panel reads its truth back from the detail route, disabled event
+    // and all.
+    const detail = await getFrameDetail(
+      getRequest(`/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    const { frame } = (await detail.json()) as {
+      frame: { schedule?: unknown };
+    };
+    expect(frame.schedule).toEqual({ events: [onEvent, offEvent] });
+
+    // The device push: disabled events resolved away, the offset alongside
+    // (the hub flattens the payload, so this IS the wire shape minus
+    // id/type), and no expiry.
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe("set_schedule");
+    expect(commands[0]?.payload).toEqual({
+      schedule: { events: [onEvent] },
+      utcOffsetMinutes: 120,
+    });
+    expect(commands[0]?.expiresAt).toBeNull();
+    expect(commands[0]?.status).toBe("pending");
+  });
+
+  it("supersedes an undelivered set_schedule instead of stacking pushes", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    for (const minute of [10, 20]) {
+      const response = await pushFrameSchedule(
+        postJson(
+          `/api/frames/${frame_id}/schedule`,
+          { schedule: { events: [scheduleEvent({ minute })] } },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.map((c) => c.status).sort()).toEqual([
+      "expired",
+      "pending",
+    ]);
+    const superseded = commands.find((c) => c.status === "expired");
+    expect(superseded?.error).toBe("superseded");
+    const [frameRow] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frameRow?.schedule).toEqual({
+      events: [scheduleEvent({ minute: 20 })],
+    });
+  });
+
+  it("refuses malformed schedules without persisting or enqueueing anything", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const push = (body: Record<string, unknown>) =>
+      pushFrameSchedule(
+        postJson(`/api/frames/${frame_id}/schedule`, body, {
+          origin: baseUrl,
+        }),
+        routeParams(frame_id),
+      );
+
+    const cases: [Record<string, unknown>, string][] = [
+      [{}, "invalid_schedule"],
+      [{ schedule: { events: "soon" } }, "invalid_schedule"],
+      [
+        { schedule: { events: [scheduleEvent({ minute: 75 })] } },
+        "invalid_schedule",
+      ],
+      [
+        { schedule: { events: [scheduleEvent({ id: "" })] } },
+        "invalid_schedule",
+      ],
+      [
+        {
+          schedule: {
+            events: Array.from({ length: 65 }, (_, i) =>
+              scheduleEvent({ id: `id-${i}` }),
+            ),
+          },
+        },
+        "schedule_too_large",
+      ],
+      [
+        { schedule: { events: [] }, utcOffsetMinutes: "120" },
+        "invalid_utc_offset",
+      ],
+      [
+        { schedule: { events: [] }, utcOffsetMinutes: 30 * 60 },
+        "invalid_utc_offset",
+      ],
+    ];
+    for (const [body, error] of cases) {
+      const response = await push(body);
+      expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([
+        400,
+        error,
+      ]);
+    }
+
+    const [frameRow] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frameRow?.schedule).toBeNull();
+    expect(
+      await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id)),
+    ).toHaveLength(0);
+  });
+
+  it("refuses schedule pushes while the frame is pending, and without an app origin", async () => {
+    const { frame_id } = await enrolledFrame();
+
+    const pending = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [] } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(pending.status).toBe(409);
+
+    const noOrigin = await pushFrameSchedule(
+      postJson(`/api/frames/${frame_id}/schedule`, {
+        schedule: { events: [] },
+      }),
+      routeParams(frame_id),
+    );
+    expect(noOrigin.status).toBe(403);
+  });
+
   it("answers 404, not 500, for frame ids that are not uuids", async () => {
     await signIn();
     const bogus = "not-a-uuid";
@@ -1411,6 +1701,14 @@ describe("frame management API", () => {
         postJson(
           `/api/frames/${bogus}/settings`,
           { settings: { rotate: 90 } },
+          { origin: baseUrl },
+        ),
+        routeParams(bogus),
+      ),
+      pushFrameSchedule(
+        postJson(
+          `/api/frames/${bogus}/schedule`,
+          { schedule: { events: [] } },
           { origin: baseUrl },
         ),
         routeParams(bogus),

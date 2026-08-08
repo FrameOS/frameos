@@ -10,7 +10,9 @@ import {
 } from "../../../../../src/lib/device-flow";
 import {
   enqueueFrameCommand,
+  esp32SettableKeys,
   frameForAccount,
+  mergeFrameSettings,
   supersedePendingCommands,
   validateFrameSettings,
 } from "../../../../../src/lib/frames";
@@ -63,15 +65,14 @@ export async function POST(
 
   // The frame's NAME is provider-side data (frames.name, what frameSummary
   // returns) — the device never has to accept it. The ESP32 firmware's
-  // set_settings persists only `interval` and `name` (its declarative
-  // subset; anything else it refuses whole-verb with setting_not_allowed),
-  // so a payload carrying other keys is refused up front and nothing is
-  // half-applied.
+  // set_settings applies only `interval`, `name` and `rotate` (its
+  // declarative subset; anything else it refuses whole-verb with
+  // setting_not_allowed), so a payload carrying other keys is refused up
+  // front and nothing is half-applied.
   const platform = (frame.hardware as { platform?: unknown } | null)?.platform;
   const isEsp32 =
     typeof platform === "string" &&
     platform.toLowerCase().startsWith("esp32");
-  const esp32SettableKeys = new Set(["interval", "name"]);
   if (
     isEsp32 &&
     Object.keys(settings).some((key) => !esp32SettableKeys.has(key))
@@ -79,10 +80,19 @@ export async function POST(
     return jsonError("settings_not_supported_by_device", 400);
   }
 
-  if (typeof settings.name === "string") {
+  // Mirror what was pushed so the Settings panel hydrates on the next load
+  // (and so a push toward an offline device is not lost from the UI). The
+  // name lands in frames.name, everything else in frames.settings, merged
+  // onto what was there so a one-key push does not blank the rest.
+  const mergedSettings = mergeFrameSettings(frame.settings, settings);
+  if (typeof settings.name === "string" || mergedSettings) {
     await db
       .update(frames)
-      .set({ name: settings.name, updatedAt: new Date() })
+      .set({
+        ...(typeof settings.name === "string" ? { name: settings.name } : {}),
+        ...(mergedSettings ? { settings: mergedSettings } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(frames.id, frame.id));
   }
 

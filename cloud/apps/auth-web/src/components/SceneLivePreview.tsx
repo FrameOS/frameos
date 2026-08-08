@@ -58,6 +58,14 @@ export function SceneLivePreview({
   const [appliedSettings, setAppliedSettings] = useState<
     Record<string, Record<string, string>>
   >({});
+  // Service keys saved in the account's settings (GET /api/settings), used
+  // as the base layer so scenes render without retyping them; anything typed
+  // above wins per field. null until the (best-effort) fetch settles — the
+  // runtime mount waits for it so it doesn't boot keyless and remount.
+  const [storedSettings, setStoredSettings] = useState<Record<
+    string,
+    Record<string, string>
+  > | null>(null);
   const requiredSettings = useMemo<PreviewSettingsGroup[]>(
     () => (scenes ? requiredSettingsForScenes(scenes) : []),
     [scenes],
@@ -141,7 +149,60 @@ export function SceneLivePreview({
   }, [open, scenes, sceneId]);
 
   useEffect(() => {
-    if (!open || !scenes || !containerRef.current) {
+    if (!open || storedSettings !== null) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const groups: Record<string, Record<string, string>> = {};
+      try {
+        const response = await fetch("/api/settings");
+        if (response.ok) {
+          // {group: {field: value}} — keep the non-empty string fields; the
+          // wasm runtime consumes exactly that shape.
+          const data = (await response.json()) as Record<string, unknown>;
+          for (const [group, value] of Object.entries(data)) {
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              continue;
+            }
+            const fields: Record<string, string> = {};
+            for (const [field, fieldValue] of Object.entries(value)) {
+              if (typeof fieldValue === "string" && fieldValue) {
+                fields[field] = fieldValue;
+              }
+            }
+            if (Object.keys(fields).length > 0) {
+              groups[group] = fields;
+            }
+          }
+        }
+      } catch {
+        // Not signed in / no stored keys: the preview still runs, and the
+        // form above lets the visitor type keys for this tab.
+      }
+      if (!cancelled) {
+        setStoredSettings(groups);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, storedSettings]);
+
+  // Stored account keys under, per-field overrides typed in this tab over.
+  const previewSettings = useMemo(() => {
+    const merged: Record<string, Record<string, string>> = {};
+    for (const [group, fields] of Object.entries(storedSettings ?? {})) {
+      merged[group] = { ...fields };
+    }
+    for (const [group, fields] of Object.entries(appliedSettings)) {
+      merged[group] = { ...(merged[group] ?? {}), ...fields };
+    }
+    return merged;
+  }, [storedSettings, appliedSettings]);
+
+  useEffect(() => {
+    if (!open || !scenes || storedSettings === null || !containerRef.current) {
       return;
     }
     let cancelled = false;
@@ -157,7 +218,7 @@ export function SceneLivePreview({
           width: viewport.width,
           height: viewport.height,
           scenes,
-          settings: appliedSettings,
+          settings: previewSettings,
           // Fallback only: the runtime fetches URLs client-side first and
           // routes just CORS-blocked hosts through this endpoint.
           proxyUrl: "/api/store/preview-proxy",
@@ -173,7 +234,7 @@ export function SceneLivePreview({
       cancelled = true;
       handle?.destroy();
     };
-  }, [open, scenes, viewport, appliedSettings, restartCount]);
+  }, [open, scenes, viewport, storedSettings, previewSettings, restartCount]);
 
   function applySettings() {
     const nested: Record<string, Record<string, string>> = {};
@@ -368,8 +429,9 @@ export function SceneLivePreview({
             This scene uses services that need credentials
           </h4>
           <p className="copy preview-settings__hint">
-            Keys stay in this browser tab and are used only by the preview —
-            they are not stored on FrameOS Cloud.
+            Keys saved in your account settings are applied automatically.
+            Anything typed here stays in this browser tab and is used only by
+            the preview.
           </p>
           {requiredSettings.map((group) => (
             <div className="preview-settings__group" key={group.key}>

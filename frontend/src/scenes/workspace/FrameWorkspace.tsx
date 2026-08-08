@@ -315,8 +315,11 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-reboot', label: 'Reboot' },
 ]
 
-function frameSettingsSectionsForMode(mode: WorkspaceMode = workspaceMode()): { id: string; label: string }[] {
-  return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id))
+function frameSettingsSectionsForFrame(
+  frame?: FrameType | null,
+  mode: WorkspaceMode = workspaceMode()
+): { id: string; label: string }[] {
+  return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id, frame))
 }
 
 function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
@@ -414,9 +417,13 @@ function FrameSelector({
   )
 }
 
-function FrameSettingsSectionLinks({ frameId }: { frameId: FrameId }): JSX.Element {
+function FrameSettingsSectionLinks({ frame }: { frame: FrameType }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
-  const frameSettingsSections = frameSettingsSectionsForMode()
+  const frameId = frame.id
+  // Per frame, not per mode: which sections FrameSettings renders depends on
+  // the device (an esp32 cloud frame shows one), so this cannot be hoisted to
+  // module scope the way the global settings nav is.
+  const frameSettingsSections = frameSettingsSectionsForFrame(frame)
   const splitIndex = Math.ceil(frameSettingsSections.length / 2)
   const sectionColumns = [frameSettingsSections.slice(0, splitIndex), frameSettingsSections.slice(splitIndex)]
 
@@ -547,7 +554,7 @@ function FrameTree({
             return (
               <div key={definition.panel} className="space-y-1">
                 <FrameToolRow definition={definition} active={active} frameId={frame.id} />
-                {definition.panel === 'settings' && active ? <FrameSettingsSectionLinks frameId={frame.id} /> : null}
+                {definition.panel === 'settings' && active ? <FrameSettingsSectionLinks frame={frame} /> : null}
               </div>
             )
           })}

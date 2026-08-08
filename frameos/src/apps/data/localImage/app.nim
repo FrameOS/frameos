@@ -9,6 +9,7 @@ import random
 import frameos/utils/image
 import frameos/utils/app_images
 import frameos/utils/exif
+import frameos/utils/paths
 import frameos/apps
 import frameos/types
 import frameos/hal/entropy
@@ -38,13 +39,6 @@ proc isImage(file: string): bool =
       return true
   return false
 
-proc isInIgnoredDir(path: string): bool =
-  let normalized = path.replace('\\', '/')
-  for dir in [".thumbs", ".frameos"]:
-    if normalized.startsWith(dir & "/") or normalized.contains("/" & dir & "/"):
-      return true
-  return false
-
 proc compareImagePaths(a, b: string): int =
   result = cmpIgnoreCase(a, b)
   if result == 0:
@@ -65,7 +59,8 @@ proc hasSameImages(a, b: seq[string]): bool =
 
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string, search: string): seq[string] =
-  # if folder is a file
+  # If the scene points at one exact file, honor it even when the name looks
+  # like OS junk: explicit beats implicit. Only enumeration filters.
   if fileExists(folder):
     if isImage(folder):
       return @[""]
@@ -75,9 +70,10 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
 
   let searchQuery = search.toLower()
   var images: seq[string] = @[]
-  for file in walkDirRec(folder, relative = true):
-    if isInIgnoredDir(file):
-      continue
+  # walkDirRecNoJunk skips hidden/OS-junk files (`._IMG.jpg`, `.DS_Store`,
+  # `Thumbs.db`, `*.crdownload`, …) and never descends into junk directories
+  # (`.thumbs`, `.frameos`, `@eaDir`, `System Volume Information`, …).
+  for file in walkDirRecNoJunk(folder, relative = true):
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       images.add(file)
   return images

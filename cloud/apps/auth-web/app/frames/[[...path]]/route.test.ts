@@ -28,6 +28,54 @@ const readFile = vi.hoisted(() => vi.fn(async () => shell));
 
 vi.mock("node:fs/promises", () => ({ readFile }));
 
+// The enrollment origin's LAN-address lookup asks the routing table (a UDP
+// connect) and falls back to scanning interfaces. Both are machine state, so
+// both are fixtures here — the real bug this guards against (bridge100
+// beating en0 by enumeration order) only reproduces on a machine running
+// Internet Sharing.
+const lanFixtures = vi.hoisted(() => ({
+  defaultRouteAddress: undefined as string | undefined,
+  interfaces: {} as Record<
+    string,
+    { address: string; family: string; internal: boolean }[]
+  >,
+}));
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, networkInterfaces: () => lanFixtures.interfaces };
+});
+
+vi.mock("node:dgram", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:dgram")>();
+  return {
+    ...actual,
+    createSocket: () => {
+      const errorListeners: (() => void)[] = [];
+      return {
+        once(event: string, listener: () => void) {
+          if (event === "error") errorListeners.push(listener);
+        },
+        connect(_port: number, _host: string, connected: () => void) {
+          if (lanFixtures.defaultRouteAddress === undefined) {
+            queueMicrotask(() => errorListeners.forEach((l) => l()));
+          } else {
+            connected();
+          }
+        },
+        address() {
+          return {
+            address: lanFixtures.defaultRouteAddress,
+            family: "IPv4",
+            port: 0,
+          };
+        },
+        close() {},
+      };
+    },
+  };
+});
+
 const { GET } = await import("./route");
 
 function get(url: string) {
@@ -41,6 +89,10 @@ describe("frames SPA shell", () => {
     delete process.env.FRAMEOS_SCENES_APP_URL;
     delete process.env.FRAMEOS_CLOUD_APP_URL;
     readFile.mockResolvedValue(shell);
+    lanFixtures.defaultRouteAddress = "10.4.0.47";
+    lanFixtures.interfaces = {
+      en0: [{ address: "10.4.0.47", family: "IPv4", internal: false }],
+    };
   });
 
   it("points a localhost request at the dev hub's own port", async () => {
@@ -195,16 +247,44 @@ describe("frames SPA shell", () => {
     // enrolls. The header links keep localhost (the browser is local), but
     // the enrollment origin swaps in this machine's LAN IPv4.
     const body = await (await get("http://localhost:3000/frames")).text();
-    const match = body.match(/cloud_origin: "(.*)",/);
-    expect(match).not.toBeNull();
-    const origin = new URL(match![1]!);
-    // Whatever interface the test machine has: an IPv4 that is not loopback,
-    // or (on a machine with no network at all) localhost as the fallback.
-    expect(origin.port).toBe("3000");
-    if (origin.hostname !== "localhost") {
-      expect(origin.hostname).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
-      expect(origin.hostname).not.toBe("127.0.0.1");
-    }
+    expect(body).toContain('cloud_origin: "http://10.4.0.47:3000",');
+  });
+
+  it("takes the default route's address, not the first RFC1918 interface", async () => {
+    // macOS Internet Sharing's bridge100 holds 192.168.139.x — RFC1918, but
+    // host-only. It enumerates before en0, and picking it provisioned frames
+    // with a cloud_url they could never reach ("provider unreachable").
+    lanFixtures.defaultRouteAddress = "10.4.0.47";
+    lanFixtures.interfaces = {
+      bridge100: [
+        { address: "192.168.139.3", family: "IPv4", internal: false },
+      ],
+      en0: [{ address: "10.4.0.47", family: "IPv4", internal: false }],
+    };
+    const body = await (await get("http://localhost:3000/frames")).text();
+    expect(body).toContain('cloud_origin: "http://10.4.0.47:3000",');
+  });
+
+  it("skips virtual bridges when the default route is a VPN", async () => {
+    // Full-tunnel VPN: the default route's source address is not RFC1918, so
+    // the interface scan decides — and must still prefer the physical NIC
+    // over an Internet Sharing bridge listed first.
+    lanFixtures.defaultRouteAddress = "100.98.45.113";
+    lanFixtures.interfaces = {
+      bridge100: [
+        { address: "192.168.139.3", family: "IPv4", internal: false },
+      ],
+      en0: [{ address: "10.4.0.47", family: "IPv4", internal: false }],
+    };
+    const body = await (await get("http://localhost:3000/frames")).text();
+    expect(body).toContain('cloud_origin: "http://10.4.0.47:3000",');
+  });
+
+  it("keeps localhost when the machine has no usable network", async () => {
+    lanFixtures.defaultRouteAddress = undefined;
+    lanFixtures.interfaces = {};
+    const body = await (await get("http://localhost:3000/frames")).text();
+    expect(body).toContain('cloud_origin: "http://localhost:3000",');
   });
 
   it("sends the deployment's claim-code TTL rather than a hardcoded 24h", async () => {

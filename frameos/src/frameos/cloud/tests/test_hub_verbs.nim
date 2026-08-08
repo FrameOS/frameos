@@ -17,6 +17,7 @@ type
     assetMkdirs: seq[string]
     assetDeletes: seq[string]
     assetRenames: seq[(string, string)]
+    serviceSettingsRefreshes: int
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
@@ -73,6 +74,8 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
       recorded.assetDeletes.add(path),
     renameAssetFn: proc(src: string, dst: string) {.gcsafe.} =
       recorded.assetRenames.add((src, dst)),
+    refreshServiceSettingsFn: proc() {.gcsafe.} =
+      recorded.serviceSettingsRefreshes += 1,
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -148,6 +151,59 @@ suite "cloud hub verb dispatcher":
     check recorded.persistedSettings[0]{"rotate"}.getInt(0) == 90
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
+
+  test "refresh_service_settings needs settings:services and only accepts the nudge":
+    let denied = Recorded()
+    let refused = handleCloudVerb(makeContext(denied, @["frame:managed"]),
+      %*{"id": "r1", "type": "refresh_service_settings"})
+    check refused.ack{"ok"}.getBool(true) == false
+    check refused.ack{"error"}.getStr("") == "insufficient_scope"
+    check denied.serviceSettingsRefreshes == 0
+
+    let granted = Recorded()
+    let accepted = handleCloudVerb(
+      makeContext(granted, @["frame:managed", "settings:services"]),
+      %*{"id": "r2", "type": "refresh_service_settings"})
+    check accepted.ack{"ok"}.getBool(false) == true
+    check accepted.ack{"id"}.getStr("") == "r2"
+    # The ack is bare: acceptance, not completion. The fetch is HTTP on the
+    # device's own schedule and nothing about it rides the ack.
+    check accepted.extra.len == 0
+    check granted.serviceSettingsRefreshes == 1
+    check granted.events.len == 0
+    check granted.persistedSettings.len == 0
+    check "refresh_service_settings" in auditedVerbs(granted)
+
+  test "refresh_service_settings ignores any payload the provider attaches":
+    # The wire payload is always empty; a provider that smuggles keys into it
+    # must not be able to set anything — this handler reads no keys at all.
+    let recorded = Recorded()
+    let reply = handleCloudVerb(
+      makeContext(recorded, @["settings:services"]),
+      %*{"id": "r3", "type": "refresh_service_settings",
+         "settings": {"unsplash": {"accessKey": "leaked"}}})
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.serviceSettingsRefreshes == 1
+    check recorded.persistedSettings.len == 0
+
+  test "set_settings and service settings stay disjoint paths":
+    # The six service-settings groups are cloud-owned but only over the
+    # separate HTTPS pull; they are NOT in CLOUD_SETTINGS_ALLOWLIST, so
+    # set_settings refuses the whole verb when one shows up — even alongside
+    # a perfectly valid key, and even with settings:services granted.
+    for group in ["frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash"]:
+      check group notin CLOUD_SETTINGS_ALLOWLIST
+      let recorded = Recorded()
+      var settings = %*{"name": "Kitchen"}
+      settings[group] = %*{"apiKey": "sk-live-should-never-arrive-here"}
+      let reply = handleCloudVerb(
+        makeContext(recorded, @["frame:managed", "settings:services"]),
+        %*{"id": "d1", "type": "set_settings", "settings": settings})
+      check reply.ack{"ok"}.getBool(true) == false
+      check reply.ack{"error"}.getStr("") == "setting_not_allowed"
+      check recorded.persistedSettings.len == 0
+      check recorded.events.len == 0
+      check recorded.serviceSettingsRefreshes == 0
 
   test "set_schedule persists and reloads":
     let recorded = Recorded()

@@ -22,6 +22,8 @@ export const deviceScopeDescriptions: Record<string, string> = {
   "gallery:read": "Show curated images from the FrameOS gallery on frames",
   "remote:access":
     "Open a relay so this backend can be reached from cloud.frameos.net (may require a paid plan)",
+  "settings:services":
+    "Send this frame the service API keys its scenes need (Unsplash, OpenAI, Home Assistant, Immich, GitHub, FrameOS Gallery)",
   "store:publish":
     "Save scenes from this backend to your cloud account and share them on the FrameOS store",
   "store:read": "Browse and install scenes from the FrameOS store",
@@ -44,6 +46,7 @@ export const deviceScopeLabels: Record<string, string> = {
   "frame:managed": "Cloud-managed frame",
   "gallery:read": "Gallery access",
   "remote:access": "Remote access",
+  "settings:services": "Service API keys",
   "store:publish": "Save and share scenes",
   "store:read": "Store access",
   "telemetry:logs": "Log shipping",

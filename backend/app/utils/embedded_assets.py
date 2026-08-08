@@ -27,6 +27,7 @@ import os
 import posixpath
 import re
 import uuid
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Any, Optional
 
@@ -112,7 +113,27 @@ def _quote_rel(rel_path: str) -> str:
     return quote(rel_path, safe="")
 
 
-async def list_assets(frame: Frame, redis: Redis) -> list[dict[str, Any]]:
+@dataclass
+class AssetListing:
+    """An asset listing plus whatever storage state the source reported.
+
+    ``mounted`` is None whenever nothing said otherwise — SSH/agent frames,
+    virtual frames and ESP32 firmware older than the flag. Only an explicit
+    ``False`` means "the SD card is missing", and that is the one case worth
+    telling the user about: an empty list then means "cannot see the card",
+    not "the card is empty".
+    """
+
+    assets: list[dict[str, Any]] = field(default_factory=list)
+    mounted: Optional[bool] = None
+
+    @property
+    def storage(self) -> Optional[dict[str, Any]]:
+        """The storage state for API responses, or None when unknown."""
+        return None if self.mounted is None else {"mounted": self.mounted}
+
+
+async def list_assets(frame: Frame, redis: Redis) -> AssetListing:
     """List every file/directory on the device, with paths made absolute so the
     response matches the SSH/agent shape the frontend already renders."""
     status, body, _headers = await _fetch_frame_http_bytes(
@@ -158,7 +179,10 @@ async def list_assets(frame: Frame, redis: Redis) -> list[dict[str, Any]]:
             "is_dir": bool(entry.get("is_dir")),
         })
     assets.sort(key=lambda a: a["path"])
-    return assets
+    # Only SD-backed devices report "mounted"; a missing key stays unknown so
+    # nothing warns about frames that never had a card to begin with.
+    mounted = payload.get("mounted")
+    return AssetListing(assets=assets, mounted=mounted if isinstance(mounted, bool) else None)
 
 
 async def download_asset(frame: Frame, redis: Redis, full_path: str) -> tuple[bytes, str]:

@@ -20,6 +20,8 @@ import {
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
+import { deviceDeliverableFields } from "./frame-service-settings";
+import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
@@ -43,6 +45,10 @@ export const claimTokenPrefix = "FRCT";
 export const frameManagedScope = "frame:managed";
 export const frameTelemetryLogsScope = "telemetry:logs";
 export const frameTelemetryMetricsScope = "telemetry:metrics";
+// Lets the frame PULL the account's service API keys (Unsplash, OpenAI, Home
+// Assistant, …) from GET /api/frames/{id}/service-settings. Never a push: see
+// enqueueServiceSettingsRefresh below for why the keys stay off the queue.
+export const frameServiceSettingsScope = "settings:services";
 
 // Deployment-tunable limits. A self-hoster with 60 frames, or a developer
 // re-opening "Add frame" all afternoon, should not have to patch the source.
@@ -124,14 +130,19 @@ export const allowedFrameSettings = new Map<
 ]);
 
 export const allowedFrameCommandTypes = new Set([
+  "get_metrics",
   // Advisory only: the device fetches the manifest and verifies the image
   // signature itself (docs/cloud-frames.md "Signed OTA") — the queue can
   // only suggest, never install.
   "notify_update_available",
   "reboot",
+  // Zero-payload nudge: "your service settings changed, re-pull them".
+  // Carries no keys — see enqueueServiceSettingsRefresh.
+  "refresh_service_settings",
   "render",
   "restart_runtime",
   "set_current_scene",
+  "set_schedule",
 ]);
 
 export function validateFrameSettings(
@@ -153,6 +164,195 @@ export function validateFrameSettings(
     }
   }
   return { settings: Object.fromEntries(entries) };
+}
+
+// The subset the ESP32 firmware really applies in its `set_settings` handler
+// (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
+// (interval_sec), `name` (the DHCP hostname) and `rotate` (validated with
+// the same 0/90/180/270 normalization the backend settings poll uses, then
+// deferred-rebooted so the renderer re-inits). Everything else has no
+// on-device consumer — `scaling_mode` and `debug` are not even fields of
+// fos_config_t, and `timezone` is unimplementable without a tz database —
+// so the firmware refuses the WHOLE verb on them and the route refuses them
+// up front instead of half-applying a push.
+export const esp32SettableKeys = new Set(["interval", "name", "rotate"]);
+
+// The settings frames.settings mirrors, in the device's spelling. `name` is
+// excluded on purpose: frames.name is the authoritative display name, and a
+// second copy here could disagree with it.
+function persistableSettings(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([key]) => key !== "name"),
+  );
+}
+
+// Merge a validated push onto whatever was stored before, so a push carrying
+// only `interval` does not blank out a previously pushed `rotate`. Returns
+// undefined when the push has nothing to mirror (a name-only rename).
+export function mergeFrameSettings(
+  stored: unknown,
+  pushed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const incoming = persistableSettings(pushed);
+  if (Object.keys(incoming).length === 0) {
+    return undefined;
+  }
+  return { ...readFrameSettings(stored), ...incoming };
+}
+
+// Read the stored jsonb back through the allowlist. It is written through
+// validateFrameSettings, but it is still jsonb from a previous release's
+// (or a future release's) allowlist — screening it here keeps a retired key
+// from reappearing in the summary and, from there, in the next push.
+export function readFrameSettings(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const stored = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, check] of allowedFrameSettings) {
+    if (key === "name") continue;
+    if (Object.hasOwn(stored, key) && check(stored[key])) {
+      out[key] = stored[key];
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Scene schedule (docs/cloud-frames.md `set_schedule`)
+// ---------------------------------------------------------------------------
+
+// Caps sized to the smallest schedule engine in the fleet — the ESP32's
+// (embedded/esp32/main/fos_schedule.c): SCHEDULE_MAX_EVENTS 64 and
+// SCHEDULE_MAX_BYTES 32 KiB, enforced here so a push the device would refuse
+// (or silently truncate) is refused up front instead. The per-event payload
+// cap is server-side prudence for a jsonb column the SPA replays; note the
+// ESP32 additionally drops any single event whose payload serializes past
+// its own 512-byte SCHEDULE_PAYLOAD_LEN.
+export const maxScheduleEvents = 64;
+export const maxScheduleEventPayloadBytes = 4 * 1024;
+export const maxScheduleBytes = 32 * 1024;
+// UTC offsets of real zones span -12:00 (Etc/GMT+12) to +14:00 (Kiritimati).
+export const minScheduleUtcOffsetMinutes = -12 * 60;
+export const maxScheduleUtcOffsetMinutes = 14 * 60;
+
+export interface FrameScheduleEvent {
+  id: string;
+  minute: number;
+  hour: number;
+  weekday: number;
+  event: string;
+  payload: Record<string, unknown>;
+  disabled?: boolean;
+}
+
+export interface FrameSchedule {
+  events: FrameScheduleEvent[];
+  disabled?: boolean;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// Validate and rebuild a schedule from the SPA's Schedule panel. Sanitize by
+// reconstruction (the parseAssetEntries doctrine — this jsonb is persisted
+// and replayed to every browser and to devices), but refuse the WHOLE
+// schedule on any invalid event: an edit that silently dropped events is
+// exactly the bug this write path exists to fix. Shape per
+// embedded/esp32/main/fos_schedule.h and the Pi's config.nim loadSchedule:
+// {events: [{id, minute 0-59, hour 0-23, weekday 0-9, event, payload,
+// disabled?}], disabled?}.
+export function validateFrameSchedule(
+  value: unknown,
+): { schedule?: FrameSchedule; error?: string } {
+  if (!isPlainObject(value) || !Array.isArray(value.events)) {
+    return { error: "invalid_schedule" };
+  }
+  if (value.events.length > maxScheduleEvents) {
+    return { error: "schedule_too_large" };
+  }
+  const events: FrameScheduleEvent[] = [];
+  for (const item of value.events) {
+    if (!isPlainObject(item)) {
+      return { error: "invalid_schedule" };
+    }
+    const { id, minute, hour, weekday, event, payload, disabled } = item;
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      id.length > 64 ||
+      !Number.isInteger(minute) ||
+      (minute as number) < 0 ||
+      (minute as number) > 59 ||
+      !Number.isInteger(hour) ||
+      (hour as number) < 0 ||
+      (hour as number) > 23 ||
+      // 0 daily, 1-7 mon-sun, 8 weekdays, 9 weekends; absent = daily.
+      (weekday !== undefined &&
+        weekday !== null &&
+        (!Number.isInteger(weekday) ||
+          (weekday as number) < 0 ||
+          (weekday as number) > 9)) ||
+      typeof event !== "string" ||
+      event.length === 0 ||
+      // The ESP32 stores the name in a 64-byte buffer, NUL included.
+      event.length > 63 ||
+      (payload !== undefined && !isPlainObject(payload)) ||
+      (disabled !== undefined && typeof disabled !== "boolean")
+    ) {
+      return { error: "invalid_schedule" };
+    }
+    const eventPayload = isPlainObject(payload) ? payload : {};
+    if (
+      Buffer.byteLength(JSON.stringify(eventPayload), "utf8") >
+      maxScheduleEventPayloadBytes
+    ) {
+      return { error: "schedule_too_large" };
+    }
+    events.push({
+      // weekday/payload always materialized: the Pi runtime parses frame.json
+      // into a concrete object and the ESP32 defaults absent fields the same
+      // way — explicit beats relying on two parsers' defaults agreeing.
+      event,
+      hour: hour as number,
+      id,
+      minute: minute as number,
+      payload: eventPayload,
+      weekday: (weekday ?? 0) as number,
+      ...(disabled === true ? { disabled: true } : {}),
+    });
+  }
+  const schedule: FrameSchedule = {
+    events,
+    ...(value.disabled === true ? { disabled: true } : {}),
+  };
+  if (Buffer.byteLength(JSON.stringify(schedule), "utf8") > maxScheduleBytes) {
+    return { error: "schedule_too_large" };
+  }
+  return { schedule };
+}
+
+// The schedule object a set_schedule push carries. Devices fire every event
+// they are given — the backend's embedded_device.py strips disabled events
+// before serving frame.json for exactly this reason — so the disabled flags
+// are resolved here and never reach the wire. A fully disabled schedule
+// ships as zero events, NOT as null: the Pi's set_schedule handler
+// (hub_client.nim handleSetSchedule) refuses a non-object schedule.
+export function scheduleDevicePayload(schedule: FrameSchedule): {
+  events: Omit<FrameScheduleEvent, "disabled">[];
+} {
+  if (schedule.disabled) {
+    return { events: [] };
+  }
+  return {
+    events: schedule.events
+      .filter((event) => !event.disabled)
+      .map(({ disabled: _disabled, ...event }) => event),
+  };
 }
 
 export function isValidEd25519PublicKey(publicKeyBase64: unknown): boolean {
@@ -201,6 +401,13 @@ export function verifyFrameSignature(
 
 export function frameSummary(frame: typeof frames.$inferSelect) {
   return {
+    // The last-pushed settings round-trip as TOP-LEVEL fields in the
+    // device's own spelling (interval, rotate, …) because that is how the
+    // shared SPA's frameForm reads them — see cloudFrameSettingKeys in
+    // frontend/src/utils/cloudFrameSettings.ts. Without this the Settings
+    // panel rendered blanks after every reload. Spread first so the
+    // provider-owned fields below always win, `name` above all.
+    ...readFrameSettings(frame.settings),
     assigned_checksum: frame.assignedChecksum,
     connected: frame.connected,
     created_at: frame.createdAt,
@@ -211,6 +418,7 @@ export function frameSummary(frame: typeof frames.$inferSelect) {
     linked_client_id: frame.linkedClientId,
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,
+    schedule: frame.schedule,
     status: frame.status,
   };
 }
@@ -306,6 +514,106 @@ export async function supersedePendingCommands(
         inArray(frameCommands.status, ["pending", "sent"]),
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Service settings (docs/cloud-frames.md "Service settings")
+// ---------------------------------------------------------------------------
+
+// The nudge is advisory, so it expires quickly: a frame that was offline when
+// the owner saved a key re-pulls on its own at `ready` anyway (and on every
+// render pass that needs a key), so a stale nudge redelivered days later buys
+// nothing and only costs a wake-up on a battery frame.
+export const serviceSettingsRefreshTtlMs = 5 * 60 * 1000;
+
+/**
+ * Tell a frame its service settings changed. The payload is EMPTY, always.
+ *
+ * The keys themselves travel over the device-authed HTTPS pull
+ * (GET /api/frames/{id}/service-settings), never over this queue:
+ *
+ *  - `frame_commands` rows are never deleted, so a pushed secret would sit in
+ *    Postgres — and in every backup — forever, long after the owner deleted
+ *    the key from their account;
+ *  - the payload passes through the hub, whose log redaction matches
+ *    token/secret/password/authorization/cookie/signature (apps/frame-hub/
+ *    src/log.ts) and would NOT match `apiKey` or `accessKey`;
+ *  - delivery is at-least-once, so a queued key could be redelivered to a
+ *    device after the owner revoked it.
+ *
+ * A pull has none of those properties: it is computed fresh per request,
+ * answered `Cache-Control: no-store`, and stops the moment the scope is
+ * revoked.
+ */
+export async function enqueueServiceSettingsRefresh(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+) {
+  // N saves while a frame is offline are one re-pull, not N wake-ups.
+  await supersedePendingCommands(db, frameId, "refresh_service_settings");
+  return enqueueFrameCommand(db, {
+    frameId,
+    payload: {},
+    ttlMs: serviceSettingsRefreshTtlMs,
+    type: "refresh_service_settings",
+  });
+}
+
+// Read frames.service_setting_groups. `undefined` means "never computed"
+// (a NULL column, or garbage from a hand-edited row) and tells the pull route
+// to compute and backfill it; an empty array means "computed, declares
+// nothing" and is NOT recomputed. Screened through deviceDeliverableFields so
+// a group retired from the deliverable list can never reappear from an old
+// row.
+export function readServiceSettingGroups(
+  value: unknown,
+): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter(
+    (entry): entry is string =>
+      typeof entry === "string" && deviceDeliverableFields.has(entry),
+  );
+}
+
+// The groups a set of interpreted scenes declare, in the shape the column
+// stores. Pure: callers that already hold the assembled scenes (the scene
+// assignment route) pass them straight in rather than re-reading anything.
+export function declaredServiceSettingGroups(scenes: unknown[]): string[] {
+  return requiredSettingsForScenes(scenes as Record<string, unknown>[])
+    .map((group) => group.key)
+    .filter((key) => deviceDeliverableFields.has(key));
+}
+
+// Compute the groups from the frame's CURRENT assignments and persist them.
+// Only the backfill path (a NULL column on an old frame) pays for this: it
+// unzips every assigned scene, which is exactly why the column exists.
+// Returns [] when the scenes cannot be assembled at all (a pulled scene, a
+// yanked version) and persists nothing in that case, so the next request
+// retries instead of freezing "declares nothing" into the row.
+export async function computeAndStoreServiceSettingGroups(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+): Promise<string[]> {
+  const built = await buildScenesPayloadForFrame(db, frameId);
+  if ("error" in built) {
+    return [];
+  }
+  const groups = declaredServiceSettingGroups(built.scenes);
+  await storeServiceSettingGroups(db, frameId, groups);
+  return groups;
+}
+
+export async function storeServiceSettingGroups(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  groups: string[],
+) {
+  await db
+    .update(frames)
+    .set({ serviceSettingGroups: groups, updatedAt: new Date() })
+    .where(eq(frames.id, frameId));
 }
 
 // Pull the shallowest scenes.json out of a published template zip. The zip is

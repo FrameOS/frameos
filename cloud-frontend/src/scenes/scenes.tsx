@@ -8,11 +8,13 @@ export const scenes = {
   frame: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFrame }))),
   sceneWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSceneWorkspace }))),
   appsWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudAppsWorkspace }))),
+  settings: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSettings }))),
 }
 
 // Routes come from the shared urls module so they always match the links
 // the shared components generate. With route_base_path = '/frames' these
 // resolve to /frames, /frames/frames/:id, /frames/scenes/..., /frames/apps/...
+// and /frames/settings (the account's service API keys).
 // The SPA's own login/signup scenes are deliberately absent: Next.js owns
 // auth on the cloud (apiFetch redirects to /login on 401).
 export const getRoutes = () =>
@@ -27,4 +29,5 @@ export const getRoutes = () =>
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
+    [urls.settings()]: 'settings',
   }) as const

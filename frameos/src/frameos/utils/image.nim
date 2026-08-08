@@ -15,10 +15,15 @@ import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
 when defined(frameosEmbedded):
+  # pixie.nim imports the fileformat modules without re-exporting them, so
+  # every format the streaming decode paths reach for has to be imported by
+  # name here. Miss one and its `when compiles(...)` branch below quietly
+  # evaluates false — the format silently loses its file-backed decoder.
   import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
+  import pixie/fileformats/ppm
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
@@ -234,6 +239,8 @@ when defined(frameosEmbedded):
       return "JPEG"
     if len > 2 and bytes[0] == 'B'.uint8 and bytes[1] == 'M'.uint8:
       return "BMP"
+    if len > 2 and bytes[0] == 'P'.uint8 and bytes[1] == '6'.uint8:
+      return "PPM"
     if len > 6 and bytes[0] == 'G'.uint8 and bytes[1] == 'I'.uint8 and bytes[2] == 'F'.uint8:
       return "GIF"
     if len > 12 and bytes[0] == 'R'.uint8 and bytes[1] == 'I'.uint8 and
@@ -623,6 +630,21 @@ when defined(frameosEmbedded):
         # Interlaced/16-bit PNGs raise here — decoding those would need the
         # buffered copy the spill exists to avoid, so let it surface.
         decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "BMP" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Uncompressed fixed-stride rows: one source row in RAM at a time,
+        # rows outside the fitted rect are skipped without conversion.
+        decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "PPM" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # P6 only — ASCII P3 raises rather than buffering the file back.
+        decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
         return target
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")

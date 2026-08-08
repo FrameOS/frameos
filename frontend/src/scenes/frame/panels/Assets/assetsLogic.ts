@@ -14,6 +14,7 @@ import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 
 export interface AssetsLogicProps {
   frameId: FrameId
@@ -64,6 +65,21 @@ interface FrameAssetsResponse {
     refreshing?: boolean
     retry_after?: number
   }
+  /** Backend shape. Only SD-backed frames report it. */
+  storage?: { mounted?: boolean | null } | null
+  /** The on-device admin API answers with the flag at the top level. */
+  mounted?: boolean | null
+}
+
+/**
+ * Whether the frame's storage is mounted, or null when nothing said either way
+ * (Pi/agent frames, virtual frames, firmware older than the flag). Only an
+ * explicit false is worth telling the user about: it turns "no assets" from
+ * "the card is empty" into "the card is not readable".
+ */
+function storageMountedFromResponse(data: FrameAssetsResponse): boolean | null {
+  const mounted = data.storage?.mounted ?? data.mounted
+  return typeof mounted === 'boolean' ? mounted : null
 }
 
 function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
@@ -267,6 +283,7 @@ export const assetsLogic = kea<assetsLogicType>([
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
+    setStorageMounted: (storageMounted: boolean | null) => ({ storageMounted }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
     assetDeleted: (path: string) => ({ path }),
@@ -274,6 +291,7 @@ export const assetsLogic = kea<assetsLogicType>([
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
+    toggleShowHiddenFiles: true,
   }),
   loaders(({ actions, cache, props, values }) => ({
     assets: [
@@ -287,6 +305,7 @@ export const assetsLogic = kea<assetsLogicType>([
             }
             const data = (await response.json()) as FrameAssetsResponse
             window.clearTimeout(cache.reloadTimer)
+            actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
               cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
@@ -316,6 +335,7 @@ export const assetsLogic = kea<assetsLogicType>([
               throw new Error('Failed to refresh assets')
             }
             const data = (await response.json()) as FrameAssetsResponse
+            actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               // The listing is being fetched (cloud: an assets_list command is
               // on its way to the device) — poll until it lands, exactly like
@@ -390,10 +410,28 @@ export const assetsLogic = kea<assetsLogicType>([
         setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
       },
     ],
+    // null until something reports it, and null forever for the frames that
+    // never do — see storageMountedFromResponse.
+    storageMounted: [
+      null as boolean | null,
+      {
+        setStorageMounted: (_, { storageMounted }) => storageMounted,
+      },
+    ],
     showSystemFolders: [
       false,
       {
         toggleShowSystemFolders: (state) => !state,
+      },
+    ],
+    // OS junk (.DS_Store, ._sidecars, Thumbs.db, @eaDir, …) is hidden by
+    // default; the preference is global, not per frame — you plug the same
+    // SD card into several frames.
+    showHiddenFiles: [
+      false,
+      { persist: true, storageKey: 'assetsLogic.showHiddenFiles' },
+      {
+        toggleShowHiddenFiles: (state) => !state,
       },
     ],
     assets: {
@@ -459,15 +497,21 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders],
-      (cleanedAssets, frame, showSystemFolders) => {
-        const visibleAssets = showSystemFolders
-          ? cleanedAssets
-          : cleanedAssets.filter((asset) => !isSystemAssetPath(asset.path))
+      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles],
+      (cleanedAssets, frame, showSystemFolders, showHiddenFiles) => {
+        const visibleAssets = cleanedAssets.filter((asset) => {
+          // The FrameOS-owned folders (.frameos, .thumbs) keep their own
+          // toggle: they are ours, not the operating system's droppings.
+          if (isSystemAssetPath(asset.path)) {
+            return showSystemFolders
+          }
+          return showHiddenFiles || !isHiddenOrJunkAssetPath(asset.path)
+        })
         return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
     assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
+    storageUnmounted: [(s) => [s.storageMounted], (storageMounted): boolean => storageMounted === false],
     diskStats: [
       (s) => [s.sortedMetrics, s.cleanedAssets, s.frame],
       (sortedMetrics, cleanedAssets, frame): DiskStats | null => {

@@ -85,6 +85,37 @@ const char *fos_assets_content_type(const char *path)
     return "application/octet-stream";
 }
 
+/* OS droppings on a card that has been in a Windows/macOS/NAS machine. The
+ * dot-prefixed ones (`._IMG.jpg` AppleDouble sidecars, `.Trashes`,
+ * `.Spotlight-V100`) are already covered by the dotfile rule in
+ * asset_list_walk; these are the ones that do not start with a dot. Mirrors
+ * frameos/src/frameos/utils/paths.nim — keep the lists in sync.
+ *
+ * Listing-only, exactly like the dotfile rule: asset_get can still read one
+ * by exact path. */
+static bool asset_name_is_junk(const char *name)
+{
+    static const char *junk_names[] = {
+        "Thumbs.db",   "ehthumbs.db", "ehthumbs_vista.db",
+        "desktop.ini", "@eaDir",      "__MACOSX",
+        "$RECYCLE.BIN", "RECYCLER",   "System Volume Information",
+    };
+    for (size_t i = 0; i < sizeof(junk_names) / sizeof(junk_names[0]); i++) {
+        if (!strcasecmp(name, junk_names[i])) return true;
+    }
+    static const char *junk_exts[] = {
+        ".tmp", ".temp", ".part", ".crdownload", ".download", ".lnk",
+    };
+    size_t len = strlen(name);
+    if (len == 0) return true;
+    if (name[len - 1] == '~') return true;
+    for (size_t i = 0; i < sizeof(junk_exts) / sizeof(junk_exts[0]); i++) {
+        size_t ext_len = strlen(junk_exts[i]);
+        if (len > ext_len && !strcasecmp(name + len - ext_len, junk_exts[i])) return true;
+    }
+    return false;
+}
+
 /* Recursive walk for the asset listing. Dotfiles stay local (same rule as
  * the Linux firmware); entries beyond the cap flip `truncated` instead of
  * silently stopping. Returns false only on allocation failure. */
@@ -99,6 +130,7 @@ static bool asset_list_walk(cJSON *assets, char *rel, size_t rel_cap,
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') continue;
+        if (asset_name_is_junk(entry->d_name)) continue;
         if (*count >= FOS_ASSETS_LIST_MAX_ENTRIES) {
             *truncated = true;
             break;

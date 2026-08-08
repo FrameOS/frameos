@@ -94,6 +94,12 @@ export async function POST(
     case "render":
       type = "render";
       break;
+    // The Metrics panel's "Request metrics" button. The device answers with a
+    // metrics message the hub already stores (frame_metrics + new_metrics
+    // broadcast), so mapping the event is all it takes.
+    case "metrics":
+      type = "get_metrics";
+      break;
     case "setCurrentScene": {
       if (!sceneId || sceneId.length > maxSceneIdChars) {
         return jsonError("invalid_scene_id", 400);

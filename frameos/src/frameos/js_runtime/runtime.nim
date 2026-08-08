@@ -746,8 +746,13 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
                      args: Table[string, Value],
                      argTypes: Table[string, string],
                      outputTypes: Table[string, string],
-                     targetField: string): Value =
+                     targetField: string,
+                     defaultedArgs: seq[DefaultedArg] = @[]): Value =
   ## Set EvalEnv for this scene context, call fnName(), parse envelope, coerce.
+  ##
+  ## `defaultedArgs` lists arguments whose producer raised and were replaced by
+  ## a zero value. They are only used to annotate a JS error, so the user reads
+  ## "recycle failed: HTTP 401 …" instead of a bare Symbol.iterator complaint.
   var expectedType = ""
   if targetField.len > 0 and outputTypes.hasKey(targetField):
     expectedType = outputTypes[targetField]
@@ -781,15 +786,31 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
 
   let kind = parsed{"k"}.getStr()
   if kind == "error":
-    let message = mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr())
+    var message = mapJsErrorText(scene.js.context, parsed{"v"}{"message"}.getStr())
     let stack = mapJsErrorText(scene.js.context, parsed{"v"}{"stack"}.getStr())
-    scene.logNodeErrorPayload(nodeId, %*{
+    var errorPayload = %*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
       "nodeId": nodeId.int,
       "message": message,
       "stack": stack
-    })
+    }
+    if defaultedArgs.len > 0:
+      # Make the failure attributable: the JS message alone ("cannot read
+      # property 'Symbol.iterator' of undefined") hides the real cause, which
+      # is the upstream producer that died.
+      var parts: seq[string] = @[]
+      var details = newJArray()
+      for arg in defaultedArgs:
+        var detail = arg.error
+        if detail.len > 200:
+          detail = detail[0 ..< 200] & "..."
+        parts.add(arg.name & " failed: " & detail)
+        details.add(%*{"arg": arg.name, "error": arg.error})
+      message = message & " (defaulted inputs: " & parts.join("; ") & ")"
+      errorPayload["message"] = %message
+      errorPayload["defaultedArgs"] = details
+    scene.logNodeErrorPayload(nodeId, errorPayload)
     if expectedType.len > 0:
       if expectedType == "string": return Value(kind: fkString, s: "")
       return valueFromJsonByType(newJNull(), expectedType)

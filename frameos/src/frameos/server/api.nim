@@ -349,6 +349,82 @@ proc persistScenesPayload*(scenes: JsonNode) =
 var frameConfigWriteLock*: Lock
 initLock(frameConfigWriteLock)
 
+# The settings groups a cloud provider owns on a cloud-managed frame
+# (docs/cloud-frames.md, "Service settings"): exactly the sections of
+# frameAdminEditableSettingsFields, which the static block below pins. Every
+# other settings key stays under local control and is never touched by a cloud
+# service-settings pull.
+const frameCloudServiceSettingsGroups* = [
+  "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
+]
+
+static:
+  for (section, _) in frameAdminEditableSettingsFields:
+    doAssert section in frameCloudServiceSettingsGroups,
+      "frameCloudServiceSettingsGroups is out of sync with " &
+      "frameAdminEditableSettingsFields: " & section
+
+proc cloudServiceSettingsGroup(group: string, payload: JsonNode): JsonNode =
+  ## One group as the device will store it: only the fields this frame knows
+  ## for that group, only non-empty strings. nil when nothing usable is left —
+  ## the caller then deletes the group, exactly as it treats an absent one
+  ## (the provider omits empty values for the same reason).
+  if payload == nil or payload.kind != JObject:
+    return nil
+  var fields = newJObject()
+  for (section, field) in frameAdminEditableSettingsFields:
+    if section != group:
+      continue
+    let value = payload{field}
+    if value != nil and value.kind == JString and value.getStr("").len > 0:
+      fields[field] = %value.getStr("")
+  if fields.len == 0: nil else: fields
+
+proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.} =
+  ## Applies one cloud service-settings pull (docs/cloud-frames.md) to
+  ## frame.json and to the live config, and reports whether anything changed.
+  ##
+  ## `settings` is the pull's `settings` object (group → field → value). The six
+  ## groups above are cloud-owned: each one present is REPLACED wholesale and
+  ## each one absent is DELETED — revoking a key in the provider account, or
+  ## dropping the last scene that used it, has to take the key off the device.
+  ## `nil` (or a non-object) clears all six, which is what the provider's
+  ## `403 insufficient_scope` means. Nothing else in `settings`, and nothing
+  ## else in frame.json, is read or written.
+  withLock frameConfigWriteLock:
+    let configPath = getConfigFilename()
+    var configJson = loadConfigJson()
+    if configJson == nil or configJson.kind != JObject:
+      configJson = %*{}
+    var current = frameAdminSettingsSource(configJson)
+    if current == nil or current.kind != JObject:
+      current = %*{}
+
+    let incoming = if settings != nil and settings.kind == JObject: settings else: nil
+    var changed = false
+    for group in frameCloudServiceSettingsGroups:
+      let desired =
+        if incoming == nil: nil
+        else: cloudServiceSettingsGroup(group, incoming{group})
+      let existing = current{group}
+      if desired == nil:
+        if existing != nil:
+          current.delete(group)
+          changed = true
+      elif existing == nil or existing.kind != JObject or existing != desired:
+        current[group] = desired
+        changed = true
+    if not changed:
+      return false
+
+    configJson["settings"] = current
+    writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+    if globalFrameConfig != nil:
+      globalFrameConfig.settings = copy(current)
+    if globalFrameOS != nil and globalFrameOS.frameConfig != nil:
+      globalFrameOS.frameConfig.settings = copy(current)
+    result = true
+
 proc persistFrameApiUpdate*(payload: JsonNode) =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "Frame update payload must be a JSON object")

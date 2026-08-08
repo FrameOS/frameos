@@ -90,7 +90,10 @@ const routeParams = (id: string) => ({ params: Promise.resolve({ frameId: id }) 
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
-  authMock.mockResolvedValue({ frame: { id: frameId } as never });
+  authMock.mockResolvedValue({
+    frame: { id: frameId } as never,
+    linkedClient: { scopes: ["frame:managed"] } as never,
+  });
 });
 
 afterEach(() => {

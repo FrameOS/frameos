@@ -7,6 +7,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/image
+import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
 
@@ -231,9 +232,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
       var files: seq[string] = @[]
       if dir.len > 0 and dirExists(dir):
-        for filePath in walkDirRec(dir, relative = false):
-          if "/.thumbs/" in filePath or "/.frameos/" in filePath:
-            continue
+        # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
+        # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
+        for filePath in walkDirRecNoJunk(dir, relative = false):
           files.add(filePath[(root.len + 1)..^1])
       files.sort()
       let arr = newJArray()

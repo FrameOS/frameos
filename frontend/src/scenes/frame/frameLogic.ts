@@ -24,7 +24,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
-import { pushCloudFrameSettings } from '../../utils/cloudFrameApi'
+import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import { cloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
@@ -597,7 +597,10 @@ function frameosVersionRequiresDeploy(previousFrameosVersion: string | null): bo
 // error handling" into Pending save forever, unsaveable by construction.
 function frameDiffKeys(): (keyof FrameType)[] {
   if (isCloudMode()) {
-    return [...(cloudFrameSettingKeys as readonly (keyof FrameType)[]), 'scenes']
+    // `schedule` rides its own verb (POST /api/frames/{id}/schedule →
+    // set_schedule), not the settings allowlist — but it round-trips through
+    // GET /api/frames/{id} like the settings do, so it diffs cleanly.
+    return [...(cloudFrameSettingKeys as readonly (keyof FrameType)[]), 'scenes', 'schedule']
   }
   return FRAME_KEYS
 }
@@ -1543,6 +1546,16 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAc
     // Save used to skip scenes entirely, which silently dropped a newly
     // added scene while still reporting success because the name pushed.
     const settingsPushed = await pushCloudFrameSettings(frameId, normalizedFrame)
+    // The schedule is its own verb (set_schedule via POST .../schedule), not
+    // a settings key — push it only when the form's schedule differs from
+    // server truth, so a name-only save does not re-enqueue an unchanged
+    // schedule toward a sleeping battery frame.
+    const schedule = normalizedFrame.schedule
+    const savedSchedule = framesModel.findMounted()?.values.frames?.[frameId]?.schedule
+    const schedulePushed = schedule !== undefined && !equal(schedule, savedSchedule)
+    if (schedulePushed && schedule) {
+      await pushCloudFrameSchedule(frameId, schedule)
+    }
     const scenes = normalizedFrame.scenes ?? []
     if (scenes.length > 0) {
       const outcome = await persistAndPushCloudFrameScenes(frameId, scenes, normalizedFrame.active_scene_id)
@@ -1550,7 +1563,7 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAc
         clearCloudSceneJsonCache(storeSceneId)
       }
       framesModel.actions.hydrateCloudFrameScenes(frameId, true)
-    } else if (!settingsPushed) {
+    } else if (!settingsPushed && !schedulePushed) {
       throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
     }
     return
@@ -2051,6 +2064,14 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     showDeployPlanModal: () => {
+      // The cloud's deploy dialog (FrameDeployPlanDrawer's cloud branch)
+      // shows no build plan: there is no POST /api/frames/{id}/deploy_plan
+      // and no /sync on that control plane, so fetching either only parked a
+      // 404 in the drawer's error slot. Its own state — unsaved changes,
+      // scene count, connection — comes from the frame row.
+      if (isCloudMode()) {
+        return
+      }
       if (
         !values.frameSyncStatusLoading &&
         shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
@@ -2360,11 +2381,7 @@ export const frameLogic = kea<frameLogicType>([
         detail: 'Saving scenes to your cloud account',
       })
       try {
-        const outcome = await persistAndPushCloudFrameScenes(
-          props.frameId,
-          scenes,
-          values.frame?.active_scene_id
-        )
+        const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id)
         for (const storeSceneId of outcome.changedStoreSceneIds) {
           clearCloudSceneJsonCache(storeSceneId)
         }

@@ -122,10 +122,23 @@ describe("FrameActionsMenu in cloud mode", () => {
 
     const labels = menuLabels();
     // Delete is NOT in this list: the cloud offers it (DELETE /api/frames/{id},
-    // pinned in workspace-surfaces.test.ts).
-    for (const backendOnly of ["Deploy", "Build SD card", "Stop FrameOS", "Archive"]) {
+    // pinned in workspace-surfaces.test.ts). Neither is Deploy — see below.
+    for (const backendOnly of ["Build SD card", "Stop FrameOS", "Archive"]) {
       expect(labels).not.toContain(backendOnly);
     }
+  });
+
+  it("offers Deploy — it opens the cloud deploy dialog, not an SSH build", () => {
+    renderMenu(cloudFrame("esp32"));
+
+    // Deploy used to be listed with the backend-only entries above, on the
+    // reasoning that the cloud has no /deploy endpoint. But the entry opens
+    // the deploy dialog, and the cloud's dialog is its own branch: push
+    // scenes (settings + one checksummed set_scenes), the firmware-update
+    // nudge, and WebSerial USB provisioning for esp32 boards. Without it the
+    // esp32 USB setup had no route into the workspace at all.
+    expect(menuLabels()).toContain("Deploy");
+    expect(menuItem("Deploy")?.getAttribute("title")).toBe("Open deploy options");
   });
 
   it("keeps Rename enabled for a Pi frame", () => {
