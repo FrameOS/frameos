@@ -269,7 +269,7 @@ async def _virtual_frame_png(
     width, height = virtual_frame_dimensions(frame)
     scene_states = await get_virtual_scene_states(redis, frame)
     assets_dir = virtual_assets.frame_assets_dir(frame)
-    rgba, rendered_state = await render_scene_rgba_and_state(
+    rgba, rendered_state, saved_assets = await render_scene_rgba_and_state(
         frame,
         width,
         height,
@@ -277,8 +277,20 @@ async def _virtual_frame_png(
         settings=embedded_settings_payload(db, frame),
         scenes_override=scenes_override,
         scene_states=scene_states,
-        assets_dir=str(assets_dir) if assets_dir.is_dir() else None,
+        assets_dir=str(assets_dir),
+        save_assets=frame.save_assets,
+        assets_write_budget=max(
+            0, virtual_assets.quota_bytes(frame) - virtual_assets.usage_bytes(frame)
+        ),
     )
+    if saved_assets is not None and saved_assets.get("files"):
+        # Scene apps saved new assets (OpenAI images, downloaded photos):
+        # drop the cached listing so the workspace sees them.
+        from .frames import _invalidate_frame_assets_cache
+
+        await _invalidate_frame_assets_cache(
+            redis, frame, frame.assets_path or "/srv/assets"
+        )
     # Previews of unsaved scenes must not clobber the stored state; neither
     # may a render whose state seeding failed (old wasm bundle without the
     # set_scene_state export) — its readback is just scene defaults.

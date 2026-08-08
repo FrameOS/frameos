@@ -283,6 +283,18 @@ async def test_virtual_assets_quota(async_client, db, redis, virtual_assets_dir)
     assert response.status_code == 200, response.text
 
 
+def test_virtual_assets_quota_parsing():
+    from app.utils.virtual_assets import DEFAULT_QUOTA_MB, quota_bytes
+
+    mb = 1024 * 1024
+    assert quota_bytes(Frame(device_config={'assetsQuotaMb': 250})) == 250 * mb
+    # Settings forms may deliver numbers as strings.
+    assert quota_bytes(Frame(device_config={'assetsQuotaMb': '250'})) == 250 * mb
+    for bad in (None, 0, -5, 'lots', True, {}):
+        assert quota_bytes(Frame(device_config={'assetsQuotaMb': bad})) == DEFAULT_QUOTA_MB * mb
+    assert quota_bytes(Frame(device_config=None)) == DEFAULT_QUOTA_MB * mb
+
+
 # -------------------------------------------------------------------- state
 
 
@@ -380,3 +392,53 @@ async def test_virtual_state_rejects_oversized_payload(async_client, db, redis):
               'state': {'word': 'x' * (VIRTUAL_STATE_QUOTA_BYTES + 1)}},
         headers={'content-type': 'application/json'})
     assert response.status_code == 413
+
+
+# ------------------------------------------------------- asset write-back
+
+
+@pytest.mark.asyncio
+async def test_virtual_render_passes_save_assets_and_budget(
+    async_client, db, redis, virtual_assets_dir, monkeypatch
+):
+    """The render pipeline forwards the frame's saveAssets config and the
+    remaining quota, and a reported write-back invalidates the asset cache."""
+    from app.api import virtual_frame as vf
+
+    frame = await create_virtual_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-a', 'name': 'A', 'nodes': [], 'edges': []}]
+    frame.save_assets = True
+    frame.device_config = {**(frame.device_config or {}), 'assetsQuotaMb': 1}
+    db.add(frame)
+    db.commit()
+
+    # Prime the asset list cache so we can observe the invalidation.
+    response = await async_client.get(f'/api/frames/{frame.id}/assets')
+    assert response.status_code == 200
+    assert response.json()['assets'] == []
+
+    captured = {}
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        captured.update(kwargs)
+        # Simulate the harness writing a scene-saved asset back to disk.
+        target = virtual_assets_dir / f'frame_{frame_arg.id}' / 'wikicommons' / 'img.abc123.jpg'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'jpeg-bytes')
+        rgba = b'\x00' * (width * height * 4)
+        return rgba, None, {'files': ['wikicommons/img.abc123.jpg'], 'skippedOverBudget': 0}
+
+    monkeypatch.setattr(vf, 'render_scene_rgba_and_state', fake_render)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/event/render')
+    assert response.status_code == 200, response.text
+
+    assert captured['save_assets'] is True
+    assert captured['assets_write_budget'] == 1024 * 1024  # empty store: full quota
+    assert captured['assets_dir'].endswith(f'frame_{frame.id}')
+
+    # The write-back invalidated the cached (empty) listing.
+    response = await async_client.get(f'/api/frames/{frame.id}/assets')
+    assert response.status_code == 200
+    paths = [a['path'] for a in response.json()['assets']]
+    assert '/srv/assets/wikicommons/img.abc123.jpg' in paths

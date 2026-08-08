@@ -11,8 +11,8 @@ signatures, same absolute-path convention (paths prefixed with
 interchangeably. The ``redis`` parameter is unused here and kept only for
 that symmetry.
 
-Uploads are quota-limited per frame: ``device_config.assetsQuotaMb`` when set,
-else ``FRAMEOS_VIRTUAL_ASSETS_QUOTA_MB``, else 100 MB. Exceeding it returns
+Uploads are quota-limited per frame: ``device_config.assetsQuotaMb`` (edited
+in the frame's settings panel), defaulting to 100 MB. Exceeding it returns
 507 Insufficient Storage, the same status a full SD card produces on embedded
 frames.
 """
@@ -46,15 +46,15 @@ def frame_assets_dir(frame: Frame) -> Path:
 
 def quota_bytes(frame: Frame) -> int:
     device_config = frame.device_config if isinstance(frame.device_config, dict) else {}
-    override = device_config.get("assetsQuotaMb")
-    if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
-        return int(override * 1024 * 1024)
-    env_value = os.environ.get("FRAMEOS_VIRTUAL_ASSETS_QUOTA_MB")
-    try:
-        if env_value and float(env_value) > 0:
-            return int(float(env_value) * 1024 * 1024)
-    except ValueError:
-        pass
+    quota = device_config.get("assetsQuotaMb")
+    # The settings form may deliver the number as a string; be lenient.
+    if isinstance(quota, str):
+        try:
+            quota = float(quota)
+        except ValueError:
+            quota = None
+    if isinstance(quota, (int, float)) and not isinstance(quota, bool) and quota > 0:
+        return int(quota * 1024 * 1024)
     return DEFAULT_QUOTA_MB * 1024 * 1024
 
 

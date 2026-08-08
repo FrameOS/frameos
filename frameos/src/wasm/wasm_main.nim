@@ -271,6 +271,20 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
     setLastError("loadScenes failed: " & e.msg)
     0
 
+proc frameos_wasm_set_save_assets(payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## The frame's saveAssets config (bool, or {nodeName: bool}), so apps'
+  ## "auto" save mode behaves like on a device. Call after init; without it
+  ## the runtime keeps the historical default of false.
+  try:
+    if frameConfig.isNil:
+      setLastError("setSaveAssets: init not called")
+      return false
+    frameConfig.saveAssets = parseJson($payloadJson)
+    true
+  except Exception as e:
+    setLastError("setSaveAssets failed: " & e.msg)
+    false
+
 proc frameos_wasm_set_scene_state(sceneId: cstring, stateJson: cstring): bool {.exportc, cdecl.} =
   ## Seed persisted state for a scene before it initializes — how the backend
   ## restores stored state for virtual frames, where every render is a fresh

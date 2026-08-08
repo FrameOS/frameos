@@ -7,7 +7,7 @@
 //
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
-//    sceneId, statesJson, frameAssetsRoot}
+//    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
@@ -16,6 +16,12 @@
 // Python caller parses. frameAssetsRoot is a host directory whose files are
 // preloaded into the wasm MEMFS under /srv/assets, so scene apps that read
 // frame assets (photo folders etc.) see them like on-device files.
+// saveAssetsJson carries the frame's saveAssets config into the runtime;
+// files that apps save during the render (saveAsset in apps.nim — OpenAI
+// images, downloaded photos) land in MEMFS and are written back to
+// frameAssetsRoot after the render, up to assetsWriteBudget bytes (the
+// frame's remaining asset quota), reported on stderr as one
+// `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}` line.
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -27,9 +33,9 @@
 
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 
 // Synchronous XMLHttpRequest, as the emscripten HTTP bridge expects: each
 // send() runs fetch() in a short-lived child Node so the blocking wait is
@@ -200,11 +206,25 @@ if (request.statesJson) {
   }
 }
 
+// The frame's saveAssets config, so apps' "auto" save mode matches the
+// device. Old bundles predate the export; they keep saveAssets=false.
+if (request.saveAssetsJson) {
+  try {
+    call('frameos_wasm_set_save_assets', 'boolean', ['string'], [request.saveAssetsJson])
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: saveAssets config unavailable (${error})\n`)
+  }
+}
+
 // Preload the frame's backend-stored assets into MEMFS so scene apps can
 // read them at the on-device path. Needs a wasm bundle built with FS in
 // EXPORTED_RUNTIME_METHODS; older bundles just skip the preload.
+// `preloadedFiles` records what existed before the render, so the
+// write-back below only copies files the scene created.
 const MAX_PRELOAD_BYTES = 128 * 1024 * 1024
-if (request.frameAssetsRoot && Module.FS) {
+const MEMFS_ASSETS_ROOT = '/srv/assets'
+const preloadedFiles = new Set()
+if (request.frameAssetsRoot && Module.FS && existsSync(request.frameAssetsRoot)) {
   const FS = Module.FS
   const ensureDir = (path) => {
     const parts = path.split('/').filter(Boolean)
@@ -226,7 +246,7 @@ if (request.frameAssetsRoot && Module.FS) {
       const hostPath = join(entry.parentPath ?? entry.path, entry.name)
       const rel = relative(request.frameAssetsRoot, hostPath).split(sep).join('/')
       if (!rel || rel.startsWith('..')) continue
-      const target = '/srv/assets/' + rel
+      const target = MEMFS_ASSETS_ROOT + '/' + rel
       if (entry.isDirectory()) {
         ensureDir(target)
         continue
@@ -235,10 +255,12 @@ if (request.frameAssetsRoot && Module.FS) {
       const size = statSync(hostPath).size
       if (preloaded + size > MAX_PRELOAD_BYTES) {
         skipped += 1
+        preloadedFiles.add(target) // over-cap files still must not be "new"
         continue
       }
       ensureDir(target.slice(0, target.lastIndexOf('/')))
       FS.writeFile(target, readFileSync(hostPath))
+      preloadedFiles.add(target)
       preloaded += size
     }
   } catch (error) {
@@ -247,8 +269,64 @@ if (request.frameAssetsRoot && Module.FS) {
   if (skipped > 0) {
     process.stderr.write(`embedded_wasm_render: skipped ${skipped} asset(s) over the ${MAX_PRELOAD_BYTES} byte preload cap\n`)
   }
-} else if (request.frameAssetsRoot) {
+} else if (request.frameAssetsRoot && !Module.FS) {
   process.stderr.write('embedded_wasm_render: wasm bundle lacks FS export, skipping asset preload\n')
+}
+
+// After the render: copy files the scene saved into MEMFS (saveAsset in
+// apps.nim — OpenAI images, downloaded photos) back to the host asset
+// store, within the remaining-quota budget the backend computed.
+function writeBackSavedAssets() {
+  if (!request.frameAssetsRoot || !Module.FS) return
+  const FS = Module.FS
+  const budget = Number.isFinite(request.assetsWriteBudget) ? request.assetsWriteBudget : 0
+  const files = []
+  let written = 0
+  let skippedOverBudget = 0
+  const walk = (dir) => {
+    let names
+    try {
+      names = FS.readdir(dir)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (name === '.' || name === '..') continue
+      const path = dir + '/' + name
+      let stat
+      try {
+        stat = FS.stat(path)
+      } catch {
+        continue
+      }
+      if (FS.isDir(stat.mode)) {
+        walk(path)
+        continue
+      }
+      if (!FS.isFile(stat.mode) || preloadedFiles.has(path)) continue
+      const rel = path.slice(MEMFS_ASSETS_ROOT.length + 1)
+      // The path comes out of the wasm module; never let it escape the root.
+      const parts = rel.split('/')
+      if (parts.some((part) => !part || part === '.' || part === '..')) continue
+      if (written + stat.size > budget) {
+        skippedOverBudget += 1
+        continue
+      }
+      try {
+        const hostPath = join(request.frameAssetsRoot, ...parts)
+        mkdirSync(dirname(hostPath), { recursive: true })
+        writeFileSync(hostPath, FS.readFile(path))
+        written += stat.size
+        files.push(rel)
+      } catch (error) {
+        process.stderr.write(`embedded_wasm_render: asset write-back failed for ${rel}: ${error}\n`)
+      }
+    }
+  }
+  walk(MEMFS_ASSETS_ROOT)
+  if (files.length > 0 || skippedOverBudget > 0) {
+    process.stderr.write('__FRAMEOS_SAVED_ASSETS__' + JSON.stringify({ files, skippedOverBudget }) + '\n')
+  }
 }
 
 const rc = call('frameos_wasm_render', 'number', [], [])
@@ -260,6 +338,8 @@ if (rc === 2 || !ptr || !len) fail(`render failed: ${lastError()}`)
 if (len !== outWidth * outHeight * 4) {
   fail(`unexpected buffer size ${len} for ${outWidth}x${outHeight}`)
 }
+
+writeBackSavedAssets()
 
 // Report the post-render scene state so the backend can persist what the
 // scene changed. Best-effort: a failure here must not fail the render.
