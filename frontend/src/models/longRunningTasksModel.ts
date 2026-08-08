@@ -70,6 +70,8 @@ export interface UpdateTaskProgressPayload {
   progressCurrent: number | null
   progressTotal: number | null
   detail?: string | null
+  /** Retitle the running task — e.g. an upload that grows while running. */
+  title?: string
 }
 
 const MAX_TASK_LOGS = 200
@@ -154,6 +156,7 @@ function updateLatestTaskProgress(tasks: LongRunningTask[], payload: UpdateTaskP
   const nextTasks = [...tasks]
   nextTasks[index] = {
     ...task,
+    title: payload.title ?? task.title,
     detail: payload.detail ?? task.detail,
     progressCurrent: payload.progressCurrent,
     progressTotal: payload.progressTotal,
