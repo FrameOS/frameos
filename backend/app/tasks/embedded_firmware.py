@@ -741,15 +741,21 @@ def _missing_required_sdkconfig(path: Path, required: dict[str, str] | None = No
     }
 
 
+def embedded_build_dir(platform: str, flash_profile: dict[str, Any]) -> Path:
+    """Backend builds get a build dir per platform + flash profile (matching
+    ci_build_image.sh's -B convention), with the generated sdkconfig inside
+    it. Chip-target or flash-size switches then land in separate directories
+    instead of wiping one shared CMake cache, and backend builds never
+    clobber the in-tree build/ + sdkconfig a manual idf.py workflow uses.
+    The build-* prefix keeps these out of the source fingerprint."""
+    return EMBEDDED_PROJECT_DIR / f"build-{platform}-{str(flash_profile['flashSize']).lower()}"
+
+
 def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | None = None) -> dict[str, str]:
-    sdkconfig_path = EMBEDDED_PROJECT_DIR / "sdkconfig"
+    sdkconfig_path = build_dir / "sdkconfig"
     missing = _missing_required_sdkconfig(sdkconfig_path, required)
     if not missing or not sdkconfig_path.exists():
         return {}
-    sdkconfig_path.unlink()
-    sdkconfig_old_path = EMBEDDED_PROJECT_DIR / "sdkconfig.old"
-    if sdkconfig_old_path.exists():
-        sdkconfig_old_path.unlink()
     if build_dir.exists():
         shutil.rmtree(build_dir)
     return missing
@@ -1926,7 +1932,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
               f"Building {platform_spec['label']} firmware with ESP-IDF at {idf_path} "
               f"(panel={selected_panel}, flash={flash_profile['flashSize']})")
 
-    build_dir = EMBEDDED_PROJECT_DIR / "build"
+    build_dir = embedded_build_dir(platform, flash_profile)
     # export.sh refuses to run inside a foreign Python venv; scrub venv vars and
     # let it activate the ESP-IDF Python environment itself.
     env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "IDF_PYTHON_ENV_PATH"}}
@@ -1984,9 +1990,11 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
                   "nim not found on the worker; building firmware without the on-device Nim runtime")
     # generated_config.h and a fresh nimcache require a CMake reconfigure: the
     # component globs nimcache/*.c at configure time.
+    idf_base = (f'idf.py -B {shlex.quote(str(build_dir))} '
+                f'-D SDKCONFIG={shlex.quote(str(build_dir / "sdkconfig"))}')
     command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
-               f'idf.py -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
-               'reconfigure >/dev/null && idf.py build merge-bin')
+               f'{idf_base} -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
+               f'reconfigure >/dev/null && {idf_base} build merge-bin')
 
     build_lock_token = await _acquire_embedded_build_lock(redis)
     try:
@@ -2031,7 +2039,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         tail = "\n".join(output_tail[-20:])
         raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
 
-    missing_sdkconfig = _missing_required_sdkconfig(EMBEDDED_PROJECT_DIR / "sdkconfig", required_sdkconfig)
+    missing_sdkconfig = _missing_required_sdkconfig(build_dir / "sdkconfig", required_sdkconfig)
     if missing_sdkconfig:
         missing = ", ".join(f"{key}={value}" for key, value in sorted(missing_sdkconfig.items()))
         raise ValueError(f"ESP32 sdkconfig is missing required defaults after build: {missing}")
