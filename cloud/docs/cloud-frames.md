@@ -147,6 +147,10 @@ Cloud-profile verb set (complete):
 - `reboot`, `restart_runtime`.
 - `notify_update_available` — advisory only; the device fetches and verifies
   independently (see OTA below).
+- `refresh_service_settings` — advisory only, empty payload; the device
+  fetches the account's service API keys over device-authed HTTPS (see
+  "Service settings: a pull, not a push" below). No credential ever rides
+  this queue.
 
 Anything else the socket receives is rejected and audit-logged on-device.
 
@@ -169,6 +173,64 @@ back refused; the profile table lives in `docs/cloud-frames.md`.
   is harmless after (and mostly before) enrollment.
 - Link tokens for the WS session follow the existing `linked_clients`
   machinery (hashed at rest, rotation grace, revocation from the account UI).
+
+### Service settings: a pull, not a push
+
+Scenes need third-party credentials (Unsplash, OpenAI, Home Assistant,
+Immich, GitHub, the FrameOS gallery). On a cloud-managed frame those live in
+the owner's account (`account_settings`) and have to reach the device. The
+obvious move — one more `set_*` verb on the command queue — is the wrong one,
+for three independent reasons:
+
+1. **`frame_commands` rows are never deleted.** A pushed key would sit in
+   Postgres, and in every backup, forever — long after the owner rotated or
+   deleted it in their account. Retention for a credential store you did not
+   design as one.
+2. **The hub's log redaction does not match these field names.** It redacts
+   `token|secret|password|authorization|cookie|signature`
+   (`apps/frame-hub/src/log.ts`); `apiKey` and `accessKey` sail straight
+   through. That is one careless `console.log` away from keys in the hub's
+   logs, and the fix is not "add two more words to the regex" — it is not
+   putting the keys on that path at all.
+3. **Delivery is at-least-once.** A queued command written to a socket that
+   died is redelivered on the next session. A revoked key could therefore be
+   handed to a device *after* the revocation.
+
+So the socket carries a **zero-payload `refresh_service_settings` nudge**
+("come and get them") and the keys travel over a device-authed HTTPS GET the
+device makes itself (`/api/frames/{id}/service-settings`, wire contract in
+`docs/cloud-frames.md`). A pull is computed fresh per request, answered
+`Cache-Control: no-store` (the cloud, unlike a self-hosted backend, sits
+behind nginx and possibly a CDN), ETag'd so an unchanged answer costs a 304
+instead of re-shipping credentials, and — the part that matters most — it
+**stops the instant the scope is revoked**. There is nothing in flight to
+recall.
+
+**Narrowed by what the scenes declare.** A frame is served only the groups
+its assigned scenes actually ask for, derived from the apps' `settings` lists
+the same way the live preview derives them (`src/lib/preview-settings.ts`).
+A frame running a clock scene never sees the account's OpenAI key. The
+response also lists the declared groups that are *not* configured, so the UI
+can say "this frame needs an Unsplash key" — and so the device knows those
+six groups are cloud-owned: a group absent from `settings` is deleted
+on-device rather than left stale.
+
+**Why the declared groups are denormalized onto `frames`.** Deriving them
+means unzipping every assigned scene version (`buildScenesPayloadForFrame`;
+the store caps a scene zip at 32 MiB), which is unthinkable on a route
+devices poll. `frames.service_setting_groups` is written wherever scenes are
+assigned, from the payload that route already assembled; `NULL` means "never
+computed" and the pull route computes and backfills it once. The column holds
+group *names* only — no credential is ever stored on a frame row.
+
+**Consent.** `settings:services` is a real scope, listed on the device
+approval screen and never in `autoGrantedDeviceScopes`; claim-token
+enrollments grant it at mint time (the owner minted the token to run their
+own scenes on their own frame), and already-enrolled frames get it only
+through the owner's explicit per-frame switch. Revocation removes the scope
+from the linked client outright — a device's own scope list is additive and
+never shrinks, so the provider's `403` is the enforcement point, not the
+device's opinion of what it was granted.
 
 ### Interpreted scenes are still code — sandbox posture
 

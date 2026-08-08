@@ -129,6 +129,7 @@ pushes, report state. Telemetry is opt-in per scope, exactly as reserved in
 | Scope | Allows the provider to |
 |---|---|
 | `frame:managed` | manage this frame (scenes, declarative settings, state) |
+| `settings:services` | serve this frame the account's service API keys (see "Service settings") |
 | `telemetry:logs` | receive and retain device logs |
 | `telemetry:metrics` | receive and retain device metrics |
 
@@ -221,6 +222,7 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum", "scene_id"?: "…", "state"?: {…}}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack once the payload is accepted and persisted, then `scene_ack` once it is actually live (no `scene_ack` if the hot-load fails — the frame is then genuinely out of sync). The optional `scene_id` names which of the pushed scenes to activate (default: the first) and `state` carries its initial public scene-state values — the shape the workspace's "preview on frame" flow produces |
 | `set_schedule` | `{"schedule": {…}, "utcOffsetMinutes"?: N}` | replace the scene schedule (`{"events": [{"id", "minute": 0-59, "hour": 0-23, "weekday": 0 daily/1-7 mon-sun/8 weekdays/9 weekends, "event", "payload"}…]}`); the provider resolves `disabled` flags before pushing — devices fire every event they are given. The optional `utcOffsetMinutes` is the provider's current frame-local UTC offset, for devices that match in local wall-clock time without a tz database; a device without that need (or one that takes its offset from a backend settings poll, as the ESP32 firmware does today) ignores the key |
 | `set_settings` | `{"settings": {…}}` | allowlisted declarative keys only (`name`, `rotate`, `interval`, `scaling_mode`, `timezone`, `debug`; `brightness` joins the list once the runtime grows a brightness setting); unknown or non-allowlisted keys → the whole verb is refused (`error: "setting_not_allowed"`) |
+| `refresh_service_settings` | `{}` | advisory nudge: "your service settings changed, re-fetch them". The payload is **always empty** — API keys never ride the command queue (see "Service settings"). Ack on *accepting* the nudge, not on completing the fetch: the fetch is HTTP, on the device's own schedule, and a failed fetch must not look like a refused verb |
 | `set_current_scene` | `{"scene_id": "…", "state"?: {…}}` | switch active scene; the optional `state` object carries public scene-state field values, forwarded to the scene exactly as the local `setCurrentScene` event would |
 | `get_state` | `{}` | bare ack, then a separate `{"id", "type": "state", …}` message with the same `id` carrying the `hello`-shaped state |
 | `get_logs` | `{"since"?: iso-ts, "limit"?: N}` | bare ack, then a `log_batch` message with the same `id` carrying the buffered lines (requires `telemetry:logs`; device caps `limit` at 1000) |
@@ -308,6 +310,87 @@ before its ack stays queued and is redelivered on the next session, so a
 device may see the same `id` twice: every verb is idempotent, and a device
 should ack a repeat exactly as it acked the original. Action verbs carry a TTL
 and are expired rather than redelivered once it passes.
+
+## Service settings
+
+Scenes need third-party credentials to render: an Unsplash access key, an
+OpenAI API key, a Home Assistant URL and token. On a self-hosted frame these
+come from the backend's settings table; on a cloud-managed frame they belong
+to the **owner's provider account**, and the frame fetches them.
+
+**They are fetched, never pushed.** The command queue is durable and is never
+pruned, so a key that entered it would live in the provider's database — and
+in every backup — long after the owner deleted it; it would pass through the
+WebSocket hub; and at-least-once redelivery could hand a device a credential
+that had already been revoked. So the socket carries only the zero-payload
+`refresh_service_settings` nudge, and the keys travel over a device-authed
+HTTPS request the device makes itself:
+
+```http
+GET {provider}/api/frames/{id}/service-settings
+Authorization: Bearer <access_token>
+If-None-Match: "<etag from the last fetch>"      # optional
+```
+
+Response `200`:
+
+```json
+{
+  "settings": {
+    "unsplash": { "accessKey": "…" },
+    "homeAssistant": { "url": "https://ha.local", "accessToken": "…" }
+  },
+  "groups": ["homeAssistant", "immich", "unsplash"]
+}
+```
+
+- `settings` — group → field → value, for every group that has a usable
+  value. Deliverable groups and fields are exactly:
+  `frameOS{apiKey}`, `github{api_key}`, `homeAssistant{url,accessToken}`,
+  `immich{url,apiKey}`, `openAI{apiKey}`, `unsplash{accessKey}`. An empty
+  string counts as "not configured" and is omitted.
+- `groups` — every group the frame's **assigned scenes declare**, whether or
+  not the owner has filled it in. A group in `groups` but not in `settings` is
+  one the frame needs and the account has not set; the device may surface that
+  ("this frame needs an Unsplash key") but must not invent a value for it.
+
+**The six groups are cloud-owned on a managed frame.** A group absent from
+`settings` is **deleted** on the device — not left at its previous value.
+That is the whole point: revoking a key in the provider account, or removing
+the last scene that used it, must actually take the key off the device.
+Settings groups *outside* the six are untouched by this route and stay under
+local control.
+
+Both the response and a `304` carry `Cache-Control: no-store`: this body is
+the account's credentials and no proxy, CDN or on-device HTTP cache may keep
+a copy. The `ETag` is a hash of the canonical response body (keys sorted at
+every level, so re-saving the same values in a different order does not
+invalidate it); a device that sends a matching `If-None-Match` gets `304` with
+no body and should keep what it has.
+
+Errors:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `401` | `invalid_link_token` | missing, unknown, revoked or expired bearer |
+| `401` | `frame_not_enrolled` / `frame_revoked` | the token is valid but no live frame stands behind it |
+| `403` | `frame_mismatch` | the bearer belongs to a different frame than the `{id}` in the path |
+| `403` | `insufficient_scope` | the link does not hold `settings:services` (or not even `frame:managed`) |
+| `409` | `frame_not_active` | the frame is still `pending` (owner has not confirmed it) |
+| `429` | `rate_limited` | over the per-IP or per-frame budget |
+
+`403 insufficient_scope` is the boundary that matters. Devices treat the
+`ready` scope list as additive truth and never drop a scope from their local
+copy, so an owner turning delivery off is enforced *here*, by the provider
+refusing the fetch — a device that keeps asking simply keeps getting 403.
+On that response a device should delete its local copy of all six groups, the
+same way it treats a group absent from `settings`.
+
+When to fetch: on every session that reaches `ready`, on a
+`refresh_service_settings` nudge, and whenever the device's own logic decides
+its copy may be stale. The nudge is advisory and expires quickly (reference
+provider: 5 minutes), because a frame that was offline when the owner saved a
+key re-fetches at `ready` anyway.
 
 ## Provisioning
 
@@ -543,6 +626,8 @@ POST {provider}/api/frames/{id}/scenes         # assign scene versions → enque
 POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
 POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
+GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not session: see "Service settings"
+POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)
 ```

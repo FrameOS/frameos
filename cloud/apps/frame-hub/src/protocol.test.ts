@@ -332,6 +332,9 @@ describe("browser event shaping", () => {
       publicKey: "pk",
       schedule: { events: [] },
       scenesChecksum: "have",
+      // Denormalized scene-declared service settings groups; group names
+      // only, and never part of the frame summary the browser sees.
+      serviceSettingGroups: ["unsplash"],
       settings: { interval: 300, rotate: 90 },
       status: "active",
       updatedAt: now,

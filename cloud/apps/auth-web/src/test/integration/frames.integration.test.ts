@@ -300,9 +300,10 @@ describe("cloud-managed frame enrollment", () => {
     expect(payload.status).toBe("pending");
     expect(payload.token_type).toBe("Bearer");
     // The FULL grant, not just frame:managed — the device stores this string
-    // as its local scope list and gates its telemetry push loops on it.
+    // as its local scope list and gates its telemetry push loops (and its
+    // service-settings pull) on it.
     expect(payload.scope).toBe(
-      "frame:managed telemetry:logs telemetry:metrics",
+      "frame:managed settings:services telemetry:logs telemetry:metrics",
     );
     expect(payload.ws_path).toBe("/api/frames/ws");
     expect(typeof payload.access_token).toBe("string");

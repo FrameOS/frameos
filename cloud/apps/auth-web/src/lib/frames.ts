@@ -20,6 +20,8 @@ import {
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
+import { deviceDeliverableFields } from "./frame-service-settings";
+import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
@@ -43,6 +45,10 @@ export const claimTokenPrefix = "FRCT";
 export const frameManagedScope = "frame:managed";
 export const frameTelemetryLogsScope = "telemetry:logs";
 export const frameTelemetryMetricsScope = "telemetry:metrics";
+// Lets the frame PULL the account's service API keys (Unsplash, OpenAI, Home
+// Assistant, …) from GET /api/frames/{id}/service-settings. Never a push: see
+// enqueueServiceSettingsRefresh below for why the keys stay off the queue.
+export const frameServiceSettingsScope = "settings:services";
 
 // Deployment-tunable limits. A self-hoster with 60 frames, or a developer
 // re-opening "Add frame" all afternoon, should not have to patch the source.
@@ -130,6 +136,9 @@ export const allowedFrameCommandTypes = new Set([
   // only suggest, never install.
   "notify_update_available",
   "reboot",
+  // Zero-payload nudge: "your service settings changed, re-pull them".
+  // Carries no keys — see enqueueServiceSettingsRefresh.
+  "refresh_service_settings",
   "render",
   "restart_runtime",
   "set_current_scene",
@@ -505,6 +514,106 @@ export async function supersedePendingCommands(
         inArray(frameCommands.status, ["pending", "sent"]),
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Service settings (docs/cloud-frames.md "Service settings")
+// ---------------------------------------------------------------------------
+
+// The nudge is advisory, so it expires quickly: a frame that was offline when
+// the owner saved a key re-pulls on its own at `ready` anyway (and on every
+// render pass that needs a key), so a stale nudge redelivered days later buys
+// nothing and only costs a wake-up on a battery frame.
+export const serviceSettingsRefreshTtlMs = 5 * 60 * 1000;
+
+/**
+ * Tell a frame its service settings changed. The payload is EMPTY, always.
+ *
+ * The keys themselves travel over the device-authed HTTPS pull
+ * (GET /api/frames/{id}/service-settings), never over this queue:
+ *
+ *  - `frame_commands` rows are never deleted, so a pushed secret would sit in
+ *    Postgres — and in every backup — forever, long after the owner deleted
+ *    the key from their account;
+ *  - the payload passes through the hub, whose log redaction matches
+ *    token/secret/password/authorization/cookie/signature (apps/frame-hub/
+ *    src/log.ts) and would NOT match `apiKey` or `accessKey`;
+ *  - delivery is at-least-once, so a queued key could be redelivered to a
+ *    device after the owner revoked it.
+ *
+ * A pull has none of those properties: it is computed fresh per request,
+ * answered `Cache-Control: no-store`, and stops the moment the scope is
+ * revoked.
+ */
+export async function enqueueServiceSettingsRefresh(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+) {
+  // N saves while a frame is offline are one re-pull, not N wake-ups.
+  await supersedePendingCommands(db, frameId, "refresh_service_settings");
+  return enqueueFrameCommand(db, {
+    frameId,
+    payload: {},
+    ttlMs: serviceSettingsRefreshTtlMs,
+    type: "refresh_service_settings",
+  });
+}
+
+// Read frames.service_setting_groups. `undefined` means "never computed"
+// (a NULL column, or garbage from a hand-edited row) and tells the pull route
+// to compute and backfill it; an empty array means "computed, declares
+// nothing" and is NOT recomputed. Screened through deviceDeliverableFields so
+// a group retired from the deliverable list can never reappear from an old
+// row.
+export function readServiceSettingGroups(
+  value: unknown,
+): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter(
+    (entry): entry is string =>
+      typeof entry === "string" && deviceDeliverableFields.has(entry),
+  );
+}
+
+// The groups a set of interpreted scenes declare, in the shape the column
+// stores. Pure: callers that already hold the assembled scenes (the scene
+// assignment route) pass them straight in rather than re-reading anything.
+export function declaredServiceSettingGroups(scenes: unknown[]): string[] {
+  return requiredSettingsForScenes(scenes as Record<string, unknown>[])
+    .map((group) => group.key)
+    .filter((key) => deviceDeliverableFields.has(key));
+}
+
+// Compute the groups from the frame's CURRENT assignments and persist them.
+// Only the backfill path (a NULL column on an old frame) pays for this: it
+// unzips every assigned scene, which is exactly why the column exists.
+// Returns [] when the scenes cannot be assembled at all (a pulled scene, a
+// yanked version) and persists nothing in that case, so the next request
+// retries instead of freezing "declares nothing" into the row.
+export async function computeAndStoreServiceSettingGroups(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+): Promise<string[]> {
+  const built = await buildScenesPayloadForFrame(db, frameId);
+  if ("error" in built) {
+    return [];
+  }
+  const groups = declaredServiceSettingGroups(built.scenes);
+  await storeServiceSettingGroups(db, frameId, groups);
+  return groups;
+}
+
+export async function storeServiceSettingGroups(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  groups: string[],
+) {
+  await db
+    .update(frames)
+    .set({ serviceSettingGroups: groups, updatedAt: new Date() })
+    .where(eq(frames.id, frameId));
 }
 
 // Pull the shallowest scenes.json out of a published template zip. The zip is

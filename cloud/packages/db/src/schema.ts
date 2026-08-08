@@ -649,6 +649,15 @@ export const frames = pgTable(
     // renders what was pushed instead of blanks after a reload. `name` is
     // NOT stored here: frames.name is authoritative for the display name.
     settings: jsonb("settings"),
+    // Which service-settings GROUPS ("unsplash", "openAI", …) this frame's
+    // assigned scenes declare, denormalized from the scenes themselves.
+    // Recomputing it means unzipping every assigned scene version (zips are
+    // capped at 32 MiB apiece), which is far too expensive to do on every
+    // device poll of /api/frames/{id}/service-settings — so it is written
+    // wherever scenes are assigned. NULL means "never computed": the pull
+    // route computes it once and backfills. Never holds a credential, only
+    // group names.
+    serviceSettingGroups: jsonb("service_setting_groups"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),

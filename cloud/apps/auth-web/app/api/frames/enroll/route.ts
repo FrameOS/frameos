@@ -16,6 +16,7 @@ import {
 import {
   countFramesForAccount,
   frameManagedScope,
+  frameServiceSettingsScope,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
   isValidEd25519PublicKey,
@@ -36,6 +37,21 @@ const wsPath = "/api/frames/ws";
 // sending a single log line while the hub sat ready to accept them.
 const claimTokenGrantedScopes = [
   frameManagedScope,
+  // Service API keys (Unsplash/OpenAI/Home Assistant/…) the frame's scenes
+  // declare, fetched by the device from
+  // GET /api/frames/{id}/service-settings — never pushed over the queue.
+  // Granted at mint time for the same reason telemetry is: the owner minted
+  // this claim token to run their own scenes on their own frame, and a scene
+  // that renders "please provide an API key" until the owner finds a second
+  // switch is the trap this grant avoids.
+  //
+  // NEW enrollments only. Existing frames are deliberately NOT backfilled —
+  // adding a scope to a link the owner approved before this feature existed
+  // is exactly the silent escalation autoGrantedDeviceScopes refuses to do.
+  // The per-frame owner toggle
+  // (POST /api/frames/{id}/service-settings/enabled) is how an already
+  // enrolled frame gets it.
+  frameServiceSettingsScope,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
 ];

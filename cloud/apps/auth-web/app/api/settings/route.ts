@@ -1,17 +1,27 @@
-import { eq } from "drizzle-orm";
-import { accountSettings, createDb } from "@frameos-cloud/db";
+import { and, eq, isNull } from "drizzle-orm";
+import {
+  accountSettings,
+  createDb,
+  frames,
+  linkedClients,
+} from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   filterAccountSettings,
   type FilteredAccountSettings,
 } from "../../../src/lib/account-settings";
 import { recordAuditEvent } from "../../../src/lib/audit";
+import { linkedClientHasScope } from "../../../src/lib/backend-auth";
 import { csrfResponse } from "../../../src/lib/csrf";
 import {
   jsonError,
   readJsonObject,
   requireDatabase,
 } from "../../../src/lib/device-flow";
+import {
+  enqueueServiceSettingsRefresh,
+  frameServiceSettingsScope,
+} from "../../../src/lib/frames";
 import { rateLimitResponse } from "../../../src/lib/rate-limit";
 import { readSession } from "../../../src/lib/session";
 
@@ -33,6 +43,50 @@ async function storedAccountSettings(
     .from(accountSettings)
     .where(eq(accountSettings.accountId, accountId));
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+}
+
+// Tell every cloud-managed frame that holds `settings:services` to re-pull.
+// The nudge carries NO payload — the keys ride the device-authed HTTPS pull
+// (GET /api/frames/{id}/service-settings), never the durable command queue,
+// which is never pruned and would keep a deleted key in Postgres and in every
+// backup forever. See enqueueServiceSettingsRefresh.
+//
+// One query, then N enqueues: an account has at most a few dozen frames
+// (maxFramesPerAccount), and only the active, scope-holding ones are nudged.
+// A failure here must not fail the save — the settings are already committed
+// and an un-nudged frame simply re-pulls at its next `ready`.
+async function nudgeManagedFrames(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+) {
+  try {
+    const rows = await db
+      .select({
+        id: frames.id,
+        providerClientMetadata: linkedClients.providerClientMetadata,
+      })
+      .from(frames)
+      .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+      .where(
+        and(
+          eq(frames.accountId, accountId),
+          eq(frames.status, "active"),
+          isNull(linkedClients.revokedAt),
+        ),
+      );
+    for (const row of rows) {
+      if (!linkedClientHasScope(row, frameServiceSettingsScope)) {
+        continue;
+      }
+      await enqueueServiceSettingsRefresh(db, row.id);
+    }
+  } catch (error) {
+    // Frame ids and a message; never the settings themselves.
+    console.error(
+      "settings: service-settings nudge failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -111,6 +165,8 @@ export async function POST(request: NextRequest) {
       eventType: "account.settings_updated",
       metadata: { keys },
     });
+
+    await nudgeManagedFrames(db, session.accountId);
   }
 
   return NextResponse.json(
