@@ -218,6 +218,22 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
+  it("links only to the one settings section the compact form renders", () => {
+    // FrameSettings replaces the whole form with a name+interval block for
+    // this profile (esp32CloudProfile), so the settings sub-nav must collapse
+    // to match. It used to be filtered by mode alone and offered all 15 cloud
+    // sections — 14 of them scrolling to an anchor that is never rendered.
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-info", esp32Frame)).toBe(true);
+    for (const section of allowedFrameSettingsSections.cloud) {
+      if (section === "frame-settings-info") continue;
+      expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame)).toBe(false);
+    }
+    // A cloud Pi still gets the full form, so its nav is untouched.
+    for (const section of allowedFrameSettingsSections.cloud) {
+      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame)).toBe(true);
+    }
+  });
+
   it("classifies esp32 variants by prefix", () => {
     // The old probe here (updateNotify missing from the capability set) is
     // gone for the best reason: the firmware now implements the verb via the
@@ -321,6 +337,30 @@ describe("embedded-hardware frames on the backend control plane", () => {
     expect(isVirtualFrame(virtualFrame)).toBe(true);
     for (const frame of [undefined, null, {}, { embedded: null }, { embedded: {} }]) {
       expect(isEmbeddedHardwareFrame(frame)).toBe(false);
+    }
+  });
+
+  it("links to no host-OS settings sections", () => {
+    // FrameSettings hides these behind its isEmbeddedMode gate — a
+    // microcontroller mounts nothing, rotates no host log files, and has
+    // neither a configurable assets path nor reboot-behaviour knobs. Virtual
+    // frames are embedded mode too, so they lose them as well.
+    for (const frame of [esp32Frame, picoFrame, virtualFrame]) {
+      for (const section of [
+        "frame-settings-mountpoints",
+        "frame-settings-assets",
+        "frame-settings-logs",
+        "frame-settings-reboot",
+      ]) {
+        expect(frameSettingsSectionIsAllowed("backend", section, frame)).toBe(false);
+      }
+      // The sections a microcontroller does answer for stay linked.
+      expect(frameSettingsSectionIsAllowed("backend", "frame-settings-info", frame)).toBe(true);
+      expect(frameSettingsSectionIsAllowed("backend", "frame-http-api-section", frame)).toBe(true);
+    }
+    // A Pi on the same control plane keeps all of them.
+    for (const section of allowedFrameSettingsSections.backend) {
+      expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(true);
     }
   });
 

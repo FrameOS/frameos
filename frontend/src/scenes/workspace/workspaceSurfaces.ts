@@ -536,6 +536,46 @@ export function frameSupportsUsbSerialConsole(
   return isEsp32CloudFrame(frame, mode)
 }
 
-export function frameSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {
+/**
+ * The esp32 cloud profile replaces the whole settings form with one compact
+ * block (name + interval) — see `esp32CloudProfile` in FrameSettings.tsx — so
+ * every other nav entry would scroll to an anchor that is never rendered.
+ */
+const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-info']
+
+/**
+ * Sections FrameSettings.tsx renders only for a full host OS (its
+ * `isEmbeddedMode` gate): a microcontroller has no mountpoints to mount, no
+ * host log files to rotate, no reboot-behaviour knobs, and no configurable
+ * assets path. Applies to virtual frames too — they are embedded mode as
+ * well, and the backend, not the "device", holds their assets.
+ */
+const embeddedModeHiddenFrameSettingsSections: readonly string[] = [
+  'frame-settings-mountpoints',
+  'frame-settings-assets',
+  'frame-settings-logs',
+  'frame-settings-reboot',
+]
+
+/**
+ * Callers with a frame in hand MUST pass it: the mode alone cannot tell a
+ * cloud esp32 (one section) from a cloud Pi (all of them), and the contract
+ * above is that a nav entry which scrolls to nothing is worse than a missing
+ * one. `frame` stays optional so mode-only probes still compile.
+ */
+export function frameSettingsSectionIsAllowed(
+  mode: WorkspaceMode,
+  sectionId: string,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  if (isEsp32CloudFrame(frame, mode) && !esp32CloudFrameSettingsSections.includes(sectionId)) {
+    return false
+  }
+  if (
+    (isEmbeddedHardwareFrame(frame) || isVirtualFrame(frame)) &&
+    embeddedModeHiddenFrameSettingsSections.includes(sectionId)
+  ) {
+    return false
+  }
   return allowedFrameSettingsSections[mode].includes(sectionId)
 }
