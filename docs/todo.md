@@ -56,11 +56,16 @@ Known gaps from the 2026-08-08 audit (in flight or open):
   in the cloud protocol — structural, not a gap to close).
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Re-flash an ALREADY-ENROLLED cloud frame** — the deploy dialog now offers
-  cloud esp32 frames the full USB *provisioning* set (status, Wi-Fi
-  scan/apply, restart, factory reset — `EmbeddedUsbSetup`, pure WebSerial),
-  but deliberately NOT a "flash firmware" button, because browser flashing
-  currently forks a duplicate frame row. `Esp32CloudFlasher`
+- **Re-ENROLL an already-enrolled cloud frame** — *updating* the firmware of
+  an enrolled board shipped 2026-08-08: the deploy dialog's Firmware section
+  has "Update over USB" (`EmbeddedUsbFirmwareUpdate`), which writes the
+  published image around the board's NVS partition
+  (`embeddedFlashImage.ts`), so Wi-Fi, settings and the cloud enrollment all
+  survive and no claim token is involved. What is still missing is
+  RE-enrollment — pointing an already-owned board at a different account, or
+  recovering one whose NVS was blanked (a factory reset, or a full 0x0 flash
+  from the "Add frame" panel). That still forks a duplicate frame row.
+  `Esp32CloudFlasher`
   (`cloud-frontend/src/components/Esp32CloudFlasher.tsx`) is an *enrollment*
   flow end to end: `mintEnrollmentCode()` always POSTs
   `/api/frames/claim-tokens` for a FRESH single-use token, provisions it over
@@ -81,8 +86,15 @@ Known gaps from the 2026-08-08 audit (in flight or open):
   3. A flasher mode that takes a known `frameId` + its bound token, skips
      the new-frame watch entirely, and reports success against the row the
      user started from.
-  Until 1–3 land, re-flashing an enrolled board stays a delete-and-re-enroll
-  (or a manual esptool flash + factory reset over the USB setup block).
+  Until 1–3 land, MOVING an enrolled board (or rescuing a blanked one) stays a
+  delete-and-re-enroll.
+- **Cloud OTA needs a released `-app.bin`** — fixed 2026-08-08 in the release
+  workflow and the manifest/download routes, but every release up to and
+  including v2026.8.12 published only the merged flash image, which an OTA
+  slot can never accept. Cloud OTA therefore does nothing until the first
+  release carrying `…-esp32-s3-generic-app.bin`; the routes answer
+  `ota_image_not_published` (404) until then, and the USB updater is the way
+  to move a board onto a newer build meanwhile.
 
 ## Cloud-managed frames
 

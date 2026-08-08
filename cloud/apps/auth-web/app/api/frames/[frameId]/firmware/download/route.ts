@@ -3,8 +3,7 @@ import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flo
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import {
   fetchLatestRelease,
-  findAsset,
-  provisioningAssets,
+  findOtaAsset,
   streamablePlatforms,
   devFirmwareOverride,
   streamDevFirmwareResponse,
@@ -65,12 +64,10 @@ export async function GET(
   if (!release) {
     return jsonError("release_lookup_failed", 502);
   }
-  const entry = provisioningAssets.find(
-    (candidate) => candidate.platform === platform,
-  );
-  const asset = entry ? findAsset(release, entry.suffix) : undefined;
+  // Must be the same artifact the manifest described: the bare app image.
+  const asset = findOtaAsset(release, platform);
   if (!asset) {
-    return jsonError("firmware_not_published", 404, {
+    return jsonError("ota_image_not_published", 404, {
       platform,
       release: release.tag_name ?? null,
     });

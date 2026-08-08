@@ -40,6 +40,32 @@ export const provisioningAssets = [
   },
 ] as const;
 
+// OTA images. NOT the same file as above, and the difference is the whole
+// reason this list exists: `provisioningAssets` points at the MERGED image
+// (`idf.py merge-bin` — bootloader at 0x0, partition table, blank otadata,
+// app at 0x10000), which is what a flasher writes to a blank board. An OTA
+// slot takes only the bare app image: esp_ota_write/esp_ota_end validate an
+// esp_app_desc at offset 0x20, and the merged image has the BOOTLOADER there,
+// so a device offered one downloads several MB and then rejects it at the last
+// step — every time, on every release. The release publishes both; the
+// device-authed manifest/download routes serve this one.
+//
+// Releases from before the `-app.bin` assets shipped have no OTA image at all;
+// those answer 404 ota_image_not_published rather than falling back to the
+// merged image, which could only ever fail on the device.
+export const otaAssets = [
+  { platform: "esp32-s3-generic", suffix: "-esp32-s3-generic-app.bin" },
+  // 4MB single-slot layout — no OTA partition on the device, so this is
+  // published (and served) only for completeness.
+  { platform: "esp32-c3-generic", suffix: "-esp32-c3-generic-app.bin" },
+] as const;
+
+/** The bare app image for a platform, or undefined on an older release. */
+export function findOtaAsset(release: Release, platform: string) {
+  const entry = otaAssets.find((candidate) => candidate.platform === platform);
+  return entry ? findAsset(release, entry.suffix) : undefined;
+}
+
 // Only the ESP32 firmware (a few MB) is ever streamed from here; the
 // gigabyte-sized SD images go through app/api/frames/sd-image with its own
 // much tighter budget.
@@ -164,6 +190,12 @@ export async function fetchReleaseAssetText(
 // `<platform>.bin`, `<platform>.bin.minisig` and `version.txt` into a
 // `.dev-firmware/` directory (next to the auth-web app, or two levels up at
 // the cloud workspace root). Disabled in production builds.
+//
+// `<platform>.bin` must be the OTA APP image (`build/frameos_esp32.bin`), not
+// `merged-binary.bin` — see the otaAssets comment above. `version.txt` must
+// match the app's version string (esp_app_get_description()->version, i.e.
+// what `idf.py build` stamped), or the device sees itself as up to date and
+// does nothing.
 
 export interface DevFirmware {
   version: string;

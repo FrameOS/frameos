@@ -560,7 +560,14 @@ provisions the panel key over serial instead of picking a per-panel binary.
 The generic image boots with `EPD_7in5_V2` as the default panel for backward
 compatibility. Artifact file names are an implementation detail of the
 release archive — read them from the release metadata rather than
-constructing them. (Transitional: the generic binary is published as
+constructing them. Each ESP32 platform publishes **two** images, and they are
+not interchangeable: `…-esp32-s3-generic.bin` is the merged flash image
+(bootloader, partition table, blank otadata, app) that a USB flasher writes at
+`0x0`, while `…-esp32-s3-generic-app.bin` is the bare app image — the only
+thing an OTA slot accepts, since `esp_ota_end` validates an `esp_app_desc` at
+offset `0x20` and the merged image has the bootloader there. The device-authed
+OTA manifest/download routes serve the `-app.bin`; the browser flasher serves
+the merged one. (Transitional: the generic binary is published as
 `…-esp32-s3-generic.bin`, with an identical copy under the legacy
 `…-esp32-s3-epd7in5v2.bin` name for one release cycle.) A second generic
 image, `…-esp32-c3-generic.bin`, targets PSRAM-less ESP32-C3 boards

@@ -757,7 +757,13 @@ static esp_err_t cloud_ota_run(void)
         esp_http_client_cleanup(client);
         ESP_LOGW(TAG, "cloud ota: manifest HTTP %d (%lld bytes)", status,
                  (long long)content_length);
-        cloud_ota_log("error", status == 409 ? "unsigned-release" : "manifest-unavailable");
+        /* 404 = the release carries no OTA app image for this platform (every
+         * release up to v2026.8.12); 409 = it has one but no signature. Both
+         * are "nothing to install", and telling them apart in the log is the
+         * difference between waiting for a release and chasing a bug. */
+        cloud_ota_log("error", status == 409   ? "unsigned-release"
+                               : status == 404 ? "no-image-published"
+                                               : "manifest-unavailable");
         return ESP_FAIL;
     }
     char *body = malloc(FOS_CLOUD_OTA_MANIFEST_MAX + 1);

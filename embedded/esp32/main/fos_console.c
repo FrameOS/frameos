@@ -531,10 +531,31 @@ static int cmd_sd(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+/* Two OTA paths exist and a board only ever has one of them: the backend one
+ * (manifest under backend_url, authenticated with the frame api_key, applied
+ * by the early updater after a reboot) and the cloud one (device-authed
+ * manifest + minisign verification, fos_ota_request_cloud_update). An enrolled
+ * cloud frame has no backend_url/api_key at all, so sending it down the
+ * backend path could only ever answer ESP_ERR_INVALID_STATE — which read like
+ * "OTA is broken" rather than "wrong path". Pick by what this board is. */
+static esp_err_t ota_request_for_control_plane(const char **plane_out)
+{
+    const fos_config_t *config = fos_config();
+    bool backend_ready = config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
+    if (!backend_ready && fos_cloud_frame_id()[0]) {
+        if (plane_out) *plane_out = "cloud";
+        fos_ota_request_cloud_update();
+        return ESP_OK;
+    }
+    if (plane_out) *plane_out = "backend";
+    return fos_ota_request_check();
+}
+
 static int cmd_ota(int argc, char **argv)
 {
-    esp_err_t err = fos_ota_request_check();
-    printf("ota: %s\n", esp_err_to_name(err));
+    const char *plane = "backend";
+    esp_err_t err = ota_request_for_control_plane(&plane);
+    printf("ota: %s (%s)\n", esp_err_to_name(err), plane);
     return err == ESP_OK ? 0 : 1;
 }
 
@@ -764,7 +785,7 @@ static int cmd_usb_api(int argc, char **argv)
     }
 
     if (strcmp(subcommand, "ota") == 0) {
-        esp_err_t err = fos_ota_request_check();
+        esp_err_t err = ota_request_for_control_plane(NULL);
         if (err == ESP_OK) {
             usb_api_ok(subcommand);
             return 0;
