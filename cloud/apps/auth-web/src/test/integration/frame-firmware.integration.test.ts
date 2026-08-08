@@ -23,6 +23,14 @@ import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
+// A `.dev-firmware/` directory at the cloud workspace root (the local
+// signed-OTA test rig) would otherwise outrank every mocked release below and
+// answer these routes with whatever image happens to sit there.
+vi.mock("../../lib/firmware-release", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  devFirmwareOverride: () => Promise.resolve(undefined),
+}));
+
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (name: string) => {
@@ -47,6 +55,9 @@ const minisigText =
   "trusted comment: frameos frameos-2026.8.1-esp32-s3-generic.bin\n" +
   "RWQfakeGlobalSignature\n";
 
+// OTA serves the bare app image (`…-app.bin`), never the merged flash image
+// a USB flasher writes — see otaAssets in src/lib/firmware-release.ts. The
+// merged asset is in the fixture precisely because it must be ignored here.
 function releasePayload(options: { signed?: boolean } = {}) {
   const signed = options.signed !== false;
   return {
@@ -55,14 +66,26 @@ function releasePayload(options: { signed?: boolean } = {}) {
         browser_download_url:
           "https://github.com/FrameOS/frameos/releases/download/v2026.8.1/frameos-2026.8.1-esp32-s3-generic.bin",
         name: "frameos-2026.8.1-esp32-s3-generic.bin",
+        size: 4096,
+      },
+      {
+        browser_download_url:
+          "https://github.com/FrameOS/frameos/releases/download/v2026.8.1/frameos-2026.8.1-esp32-s3-generic.bin.minisig",
+        name: "frameos-2026.8.1-esp32-s3-generic.bin.minisig",
+        size: minisigText.length,
+      },
+      {
+        browser_download_url:
+          "https://github.com/FrameOS/frameos/releases/download/v2026.8.1/frameos-2026.8.1-esp32-s3-generic-app.bin",
+        name: "frameos-2026.8.1-esp32-s3-generic-app.bin",
         size: firmwareBytes.length,
       },
       ...(signed
         ? [
             {
               browser_download_url:
-                "https://github.com/FrameOS/frameos/releases/download/v2026.8.1/frameos-2026.8.1-esp32-s3-generic.bin.minisig",
-              name: "frameos-2026.8.1-esp32-s3-generic.bin.minisig",
+                "https://github.com/FrameOS/frameos/releases/download/v2026.8.1/frameos-2026.8.1-esp32-s3-generic-app.bin.minisig",
+              name: "frameos-2026.8.1-esp32-s3-generic-app.bin.minisig",
               size: minisigText.length,
             },
           ]

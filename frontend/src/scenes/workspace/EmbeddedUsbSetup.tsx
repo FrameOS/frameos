@@ -20,6 +20,7 @@ import {
 } from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
 import { EmbeddedUsbConnectionButton } from './EmbeddedWebFlasher'
+import { isEsp32CloudFrame } from './workspaceSurfaces'
 
 // fos_wifi_state_t in embedded/esp32/main/fos_wifi.h
 const WIFI_STATE_LABELS = ['offline', 'connecting', 'connected', 'captive portal'] as const
@@ -83,6 +84,7 @@ export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element |
 
   const busy = statusBusy || scanBusy || applyBusy || restartBusy || factoryResetBusy
   const frameName = frame.name || frameHost(frame)
+  const cloudManaged = isEsp32CloudFrame(frame)
 
   const refreshStatus = async (): Promise<void> => {
     setStatusBusy(true)
@@ -162,9 +164,17 @@ export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element |
   }
 
   const factoryReset = async (): Promise<void> => {
+    // A reset is `nvs_erase_all` on the whole frameos namespace (fos_config.c),
+    // which takes the cloud enrollment with it — cloud_url, cloud_fid and the
+    // device token all live there. On a cloud-managed frame that is not a
+    // reset but an unlink: the row here keeps existing with nothing behind it,
+    // and the board can only come back through a fresh enrollment. Say so
+    // instead of listing "Wi-Fi, backend and hardware settings".
     if (
       !window.confirm(
-        `Factory reset "${frameName}"? This erases the device's Wi-Fi, backend and hardware settings and reboots it. This cannot be undone.`
+        cloudManaged
+          ? `Factory reset "${frameName}"? This erases everything the board has stored — Wi-Fi, hardware settings AND its enrollment in this account. It will NOT come back as this frame: you have to flash and enroll it again from "Add frame", and this frame row is left behind empty. To install new firmware, use "Update over USB" instead — that keeps the enrollment. This cannot be undone.`
+          : `Factory reset "${frameName}"? This erases the device's Wi-Fi, backend and hardware settings and reboots it. This cannot be undone.`
       )
     ) {
       return
@@ -176,7 +186,11 @@ export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element |
       await usbFactoryReset(frame.id)
       setStatus(null)
       setNetworks(null)
-      setMessage('Factory reset complete. The device erased its settings and rebooted.')
+      setMessage(
+        cloudManaged
+          ? 'Factory reset complete. The device erased its settings — including its enrollment — and rebooted. Enroll it again from "Add frame"; this frame row no longer has a device behind it.'
+          : 'Factory reset complete. The device erased its settings and rebooted.'
+      )
     } catch (resetError) {
       setError(`Factory reset failed: ${errorDetail(resetError)}`)
     } finally {
@@ -364,6 +378,12 @@ export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element |
               {factoryResetBusy ? 'Resetting' : 'Factory reset'}
             </button>
           </div>
+          {cloudManaged ? (
+            <div className="frame-tool-muted text-xs leading-4">
+              A factory reset also erases the board's enrollment, so it stops being this frame and has to be enrolled
+              again. To install new firmware without losing that, use “Update over USB” under Firmware.
+            </div>
+          ) : null}
 
           {message ? <div className="text-xs font-semibold text-green-600">{message}</div> : null}
           {error ? <div className="text-xs font-semibold text-red-500">{error}</div> : null}

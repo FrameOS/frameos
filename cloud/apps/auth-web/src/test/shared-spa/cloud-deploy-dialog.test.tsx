@@ -53,6 +53,12 @@ type CloudTestWindow = Window & {
 const testWindow = window as CloudTestWindow;
 
 beforeEach(() => {
+  // Both USB surfaces render a "this browser can't do it" note without Web
+  // Serial, so the controls under test only exist when it is present.
+  Object.defineProperty(navigator, "serial", {
+    configurable: true,
+    value: { getPorts: () => Promise.resolve([]), requestPort: () => Promise.reject(new Error("no port")) },
+  });
   testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   document.body.innerHTML = '<div id="popper"></div><div id="root"></div>';
@@ -64,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  delete (navigator as { serial?: unknown }).serial;
   vi.unstubAllGlobals();
   delete testWindow.FRAMEOS_APP_CONFIG;
   delete testWindow.FRAMEOS_EMBEDDED_NO_BACKEND;
@@ -78,6 +85,10 @@ describe("the deploy dialog in cloud mode", () => {
     expect(screen.getByRole("button", { name: "Push scenes" })).toBeTruthy();
     // The firmware nudge, previously reachable only from the "…" menu.
     expect(screen.getByRole("button", { name: /Update firmware/ })).toBeTruthy();
+    // ...and the USB route to the same released image, which is the only one
+    // that works on a board that cannot reach the network — the state the USB
+    // block below exists to repair.
+    expect(screen.getByRole("button", { name: /Update over USB/ })).toBeTruthy();
     // The point of the whole exercise.
     expect(screen.getByText("USB setup")).toBeTruthy();
   });
@@ -110,6 +121,7 @@ describe("the deploy dialog in cloud mode", () => {
     // firmware image, and it has no serial console to provision over.
     expect(screen.queryByText("USB setup")).toBeNull();
     expect(screen.queryByRole("button", { name: /Update firmware/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Update over USB/ })).toBeNull();
   });
 
   it("fetches no deploy plan (the cloud has no such endpoint)", () => {

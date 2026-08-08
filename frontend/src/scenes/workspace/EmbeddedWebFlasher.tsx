@@ -21,14 +21,14 @@ import type { FrameType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { workspaceLogic } from './workspaceLogic'
 
-type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
+export type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
 type EspFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
-type FlashLogTerminal = IEspLoaderTerminal & { flush: () => void }
+export type FlashLogTerminal = IEspLoaderTerminal & { flush: () => void }
 type TraceableTransportInternals = { trace: (message: string) => void; lastTraceTime?: number }
 
 const FIRMWARE_POLL_INTERVAL_MS = 3000
 const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
-const POST_FLASH_BOOT_WAIT_MS = 7000
+export const POST_FLASH_BOOT_WAIT_MS = 7000
 // First boot after an erase-all flash formats the 24MB SPIFFS state
 // partition before the console starts — measured ~180s on a XIAO ESP32-S3
 // with 32MB flash. Wait well past that.
@@ -40,7 +40,7 @@ const POST_FLASH_SCENE_UPLOAD_ATTEMPTS = 3
 const POST_FLASH_SCENE_UPLOAD_RETRY_MS = 3000
 const ESP_FLASH_SIZES = new Set<EspFlashSize>(['4MB', '8MB', '16MB', '32MB'])
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
@@ -59,7 +59,7 @@ const S3_RTC_WDT_RESET_CONFIG = (0x80000000 | (5 << 28) | (1 << 8) | 2) >>> 0
 // some boards (XIAO ESP32-S3) latches the chip back into ROM download mode so
 // the app never boots after flashing (arduino-esp32#6762). The watchdog reset
 // runs over the flasher-stub protocol and never touches the strap pins.
-async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
+export async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
   if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
     return false
   }
@@ -84,7 +84,7 @@ async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
 
 type FirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
-function appendBrowserFlashLog(frameId: FrameId, message: string): void {
+export function appendBrowserFlashLog(frameId: FrameId, message: string): void {
   appendEmbeddedUsbLogLine(frameId, `[browser flash] ${message}`)
 }
 
@@ -124,7 +124,7 @@ function flashTraceLogMessage(message: string): string | null {
   return message
 }
 
-function createUsbLogTerminal(frameId: FrameId): FlashLogTerminal {
+export function createUsbLogTerminal(frameId: FrameId): FlashLogTerminal {
   let pendingLine = ''
   let flushTimer: ReturnType<typeof window.setTimeout> | null = null
 
@@ -173,7 +173,7 @@ function createUsbLogTerminal(frameId: FrameId): FlashLogTerminal {
   }
 }
 
-function mirrorTransportTrace(frameId: FrameId, transport: EspTransport): void {
+export function mirrorTransportTrace(frameId: FrameId, transport: EspTransport): void {
   const traceableTransport = transport as unknown as TraceableTransportInternals
   const originalTrace = traceableTransport.trace.bind(traceableTransport)
   traceableTransport.trace = (message: string): void => {
@@ -341,17 +341,20 @@ function usbStatusSummary(text: string | undefined): string {
 // Returns the port the board answered on: the watchdog reset after flashing
 // re-enumerates the USB device, so the original SerialPort object may have
 // been replaced by a fresh grant from getPorts().
-async function waitForUsbApiReadyAfterFlash(
+export async function waitForUsbApiReadyAfterFlash(
   frame: FrameType,
   port: SerialPort,
-  onStatus: (message: string) => void
+  onStatus: (message: string) => void,
+  // The storage-format warning is specific to a flash that wiped the state
+  // partition; a flow that kept it (the USB firmware update) says so instead.
+  initialMessage = 'Waiting for board USB API. A brand-new or fully erased board formats its storage first (~3 minutes).'
 ): Promise<SerialPort> {
   const started = Date.now()
   const deadline = started + POST_FLASH_USB_READY_TIMEOUT_MS
   let attempt = 0
   let lastError: unknown = null
   let resetHintShown = false
-  onStatus('Waiting for board USB API. A brand-new or fully erased board formats its storage first (~3 minutes).')
+  onStatus(initialMessage)
 
   while (Date.now() < deadline) {
     attempt += 1

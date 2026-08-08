@@ -63,6 +63,7 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
+import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
@@ -2019,8 +2020,13 @@ function EmbeddedFirmwareSection({
  *   1. Push scenes      the settings push + one checksummed set_scenes
  *                       (frameLogic's cloudSaveAndDeploy) — the footer's
  *                       primary button.
- *   2. Update firmware  notify_update_available; the device fetches and
- *                       signature-verifies the image itself.
+ *   2. Update firmware  two paths to the same released image:
+ *                       notify_update_available over the wire (the device
+ *                       fetches and signature-verifies it itself), and
+ *                       EmbeddedUsbFirmwareUpdate over WebSerial for a board
+ *                       plugged into this computer — the latter also being
+ *                       the only route for a board that cannot reach the
+ *                       network.
  *   3. USB setup        WebSerial provisioning for esp32 boards, the same
  *                       component the backend's embedded view mounts. It
  *                       speaks only to the serial port, so it works
@@ -2028,11 +2034,13 @@ function EmbeddedFirmwareSection({
  *                       API at all — and it is the only way to fix the Wi-Fi
  *                       credentials of a board that cannot reach the cloud.
  *
- * Deliberately absent: the firmware BUILD/flash controls
- * (EmbeddedWebFlasher, OTA-from-this-backend, esptool command, footprint
- * chart). Those all read frame.embedded.firmware, which the backend builds
- * and cloud frames do not have. Re-flashing an enrolled cloud board also
- * needs a claim token bound to the existing frame — see docs/todo.md.
+ * Deliberately absent: the firmware BUILD controls (EmbeddedWebFlasher,
+ * OTA-from-this-backend, esptool command, footprint chart). Those all read
+ * frame.embedded.firmware, which the backend builds and cloud frames do not
+ * have — the cloud only ever installs published release binaries. Re-ENROLLING
+ * an already-enrolled board (moving it to another account, or recovering a
+ * blanked NVS) still needs a claim token bound to the existing frame; see
+ * docs/todo.md. Updating one does not: the USB updater writes around the NVS.
  */
 function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
   const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
@@ -2069,24 +2077,42 @@ function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
           />
         </div>
       </section>
-      {canUpdateFirmware ? (
+      {isEsp32 ? (
         <section className="space-y-2">
           <DrawerHeading>Firmware</DrawerHeading>
-          <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
-            <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
-              Ask the frame to check for new firmware and install it in the background. The device downloads the image
-              and verifies its signature itself.
+          {canUpdateFirmware ? (
+            <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
+              <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
+                <span className="font-semibold text-[color:var(--tool-strong)]">Over the air.</span> Ask the frame to
+                check for new firmware and install it in the background. The device downloads the image and verifies its
+                signature itself. It needs to be online and reachable.
+              </div>
+              <button
+                type="button"
+                title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
+                disabled={Boolean(firmwareDisabledReason)}
+                onClick={() => updateFrameFirmware(frame.id)}
+                className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                <CloudArrowDownIcon className="h-4 w-4" />
+                Update firmware
+              </button>
             </div>
-            <button
-              type="button"
-              title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
-              disabled={Boolean(firmwareDisabledReason)}
-              onClick={() => updateFrameFirmware(frame.id)}
-              className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-            >
-              <CloudArrowDownIcon className="h-4 w-4" />
-              Update firmware
-            </button>
+          ) : null}
+          {/* The USB path, for a board that is plugged into this computer:
+              writes the published image around the settings partition, so the
+              frame keeps its Wi-Fi and its cloud enrollment and comes back as
+              itself. Works on a board that cannot reach the network at all —
+              which is exactly when the OTA nudge above cannot help. */}
+          {/* Stacked, not side by side like the OTA row: this control grows a
+              progress bar and status lines while it runs. */}
+          <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              <span className="font-semibold text-[color:var(--tool-strong)]">Over USB.</span> Flash the latest released
+              firmware straight from this browser. The frame keeps its Wi-Fi credentials, its settings and its link to
+              this account — no re-enrollment, and no network needed.
+            </div>
+            <EmbeddedUsbFirmwareUpdate frame={frame} />
           </div>
         </section>
       ) : null}
@@ -2538,11 +2564,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
-                  title={
-                    isEmbeddedFrame
-                      ? 'Rebuild the firmware and update the frame over the air (OTA)'
-                      : undefined
-                  }
+                  title={isEmbeddedFrame ? 'Rebuild the firmware and update the frame over the air (OTA)' : undefined}
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

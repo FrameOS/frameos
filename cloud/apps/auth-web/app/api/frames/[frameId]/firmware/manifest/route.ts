@@ -5,8 +5,7 @@ import {
   devFirmwareOverride,
   fetchLatestRelease,
   fetchReleaseAssetText,
-  findAsset,
-  provisioningAssets,
+  findOtaAsset,
   streamablePlatforms,
 } from "../../../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -20,6 +19,10 @@ export const runtime = "nodejs";
 //
 //   GET /api/frames/{id}/firmware/manifest?platform=esp32-s3-generic
 //   -> { platform, version, size, minisig, downloadUrl }
+//
+// The image behind it is the release's bare APP binary (`…-app.bin`), not the
+// merged flash image the browser flasher writes — an OTA slot accepts nothing
+// else (src/lib/firmware-release.ts, otaAssets).
 //
 // `minisig` is the full text of the release's detached minisign signature
 // (tools/sign_firmware.py: Ed25519 over BLAKE2b-512 of the image, verified
@@ -85,12 +88,11 @@ export async function GET(
   if (!release) {
     return jsonError("release_lookup_failed", 502);
   }
-  const entry = provisioningAssets.find(
-    (candidate) => candidate.platform === platform,
-  );
-  const asset = entry ? findAsset(release, entry.suffix) : undefined;
+  // The bare app image, never the merged flash image: only the former is a
+  // valid OTA payload (src/lib/firmware-release.ts, otaAssets).
+  const asset = findOtaAsset(release, platform);
   if (!asset) {
-    return jsonError("firmware_not_published", 404, {
+    return jsonError("ota_image_not_published", 404, {
       platform,
       release: release.tag_name ?? null,
     });

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
+import { devFirmwareOverride } from "../../../../../src/lib/firmware-release";
 import { jsonError } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { GET as getManifest } from "./manifest/route";
@@ -23,8 +24,19 @@ vi.mock("../../../../../src/lib/device-flow", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   requireDatabase: () => ({ db: {} as never, response: undefined }),
 }));
+// devFirmwareOverride reads a `.dev-firmware/` directory relative to the CWD
+// (two levels up lands on the cloud workspace root, where anyone testing
+// signed OTA against a locally built image keeps one). Left real, it wins over
+// every mocked release below and rewrites this whole suite's expectations on
+// whichever machine happens to have that directory. Overridable per test so
+// the dev path itself can still be pinned.
+vi.mock("../../../../../src/lib/firmware-release", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  devFirmwareOverride: vi.fn(() => Promise.resolve(undefined)),
+}));
 
 const authMock = vi.mocked(authenticateFrameDevice);
+const devFirmwareMock = vi.mocked(devFirmwareOverride);
 const rateLimitMock = vi.mocked(rateLimitResponse);
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -36,13 +48,18 @@ const minisigText =
   "trusted comment: frameos frameos-1.2.3-esp32-s3-generic.bin\n" +
   "RWQfakeGlobalSignature\n";
 
+// A real release publishes BOTH images per platform: the merged one the
+// browser flasher writes at 0x0, and the bare app image OTA needs. These
+// routes must pick the app image every time — see otaAssets in
+// src/lib/firmware-release.ts.
+const mergedBytes = new Uint8Array(64).fill(0xe9);
 const releasePayload = {
   assets: [
     {
       browser_download_url:
         "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-s3-generic.bin",
       name: "frameos-1.2.3-esp32-s3-generic.bin",
-      size: firmwareBytes.length,
+      size: mergedBytes.length,
     },
     {
       browser_download_url:
@@ -52,8 +69,20 @@ const releasePayload = {
     },
     {
       browser_download_url:
-        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-c3-generic.bin",
-      name: "frameos-1.2.3-esp32-c3-generic.bin",
+        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-s3-generic-app.bin",
+      name: "frameos-1.2.3-esp32-s3-generic-app.bin",
+      size: firmwareBytes.length,
+    },
+    {
+      browser_download_url:
+        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-s3-generic-app.bin.minisig",
+      name: "frameos-1.2.3-esp32-s3-generic-app.bin.minisig",
+      size: minisigText.length,
+    },
+    {
+      browser_download_url:
+        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-c3-generic-app.bin",
+      name: "frameos-1.2.3-esp32-c3-generic-app.bin",
       size: 16,
     },
   ],
@@ -70,9 +99,11 @@ function mockGitHub(release: unknown = releasePayload) {
       if (url.endsWith(".minisig")) {
         return Promise.resolve(new Response(minisigText));
       }
+      // Distinct bytes per artifact, so "served the wrong one" is visible.
+      const body = url.endsWith("-app.bin") ? firmwareBytes : mergedBytes;
       return Promise.resolve(
-        new Response(firmwareBytes.slice(), {
-          headers: { "content-length": String(firmwareBytes.length) },
+        new Response(body.slice(), {
+          headers: { "content-length": String(body.length) },
         }),
       );
     }
@@ -100,6 +131,8 @@ afterEach(() => {
   fetchMock.mockReset();
   rateLimitMock.mockClear();
   authMock.mockReset();
+  devFirmwareMock.mockReset();
+  devFirmwareMock.mockResolvedValue(undefined);
   vi.unstubAllGlobals();
 });
 
@@ -169,14 +202,36 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "firmware_not_published",
+      error: "ota_image_not_published",
+      platform: "esp32-s3-generic",
+      release: "v1.2.3",
+    });
+  });
+
+  it("404s a release that publishes only the merged flash image", async () => {
+    // Every release up to and including v2026.8.12. Falling back to the
+    // merged image here would hand the device several MB it can only reject:
+    // esp_ota_end validates an esp_app_desc at 0x20, and a merged image has
+    // the bootloader there.
+    mockGitHub({
+      assets: releasePayload.assets.filter(
+        (asset) => !asset.name.includes("-app.bin"),
+      ),
+      tag_name: "v1.2.3",
+    });
+
+    const response = await manifest();
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "ota_image_not_published",
       platform: "esp32-s3-generic",
       release: "v1.2.3",
     });
   });
 
   it("409s a release whose .bin carries no .minisig — never offer an unverifiable image", async () => {
-    // esp32-c3-generic.bin exists in the fixture, its .minisig does not.
+    // esp32-c3-generic-app.bin exists in the fixture, its .minisig does not.
     mockGitHub();
 
     const response = await manifest("esp32-c3-generic");
@@ -199,6 +254,28 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
       error: "release_lookup_failed",
     });
   });
+
+  it("prefers a local .dev-firmware image over the release, without touching GitHub", async () => {
+    mockGitHub();
+    devFirmwareMock.mockResolvedValue({
+      version: "9.9.9-dev",
+      size: 4096,
+      minisig: minisigText,
+      filePath: "/tmp/esp32-s3-generic.bin",
+    });
+
+    const response = await manifest();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      platform: "esp32-s3-generic",
+      version: "9.9.9-dev",
+      size: 4096,
+      minisig: minisigText,
+      downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/frames/[frameId]/firmware/download", () => {
@@ -218,7 +295,7 @@ describe("GET /api/frames/[frameId]/firmware/download", () => {
       "application/octet-stream",
     );
     expect(response.headers.get("x-frameos-image-name")).toBe(
-      "frameos-1.2.3-esp32-s3-generic.bin",
+      "frameos-1.2.3-esp32-s3-generic-app.bin",
     );
     expect(response.headers.get("x-frameos-release")).toBe("v1.2.3");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firmwareBytes);
@@ -230,14 +307,14 @@ describe("GET /api/frames/[frameId]/firmware/download", () => {
       assets: [
         {
           browser_download_url:
-            "https://evil.example/frameos-1.2.3-esp32-s3-generic.bin",
-          name: "frameos-1.2.3-esp32-s3-generic.bin",
+            "https://evil.example/frameos-1.2.3-esp32-s3-generic-app.bin",
+          name: "frameos-1.2.3-esp32-s3-generic-app.bin",
           size: 32,
         },
         {
           browser_download_url:
-            "https://evil.example/frameos-1.2.3-esp32-s3-generic.bin.minisig",
-          name: "frameos-1.2.3-esp32-s3-generic.bin.minisig",
+            "https://evil.example/frameos-1.2.3-esp32-s3-generic-app.bin.minisig",
+          name: "frameos-1.2.3-esp32-s3-generic-app.bin.minisig",
           size: 128,
         },
       ],

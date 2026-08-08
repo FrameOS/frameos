@@ -409,6 +409,17 @@ jobs:
               bash embedded/esp32/ci_build_image.sh
               cp embedded/esp32/build-ci/merged-binary.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic.bin"
+              # TWO artifacts per platform, and they are not interchangeable:
+              # merged-binary.bin is the whole flash from 0x0 (bootloader +
+              # partition table + blank otadata + app) and is what a USB
+              # flasher writes, while frameos_esp32.bin is the bare app image
+              # — the ONLY thing esp_ota_write accepts. Handing an OTA slot the
+              # merged image fails validation (its first bytes are the
+              # bootloader, which carries no esp_app_desc), so the cloud OTA
+              # manifest serves this one. Same split the self-hosted backend
+              # makes (backend/app/api/embedded_device.py).
+              cp embedded/esp32/build-ci/frameos_esp32.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic-app.bin"
               # ESP32-C3 thin-client firmware (TRMNL OG/BWRY, XTEINK X4):
               # 4MB no-OTA layout, no on-device Nim renderer.
               FRAMEOS_ESP32_PLATFORM=esp32-c3 \
@@ -416,6 +427,10 @@ jobs:
                 bash embedded/esp32/ci_build_image.sh
               cp embedded/esp32/build-ci-c3/merged-binary.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic.bin"
+              # No OTA slot in the C3 4MB layout, so its app image is
+              # published for symmetry/debugging only — nothing consumes it.
+              cp embedded/esp32/build-ci-c3/frameos_esp32.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic-app.bin"
             '
           ls -lh release-assets/
 
@@ -467,8 +482,12 @@ jobs:
           path: |
             release-assets/*-esp32-s3-generic.bin
             release-assets/*-esp32-s3-generic.bin.minisig
+            release-assets/*-esp32-s3-generic-app.bin
+            release-assets/*-esp32-s3-generic-app.bin.minisig
             release-assets/*-esp32-c3-generic.bin
             release-assets/*-esp32-c3-generic.bin.minisig
+            release-assets/*-esp32-c3-generic-app.bin
+            release-assets/*-esp32-c3-generic-app.bin.minisig
           if-no-files-found: error
 
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
