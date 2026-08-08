@@ -659,7 +659,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "`<div class='metric'><b>Flash</b>${Math.round((st.flashBytes||0)/1024)}K: ${fl}</div>`+"
         "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
         "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`+"
-        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`;"
+        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`+"
+        "(s.assets&&s.assets.sdError?`<div class='metric'><b>SD error</b>${s.assets.sdError}</div>`:'');"
         "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
         "function refreshPreview(){const img=document.getElementById('preview');img.src='/image?t='+Date.now();}"
         "function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;"
@@ -719,11 +720,15 @@ char *fos_http_status_json(void)
     char *backend = json_escape_dup(config->backend_url);
     char *ssid = json_escape_dup(config->wifi_ssid);
     char *nim_info = json_escape_dup(frameos_nim_info());
+    /* Why the card is not mounted, verbatim — "0 assets" with no reason is
+     * what makes SD problems unanswerable from the panel. */
+    char *sd_error = json_escape_dup(fos_assets_sd_last_error());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
         !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info ||
-        !cloud_url || !cloud_frame_id || !cloud_error) {
+        !sd_error || !cloud_url || !cloud_frame_id || !cloud_error) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
         free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        free(sd_error);
         free(cloud_url); free(cloud_frame_id); free(cloud_error);
         return NULL;
     }
@@ -738,7 +743,8 @@ char *fos_http_status_json(void)
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
         "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
-        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu},"
+        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,"
+        "\"sdErrorCode\":\"%s\",\"sdError\":\"%s\"},"
         "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
         "\"resumable\":true,\"bootRequestSupported\":true,"
         "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
@@ -770,6 +776,7 @@ char *fos_http_status_json(void)
         fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
         (unsigned long)config->assets_sd.max_freq_khz,
         (unsigned long long)fos_assets_sd_capacity_bytes(),
+        fos_assets_sd_last_error_code(), sd_error,
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
@@ -796,6 +803,7 @@ char *fos_http_status_json(void)
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
     free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+    free(sd_error);
     free(cloud_url); free(cloud_frame_id); free(cloud_error);
     if (len < 0 || !json) {
         free(json);
@@ -2102,6 +2110,53 @@ static esp_err_t asset_mutate_post_handler(httpd_req_t *req, const char *op)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* Explicit SD-card maintenance. Boot never formats a card it merely failed to
+ * mount, and never re-probes the socket after boot (fos_assets_sd.c), so these
+ * two actions are the only ways to put a filesystem on a blank card or to pick
+ * up a card that was inserted while the frame was running:
+ *
+ *   POST /api/action/remount-sd  |  POST /api/frames/<id>/assets/remount-sd
+ *   POST /api/action/format-sd   |  POST /api/frames/<id>/assets/format-sd
+ *
+ * format-sd ERASES the card: it writes a fresh filesystem to a card that
+ * carries no volume this firmware can mount (a blank card, or an exFAT card
+ * whose contents the frame cannot see). A card that mounts is never touched.
+ * Callers must warn the user before POSTing it. */
+static esp_err_t sd_maintenance_post_handler(httpd_req_t *req, bool format)
+{
+    REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
+    log_http_command(req, format ? "format-sd" : "remount-sd", 0);
+
+    esp_err_t err = format ? fos_assets_sd_format() : fos_assets_sd_remount();
+    if (err != ESP_OK) {
+        const char *detail = fos_assets_sd_last_error();
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   (detail && detail[0]) ? detail : esp_err_to_name(err));
+    }
+    char *body = NULL;
+    int len = asprintf(&body, "{\"ok\":true,\"mounted\":true,\"capacityBytes\":%llu}",
+                       (unsigned long long)fos_assets_sd_capacity_bytes());
+    if (len < 0 || !body) {
+        free(body);
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t send_err = httpd_resp_sendstr(req, body);
+    free(body);
+    return send_err;
+}
+
+static esp_err_t sd_remount_post_handler(httpd_req_t *req)
+{
+    return sd_maintenance_post_handler(req, false);
+}
+
+static esp_err_t sd_format_post_handler(httpd_req_t *req)
+{
+    return sd_maintenance_post_handler(req, true);
+}
+
 static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 {
     char path[256];
@@ -2164,6 +2219,8 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
     if (strcmp(suffix, "/assets/mkdir") == 0) return asset_mutate_post_handler(req, "mkdir");
     if (strcmp(suffix, "/assets/delete") == 0) return asset_mutate_post_handler(req, "delete");
     if (strcmp(suffix, "/assets/rename") == 0) return asset_mutate_post_handler(req, "rename");
+    if (strcmp(suffix, "/assets/remount-sd") == 0) return sd_remount_post_handler(req);
+    if (strcmp(suffix, "/assets/format-sd") == 0) return sd_format_post_handler(req);
     const char *event_prefix = "/event/";
     if (strncmp(suffix, event_prefix, strlen(event_prefix)) == 0) {
         char event_name[96];
@@ -2292,8 +2349,8 @@ typedef struct {
     char uri[32];
 } logged_route_t;
 
-/* 25 routes per server (13 GET + 12 POST), x2 servers (http + https), or
- * 25 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
+/* 27 routes per server (13 GET + 14 POST), x2 servers (http + https), or
+ * 27 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
 #define FOS_HTTP_MAX_LOGGED_ROUTES 64
 static logged_route_t s_logged_routes[FOS_HTTP_MAX_LOGGED_ROUTES];
 static size_t s_logged_route_count = 0;
@@ -2358,6 +2415,8 @@ static bool should_log_request(int method, const char *path)
             path_has_suffix(path, "/assets/mkdir") ||
             path_has_suffix(path, "/assets/delete") ||
             path_has_suffix(path, "/assets/rename") ||
+            path_has_suffix(path, "/assets/remount-sd") ||
+            path_has_suffix(path, "/assets/format-sd") ||
             strcmp(path, "/api/scenes") == 0 ||
             path_is_frame_update_root(path)) {
             return false;
@@ -2458,11 +2517,15 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     httpd_uri_t action_restart = {.uri = "/api/action/restart", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t action_reboot = {.uri = "/api/action/reboot", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
+    httpd_uri_t remount_sd = {.uri = "/api/action/remount-sd", .method = HTTP_POST, .handler = sd_remount_post_handler};
+    httpd_uri_t format_sd = {.uri = "/api/action/format-sd", .method = HTTP_POST, .handler = sd_format_post_handler};
     REGISTER_ROUTE(render);
     REGISTER_ROUTE(ota);
     REGISTER_ROUTE(action_restart);
     REGISTER_ROUTE(action_reboot);
     REGISTER_ROUTE(scene);
+    REGISTER_ROUTE(remount_sd);
+    REGISTER_ROUTE(format_sd);
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
     httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};

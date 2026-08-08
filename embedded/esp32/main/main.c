@@ -138,8 +138,14 @@ void app_main(void)
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
 
+    /* fos_assets_sd_mount emits its own structured "assets:sd" line into the
+     * log ring (and replays it to the backend/cloud once upload is enabled,
+     * below) — a mount failure must never be a serial-only event, or "why are
+     * my assets empty?" has no remote answer. */
     if (fos_assets_sd_mount(config) != ESP_OK) {
-        ESP_LOGW(TAG, "SD assets unavailable, continuing without /srv/assets");
+        ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
+                 config->assets_path[0] ? config->assets_path : "/srv/assets",
+                 fos_assets_sd_last_error());
     } else {
         fos_assets_cleanup_stale_uploads();
     }
@@ -272,6 +278,7 @@ void app_main(void)
 
     if (online) {
         frameos_nim_set_log_upload_enabled(true);
+        if (config->assets_sd.enabled) fos_assets_sd_log_status();
         log_bootup_event(true);
         fos_http_start(false);
         fos_ota_start_periodic_task(24);

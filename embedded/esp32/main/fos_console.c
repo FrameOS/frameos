@@ -22,6 +22,7 @@
 
 #include "cJSON.h"
 #include "fos_assets.h"
+#include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -112,9 +113,13 @@ static int cmd_status(int argc, char **argv)
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
-    printf("assets:      path=%s sd=%d pins=%s freq=%lu kHz\n",
-           config->assets_path, (int)config->assets_sd.enabled, sd_pins,
+    printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz\n",
+           config->assets_path, (int)config->assets_sd.enabled,
+           (int)fos_assets_sd_mounted(), sd_pins,
            (unsigned long)config->assets_sd.max_freq_khz);
+    if (fos_assets_sd_last_error()[0]) {
+        printf("sd_error:    %s\n", fos_assets_sd_last_error());
+    }
     printf("interval:    %lu s, deep_sleep=%d, wake_schedule=%d\n",
            (unsigned long)config->interval_sec, (int)config->deep_sleep,
            (int)config->wake_schedule);
@@ -487,6 +492,38 @@ static int cmd_display_test(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+/* Explicit SD-card maintenance. The boot mount never formats a card it merely
+ * failed to read (an exFAT card full of photos is indistinguishable from a
+ * blank one at that API), and never re-probes the socket after boot — so
+ * formatting a blank card and picking up a card inserted while the frame was
+ * running both have to be asked for by hand, here. */
+static int cmd_sd(int argc, char **argv)
+{
+    const char *action = argc >= 2 ? argv[1] : "status";
+    esp_err_t err = ESP_OK;
+    if (strcmp(action, "remount") == 0) {
+        err = fos_assets_sd_remount();
+    } else if (strcmp(action, "format") == 0) {
+        /* Writes a filesystem only to a card that carries no volume this
+         * firmware can mount; a card that mounts is never erased. */
+        printf("sd: FORMATTING - this ERASES everything on an unreadable card and is\n"
+               "    NOT undoable. It is meant for a blank card. If the card only looks\n"
+               "    empty to the frame because it is exFAT, pull it out and copy the\n"
+               "    files off on a computer first.\n");
+        err = fos_assets_sd_format();
+    } else if (strcmp(action, "status") != 0) {
+        printf("usage: sd [status|remount|format]\n");
+        return 1;
+    }
+    printf("sd: mounted=%d path=%s capacity=%llu bytes\n",
+           (int)fos_assets_sd_mounted(), fos_config()->assets_path,
+           (unsigned long long)fos_assets_sd_capacity_bytes());
+    if (fos_assets_sd_last_error()[0]) {
+        printf("sd_error:    %s\n", fos_assets_sd_last_error());
+    }
+    return err == ESP_OK ? 0 : 1;
+}
+
 static int cmd_ota(int argc, char **argv)
 {
     esp_err_t err = fos_ota_request_check();
@@ -662,7 +699,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|get-asset|upload-asset|asset-op> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|get-asset|upload-asset|asset-op|remount-sd|format-sd> ...\n");
         return 1;
     }
 
@@ -903,6 +940,19 @@ static int cmd_usb_api(int argc, char **argv)
         return 0;
     }
 
+    /* Explicit SD maintenance — see cmd_sd. Never triggered automatically. */
+    if (strcmp(subcommand, "remount-sd") == 0 || strcmp(subcommand, "format-sd") == 0) {
+        bool format = strcmp(subcommand, "format-sd") == 0;
+        esp_err_t err = format ? fos_assets_sd_format() : fos_assets_sd_remount();
+        if (err != ESP_OK) {
+            const char *detail = fos_assets_sd_last_error();
+            usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "sd action failed");
+            return 1;
+        }
+        usb_api_ok(subcommand);
+        return 0;
+    }
+
     if (strcmp(subcommand, "list-assets") == 0) {
         cJSON *msg = cJSON_CreateObject();
         cJSON *assets = msg ? cJSON_AddArrayToObject(msg, "assets") : NULL;
@@ -1118,6 +1168,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},
         {.command = "render", .help = "Render now", .func = cmd_render},
         {.command = "display_test", .help = "display_test [bands|black|white|red|green|blue|yellow] — draw direct panel test", .func = cmd_display_test},
+        {.command = "sd", .help = "sd [status|remount|format] — SD assets card; format ERASES an unreadable card and is never automatic", .func = cmd_sd},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
         {.command = "scenes", .help = "Show loaded scenes + sync from backend", .func = cmd_scenes},
         {.command = "scene_state", .help = "Show current interpreted scene state JSON", .func = cmd_scene_state},
