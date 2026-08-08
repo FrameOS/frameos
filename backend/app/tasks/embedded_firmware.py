@@ -622,6 +622,17 @@ def embedded_platform_spec_for_frame(frame: Frame) -> dict[str, Any]:
     return EMBEDDED_PLATFORMS[embedded_platform_for_frame(frame)]
 
 
+def is_virtual_frame(frame: Frame) -> bool:
+    """Backend-rendered frame with no hardware: assets and scene state live on
+    the backend instead of a device."""
+    if (frame.mode or "rpios") != "embedded":
+        return False
+    try:
+        return embedded_platform_spec_for_frame(frame)["family"] == "virtual"
+    except ValueError:
+        return False
+
+
 def _embedded_platform_or_default(frame: Frame) -> str:
     """The frame's chip target, tolerating malformed metadata (error paths)."""
     try:

@@ -267,7 +267,7 @@ const frameToolDefinitions: FrameToolDefinition[] = [
 // Schedule on an esp32 cloud frame, whose firmware refuses `set_schedule`),
 // so the workspace keeps its shape whatever the hardware. Virtual frames are
 // the one exception: panels whose concepts don't exist for them (terminal,
-// ping, assets, metrics) are hidden outright — see workspaceSurfaces.ts.
+// ping, metrics) are hidden outright — see workspaceSurfaces.ts.
 function frameToolDefinitionsForMode(
   mode: WorkspaceMode = workspaceMode(),
   frame?: FrameType | null

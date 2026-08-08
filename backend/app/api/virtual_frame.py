@@ -22,6 +22,7 @@ password; rotating the frame's server API key invalidates it.
 from __future__ import annotations
 
 import io
+import json
 from http import HTTPStatus
 
 from fastapi import Depends, HTTPException, Query
@@ -32,7 +33,8 @@ from app.database import get_db
 from app.models.frame import Frame
 from app.redis import get_redis
 from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
-from app.utils.embedded_render import render_scene_rgba
+from app.utils import virtual_assets
+from app.utils.embedded_render import render_scene_rgba_and_state
 
 from . import api_public
 from .embedded_device import (
@@ -44,6 +46,8 @@ from .embedded_device import (
     embedded_diagnostic_image,
     embedded_settings_payload,
 )
+
+VIRTUAL_STATE_QUOTA_BYTES = 256 * 1024  # per frame, across all scenes
 
 VIRTUAL_DEFAULT_WIDTH = 800
 VIRTUAL_DEFAULT_HEIGHT = 480
@@ -70,6 +74,144 @@ def _virtual_frame(db: Session, frame_id: int, token: str | None) -> Frame:
     if not isinstance(view_token, str) or not view_token or token != view_token:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     return frame
+
+
+# --------------------------------------------------------------- scene state
+#
+# A device keeps scene state in the running process and persists chosen
+# fields to disk; a virtual frame's renderer is a fresh wasm process every
+# time, so the backend is the memory: per-scene state lives in redis (no
+# TTL, same as frame:{id}:active_scene) and is injected into the renderer on
+# every pass, then read back after the render so state the scene itself
+# changed sticks too.
+
+
+def _virtual_states_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:virtual:scene_states"
+
+
+def _scene_by_id(frame: Frame, scene_id: str | None) -> dict | None:
+    if not scene_id:
+        return None
+    for scene in frame.scenes or []:
+        if isinstance(scene, dict) and scene.get("id") == scene_id:
+            return scene
+    return None
+
+
+def _scene_fields(scene: dict) -> list[dict]:
+    fields = scene.get("fields")
+    return [f for f in fields if isinstance(f, dict) and f.get("name")] if isinstance(fields, list) else []
+
+
+def _settable_field_names(scene: dict) -> set[str]:
+    # Mirrors the interpreter's publicStateFields: fields without an explicit
+    # access default to public.
+    return {f["name"] for f in _scene_fields(scene) if f.get("access") != "private"}
+
+
+def _storable_field_names(scene: dict) -> set[str]:
+    # What survives between renders: everything settable plus fields the
+    # scene marked persist=disk (the device's across-restarts contract).
+    return _settable_field_names(scene) | {
+        f["name"] for f in _scene_fields(scene) if f.get("persist") == "disk"
+    }
+
+
+async def get_virtual_scene_states(redis, frame: Frame) -> dict[str, dict]:
+    raw = await redis.get(_virtual_states_key(frame.id))
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        scene_id: state
+        for scene_id, state in payload.items()
+        if isinstance(scene_id, str) and isinstance(state, dict)
+    }
+
+
+async def _save_virtual_scene_states(redis, frame: Frame, states: dict[str, dict]) -> None:
+    serialized = json.dumps(states, separators=(",", ":"))
+    if len(serialized) > VIRTUAL_STATE_QUOTA_BYTES:
+        raise HTTPException(
+            status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Scene state exceeds {VIRTUAL_STATE_QUOTA_BYTES} bytes",
+        )
+    await redis.set(_virtual_states_key(frame.id), serialized)
+
+
+async def resolve_virtual_scene_id(redis, frame: Frame, scene_id: str | None = None) -> str | None:
+    """The scene an event or render targets: explicit id, else the
+    workspace-activated scene, else the frame's first scene."""
+    if scene_id:
+        return scene_id
+    active = await _active_scene_id(redis, frame)
+    if active:
+        return active
+    for scene in frame.scenes or []:
+        if isinstance(scene, dict) and scene.get("id"):
+            return scene["id"]
+    return None
+
+
+async def apply_virtual_scene_state(redis, frame: Frame, scene_id: str | None, state: dict) -> None:
+    """Merge a setSceneState/setCurrentScene state payload, keeping only the
+    scene's public fields — the same filter the device runtime applies."""
+    scene = _scene_by_id(frame, scene_id)
+    if scene is None or not isinstance(state, dict):
+        return
+    allowed = _settable_field_names(scene)
+    field_types = {f["name"]: f.get("type") for f in _scene_fields(scene)}
+    accepted = {}
+    for key, value in state.items():
+        if key not in allowed:
+            continue
+        # Control forms deliver json fields as strings; parse them like
+        # applyPublicStateFromPayload does on the device.
+        if field_types.get(key) == "json" and isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                pass
+        accepted[key] = value
+    if not accepted:
+        return
+    states = await get_virtual_scene_states(redis, frame)
+    states[scene_id] = {**states.get(scene_id, {}), **accepted}
+    await _save_virtual_scene_states(redis, frame, states)
+
+
+async def store_rendered_scene_state(redis, frame: Frame, scene_id: str | None, state: dict) -> None:
+    """Persist the state the renderer reported after a pass (defaults now
+    evaluated, plus anything the scene's own logic changed)."""
+    scene = _scene_by_id(frame, scene_id)
+    if scene is None or not isinstance(state, dict):
+        return
+    storable = _storable_field_names(scene)
+    filtered = {key: value for key, value in state.items() if key in storable}
+    states = await get_virtual_scene_states(redis, frame)
+    if states.get(scene_id) == filtered:
+        return
+    states[scene_id] = filtered
+    try:
+        await _save_virtual_scene_states(redis, frame, states)
+    except HTTPException:
+        # An oversized render-produced state must not fail the image request;
+        # the previous stored state simply stays.
+        pass
+
+
+async def virtual_frame_states_payload(redis, frame: Frame) -> dict:
+    """The `/states` shape a physical frame serves: current scene + per-scene
+    public state, straight from the backend store."""
+    states = await get_virtual_scene_states(redis, frame)
+    scene_id = await resolve_virtual_scene_id(redis, frame)
+    return {"sceneId": scene_id or "", "states": states}
 
 
 def virtual_frame_dimensions(frame: Frame) -> tuple[int, int]:
@@ -125,14 +267,29 @@ async def _virtual_frame_png(
     from PIL import Image
 
     width, height = virtual_frame_dimensions(frame)
-    rgba = await render_scene_rgba(
+    scene_states = await get_virtual_scene_states(redis, frame)
+    assets_dir = virtual_assets.frame_assets_dir(frame)
+    rgba, rendered_state = await render_scene_rgba_and_state(
         frame,
         width,
         height,
         scene_id=scene_id_override or await _active_scene_id(redis, frame),
         settings=embedded_settings_payload(db, frame),
         scenes_override=scenes_override,
+        scene_states=scene_states,
+        assets_dir=str(assets_dir) if assets_dir.is_dir() else None,
     )
+    # Previews of unsaved scenes must not clobber the stored state; neither
+    # may a render whose state seeding failed (old wasm bundle without the
+    # set_scene_state export) — its readback is just scene defaults.
+    if (
+        rendered_state is not None
+        and scenes_override is None
+        and rendered_state.get("seeded", True)
+    ):
+        await store_rendered_scene_state(
+            redis, frame, rendered_state.get("sceneId"), rendered_state.get("state")
+        )
     if rgba is not None:
         image = Image.frombytes("RGBA", (width, height), rgba).convert("RGB")
     else:
@@ -184,7 +341,6 @@ async def refresh_virtual_frame_image(
     ``scenes_override`` renders unsaved scenes (preview-on-frame) without
     persisting them.
     """
-    import json
     import time
 
     from app.models.log import new_log as log

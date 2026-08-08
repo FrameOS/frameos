@@ -6,9 +6,16 @@
 // instead of on the device.
 //
 // Protocol: a single JSON object on stdin
-//   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson, sceneId}
+//   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
+//    sceneId, statesJson, frameAssetsRoot}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
+// statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
+// after a successful render the post-render state is reported on stderr as
+// one `__FRAMEOS_SCENE_STATE__{"sceneId":...,"state":...}` line, which the
+// Python caller parses. frameAssetsRoot is a host directory whose files are
+// preloaded into the wasm MEMFS under /srv/assets, so scene apps that read
+// frame assets (photo folders etc.) see them like on-device files.
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -20,8 +27,9 @@
 
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 
 // Synchronous XMLHttpRequest, as the emscripten HTTP bridge expects: each
 // send() runs fetch() in a short-lived child Node so the blocking wait is
@@ -164,6 +172,85 @@ if (request.sceneId) {
   }
 }
 
+// Seed backend-persisted scene state (virtual frames). Old wasm bundles
+// predate the export; state seeding then degrades to defaults-only, and
+// stateSeeded=false tells the backend NOT to persist the post-render
+// readback (it would clobber the stored state with scene defaults).
+let stateSeeded = true
+if (request.statesJson) {
+  let states = null
+  try {
+    states = JSON.parse(request.statesJson)
+  } catch {
+    stateSeeded = false
+    process.stderr.write('embedded_wasm_render: invalid statesJson, ignoring\n')
+  }
+  if (states && typeof states === 'object') {
+    for (const [sceneId, state] of Object.entries(states)) {
+      if (!state || typeof state !== 'object') continue
+      try {
+        call('frameos_wasm_set_scene_state', 'boolean', ['string', 'string'],
+          [sceneId, JSON.stringify(state)])
+      } catch (error) {
+        stateSeeded = false
+        process.stderr.write(`embedded_wasm_render: state seeding unavailable (${error})\n`)
+        break
+      }
+    }
+  }
+}
+
+// Preload the frame's backend-stored assets into MEMFS so scene apps can
+// read them at the on-device path. Needs a wasm bundle built with FS in
+// EXPORTED_RUNTIME_METHODS; older bundles just skip the preload.
+const MAX_PRELOAD_BYTES = 128 * 1024 * 1024
+if (request.frameAssetsRoot && Module.FS) {
+  const FS = Module.FS
+  const ensureDir = (path) => {
+    const parts = path.split('/').filter(Boolean)
+    let current = ''
+    for (const part of parts) {
+      current += '/' + part
+      try {
+        FS.mkdir(current)
+      } catch {
+        // exists
+      }
+    }
+  }
+  let preloaded = 0
+  let skipped = 0
+  try {
+    const entries = readdirSync(request.frameAssetsRoot, { recursive: true, withFileTypes: true })
+    for (const entry of entries) {
+      const hostPath = join(entry.parentPath ?? entry.path, entry.name)
+      const rel = relative(request.frameAssetsRoot, hostPath).split(sep).join('/')
+      if (!rel || rel.startsWith('..')) continue
+      const target = '/srv/assets/' + rel
+      if (entry.isDirectory()) {
+        ensureDir(target)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const size = statSync(hostPath).size
+      if (preloaded + size > MAX_PRELOAD_BYTES) {
+        skipped += 1
+        continue
+      }
+      ensureDir(target.slice(0, target.lastIndexOf('/')))
+      FS.writeFile(target, readFileSync(hostPath))
+      preloaded += size
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: asset preload failed: ${error}\n`)
+  }
+  if (skipped > 0) {
+    process.stderr.write(`embedded_wasm_render: skipped ${skipped} asset(s) over the ${MAX_PRELOAD_BYTES} byte preload cap\n`)
+  }
+} else if (request.frameAssetsRoot) {
+  process.stderr.write('embedded_wasm_render: wasm bundle lacks FS export, skipping asset preload\n')
+}
+
 const rc = call('frameos_wasm_render', 'number', [], [])
 const outWidth = call('frameos_wasm_width', 'number', [], [])
 const outHeight = call('frameos_wasm_height', 'number', [], [])
@@ -172,6 +259,20 @@ const len = call('frameos_wasm_buffer_len', 'number', [], [])
 if (rc === 2 || !ptr || !len) fail(`render failed: ${lastError()}`)
 if (len !== outWidth * outHeight * 4) {
   fail(`unexpected buffer size ${len} for ${outWidth}x${outHeight}`)
+}
+
+// Report the post-render scene state so the backend can persist what the
+// scene changed. Best-effort: a failure here must not fail the render.
+try {
+  const info = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
+  const state = JSON.parse(call('frameos_wasm_scene_state', 'string', [], []))
+  process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
+    sceneId: info.currentSceneId || request.sceneId || '',
+    state,
+    seeded: stateSeeded,
+  }) + '\n')
+} catch (error) {
+  process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)
 }
 
 process.stdout.write(Buffer.from(Module.HEAPU8.buffer, ptr, len), (err) => {

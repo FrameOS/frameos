@@ -45,6 +45,9 @@ var
   sceneInfoBuffer: string
   sceneStateBuffer: string
   lastErrorBuffer: string
+  # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
+  # before the scene's first render and merged into scene.state at init.
+  pendingSceneStates = initTable[string, JsonNode]()
 
 proc currentSceneName(): string =
   if not currentExported.isNil and currentExported.name.len > 0:
@@ -116,7 +119,10 @@ proc ensureScene(): bool =
     setLastError("scene not found: " & sceneId.string)
     return false
   currentExported = scenes[sceneId]
-  currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
+  let persisted =
+    if pendingSceneStates.hasKey(sceneId.string): pendingSceneStates[sceneId.string]
+    else: %*{}
+  currentScene = interpreter.init(sceneId, frameConfig, logger, persisted)
   log(&"scene \"{currentSceneName()}\" initialized")
   true
 
@@ -145,6 +151,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     scenesLoadedCount = 0
     renderRequested = false
     lastImage = nil
+    pendingSceneStates = initTable[string, JsonNode]()
 
     var settings = %*{}
     let settingsText = $settingsJson
@@ -263,6 +270,22 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
   except Exception as e:
     setLastError("loadScenes failed: " & e.msg)
     0
+
+proc frameos_wasm_set_scene_state(sceneId: cstring, stateJson: cstring): bool {.exportc, cdecl.} =
+  ## Seed persisted state for a scene before it initializes — how the backend
+  ## restores stored state for virtual frames, where every render is a fresh
+  ## wasm process. Merged into scene.state (over field defaults) when the
+  ## scene inits, so it must be called before the first render.
+  try:
+    let parsed = parseJson($stateJson)
+    if parsed.kind != JObject:
+      setLastError("setSceneState: state must be a JSON object")
+      return false
+    pendingSceneStates[$sceneId] = parsed
+    true
+  except Exception as e:
+    setLastError("setSceneState failed: " & e.msg)
+    false
 
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
