@@ -42,6 +42,7 @@ static void load_defaults(void)
     strlcpy(s_config.admin_pass, FRAMEOS_DEFAULT_ADMIN_AUTH_PASS, sizeof(s_config.admin_pass));
     strlcpy(s_config.assets_path, FRAMEOS_DEFAULT_ASSETS_PATH, sizeof(s_config.assets_path));
     s_config.assets_sd.enabled = FRAMEOS_DEFAULT_ASSETS_SD_ENABLE;
+    s_config.assets_sd.autoformat = FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT;
     s_config.assets_sd.cs = FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS;
     s_config.assets_sd.sck = FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK;
     s_config.assets_sd.miso = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO;
@@ -139,6 +140,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
     int8_t i8;
     if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
+    if (nvs_get_u8(nvs, "sd_autofmt", &u8) == ESP_OK) s_config.assets_sd.autoformat = u8 != 0;
     if (nvs_get_i8(nvs, "sd_cs", &i8) == ESP_OK) s_config.assets_sd.cs = i8;
     if (nvs_get_i8(nvs, "sd_sck", &i8) == ESP_OK) s_config.assets_sd.sck = i8;
     if (nvs_get_i8(nvs, "sd_miso", &i8) == ESP_OK) s_config.assets_sd.miso = i8;
@@ -207,6 +209,7 @@ esp_err_t fos_config_save(void)
     nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
     nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
+    nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0);
     nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);
     nvs_set_i8(nvs, "sd_sck", s_config.assets_sd.sck);
     nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso);

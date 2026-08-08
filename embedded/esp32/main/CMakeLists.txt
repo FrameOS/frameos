@@ -16,6 +16,7 @@ idf_component_register(
         "fos_battery.c"
         "fos_assets.c"
         "fos_assets_sd.c"
+        "fos_sd_probe.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi

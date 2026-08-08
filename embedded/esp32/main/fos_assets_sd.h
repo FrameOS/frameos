@@ -12,15 +12,23 @@
 /* Structured "assets:sd" log line; stays well under FOS_NIM_LOG_MAX_LINE. */
 #define FOS_ASSETS_SD_LOG_LEN 768
 
-/* Boot-time mount. NEVER formats: a card that fails to mount is left exactly
- * as the user handed it over, and the reason is reported instead (see
- * fos_assets_sd.c for the exFAT trap). */
+/* Boot-time mount. Formats only a card it can PROVE is empty: when FatFs
+ * cannot read a volume, the raw sectors are probed (fos_sd_probe.h) and the
+ * card is formatted only on a "provably blank" verdict — no filesystem at all,
+ * or an exFAT volume whose root directory is empty. Everything else, including
+ * every uncertain read, is left exactly as the user handed it over and the
+ * reason is reported instead (see fos_assets_sd.c for the exFAT trap).
+ * config->assets_sd.autoformat turns the probe-and-format step off entirely. */
 esp_err_t fos_assets_sd_mount(const fos_config_t *config);
 /* Explicit user actions, triggered by hand and never automatically:
- *  - remount: unmount and mount again, for a card inserted after boot.
+ *  - remount: unmount and mount again, for a card inserted after boot. Runs
+ *    the same probe-then-format-only-if-provably-empty path as the boot mount,
+ *    so a card swapped in later behaves exactly like one present at boot.
  *  - format: ERASES the card and writes a fresh FAT volume. Only acts on a
  *    card that carries no volume this firmware can mount; a card that mounts
- *    is left alone. Whoever calls this must have told the user it erases. */
+ *    is left alone. Unlike the boot path it does NOT consult the probe — this
+ *    is the user deliberately overriding a refusal. Whoever calls this must
+ *    have told the user it erases. */
 esp_err_t fos_assets_sd_remount(void);
 esp_err_t fos_assets_sd_format(void);
 bool fos_assets_sd_mounted(void);

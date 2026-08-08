@@ -113,10 +113,11 @@ static int cmd_status(int argc, char **argv)
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
-    printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz\n",
+    printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz autoformat=%d\n",
            config->assets_path, (int)config->assets_sd.enabled,
            (int)fos_assets_sd_mounted(), sd_pins,
-           (unsigned long)config->assets_sd.max_freq_khz);
+           (unsigned long)config->assets_sd.max_freq_khz,
+           (int)config->assets_sd.autoformat);
     if (fos_assets_sd_last_error()[0]) {
         printf("sd_error:    %s\n", fos_assets_sd_last_error());
     }
@@ -145,6 +146,7 @@ static int cmd_set(int argc, char **argv)
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hardware|panel|render_mode|rotate|"
                "interval|spill_force|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
+               "assets_sd_autoformat|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
         return 1;
     }
@@ -314,6 +316,9 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     else if (strcmp(key, "assets_sd") == 0) config->assets_sd.enabled = atoi(value) != 0;
     else if (strcmp(key, "assets_sd_freq") == 0) config->assets_sd.max_freq_khz = strtoul(value, NULL, 10);
+    /* 1 (default): format a card at boot when the raw sectors prove it empty.
+     * 0: never format without an explicit `sd format`. */
+    else if (strcmp(key, "assets_sd_autoformat") == 0) config->assets_sd.autoformat = atoi(value) != 0;
     else if (strcmp(key, "assets_sd_pins") == 0) {
         if (fos_config_parse_assets_sd_pins(value, &config->assets_sd) != ESP_OK) {
             printf("bad SD pin spec, want e.g. cs=38,sck=39,miso=40,mosi=41\n");
@@ -492,11 +497,13 @@ static int cmd_display_test(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
-/* Explicit SD-card maintenance. The boot mount never formats a card it merely
- * failed to read (an exFAT card full of photos is indistinguishable from a
- * blank one at that API), and never re-probes the socket after boot — so
- * formatting a blank card and picking up a card inserted while the frame was
- * running both have to be asked for by hand, here. */
+/* Explicit SD-card maintenance. The boot mount only formats a card whose raw
+ * sectors prove it empty (an exFAT card full of photos is indistinguishable
+ * from a blank one at the FatFs API, so the proof has to come from reading the
+ * sectors directly), and never re-probes the socket after boot — so formatting
+ * a card the probe refused, and picking up a card inserted while the frame was
+ * running, both have to be asked for by hand, here. `format` deliberately
+ * overrides the probe: the warning below is the user's informed consent. */
 static int cmd_sd(int argc, char **argv)
 {
     const char *action = argc >= 2 ? argv[1] : "status";

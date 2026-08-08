@@ -641,6 +641,13 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->assets_sd.max_freq_khz);
     if (send_input(req, "SD max frequency (kHz)", "assets_sd_freq", "number", field,
                    " min='400' max='40000'") != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "<label for='assets_sd_autoformat'>Format blank SD cards</label>"
+                     "<select id='assets_sd_autoformat' name='assets_sd_autoformat'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Yes, if the card is provably empty",
+                    config->assets_sd.autoformat) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Never format without asking",
+                    !config->assets_sd.autoformat) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
         "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
@@ -743,7 +750,7 @@ char *fos_http_status_json(void)
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
         "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
-        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,"
+        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,\"sdAutoformat\":%s,"
         "\"sdErrorCode\":\"%s\",\"sdError\":\"%s\"},"
         "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
         "\"resumable\":true,\"bootRequestSupported\":true,"
@@ -776,6 +783,7 @@ char *fos_http_status_json(void)
         fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
         (unsigned long)config->assets_sd.max_freq_khz,
         (unsigned long long)fos_assets_sd_capacity_bytes(),
+        config->assets_sd.autoformat ? "true" : "false",
         fos_assets_sd_last_error_code(), sd_error,
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
@@ -1162,6 +1170,7 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "assets_path", value, sizeof(value))) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     if (form_value(body, "assets_sd_enable", value, sizeof(value))) config->assets_sd.enabled = atoi(value) != 0;
     if (form_value(body, "assets_sd_pins", value, sizeof(value))) fos_config_parse_assets_sd_pins(value, &config->assets_sd);
+    if (form_value(body, "assets_sd_autoformat", value, sizeof(value))) config->assets_sd.autoformat = atoi(value) != 0;
     if (form_value(body, "assets_sd_freq", value, sizeof(value))) {
         uint32_t freq = strtoul(value, NULL, 10);
         if (freq >= 400 && freq <= 40000) config->assets_sd.max_freq_khz = freq;
@@ -2110,10 +2119,10 @@ static esp_err_t asset_mutate_post_handler(httpd_req_t *req, const char *op)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
-/* Explicit SD-card maintenance. Boot never formats a card it merely failed to
- * mount, and never re-probes the socket after boot (fos_assets_sd.c), so these
- * two actions are the only ways to put a filesystem on a blank card or to pick
- * up a card that was inserted while the frame was running:
+/* Explicit SD-card maintenance. Boot formats only a card whose raw sectors
+ * prove it empty, and never re-probes the socket after boot (fos_assets_sd.c),
+ * so these two actions are the only ways to put a filesystem on a card the
+ * probe refused, or to pick up a card inserted while the frame was running:
  *
  *   POST /api/action/remount-sd  |  POST /api/frames/<id>/assets/remount-sd
  *   POST /api/action/format-sd   |  POST /api/frames/<id>/assets/format-sd

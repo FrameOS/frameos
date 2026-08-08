@@ -3,16 +3,20 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <stdlib.h>
+
 #include "driver/gpio.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "soc/soc_caps.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdmmc_cmd.h"
 
+#include "fos_sd_probe.h"
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_assets_sd";
@@ -149,31 +153,112 @@ static void json_safe_copy(const char *src, char *out, size_t out_len)
 /* One structured line into the frameos log ring (GET /logs, backend webhook,
  * cloud log_batch). CONFIG_LOG_DEFAULT_LEVEL is WARN on the 32MB profile, so
  * ESP_LOGI is compiled out — this ring line is the only remote evidence of
- * why assets are missing. Stays far below FOS_NIM_LOG_MAX_LINE (1536). */
+ * why assets are missing. Stays far below FOS_NIM_LOG_MAX_LINE (1536).
+ *
+ * `probe` is the verdict token from fos_sd_probe.c ("blank_exfat",
+ * "exfat_has_files", …) when the blank-card probe ran, else "". It extends the
+ * existing reason vocabulary rather than replacing it: `reason` still says why
+ * the mount failed, `probe` says what we found when we looked at the raw
+ * sectors and therefore why we did or did not format. */
 static void log_mount_outcome(const char *action, bool mounted, esp_err_t err,
                               const char *pins, uint32_t freq_khz, int attempts,
-                              uint64_t capacity_bytes)
+                              uint64_t capacity_bytes, const char *probe)
 {
     char path[FOS_ASSETS_PATH_LEN];
     json_safe_copy(s_mount_point, path, sizeof(path));
+    /* Probe tokens are compile-time literals from fos_sd_probe.c, so they are
+     * already JSON-safe; the ternary keeps the field out of the line entirely
+     * when no probe ran. */
+    char probe_field[64] = "";
+    if (probe && probe[0]) {
+        snprintf(probe_field, sizeof(probe_field), ",\"probe\":\"%s\"", probe);
+    }
     if (mounted) {
         snprintf(s_last_log_line, sizeof(s_last_log_line),
                  "{\"event\":\"assets:sd\",\"source\":\"esp32\",\"action\":\"%s\","
                  "\"mounted\":true,\"path\":\"%s\",\"capacityMB\":%llu,"
-                 "\"pins\":\"%s\",\"freqKHz\":%lu,\"attempts\":%d}",
+                 "\"pins\":\"%s\",\"freqKHz\":%lu,\"attempts\":%d%s}",
                  action, path,
                  (unsigned long long)(capacity_bytes / (1024ULL * 1024ULL)),
-                 pins, (unsigned long)freq_khz, attempts);
+                 pins, (unsigned long)freq_khz, attempts, probe_field);
     } else {
         sd_reason_t reason = mount_reason(err);
         snprintf(s_last_log_line, sizeof(s_last_log_line),
                  "{\"event\":\"assets:sd\",\"source\":\"esp32\",\"action\":\"%s\","
                  "\"mounted\":false,\"error\":\"%s\",\"reason\":\"%s\",\"detail\":\"%s\","
-                 "\"path\":\"%s\",\"pins\":\"%s\",\"freqKHz\":%lu,\"attempts\":%d}",
+                 "\"path\":\"%s\",\"pins\":\"%s\",\"freqKHz\":%lu,\"attempts\":%d%s}",
                  action, esp_err_to_name(err), reason.code, reason.detail,
-                 path, pins, (unsigned long)freq_khz, attempts);
+                 path, pins, (unsigned long)freq_khz, attempts, probe_field);
     }
     frameos_nim_log_hook(s_last_log_line);
+}
+
+/* --------------------------------------------------------------------------
+ * Blank-card probe
+ *
+ * esp_vfs_fat_sdspi_mount frees its sdmmc_card_t and detaches the SPI device
+ * on every failure path, so by the time we know the mount failed there is no
+ * card handle left to read sectors with. We bring up our own on the SPI bus
+ * that is still initialised, mirroring exactly what the mount does, read a few
+ * sectors, and tear it back down. Read-only from start to finish: nothing in
+ * here or in fos_sd_probe.c ever issues a write.
+ * ------------------------------------------------------------------------ */
+
+typedef struct {
+    sdmmc_card_t *card;
+} probe_ctx_t;
+
+static bool probe_read_sectors(void *ctx, uint64_t lba, uint32_t count, uint8_t *dst)
+{
+    probe_ctx_t *p = (probe_ctx_t *)ctx;
+    if (!p || !p->card || lba > SIZE_MAX) return false;
+    return sdmmc_read_sectors(p->card, dst, (size_t)lba, (size_t)count) == ESP_OK;
+}
+
+/* Returns the verdict; *detail always receives a token fit for the log. Any
+ * failure to set the probe up at all is a refusal, never a format. */
+static fos_sd_probe_verdict_t sd_probe_blank(const sdmmc_host_t *host_template,
+                                             const sdspi_device_config_t *slot_config,
+                                             const char **detail)
+{
+    *detail = "probe_unavailable";
+    fos_sd_probe_verdict_t verdict = FOS_SD_PROBE_REFUSE;
+
+    sdmmc_host_t host = *host_template;
+    if (host.init && host.init() != ESP_OK) return verdict;
+
+    sdspi_dev_handle_t handle = 0;
+    esp_err_t err = sdspi_host_init_device(slot_config, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SD probe could not attach to the SPI bus: %s", esp_err_to_name(err));
+        return verdict;
+    }
+    host.slot = handle;
+
+    sdmmc_card_t *card = calloc(1, sizeof(sdmmc_card_t));
+    /* sdmmc transfers want a DMA-capable, word-aligned buffer. */
+    uint8_t *scratch = heap_caps_malloc(FOS_SD_PROBE_SCRATCH_BYTES, MALLOC_CAP_DMA);
+    if (card && scratch) {
+        err = sdmmc_card_init(&host, card);
+        if (err != ESP_OK) {
+            *detail = "probe_card_init_failed";
+        } else if (card->csd.sector_size != FOS_SD_SECTOR_BYTES) {
+            /* Every sector number the probe computes assumes 512-byte sectors. */
+            *detail = "probe_sector_size";
+        } else {
+            probe_ctx_t ctx = {.card = card};
+            verdict = fos_sd_probe_run(probe_read_sectors, &ctx,
+                                       (uint64_t)card->csd.capacity,
+                                       scratch, FOS_SD_PROBE_SCRATCH_BYTES, detail);
+        }
+    } else {
+        *detail = "probe_out_of_memory";
+    }
+
+    free(scratch);
+    free(card);
+    sdspi_host_remove_device(handle);
+    return verdict;
 }
 
 static void sd_unmount(void)
@@ -197,7 +282,7 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
         ESP_LOGW(TAG, "SD assets enabled but config is incomplete: path=%s pins=%s",
                  config->assets_path[0] ? config->assets_path : "(unset)", pins);
         set_last_error(ESP_ERR_INVALID_ARG);
-        log_mount_outcome(action, false, ESP_ERR_INVALID_ARG, pins, 0, 0, 0);
+        log_mount_outcome(action, false, ESP_ERR_INVALID_ARG, pins, 0, 0, 0, "");
         return ESP_ERR_INVALID_ARG;
     }
     strlcpy(s_mount_point, config->assets_path, sizeof(s_mount_point));
@@ -225,7 +310,7 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "SD SPI bus init failed on SPI3 (%s): %s", pins, esp_err_to_name(err));
         set_last_error(err);
-        log_mount_outcome(action, false, err, pins, host.max_freq_khz, 0, 0);
+        log_mount_outcome(action, false, err, pins, host.max_freq_khz, 0, 0, "");
         return err;
     }
 
@@ -248,7 +333,11 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
          * this API, from a blank card. Auto-formatting there erases the
          * photos, silently. Don't — report it instead (see mount_reason).
          *
-         * Formatting a genuinely blank card stays available as an explicit
+         * The boot path can still format, but only after reading the raw
+         * sectors itself and *proving* the card empty (see the autoformat
+         * block below); FatFs's own FR_NO_FILESYSTEM is never enough.
+         *
+         * Formatting a card the probe refuses stays available as an explicit
          * user action that says out loud that it erases: `sd format` /
          * `usb_api format-sd` on the console, or
          * POST /api/action/format-sd over HTTP. */
@@ -278,13 +367,40 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
+
+    /* Auto-format, narrowly. ESP_FAIL means "the card talks but FatFs cannot
+     * read a volume on it" — which is a blank card AND every exFAT card, so it
+     * is not on its own permission to erase anything. Read the raw sectors and
+     * only format if they prove there is nothing to lose. Every uncertain
+     * answer, every unexpected value and every read error comes back as
+     * FOS_SD_PROBE_REFUSE and we stay unmounted, exactly as before. */
+    const char *probe = "";
+    if (err == ESP_FAIL && !allow_format && config->assets_sd.autoformat) {
+        fos_sd_probe_verdict_t verdict = sd_probe_blank(&host, &slot_config, &probe);
+        if (verdict == FOS_SD_PROBE_REFUSE) {
+            ESP_LOGW(TAG, "SD auto-format declined [%s] — the card is not provably "
+                          "empty, leaving it untouched", probe);
+        } else {
+            ESP_LOGW(TAG, "SD card probed as provably empty [%s] — formatting", probe);
+            action = "autoformat";
+            mount_config.format_if_mount_failed = true;
+            attempts++;
+            err = esp_vfs_fat_sdspi_mount(s_mount_point, &host, &slot_config, &mount_config, &s_card);
+            mount_config.format_if_mount_failed = false;
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "SD auto-format failed: %s", esp_err_to_name(err));
+                s_card = NULL;
+            }
+        }
+    }
+
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable [%s] — %s",
                  mount_reason(err).code, mount_reason(err).detail);
         spi_bus_free(host.slot);
         s_card = NULL;
         set_last_error(err);
-        log_mount_outcome(action, false, err, pins, host.max_freq_khz, attempts, 0);
+        log_mount_outcome(action, false, err, pins, host.max_freq_khz, attempts, 0, probe);
         return err;
     }
 
@@ -297,7 +413,7 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
              (unsigned long long)(capacity / (1024ULL * 1024ULL)),
              pins,
              (unsigned long)host.max_freq_khz);
-    log_mount_outcome(action, true, ESP_OK, pins, host.max_freq_khz, attempts, capacity);
+    log_mount_outcome(action, true, ESP_OK, pins, host.max_freq_khz, attempts, capacity, probe);
     return ESP_OK;
 }
 
@@ -352,8 +468,12 @@ esp_err_t fos_assets_sd_format(void)
      * filesystem to a card that carries no volume this firmware can mount —
      * a genuinely blank card, or (careful) an exFAT card whose contents the
      * frame cannot see. A card that mounts is never touched, so this can
-     * never quietly wipe a working FAT card. Callers must say "erases" to
-     * the user before getting here; boot must never call it. */
+     * never quietly wipe a working FAT card.
+     *
+     * It intentionally bypasses the blank-card probe: reaching here means the
+     * user was shown the "this erases the card" warning and asked for it
+     * anyway, which has to be able to override a probe refusal. Callers must
+     * say "erases" before getting here; boot must never call it. */
     sd_unmount();
     ESP_LOGW(TAG, "explicit SD format requested — this erases an unreadable card");
     return sd_mount(config, true, "format");

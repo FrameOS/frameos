@@ -44,6 +44,12 @@ typedef struct {
 
 typedef struct {
     bool enabled;
+    /* Format a card at boot when — and only when — the probe in fos_sd_probe.c
+     * can prove it holds nothing (no filesystem at all, or an exFAT volume with
+     * an empty root directory). Anything it cannot prove empty is left
+     * untouched. On by default so a brand-new card just works; turn it off with
+     * `set assets_sd_autoformat 0` to require the explicit `sd format`. */
+    bool autoformat;
     int8_t cs;
     int8_t sck;
     int8_t miso;
