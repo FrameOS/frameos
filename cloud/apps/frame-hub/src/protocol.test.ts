@@ -330,6 +330,7 @@ describe("browser event shaping", () => {
       linkedClientId: "lc-1",
       name: "Kitchen frame",
       publicKey: "pk",
+      schedule: { events: [] },
       scenesChecksum: "have",
       status: "active",
       updatedAt: now,
@@ -347,6 +348,7 @@ describe("browser event shaping", () => {
       linked_client_id: "lc-1",
       name: "Kitchen frame",
       scenes_checksum: "have",
+      schedule: { events: [] },
       status: "active",
     });
   });
