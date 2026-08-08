@@ -549,7 +549,9 @@ function AssetsSummaryHeader({
           </div>
         ))}
         <div className="bg-[var(--tool-bg)] px-3 py-2 @3xl:px-4 @3xl:py-3">
-          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Disk</div>
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">
+            {diskStats?.isQuota ? 'Quota' : 'Disk'}
+          </div>
           {diskStats ? (
             <>
               <div className="mt-0.5 text-base font-semibold text-[color:var(--tool-strong)] @3xl:mt-1 @3xl:text-lg">
@@ -562,7 +564,9 @@ function AssetsSummaryHeader({
                 />
               </div>
               <div className="frame-tool-muted mt-1 truncate text-xs">
-                {humaniseSize(diskStats.availableBytes)} free / {humaniseSize(diskStats.totalBytes)}
+                {diskStats.isQuota
+                  ? `${humaniseSize(diskStats.usedBytes)} of ${humaniseSize(diskStats.totalBytes)} quota`
+                  : `${humaniseSize(diskStats.availableBytes)} free / ${humaniseSize(diskStats.totalBytes)}`}
               </div>
             </>
           ) : (

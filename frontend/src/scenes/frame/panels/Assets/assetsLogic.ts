@@ -9,7 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
@@ -41,6 +41,21 @@ export interface DiskStats {
   usedBytes: number
   availableBytes: number
   usedPercent: number
+  // Virtual frames have no disk metrics; their stats describe the
+  // backend-enforced asset quota instead.
+  isQuota?: boolean
+}
+
+// Mirrors backend virtual_assets.quota_bytes: per-frame override in the
+// frame settings, 100 MB default.
+const VIRTUAL_ASSETS_DEFAULT_QUOTA_MB = 100
+
+function virtualQuotaBytes(frame: { device_config?: Record<string, any> | null } | null): number {
+  const raw = frame?.device_config?.assetsQuotaMb
+  const parsed = typeof raw === 'string' ? parseFloat(raw) : raw
+  const quotaMb =
+    typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : VIRTUAL_ASSETS_DEFAULT_QUOTA_MB
+  return quotaMb * 1024 * 1024
 }
 
 interface FrameAssetsResponse {
@@ -453,7 +468,29 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
-    diskStats: [(s) => [s.sortedMetrics], (sortedMetrics): DiskStats | null => latestDiskStats(sortedMetrics)],
+    diskStats: [
+      (s) => [s.sortedMetrics, s.cleanedAssets, s.frame],
+      (sortedMetrics, cleanedAssets, frame): DiskStats | null => {
+        // Virtual frames never emit disk metrics; show the backend asset
+        // quota instead, with usage summed from the full listing (system
+        // folders included — the quota counts them too).
+        if (isVirtualFrame(frame)) {
+          const usedBytes = cleanedAssets.reduce(
+            (sum: number, asset: AssetType) => sum + (asset.is_dir ? 0 : asset.size || 0),
+            0
+          )
+          const totalBytes = virtualQuotaBytes(frame)
+          return {
+            totalBytes,
+            usedBytes,
+            availableBytes: Math.max(0, totalBytes - usedBytes),
+            usedPercent: totalBytes > 0 ? Math.min(100, (usedBytes / totalBytes) * 100) : 0,
+            isQuota: true,
+          }
+        }
+        return latestDiskStats(sortedMetrics)
+      },
+    ],
   }),
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
