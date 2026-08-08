@@ -51,6 +51,7 @@ extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
 extern void fos_nim_invalidate_settings_impl(void);
 extern double fos_nim_scene_interval_impl(void);
+extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
 
@@ -424,6 +425,15 @@ double frameos_nim_scene_interval(void)
     double interval = fos_nim_scene_interval_impl();
     nim_lock_give();
     return interval;
+}
+
+double frameos_nim_next_sleep(void)
+{
+    if (!s_nim_ready) return -1;
+    if (!nim_lock_take()) return -1;
+    double next_sleep = fos_nim_next_sleep_impl();
+    nim_lock_give();
+    return next_sleep;
 }
 
 bool frameos_nim_render_requested(void)
@@ -881,6 +891,7 @@ static const char *TAG = "fos_nim_http";
 static char s_http_spill_dir[128] = "";
 static size_t s_http_spill_max_bytes = 0;
 static uint32_t s_http_spill_seq = 0;
+static size_t s_http_spill_force_bytes = 0;
 
 void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
 {
@@ -891,6 +902,11 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
     }
     snprintf(s_http_spill_dir, sizeof(s_http_spill_dir), "%s", dir);
     s_http_spill_max_bytes = max_spill_bytes;
+}
+
+void fos_nim_http_set_spill_force_bytes(size_t threshold)
+{
+    s_http_spill_force_bytes = threshold;
 }
 
 typedef enum {
@@ -1052,7 +1068,10 @@ static fos_nim_body_status_t http_spill_remaining(
         fos_nim_http_free_chunks(chunks, chunk_count);
         return FOS_NIM_BODY_SPILL_FAILED;
     }
-    ESP_LOGI(TAG, "%s: PSRAM exhausted after %u buffered bytes; spilling body to %s",
+    /* WARN: spilling is a memory-pressure event (or the spill_force debug
+     * knob) and the only runtime evidence the spill path ran — the 32MB
+     * profile compiles ESP_LOGI out (CONFIG_LOG_DEFAULT_LEVEL=WARN). */
+    ESP_LOGW(TAG, "%s: PSRAM exhausted after %u buffered bytes; spilling body to %s",
              url, (unsigned)buffered, path);
 
     bool ok = true;
@@ -1113,7 +1132,7 @@ static fos_nim_body_status_t http_spill_remaining(
     }
     *out_path = dup;
     *out_total = total;
-    ESP_LOGI(TAG, "%s: spilled %u-byte body to %s", url, (unsigned)total, path);
+    ESP_LOGW(TAG, "%s: spilled %u-byte body to %s", url, (unsigned)total, path);
     return FOS_NIM_BODY_OK;
 }
 
@@ -1257,15 +1276,23 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
             if (want > limit - total) want = limit - total;
             if (want < 1) want = 1;
             uint8_t *buf = NULL;
-            while (true) {
-                size_t free_spiram =
-                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                if (free_spiram >= want + 1 + FOS_NIM_HTTP_PSRAM_RESERVE) {
-                    buf = heap_caps_malloc(want + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            /* Debug knob (`set spill_force <bytes>`): pretend PSRAM ran out
+             * once this many bytes are buffered, so the spill path can be
+             * exercised on a frame with memory to spare. Small bodies
+             * (scene JSON, API calls) keep buffering normally. */
+            bool force_spill = s_http_spill_force_bytes > 0 && spill_allowed &&
+                               total >= s_http_spill_force_bytes;
+            if (!force_spill) {
+                while (true) {
+                    size_t free_spiram =
+                        heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (free_spiram >= want + 1 + FOS_NIM_HTTP_PSRAM_RESERVE) {
+                        buf = heap_caps_malloc(want + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    }
+                    if (buf != NULL) break;
+                    if (want <= FOS_NIM_HTTP_CHUNK_MIN_BYTES) break;
+                    want /= 2;
                 }
-                if (buf != NULL) break;
-                if (want <= FOS_NIM_HTTP_CHUNK_MIN_BYTES) break;
-                want /= 2;
             }
             if (buf == NULL) {
                 if (spill_allowed) {

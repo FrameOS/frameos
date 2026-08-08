@@ -124,6 +124,7 @@ esp_err_t fos_config_init(void)
     uint32_t u32;
     if (nvs_get_u32(nvs, "frame_id", &u32) == ESP_OK) s_config.frame_id = u32;
     if (nvs_get_u32(nvs, "interval", &u32) == ESP_OK) s_config.interval_sec = u32;
+    if (nvs_get_u32(nvs, "spill_force", &u32) == ESP_OK) s_config.http_spill_force_bytes = u32;
     uint16_t rotate_u16 = 0;
     if (nvs_get_u16(nvs, "rotate", &rotate_u16) == ESP_OK &&
         (rotate_u16 == 0 || rotate_u16 == 90 || rotate_u16 == 180 || rotate_u16 == 270)) {
@@ -199,6 +200,7 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u16(nvs, "rotate", s_config.rotate);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
+    nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);

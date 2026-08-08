@@ -139,7 +139,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hardware|panel|render_mode|rotate|"
-               "interval|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
+               "interval|spill_force|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
         return 1;
     }
@@ -296,6 +296,7 @@ static int cmd_set(int argc, char **argv)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
+    else if (strcmp(key, "spill_force") == 0) config->http_spill_force_bytes = strtoul(value, NULL, 10);
     else if (strcmp(key, "rotate") == 0) {
         unsigned long rot = strtoul(value, NULL, 10) % 360;
         if (rot != 0 && rot != 90 && rot != 180 && rot != 270) {

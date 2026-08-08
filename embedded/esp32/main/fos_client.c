@@ -805,11 +805,15 @@ static void client_task(void *arg)
          * changes without a rebuild. ETag'd, so steady state is a 304. */
         fos_settings_sync(false);
 
+        /* A console `set spill_force` may have changed it since last pass. */
+        fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
          * cycling the display down to a damaging voltage. */
         int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
         bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
+        bool rendered = false;
         if (battery_critical) {
             ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
             log_render_skipped("battery", battery_pct);
@@ -819,21 +823,41 @@ static void client_task(void *arg)
                 log_render_skipped("ota", -1);
             } else {
                 render_once();
+                rendered = true;
             }
         }
         log_metrics_sample();
         frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
+        /* The scene's refreshInterval is authoritative when a scene is
+         * loaded and has an opinion (>= 1), matching the Pi runner where
+         * the frame-level interval is only the no-scene fallback. Clamped
+         * like the settings-pulled interval: a bad value must not park the
+         * frame for months. */
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
         double scene_interval = frameos_nim_scene_interval();
-        if (scene_interval >= 1.0 && scene_interval < interval) {
+        if (scene_interval >= 1.0) {
+            if (scene_interval > 7 * 86400.0) scene_interval = 7 * 86400.0;
             interval = (uint32_t)scene_interval;
+        }
+        /* A per-render override from logic/nextSleepDuration beats both
+         * intervals, like context.nextSleep on the Pi runner. Only valid
+         * right after a render actually ran. */
+        if (rendered) {
+            double next_sleep = frameos_nim_next_sleep();
+            if (next_sleep >= 0.0) {
+                if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
+                if (next_sleep < 1.0) next_sleep = 1.0;
+                interval = (uint32_t)next_sleep;
+            }
         }
         if (battery_critical && interval < FOS_BATTERY_CRITICAL_SLEEP_SEC) {
             interval = FOS_BATTERY_CRITICAL_SLEEP_SEC;
         }
 
         uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
+        ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
+                 (unsigned long)sleep_s, (unsigned long)interval);
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         if (config->deep_sleep && fos_display_present() && keep_awake_s == 0) {
             ESP_LOGI(TAG, "deep sleeping for %lu s%s", (unsigned long)sleep_s,

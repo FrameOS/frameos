@@ -18,6 +18,7 @@
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
+#include "nvs.h"
 
 static const char *TAG = "fos_scenes";
 
@@ -348,6 +349,59 @@ static void save_etag(const char *etag)
 
 /* --------------------------------------------------------------- apply */
 
+/* Last explicitly selected scene, persisted so a reboot or power cut comes
+ * back on the scene that was showing — not the first scene in the payload.
+ * Same NVS namespace as fos_config; factory-reset clears it with the rest. */
+#define LAST_SCENE_NVS_KEY "last_scene"
+
+static void persist_last_scene(const char *scene_id)
+{
+    if (scene_id == NULL || scene_id[0] == '\0') return;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    char current[SCENE_ID_LEN] = "";
+    size_t len = sizeof(current);
+    if (nvs_get_str(nvs, LAST_SCENE_NVS_KEY, current, &len) != ESP_OK ||
+        strcmp(current, scene_id) != 0) {
+        nvs_set_str(nvs, LAST_SCENE_NVS_KEY, scene_id);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+/* True once the boot-time restore succeeded or an explicit selection made
+ * it moot. Until then every scene load retries: the first payload after
+ * boot can be the baked single-scene default (fresh /state), and the
+ * persisted scene only appears when the cached or backend payload lands. */
+static bool s_last_scene_settled = false;
+
+static void restore_last_scene(void)
+{
+    if (s_last_scene_settled) return;
+
+    char scene_id[SCENE_ID_LEN] = "";
+    size_t len = sizeof(scene_id);
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return;
+    esp_err_t err = nvs_get_str(nvs, LAST_SCENE_NVS_KEY, scene_id, &len);
+    nvs_close(nvs);
+    if (err != ESP_OK || scene_id[0] == '\0') {
+        s_last_scene_settled = true; /* nothing persisted */
+        return;
+    }
+
+    /* A scene missing from this payload keeps the payload's first scene
+     * active (the previous behavior) and retries on the next load. */
+    if (frameos_nim_set_scene(scene_id)) {
+        s_last_scene_settled = true;
+        ESP_LOGI(TAG, "restored last scene: %s", scene_id);
+        log_scene_event("scenes:restore", "ok", "nvs", scene_id, "restored",
+                        0, 0, 0, ESP_OK);
+    } else {
+        ESP_LOGW(TAG, "last scene %s not in payload; keeping default", scene_id);
+    }
+}
+
 static bool load_into_nim(const char *json, size_t len, const char *origin)
 {
     if (!frameos_nim_available()) {
@@ -367,6 +421,7 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
     ESP_LOGI(TAG, "%d scene(s) live", count);
     log_scene_event("scenes:load", "ok", origin, "", "runtime-loaded",
                     len, count, 0, ESP_OK);
+    restore_last_scene();
     return true;
 }
 
@@ -439,6 +494,8 @@ bool fos_scenes_apply_pending_selection(void)
                         "apply-failed", 0, 0, 0, ESP_FAIL);
         return false;
     }
+    persist_last_scene(scene_id);
+    s_last_scene_settled = true; /* explicit selection makes the boot restore moot */
     ESP_LOGI(TAG, "scene selected: %s", scene_id);
     printf("scene changed: %s\n", scene_id); /* visible on the USB serial stream */
     log_scene_event("event:setCurrentScene", "ok", "queued", scene_id,

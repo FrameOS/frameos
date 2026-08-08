@@ -71,6 +71,9 @@ typedef struct {
     uint32_t interval_sec;         /* refresh interval */
     uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */
     uint32_t max_http_response_bytes;
+    uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
+                                      * bytes spill to storage even with PSRAM
+                                      * free (0 = off, spill on pressure only) */
     bool server_send_logs;         /* upload runtime/render logs to backend */
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */

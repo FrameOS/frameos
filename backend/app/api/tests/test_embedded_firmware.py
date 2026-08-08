@@ -1217,37 +1217,32 @@ def test_ready_4mb_firmware_does_not_require_ota_artifact(tmp_path):
 
 
 def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
-    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
-    sdkconfig_old = tmp_path / "sdkconfig.old"
-    sdkconfig_old.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
-    build_dir = tmp_path / "build"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
     build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
+    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
     (build_dir / "stale.o").write_text("old", encoding="utf-8")
 
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir)
+    missing = _reset_stale_embedded_sdkconfig(build_dir)
 
     assert missing == {
         "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
         "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
     }
     assert not sdkconfig.exists()
-    assert not sdkconfig_old.exists()
     assert not build_dir.exists()
 
 
 def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
+    build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
     sdkconfig.write_text(
         "CONFIG_ESP_ERR_TO_NAME_LOOKUP=y\nCONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n",
         encoding="utf-8",
     )
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
 
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir)
+    missing = _reset_stale_embedded_sdkconfig(build_dir)
 
     assert missing == {}
     assert sdkconfig.exists()
@@ -1255,7 +1250,9 @@ def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
 
 
 def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
+    build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
     sdkconfig.write_text(
         '\n'.join([
             'CONFIG_ESP_ERR_TO_NAME_LOOKUP=y',
@@ -1267,12 +1264,9 @@ def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
         ]),
         encoding="utf-8",
     )
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
 
     required = embedded_required_sdkconfig_for_frame(Frame(embedded={"flashSize": "32MB"}))
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir, required)
+    missing = _reset_stale_embedded_sdkconfig(build_dir, required)
 
     assert missing == {
         "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
