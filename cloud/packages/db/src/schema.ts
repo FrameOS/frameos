@@ -582,6 +582,35 @@ export const rateLimitBuckets = pgTable("rate_limit_buckets", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
 
+// Account-level service settings (Unsplash/OpenAI/Home Assistant/... API keys
+// scenes use), one row per settings group — the cloud mirror of the backend's
+// settings table (backend/app/models/settings.py). Which groups and fields
+// are storable is enforced in auth-web (src/lib/account-settings.ts), not
+// here.
+export const accountSettings = pgTable(
+  "account_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountKeyUnique: uniqueIndex("account_settings_account_key_unique").on(
+      table.accountId,
+      table.key,
+    ),
+  }),
+);
+
 // Cloud-managed frames (wire contract: docs/cloud-frames.md at the repo
 // root; design: cloud/docs/cloud-frames.md). A frame is 1:1 with a
 // linked_clients row (client_kind = "frame"). We store only the device's
@@ -610,6 +639,25 @@ export const frames = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     lastState: jsonb("last_state"),
     lastMetrics: jsonb("last_metrics"),
+    // Wake/event schedule pushed to the device via set_schedule (shape per
+    // embedded/esp32/main/fos_schedule.h: {events: [...], disabled?}). Stored
+    // so the panel can render it and edits survive the device being offline.
+    schedule: jsonb("schedule"),
+    // Last-pushed declarative settings (allowedFrameSettings in
+    // auth-web's src/lib/frames.ts — interval/rotate/…). Devices own their
+    // own copy; this is the control plane's mirror so the Settings panel
+    // renders what was pushed instead of blanks after a reload. `name` is
+    // NOT stored here: frames.name is authoritative for the display name.
+    settings: jsonb("settings"),
+    // Which service-settings GROUPS ("unsplash", "openAI", …) this frame's
+    // assigned scenes declare, denormalized from the scenes themselves.
+    // Recomputing it means unzipping every assigned scene version (zips are
+    // capped at 32 MiB apiece), which is far too expensive to do on every
+    // device poll of /api/frames/{id}/service-settings — so it is written
+    // wherever scenes are assigned. NULL means "never computed": the pull
+    // route computes it once and backfills. Never holds a credential, only
+    // group names.
+    serviceSettingGroups: jsonb("service_setting_groups"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),

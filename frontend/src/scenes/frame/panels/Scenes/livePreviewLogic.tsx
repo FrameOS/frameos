@@ -291,21 +291,27 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
 
       const frameId = values.frame?.id ?? props.frameId
 
-      // Fetch the frame's assembled settings (app API keys etc.) so data apps
-      // that need secrets can run in the preview. Best-effort: a scene with no
-      // secret-using apps still previews fine if this fails. The cloud stores
-      // no backend settings and serves no such route, so don't ask it.
+      // Fetch the stored settings (app API keys etc.) so data apps that need
+      // secrets can run in the preview. Best-effort: a scene with no
+      // secret-using apps still previews fine if this fails. On the cloud
+      // GET /api/settings already answers with the merged {group: value}
+      // object; the backend assembles the same shape per frame.
       let settings: Record<string, any> = {}
-      if (!isCloudMode()) {
-        try {
+      try {
+        if (isCloudMode()) {
+          const response = await apiFetch(`/api/settings`)
+          if (response.ok) {
+            settings = (await response.json()) ?? {}
+          }
+        } else {
           const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
           if (response.ok) {
             const data = await response.json()
             settings = data?.settings ?? {}
           }
-        } catch (error) {
-          // fall through with empty settings
         }
+      } catch (error) {
+        // fall through with empty settings
       }
       // User-entered keys (setPreviewSettings) win over the backend's, merged
       // per settings group.

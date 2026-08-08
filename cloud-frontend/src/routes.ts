@@ -33,3 +33,8 @@ export function cloudFrameUrl(frameId: string, tool?: string): string {
   const path = `${cloudRouteBasePath}/frames/${encodeURIComponent(frameId)}`
   return tool ? `${path}?tool=${encodeURIComponent(tool)}` : path
 }
+
+/** The account settings page (service API keys) — the SPA's `settings` scene. */
+export function cloudSettingsUrl(): string {
+  return `${cloudRouteBasePath}/settings`
+}

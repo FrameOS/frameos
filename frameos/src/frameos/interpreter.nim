@@ -137,9 +137,15 @@ proc withCache(scene: InterpretedFrameScene,
                cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
                builtAnyInput: bool, builtInputKey: JsonNode,
                cacheExprActive: bool, cacheExprValue: JsonNode,
+               allowStore: bool,
                extraLog: JsonNode,
                compute: proc (): Value): Value =
   ## Generic cache handler shared by app/code data nodes.
+  ##
+  ## `allowStore = false` still serves an existing cache entry, but refuses to
+  ## write the freshly computed value back. Used when the computation ran on
+  ## degraded inputs (a producer failed and was zero-filled): that result must
+  ## never be pinned in the cache as though it were real data.
   if not cacheEnabled:
     return compute()
 
@@ -192,6 +198,12 @@ proc withCache(scene: InterpretedFrameScene,
     scene.logger.log(payload)
 
   let fresh = compute()
+  if not allowStore:
+    # Degraded inputs: return the value for this pass only. Leaving the stored
+    # entry (and its key/time/expression) untouched means a later healthy pass
+    # can still hit it, and a stale-but-real value is never replaced by one
+    # computed from zero-filled data.
+    return fresh
   when defined(frameosEmbedded):
     # Never retain frame-sized images in the node cache on embedded: image
     # producers decode straight into the render canvas, so the cached value
@@ -505,6 +517,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
+                           true,
                            %*{"keyword": keyword}):
           (proc (): Value =
             getInterpretedApp(keyword, app, context)
@@ -644,6 +657,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var args = initTable[string, Value]()
       var builtInputKey = %*{}
       var builtAnyInput = false
+      # Args whose producer raised and were replaced by a zero value. Tracked so
+      # (a) the resulting JS error can name the real culprit and (b) the result
+      # of this pass is kept out of the node cache.
+      var defaultedArgs: seq[DefaultedArg] = @[]
 
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
            cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
@@ -661,6 +678,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 builtInputKey[argName] = valueToKeyJson(vIn)
                 builtAnyInput = true
             except Exception as e:
+              # One flaky producer must not take down the whole node. Hand the
+              # code the zero value of the arg's declared type instead of
+              # leaving the arg unset: an unset arg reaches JS as `undefined`,
+              # and `[...undefined]` throws, killing every *other* data source
+              # merged in the same expression.
+              let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
               self.logger.log(%*{
                 "event": "interpreter:codeArg:error",
                 "sceneId": self.id,
@@ -668,8 +691,19 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "arg": argName,
                 "producer": producerNodeId.int,
                 "error": $e.msg,
-                "stacktrace": e.getStackTrace()
+                "stacktrace": e.getStackTrace(),
+                "defaulted": true,
+                "defaultValue": valueToJson(zero)
               })
+              args[argName] = zero
+              if not argTypes.hasKey(argName):
+                argTypes[argName] = ""
+              defaultedArgs.add((name: argName, error: $e.msg))
+              # Deliberately NOT added to builtInputKey: a zero value is the
+              # absence of data, not data. Keying on it would either poison a
+              # good cache entry with a degraded result or make "no data" look
+              # like a legitimate input change. The store guard below is what
+              # actually keeps the degraded result out of the cache.
 
       if self.codeInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
@@ -686,6 +720,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               builtInputKey[argName] = valueToKeyJson(vIn)
               builtAnyInput = true
           except Exception as e:
+            # Same reasoning as the connected-producer path above: substitute
+            # the zero value so downstream code sees "no data", not `undefined`.
+            let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
             self.logger.log(%*{
               "event": "interpreter:codeArg:error:inlineCode",
               "sceneId": self.id,
@@ -693,15 +730,23 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               "arg": argName,
               "code": snippet,
               "error": $e.msg,
-              "stacktrace": e.getStackTrace()
+              "stacktrace": e.getStackTrace(),
+              "defaulted": true,
+              "defaultValue": valueToJson(zero)
             })
+            args[argName] = zero
+            if not argTypes.hasKey(argName):
+              argTypes[argName] = ""
+            defaultedArgs.add((name: argName, error: $e.msg))
+            # Not a cache-input contribution; see the connected-arg comment.
 
       let targetField = if defaultOutputName.len > 0: defaultOutputName else: ""
 
       # Compute (with optional caching)
       let computeFresh = proc (): Value =
         var fnName = getOrCompileCodeFn(self, currentNode)
-        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
+        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField,
+                       defaultedArgs)
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -713,6 +758,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
+                           defaultedArgs.len == 0,
                            %*{"nodeType": "code"},
                            computeFresh)
       else:

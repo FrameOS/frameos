@@ -3,6 +3,8 @@ import {
   addFrameFlows,
   allowedFrameMenuActions,
   allowedFrameSettingsSections,
+  allowedGlobalSettingsSections,
+  globalSettingsSectionIsAllowed,
   allowedFrameToolPanels,
   allowedSceneToolPanels,
   allowedSceneUtilityPanels,
@@ -23,8 +25,8 @@ import {
 
 // The shared SPA (frontend/src) renders the cloud fleet UI as well as the
 // self-hosted backend and the on-device admin panel. Cloud-managed frames
-// speak a four-verb protocol over an outbound WebSocket: no shell, no files,
-// no deploy, no SSH. Gating used to be `isCloudMode()` sprinkled across eight
+// speak a four-verb protocol over an outbound WebSocket: no shell, no SSH,
+// no compiled builds. Gating used to be `isCloudMode()` sprinkled across eight
 // components — a deny-list, so anything new was cloud-visible by default and
 // shipped a button that always errored.
 //
@@ -57,12 +59,11 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     expect(allowedSceneUtilityPanels.cloud).not.toContain("source");
   });
 
-  it("offers no deploy, SD-card build, stop or archive action", () => {
+  it("offers no SD-card build, remote-agent, stop or archive action", () => {
     for (const action of [
       "archive",
       "buildSdCard",
       "cancelDeploy",
-      "deploy",
       "deployRemote",
       "localDeploy",
       "restartRemote",
@@ -76,6 +77,23 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     expect(frameMenuActionIsAllowed("cloud", "delete")).toBe(true);
   });
 
+  it("offers deploy — the ENTRY POINT, not the backend's transport", () => {
+    // This list used to pin "no deploy on the cloud", reasoning from the
+    // transport: there is no /deploy endpoint, no build host and no
+    // fast/full distinction (cloud frames are interpreted-only). But the
+    // action is what OPENS the deploy dialog, and the cloud has three
+    // deploy-shaped things to put in it: the settings push + one checksummed
+    // set_scenes, the notify_update_available firmware nudge, and WebSerial
+    // USB provisioning for esp32 boards. Hiding the action hid all three:
+    // the "…" menu had no Deploy entry, the dashboard tile was gated off,
+    // and the scene sidebar's Deploy button fired a push immediately with no
+    // dialog and no summary of what it would send. The dialog's CONTENTS are
+    // the control plane's business — FrameDeployPlanDrawer renders its cloud
+    // branch (CloudDeploySection), never the SSH/deploy-plan/SD-card UI.
+    expect(frameMenuActionIsAllowed("cloud", "deploy")).toBe(true);
+    expect(frameMenuActionDisabledReason("cloud", "deploy", { hardware: { platform: "esp32" } })).toBeNull();
+  });
+
   it("links to no SSH, Remote-agent or backend-access settings section", () => {
     for (const section of [
       "frame-settings-ssh",
@@ -85,6 +103,46 @@ describe("cloud mode hides everything the protocol cannot do", () => {
       expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(false);
       expect(allowedFrameSettingsSections.cloud).not.toContain(section);
     }
+  });
+
+  it("keeps only the service-key sections of the GLOBAL settings page", () => {
+    // The cloud's /frames/settings page persists service API keys
+    // (account_settings via /api/settings) and nothing else: no local
+    // account, deploy defaults, SSH keys, build environment, font store,
+    // backend PostHog or backend system info.
+    expect(allowedGlobalSettingsSections.cloud).toEqual([
+      "settings-gallery",
+      "settings-openai",
+      "settings-home-assistant",
+      "settings-github",
+      "settings-immich",
+      "settings-unsplash",
+    ]);
+    for (const section of [
+      "settings-account",
+      "settings-cloud",
+      "settings-defaults",
+      "settings-ssh",
+      "settings-build-environment",
+      "settings-fonts",
+      "settings-posthog",
+      "settings-system",
+    ]) {
+      expect(globalSettingsSectionIsAllowed("cloud", section)).toBe(false);
+    }
+    // The storable groups (account-settings.ts) and the visible sections
+    // must describe the same six services.
+    expect(globalSettingsSectionIsAllowed("cloud", "settings-unsplash")).toBe(
+      true,
+    );
+    // The backend keeps everything (null = all); the on-device admin never
+    // mounts this page (urls.settings() routes to the frame's own panel),
+    // so its list stays permissive too.
+    expect(allowedGlobalSettingsSections.backend).toBeNull();
+    expect(globalSettingsSectionIsAllowed("backend", "settings-ssh")).toBe(
+      true,
+    );
+    expect(allowedGlobalSettingsSections.frameAdmin).toBeNull();
   });
 });
 
@@ -176,13 +234,31 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
+  it("links only to the one settings section the compact form renders", () => {
+    // FrameSettings replaces the whole form with a name+interval block for
+    // this profile (esp32CloudProfile), so the settings sub-nav must collapse
+    // to match. It used to be filtered by mode alone and offered all 15 cloud
+    // sections — 14 of them scrolling to an anchor that is never rendered.
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-info", esp32Frame)).toBe(true);
+    for (const section of allowedFrameSettingsSections.cloud) {
+      if (section === "frame-settings-info") continue;
+      expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame)).toBe(false);
+    }
+    // A cloud Pi still gets the full form, so its nav is untouched.
+    for (const section of allowedFrameSettingsSections.cloud) {
+      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame)).toBe(true);
+    }
+  });
+
   it("classifies esp32 variants by prefix", () => {
     // The old probe here (updateNotify missing from the capability set) is
     // gone for the best reason: the firmware now implements the verb via the
     // signed cloud OTA path, so the esp32 profile carries the full set.
     // Prefix matching still gates real surfaces — the Update-firmware menu
-    // entry and the USB serial console are offered exactly to
-    // isEsp32CloudFrame frames — so pin the classifier itself.
+    // entry, the USB serial console, and the deploy dialog's USB setup block
+    // (EmbeddedUsbSetup: status, Wi-Fi scan/provision, restart, factory
+    // reset, all over WebSerial) are offered exactly to isEsp32CloudFrame
+    // frames — so pin the classifier itself.
     for (const platform of ["esp32", "esp32-s3", "esp32-c3", "ESP32-S3"]) {
       expect(isEsp32CloudFrame({ hardware: { platform } }, "cloud")).toBe(true);
     }
@@ -279,6 +355,30 @@ describe("embedded-hardware frames on the backend control plane", () => {
     expect(isVirtualFrame(virtualFrame)).toBe(true);
     for (const frame of [undefined, null, {}, { embedded: null }, { embedded: {} }]) {
       expect(isEmbeddedHardwareFrame(frame)).toBe(false);
+    }
+  });
+
+  it("links to no host-OS settings sections", () => {
+    // FrameSettings hides these behind its isEmbeddedMode gate — a
+    // microcontroller mounts nothing, rotates no host log files, and has
+    // neither a configurable assets path nor reboot-behaviour knobs. Virtual
+    // frames are embedded mode too, so they lose them as well.
+    for (const frame of [esp32Frame, picoFrame, virtualFrame]) {
+      for (const section of [
+        "frame-settings-mountpoints",
+        "frame-settings-assets",
+        "frame-settings-logs",
+        "frame-settings-reboot",
+      ]) {
+        expect(frameSettingsSectionIsAllowed("backend", section, frame)).toBe(false);
+      }
+      // The sections a microcontroller does answer for stay linked.
+      expect(frameSettingsSectionIsAllowed("backend", "frame-settings-info", frame)).toBe(true);
+      expect(frameSettingsSectionIsAllowed("backend", "frame-http-api-section", frame)).toBe(true);
+    }
+    // A Pi on the same control plane keeps all of them.
+    for (const section of allowedFrameSettingsSections.backend) {
+      expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(true);
     }
   });
 

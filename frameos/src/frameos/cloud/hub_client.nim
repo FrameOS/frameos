@@ -19,6 +19,14 @@
 ## verb table is answered with `unknown_verb` and audit-logged through the
 ## normal log pipeline (`cloud:audit`).
 ##
+## Service API keys are the one thing this socket never carries. A frame
+## holding `settings:services` FETCHES them over its own bounded HTTPS request
+## (cloud/service_settings.nim) at every `ready`, on the zero-payload
+## `refresh_service_settings` nudge, and on a slow staleness timer; the
+## provider's `403 insufficient_scope` on that fetch — not the local scope
+## list, which is additive and never forgets — is what a revocation means, and
+## it deletes all six cloud-owned settings groups from frame.json.
+##
 ## Frames keep working when the provider is down: this thread only ever pushes
 ## data out and reacts to messages; rendering, schedules and the local admin
 ## never wait on it. A demoted or unreachable link leaves the last pushed
@@ -58,6 +66,7 @@ import frameos/utils/http_client
 import ./enrollment
 import ./identity
 import ./link_state
+import ./service_settings
 
 const
   HubBackoffMinSeconds = 3.0
@@ -103,6 +112,17 @@ const
   # stream), so the raw payload must survive base64 inflation plus envelope
   # inside HubMaxInboundBytes. 2.5 MiB raw ≈ 3.4 MiB encoded.
   HubMaxAssetUploadBytes* = 2_621_440
+  # Service settings (docs/cloud-frames.md): the contract's own triggers are a
+  # pull at every `ready` and a pull per `refresh_service_settings` nudge. This
+  # slow timer is the "whenever the device decides its copy may be stale" leg —
+  # it only matters for a frame that stays connected for days and missed a
+  # nudge, and each pull is conditional, so a no-op costs one 304.
+  HubServiceSettingsIntervalSeconds = 6 * 60 * 60.0
+  # A pull that failed for a reason that says nothing about this device (429,
+  # 5xx, DNS/TLS hiccup, a full disk) comes back long before the staleness
+  # timer would: the frame is otherwise happily connected and may be rendering
+  # with a key the owner already replaced.
+  HubServiceSettingsRetrySeconds = 300.0
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
@@ -175,6 +195,11 @@ type
     ## The current rendered image for `image_get` (error "no_image" until the
     ## first render).
     getImageFn*: proc(): AssetReadResult {.gcsafe.}
+    ## Accepts a `refresh_service_settings` nudge. The verb acks on ACCEPTANCE,
+    ## never on completion: the fetch is an HTTPS request on the device's own
+    ## schedule (see pullServiceSettings), and a failed fetch must not look
+    ## like a refused verb.
+    refreshServiceSettingsFn*: proc() {.gcsafe.}
     rebootFn*: proc() {.gcsafe.}
     auditFn*: proc(payload: JsonNode) {.gcsafe.}
 
@@ -195,11 +220,23 @@ type
     accessToken: string
     scopes: seq[string]
     scenesChecksum: string
+    frameId: string
     generation: int
 
 # ---------------------------------------------------------------------------
 # Link state helpers
 # ---------------------------------------------------------------------------
+
+proc frameIdFromState(state: JsonNode): string =
+  ## The provider mints the frame id; it is a string on every provider we know,
+  ## but a numeric id must not silently become "".
+  let node = state{"frame_id"}
+  if node == nil or node.kind == JNull:
+    ""
+  elif node.kind == JString:
+    node.getStr("")
+  else:
+    $node
 
 proc snapshotLink(): HubLinkSnapshot {.gcsafe.} =
   {.gcsafe.}:
@@ -212,6 +249,7 @@ proc snapshotLink(): HubLinkSnapshot {.gcsafe.} =
         accessToken: state{"access_token"}.getStr(""),
         scopes: linkScopes(state),
         scenesChecksum: state{"scenes_checksum"}.getStr(""),
+        frameId: frameIdFromState(state),
         generation: currentCloudLinkGeneration(),
       )
 
@@ -397,6 +435,20 @@ proc defaultWriteAsset(path: string, data: string): JsonNode {.gcsafe.} =
     payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
     payload
 
+var
+  ## Set by the `refresh_service_settings` verb (and cleared by the session
+  ## loop once the pull starts). The nudge is advisory, so accepting it is
+  ## nothing but this flag — the ack goes out immediately and the HTTPS fetch
+  ## happens on the session's own schedule.
+  serviceSettingsPullRequested: Atomic[bool]
+  ## ETag of the copy currently on disk, remembered for the next
+  ## If-None-Match. Hub-thread only. Not persisted: a restart costs one full
+  ## response, and a stale ETag would be worse than none.
+  serviceSettingsEtag = ""
+
+proc requestServiceSettingsPull*() {.gcsafe.} =
+  serviceSettingsPullRequested.store(true, moRelaxed)
+
 proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
                               scenesChecksum: string): CloudVerbContext {.gcsafe.} =
   {.gcsafe.}:
@@ -449,6 +501,8 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
                             mtime: epochTime().BiggestInt)
           except CatchableError:
             AssetReadResult(error: "no_image"),
+      refreshServiceSettingsFn: proc() {.gcsafe.} =
+        requestServiceSettingsPull(),
       rebootFn: proc() {.gcsafe.} =
         defaultReboot(),
       auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -635,6 +689,27 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
       return CloudVerbReply(ack: ackError(id, "persist_failed"))
     discard ctx.sendEventFn("reload", %*{})
   ctx.audit("set_settings", true)
+  CloudVerbReply(ack: ackOk(id))
+
+proc handleRefreshServiceSettings(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  ## Advisory nudge: "your service settings changed, re-fetch them". The
+  ## payload is always empty — API keys never ride the command queue
+  ## (docs/cloud-frames.md, "Service settings"), and nothing in this handler
+  ## reads one. Set_settings and this verb are disjoint paths: the six
+  ## service-settings groups are NOT in CLOUD_SETTINGS_ALLOWLIST and never
+  ## become settable over the socket.
+  if not ctx.hasScope(ServiceSettingsScope):
+    # The provider's 403 on the fetch is the real revocation boundary, but a
+    # device that knows it was never granted the scope says so up front.
+    ctx.audit("refresh_service_settings", false, "insufficient_scope")
+    return CloudVerbReply(ack: ackError(id, "insufficient_scope"))
+  if ctx.refreshServiceSettingsFn.isNil:
+    ctx.audit("refresh_service_settings", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  # Ack on ACCEPTING the nudge, not on completing the fetch: the fetch is HTTP
+  # on our own schedule, and a failed fetch must not look like a refused verb.
+  ctx.refreshServiceSettingsFn()
+  ctx.audit("refresh_service_settings", true)
   CloudVerbReply(ack: ackOk(id))
 
 proc handleSetSchedule(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
@@ -901,6 +976,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleSetSettings(ctx, id, msg)
   of "set_schedule":
     result = handleSetSchedule(ctx, id, msg)
+  of "refresh_service_settings":
+    result = handleRefreshServiceSettings(ctx, id)
   of "set_current_scene":
     result = handleSetCurrentScene(ctx, id, msg)
   of "get_state":
@@ -1235,6 +1312,37 @@ proc hubIdleTimeoutSeconds(): float =
       discard
   HubIdleTimeoutSeconds
 
+proc pullServiceSettings(link: HubLinkSnapshot, ctx: CloudVerbContext): ServiceSettingsSync =
+  ## One conditional service-settings pull (docs/cloud-frames.md). Runs on the
+  ## hub thread, bounded to ServiceSettingsTimeoutMs, and never logs a value:
+  ## the log line carries the status and the two flags, nothing else.
+  ##
+  ## Raises CloudHubAuthError on 401 so the thread's existing demotion counter
+  ## — the same one the WebSocket handshake feeds — sees it. 429 and 5xx are
+  ## explicitly not demotion signals: they keep the current copy and retry.
+  result = syncServiceSettings(
+    link.providerUrl, link.frameId, link.accessToken, serviceSettingsEtag,
+    proc(settings: JsonNode): bool {.gcsafe.} =
+      {.cast(gcsafe).}:
+        persistCloudServiceSettingsUpdate(settings))
+  let outcome = result
+  serviceSettingsEtag = outcome.etag
+  log(%*{"event": "cloud:serviceSettings", "status": outcome.status,
+         "changed": outcome.changed, "cleared": outcome.cleared,
+         "error": outcome.error})
+  if outcome.cleared:
+    log(%*{"event": "cloud:serviceSettings:revoked",
+           "message": "The provider refused the service-settings fetch " &
+                      "(insufficient_scope); all cloud-owned service settings " &
+                      "were removed from this frame."})
+  if outcome.changed:
+    # Only when something really changed on disk — a 304 or an identical
+    # payload must not restart the scenes.
+    discard ctx.sendEventFn("reload", %*{})
+  if outcome.authFailed:
+    raise newException(CloudHubAuthError,
+      "Provider rejected the link token on the service-settings fetch")
+
 proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
     Future[SessionEndReason] {.async.} =
   var socket: WebSocket
@@ -1296,6 +1404,20 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         logsGranted = "telemetry:logs" in ctx.scopes
         metricsGranted = "telemetry:metrics" in ctx.scopes
         log(%*{"event": "cloud:hub:scopesUpdated", "scopes": ctx.scopes.join(" ")})
+    # Service settings are fetched, never pushed. Pull once per session that
+    # reaches `ready` — before the first render this session drives — so a
+    # reconnect is self-healing: a key the owner changed (or revoked) while
+    # this frame was offline lands now, without waiting for a nudge.
+    var serviceSettingsGranted = ServiceSettingsScope in ctx.scopes
+    # 0.0 means "pull as soon as the loop runs", which is what a scope granted
+    # mid-session should do.
+    var nextServiceSettingsPullAt = 0.0
+    if serviceSettingsGranted:
+      serviceSettingsPullRequested.store(false, moRelaxed)
+      let outcome = pullServiceSettings(link, ctx)
+      nextServiceSettingsPullAt = epochTime() +
+        (if outcome.retryLater: HubServiceSettingsRetrySeconds
+         else: HubServiceSettingsIntervalSeconds)
     if logsGranted:
       # Drop anything queued before this session so the provider only gets
       # lines from its own watch window.
@@ -1321,6 +1443,7 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
           break
         ctx.scopes = fresh.scopes
         metricsGranted = "telemetry:metrics" in fresh.scopes
+        serviceSettingsGranted = ServiceSettingsScope in fresh.scopes
         let logsNow = "telemetry:logs" in fresh.scopes
         if logsNow != logsGranted:
           logsGranted = logsNow
@@ -1383,6 +1506,17 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
             (logBuffer.len > 0 and now - logBufferSince >= HubLogBatchMaxSeconds):
           await socket.send($logBatchMessage(logBuffer))
           logBuffer.setLen(0)
+      # A `refresh_service_settings` nudge was accepted (its ack already went
+      # out), or the slow staleness timer came round. Both are conditional
+      # fetches: unchanged settings cost one 304 and change nothing.
+      if serviceSettingsGranted and
+          (serviceSettingsPullRequested.load(moRelaxed) or
+           now >= nextServiceSettingsPullAt):
+        serviceSettingsPullRequested.store(false, moRelaxed)
+        let outcome = pullServiceSettings(link, ctx)
+        nextServiceSettingsPullAt = now +
+          (if outcome.retryLater: HubServiceSettingsRetrySeconds
+           else: HubServiceSettingsIntervalSeconds)
       if metricsGranted and now - lastMetricsSentAt >= metricsInterval:
         let sample = latestMetricsSample()
         if sample != nil:

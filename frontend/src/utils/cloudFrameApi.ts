@@ -1,4 +1,4 @@
-import type { FrameScene, FrameType } from '../types'
+import type { FrameSchedule, FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { cloudFrameSettingKeys, cloudFrameSettingsPayload, type CloudFrameSettingKey } from './cloudFrameSettings'
@@ -71,6 +71,28 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
   })
   await assertOk(response, 'Failed to save the frame settings')
   return true
+}
+
+/**
+ * Push the Schedule panel's edits. Schedule is its own verb (`set_schedule`),
+ * not a settings key: POST /api/frames/{id}/schedule persists the full
+ * schedule server-side (disabled events included, so the panel round-trips)
+ * and enqueues a durable, TTL-less set_schedule with the events the device
+ * should actually fire.
+ */
+export async function pushCloudFrameSchedule(frameId: FrameId, schedule: FrameSchedule): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/schedule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schedule,
+      // Schedules match in frame-local wall-clock time, but the smallest
+      // devices carry no tz database — ship the browser's current UTC offset
+      // alongside (getTimezoneOffset is minutes *behind* UTC, so negate).
+      utcOffsetMinutes: -new Date().getTimezoneOffset(),
+    }),
+  })
+  await assertOk(response, 'Failed to save the frame schedule')
 }
 
 // ---------------------------------------------------------------------------

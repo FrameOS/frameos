@@ -12,17 +12,25 @@ import { jsonError } from "./device-flow";
 import { frameForLinkedClient, frameManagedScope } from "./frames";
 
 type FrameRow = typeof frames.$inferSelect;
+type LinkedClient = NonNullable<
+  Awaited<ReturnType<typeof authenticateLinkedClient>>
+>;
 
 /**
  * Resolve a device's `Authorization: Bearer …` header to its enrolled frame.
  * Failure returns the HTTP response to send: 401 when the token proves
  * nothing (missing, unknown, revoked, or no frame behind it), 403 when the
  * token is real but is not a managed frame's.
+ *
+ * The linked client comes back too: routes guarded by a scope beyond
+ * frame:managed (service settings, say) check it without a second lookup.
  */
 export async function authenticateFrameDevice(
   db: ReturnType<typeof createDb>,
   authorizationHeader: string | null,
-): Promise<{ frame: FrameRow } | { response: NextResponse }> {
+): Promise<
+  { frame: FrameRow; linkedClient: LinkedClient } | { response: NextResponse }
+> {
   const linkedClient = await authenticateLinkedClient(db, authorizationHeader);
   if (!linkedClient) {
     return { response: jsonError("invalid_link_token", 401) };
@@ -42,5 +50,5 @@ export async function authenticateFrameDevice(
     // frame row is the authority on frame state — belt and braces.
     return { response: jsonError("frame_revoked", 401) };
   }
-  return { frame };
+  return { frame, linkedClient };
 }

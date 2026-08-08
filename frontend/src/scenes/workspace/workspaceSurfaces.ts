@@ -31,7 +31,10 @@ export type WorkspaceUtilityPanel =
 //   backend    the FrameOS backend — SSH, compiled deploys, shell, files
 //   frameAdmin the on-device admin panel — local frame, no SSH/ping
 //   cloud      FrameOS Cloud — an outbound WebSocket carrying four command
-//              verbs and a settings allowlist. No shell, no files, no deploy.
+//              verbs and a settings allowlist. No shell, no SSH, no compiled
+//              builds — but it does have a deploy: the settings push plus one
+//              checksummed set_scenes, and (for esp32 boards) USB
+//              provisioning straight from the browser.
 //
 // These are ALLOW-lists on purpose. The gating used to be `isCloudMode()`
 // booleans sprinkled across eight components, so every panel added to
@@ -85,8 +88,10 @@ export const allowedSceneUtilityPanels: Record<WorkspaceMode, readonly Workspace
 /**
  * Actions in the frame's "…" menu. `render`, `reboot` and `restart` map onto
  * the cloud's allowedFrameCommandTypes (reboot, render, restart_runtime,
- * set_current_scene); `rename` maps onto its settings allowlist. Everything
- * else needs SSH, a build host, or backend bookkeeping.
+ * set_current_scene); `rename` maps onto its settings allowlist; `deploy`
+ * opens the deploy dialog, whose contents are the control plane's business
+ * (see below). Everything else needs SSH, a build host, or backend
+ * bookkeeping.
  */
 export type FrameMenuAction =
   | 'archive'
@@ -128,7 +133,18 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
   frameAdmin: ['localDeploy', 'rename', 'render'],
   // `delete` = DELETE /api/frames/{id}: revoke the link, then drop the row
   // and everything cascaded to it. The device demotes to standalone.
-  cloud: ['delete', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
+  //
+  // `deploy` is allowed here even though the cloud has no /deploy endpoint,
+  // no build host and no fast/full distinction. It is the ENTRY POINT, not
+  // the transport: it opens the deploy dialog, which on the cloud offers the
+  // settings push + one checksummed set_scenes (framesModel.deployFrame's
+  // cloud branch), the firmware-update nudge, and — for esp32 boards — USB
+  // provisioning over WebSerial. Leaving it off the list is what used to
+  // hide every deploy affordance on the cloud, so the only way to push
+  // scenes was a bare button in the scene sidebar that opened no dialog at
+  // all and gave no confirmation of what it would send. See
+  // FrameDeployPlanDrawer's cloud branch for what the dialog renders.
+  cloud: ['delete', 'deploy', 'reboot', 'rename', 'render', 'restart', 'updateFirmware'],
 }
 
 /**
@@ -196,6 +212,33 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-logs',
     'frame-settings-reboot',
   ],
+}
+
+/**
+ * Sections of the GLOBAL settings page (scenes/settings/Settings.tsx) — not
+ * the per-frame settings panel above. `null` means "everything the page
+ * renders": the backend owns all of it, and the on-device admin never mounts
+ * this page at all (urls.settings() routes it to the frame's own settings
+ * panel instead). The cloud keeps only the service API keys scenes use —
+ * there is no local account, deploy host, SSH, build environment, font
+ * store, backend PostHog or backend system info to configure.
+ */
+export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly string[] | null> = {
+  backend: null,
+  frameAdmin: null,
+  cloud: [
+    'settings-gallery',
+    'settings-openai',
+    'settings-home-assistant',
+    'settings-github',
+    'settings-immich',
+    'settings-unsplash',
+  ],
+}
+
+export function globalSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {
+  const allowed = allowedGlobalSettingsSections[mode]
+  return allowed === null || allowed.includes(sectionId)
 }
 
 /**
@@ -509,6 +552,46 @@ export function frameSupportsUsbSerialConsole(
   return isEsp32CloudFrame(frame, mode)
 }
 
-export function frameSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {
+/**
+ * The esp32 cloud profile replaces the whole settings form with one compact
+ * block (name + interval) — see `esp32CloudProfile` in FrameSettings.tsx — so
+ * every other nav entry would scroll to an anchor that is never rendered.
+ */
+const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-info']
+
+/**
+ * Sections FrameSettings.tsx renders only for a full host OS (its
+ * `isEmbeddedMode` gate): a microcontroller has no mountpoints to mount, no
+ * host log files to rotate, no reboot-behaviour knobs, and no configurable
+ * assets path. Applies to virtual frames too — they are embedded mode as
+ * well, and the backend, not the "device", holds their assets.
+ */
+const embeddedModeHiddenFrameSettingsSections: readonly string[] = [
+  'frame-settings-mountpoints',
+  'frame-settings-assets',
+  'frame-settings-logs',
+  'frame-settings-reboot',
+]
+
+/**
+ * Callers with a frame in hand MUST pass it: the mode alone cannot tell a
+ * cloud esp32 (one section) from a cloud Pi (all of them), and the contract
+ * above is that a nav entry which scrolls to nothing is worse than a missing
+ * one. `frame` stays optional so mode-only probes still compile.
+ */
+export function frameSettingsSectionIsAllowed(
+  mode: WorkspaceMode,
+  sectionId: string,
+  frame?: FrameCapabilityInput | null
+): boolean {
+  if (isEsp32CloudFrame(frame, mode) && !esp32CloudFrameSettingsSections.includes(sectionId)) {
+    return false
+  }
+  if (
+    (isEmbeddedHardwareFrame(frame) || isVirtualFrame(frame)) &&
+    embeddedModeHiddenFrameSettingsSections.includes(sectionId)
+  ) {
+    return false
+  }
   return allowedFrameSettingsSections[mode].includes(sectionId)
 }

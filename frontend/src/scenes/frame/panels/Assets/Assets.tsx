@@ -9,7 +9,14 @@ import {
   type AssetStats,
   type DiskStats,
 } from './assetsLogic'
-import { DocumentIcon, EyeIcon, EyeSlashIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
+import {
+  DocumentIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  FolderIcon,
+  FolderOpenIcon,
+} from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
@@ -25,7 +32,7 @@ import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownM
 import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
-import { workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { isEmbeddedHardwareFrame, isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { FrameId } from '../../../../types'
@@ -95,6 +102,8 @@ function TreeNode({
   setFrameAssetFolderExpanded,
   showSystemFolders,
   toggleShowSystemFolders,
+  showHiddenFiles,
+  toggleShowHiddenFiles,
   readOnly,
 }: {
   node: AssetNode
@@ -110,6 +119,8 @@ function TreeNode({
   setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
   showSystemFolders: boolean
   toggleShowSystemFolders: () => void
+  showHiddenFiles: boolean
+  toggleShowHiddenFiles: () => void
   /** Cloud mode: the wire contract is read-only (assets_list/asset_get), so
    * every mutation affordance disappears — browse, thumbs, download and the
    * run-image-scene buttons stay. */
@@ -221,13 +232,20 @@ function TreeNode({
                   : null,
                 !node.path
                   ? {
-                      label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
-                      icon: showSystemFolders ? (
-                        <EyeSlashIcon className="w-5 h-5" />
-                      ) : (
-                        <EyeIcon className="w-5 h-5" />
-                      ),
+                      label: showSystemFolders
+                        ? 'Hide system folders (.frameos, .thumbs)'
+                        : 'Show system folders (.frameos, .thumbs)',
+                      icon: showSystemFolders ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
                       onClick: toggleShowSystemFolders,
+                    }
+                  : null,
+                !node.path
+                  ? {
+                      label: showHiddenFiles
+                        ? 'Hide hidden files (.DS_Store, Thumbs.db, …)'
+                        : 'Show hidden files (.DS_Store, Thumbs.db, …)',
+                      icon: showHiddenFiles ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
+                      onClick: toggleShowHiddenFiles,
                     }
                   : null,
                 node.path && !readOnly
@@ -285,6 +303,8 @@ function TreeNode({
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
                 showSystemFolders={showSystemFolders}
                 toggleShowSystemFolders={toggleShowSystemFolders}
+                showHiddenFiles={showHiddenFiles}
+                toggleShowHiddenFiles={toggleShowHiddenFiles}
                 readOnly={readOnly}
               />
             ))}
@@ -583,6 +603,21 @@ function AssetsSummaryHeader({
   )
 }
 
+/** Shown only when the frame explicitly reports an unmounted card. Without it
+ * an empty listing reads as "the card is empty", which it is not — the files
+ * are all still on the card the frame cannot see. */
+function StorageUnmountedNotice(): JSX.Element {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+      <div>
+        SD card not mounted — files on the card are not visible to the frame. Nothing has been deleted: reseat the card
+        (or power cycle the frame), then hit Refresh.
+      </div>
+    </div>
+  )
+}
+
 interface AssetsProps {
   scrollContainer?: boolean
 }
@@ -592,20 +627,34 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const assetsLogicProps = { frameId: frame.id }
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
-  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders } = useValues(
-    assetsLogic(assetsLogicProps)
-  )
+  const {
+    assetsLoading,
+    assetsRefreshing,
+    assetStats,
+    assetTree,
+    diskStats,
+    showSystemFolders,
+    showHiddenFiles,
+    storageUnmounted,
+  } = useValues(assetsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
-  const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
+  const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync pulls from the backend's own store; the on-device panel and the
   // cloud have nothing to sync from. Everything else works on every control
   // plane — the cloud speaks asset_put/asset_mkdir/asset_delete/asset_rename
   // through /api/frames/{id}/assets/* since cloud-workspace-fixes.
+  //
+  // Embedded frames are excluded for the same reason the API refuses them
+  // (api_frame_assets_sync): their renderers ignore synced fonts. Embedded
+  // hardware reuses the compiled-in typeface for every custom font
+  // (utils/font.nim getTypeface under frameosEmbedded) and virtual frames
+  // render with the fonts bundled into the wasm renderer, so the button could
+  // only ever produce the backend's "not supported" error.
   const readOnly = false
-  const showSyncAction = workspaceMode() === 'backend'
+  const showSyncAction = workspaceMode() === 'backend' && !isEmbeddedHardwareFrame(frame) && !isVirtualFrame(frame)
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
@@ -665,6 +714,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             onRefresh={refreshAssets}
             onSync={handleSyncAssets}
           />
+          {storageUnmounted ? <StorageUnmountedNotice /> : null}
           <TreeNode
             node={assetTree}
             frameId={frame.id}
@@ -679,6 +729,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
             showSystemFolders={showSystemFolders}
             toggleShowSystemFolders={toggleShowSystemFolders}
+            showHiddenFiles={showHiddenFiles}
+            toggleShowHiddenFiles={toggleShowHiddenFiles}
             readOnly={readOnly}
           />
         </div>

@@ -50,6 +50,14 @@ int frameos_nim_load_scenes(const char *json);
 /* Drop the Nim side's cached service settings (app secrets); the next app
  * use refetches them. Called when the ETag'd settings poll sees changes. */
 void frameos_nim_invalidate_settings(void);
+/* Install the service settings the settings poll just fetched
+ * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
+ * — group → field → value — for the six cloud-owned groups (frameOS, github,
+ * homeAssistant, immich, openAI, unsplash), never the whole response envelope.
+ * Each of the six absent from it is DELETED on the device; no other settings
+ * key is touched. "{}" (or NULL) clears all six, which is what a
+ * `403 insufficient_scope` means. Values never appear in a log line. */
+void frameos_nim_apply_service_settings(const char *json);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);

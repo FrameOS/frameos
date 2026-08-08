@@ -16,7 +16,7 @@ import pixie
 
 import embedded_scene
 import embedded_runtime
-from frameos/apps import invalidateEmbeddedServiceSettings
+from frameos/apps import invalidateEmbeddedServiceSettings, applyServiceSettings
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -355,6 +355,21 @@ proc fos_nim_invalidate_settings_impl() {.exportc, cdecl.} =
   ## Firmware's ETag'd settings poll saw new content: drop the cached
   ## service-settings so apps refetch their keys on the next render.
   invalidateEmbeddedServiceSettings(getFrameConfig())
+
+proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
+  ## The firmware's settings poll (fos_settings.c) delivered the cloud-owned
+  ## service settings. `payload` is the pull's `settings` object — group →
+  ## field → value — for the six groups of docs/cloud-frames.md; every one of
+  ## them absent from it is deleted, and `{}` clears them all (what a
+  ## `403 insufficient_scope` means). Never logs a value: the firmware logs the
+  ## group NAMES, and device logs are uploaded to the provider.
+  try:
+    if applyServiceSettings(getFrameConfig(), $payload):
+      log("service settings updated")
+  except Defect as e:
+    log("service settings apply failed (defect): " & e.msg)
+  except CatchableError as e:
+    log("service settings apply failed: " & e.msg)
 
 proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Install interpreted scenes from JSON (backend scenes.json format).

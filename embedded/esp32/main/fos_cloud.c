@@ -33,6 +33,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1585,11 +1586,12 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
 
 /* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
  * profile persists the subset that maps onto fos_config: `interval`
- * (interval_sec, picked up by the render loop's next pass, no reboot) and
+ * (interval_sec, picked up by the render loop's next pass, no reboot),
  * `name` (the DHCP hostname — the provider-side display name stays
- * authoritative on the provider). Any other key refuses the WHOLE verb with
- * setting_not_allowed, mirroring the Nim runtime, so the provider never
- * half-applies a settings push. */
+ * authoritative on the provider) and `rotate` (the renderer sizes its canvas
+ * once at init, so this one costs a reboot). Any other key refuses the WHOLE
+ * verb with setting_not_allowed, mirroring the Nim runtime, so the provider
+ * never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -1600,7 +1602,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, settings) {
         const char *key = entry->string ? entry->string : "";
-        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0) {
+        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0 &&
+            strcmp(key, "rotate") != 0) {
             ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
             ws_ack(id, false, "setting_not_allowed");
             return;
@@ -1627,11 +1630,36 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
     }
+    /* Validate rotate before touching config, so an invalid one leaves the
+     * whole verb unapplied (the interval/name writes above are still in RAM
+     * — nothing is persisted until fos_config_save() below). */
+    bool rotate_changed = false;
+    const cJSON *rotate = cJSON_GetObjectItem(settings, "rotate");
+    if (rotate != NULL) {
+        uint16_t normalized = 0;
+        if (!cJSON_IsNumber(rotate) ||
+            !fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        rotate_changed = config->rotate != normalized;
+        config->rotate = normalized;
+    }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
     }
     ws_ack(id, true, NULL);
+    if (rotate_changed) {
+        /* The Nim runtime sizes the scene canvas at init (main.c passes
+         * config->rotate into frameos_nim_init), and the panel packers read
+         * the config directly — a restart is what makes a new rotation take
+         * effect, exactly as on the backend settings poll. Ack first: the
+         * reboot task's delay is what lets it flush over the socket. */
+        ESP_LOGW(TAG, "ws: rotation changed to %u; restarting to re-init the renderer",
+                 (unsigned)config->rotate);
+        ws_schedule_reboot();
+    }
 }
 
 /* Ack a message we could not parse, so the provider's durable queue moves on. */
@@ -1667,6 +1695,10 @@ static void ws_handle_message(const char *data, size_t len)
      * mutations defer to the backend; telemetry, assets and OTA still work. */
     static const char *backend_owned_verbs[] = {
         "set_scenes", "set_current_scene", "set_settings", "set_schedule",
+        /* Service settings too: the settings poll takes its payload from the
+         * backend whenever one is configured, so acking a provider's nudge
+         * `ok: true` would promise a fetch that never reads the provider. */
+        "refresh_service_settings",
     };
     if (fos_config()->backend_url[0] != '\0') {
         for (size_t i = 0; i < sizeof(backend_owned_verbs) / sizeof(backend_owned_verbs[0]); i++) {
@@ -1687,6 +1719,7 @@ static void ws_handle_message(const char *data, size_t len)
          * revocations since enrollment. */
         bool logs_granted = false;
         bool metrics_granted = false;
+        bool service_settings_granted = false;
         const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
         const cJSON *scope = NULL;
         cJSON_ArrayForEach(scope, scopes) {
@@ -1695,10 +1728,19 @@ static void ws_handle_message(const char *data, size_t len)
                 logs_granted = true;
             } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
                 metrics_granted = true;
+            } else if (strcmp(scope->valuestring, "settings:services") == 0) {
+                service_settings_granted = true;
             }
         }
         s_logs_granted = logs_granted;
         s_metrics_granted = metrics_granted;
+        /* Service settings are fetched, never pushed: this only tells the
+         * settings poll it may ask. It pulls once before the next render, so a
+         * key the owner changed while this frame was offline lands on
+         * reconnect without waiting for a nudge. Unlike the telemetry flags
+         * this one is additive and outlives the session — the provider's
+         * `403 insufficient_scope` is what removes the keys again. */
+        fos_settings_cloud_scope_granted(service_settings_granted);
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
@@ -1742,6 +1784,14 @@ static void ws_handle_message(const char *data, size_t len)
         ws_ack(id, true, NULL);
         ws_schedule_reboot();
     } else if (strcmp(type, "set_schedule") == 0) {
+        /* The chip carries no tz database, so the provider sends the frame's
+         * current UTC offset alongside the schedule (the backend poll does the
+         * same via the `frame` object). Apply it first: without it a
+         * cloud-only frame evaluates every event in UTC. */
+        const cJSON *offset = cJSON_GetObjectItem(root, "utcOffsetMinutes");
+        if (cJSON_IsNumber(offset)) {
+            fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
+        }
         const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
         if (schedule == NULL || cJSON_IsNull(schedule)) {
             fos_schedule_set_json(NULL, 0);
@@ -1758,6 +1808,21 @@ static void ws_handle_message(const char *data, size_t len)
                 ws_ack(id, false, "invalid_schedule");
             }
             cJSON_free(printed);
+        }
+    } else if (strcmp(type, "refresh_service_settings") == 0) {
+        /* Advisory nudge: "your service settings changed, re-fetch them". The
+         * payload is always empty — API keys never ride the command queue
+         * (docs/cloud-frames.md, "Service settings") and nothing here reads
+         * one. Disjoint from set_settings: the six service groups are not in
+         * that verb's allowlist and never become settable over the socket.
+         * Ack on ACCEPTING the nudge, not on completing the fetch: the fetch
+         * is HTTP on the render task's schedule, and a failed fetch must not
+         * look like a refused verb. */
+        if (!fos_settings_cloud_scope()) {
+            ws_ack(id, false, "insufficient_scope");
+        } else {
+            ws_ack(id, true, NULL);
+            fos_settings_request_sync();
         }
     } else if (strcmp(type, "get_logs") == 0) {
         ws_handle_get_logs(root, id);
@@ -2015,8 +2080,6 @@ static void ws_start(void)
     /* Tee runtime log lines toward this session (flushed by ws_poll_logs on
      * the cloud task once telemetry:logs is confirmed by `ready`). */
     ws_logs_init();
-    /* TODO(cloud-frames): apply set_schedule for the declarative
-     * allowlist (set_settings ships the interval/name subset already). */
 }
 
 /* Cloud task only: the websocket task must not be torn down from inside its

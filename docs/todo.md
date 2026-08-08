@@ -5,6 +5,85 @@ One tracker for everything still open across the repo (last swept
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
+## ESP32 backend→cloud parity (current push, 2026-08)
+
+Goal: everything the self-hosted backend can do with an ESP32 frame, the
+cloud can too. Standing rule (also in AGENTS.md): frame-facing features and
+fixes land on BOTH control planes unless explicitly one-sided.
+Constraints and direction:
+
+- The cloud only installs **prebuilt release binaries** — no compilation
+  ever happens cloud-side. Do as much as possible **in the browser**
+  (WebSerial flashing/provisioning, wasm previews/renders).
+- Unify the flashing/provisioning steps and code across control planes:
+  the backend should adopt the same **browser-centric flash system** the
+  cloud uses (Esp32CloudFlasher / EmbeddedWebFlasher convergence). The
+  backend may still build a frame-specific binary server-side when a
+  custom source build is needed — the browser flasher then just flashes
+  that artifact instead of a release download.
+- Inventory to port/verify per surface: settings (incl. account-level API
+  keys like Unsplash/OpenAI), metrics, schedule, assets, logs, OTA,
+  scene state/control, USB provisioning. Track gaps in the parity matrix
+  (`docs/api-triality.md`) and delete items here as they ship.
+
+Known gaps from the 2026-08-08 audit (in flight or open):
+
+- **Service-settings follow-ups** — the feature shipped end to end 2026-08-08
+  (contract in docs/cloud-frames.md "Service settings"; provider routes +
+  `settings:services` scope + `refresh_service_settings` nudge, Nim runtime
+  client, ESP32 client). What is left is smaller:
+  1. **Delete the duplicate ESP32 fetch**: `apps.nim`
+     `loadEmbeddedServiceSettings`/`ensureEmbeddedServiceSettings`, the
+     `settingsUrl` seed in `embedded_runtime.nim`, `should_authorize_backend_url`
+     in the glue, and the `ensureEmbeddedServiceSettings()` calls in the ~8 app
+     files. The device now fetches the same payload twice per boot on backend
+     frames; firmware and Nim ship as one binary, so there is no version skew
+     to fear. Harmless today (the lazy path can only re-merge identical values
+     and cannot resurrect a deleted group) — it is dead weight, not a bug.
+  2. **Surface it in the workspace**: `frameSummary` returns nothing about the
+     scope, so nothing can show whether a frame receives keys or which groups
+     its scenes declare (`frames.service_setting_groups` already holds the
+     latter). Adding a field means updating frame-hub's `protocol.test.ts`
+     fixture in the same commit.
+  3. **Nudge on scene assignment**: assigning a scene that newly declares a
+     group writes the column but sends no `refresh_service_settings`, so the
+     frame learns about it at its next `ready` or settings save.
+  4. Hardware verification: no cloud-managed frame has run the pull against a
+     real provider yet — both clients are unit-tested and build-verified only.
+- Cloud metrics responses omit the backend's `reboots` markers (cosmetic;
+  SPA degrades gracefully).
+- Terminal / ping / debug panels are backend-only by design (no shell verbs
+  in the cloud protocol — structural, not a gap to close).
+- Cloud-managed ESP32-C3 frames still have no render source (wasm harness
+  is the building block; C3 boards stay out of the cloud flasher until then).
+- **Re-flash an ALREADY-ENROLLED cloud frame** — the deploy dialog now offers
+  cloud esp32 frames the full USB *provisioning* set (status, Wi-Fi
+  scan/apply, restart, factory reset — `EmbeddedUsbSetup`, pure WebSerial),
+  but deliberately NOT a "flash firmware" button, because browser flashing
+  currently forks a duplicate frame row. `Esp32CloudFlasher`
+  (`cloud-frontend/src/components/Esp32CloudFlasher.tsx`) is an *enrollment*
+  flow end to end: `mintEnrollmentCode()` always POSTs
+  `/api/frames/claim-tokens` for a FRESH single-use token, provisions it over
+  serial, and then watches the frame list for a frame id it has not seen
+  before. Point that at a board that already owns a frame row and the account
+  ends up with two rows for one device (the old one orphaned, still counting
+  against `maxFramesPerAccount`), which is worse than not offering the button.
+  What is missing is server-side, and none of it exists today:
+  1. A claim token BOUND to an existing frame. `app/api/frames/claim-tokens/route.ts`
+     accepts only `name`/`multi_use`/`max_uses`/`ttl_days` and
+     `frameEnrollmentTokens` has no frame column — add an optional
+     `frame_id` (ownership-checked against the session account, forced
+     `max_uses: 1`, short TTL) so redemption can re-key an existing row
+     instead of inserting one.
+  2. Redemption that re-keys rather than creates: the enrollment path must,
+     for a frame-bound token, rotate that frame's device credentials in
+     place and leave `frames.id`, its scenes, assets and logs alone.
+  3. A flasher mode that takes a known `frameId` + its bound token, skips
+     the new-frame watch entirely, and reports success against the row the
+     user started from.
+  Until 1–3 land, re-flashing an enrolled board stays a delete-and-re-enroll
+  (or a manual esptool flash + factory reset over the USB setup block).
+
 ## Cloud-managed frames
 
 - **Signed OTA** — the one open item from the cloud-workspace push and the

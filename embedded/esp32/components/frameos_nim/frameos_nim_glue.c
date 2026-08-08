@@ -50,6 +50,7 @@ extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
 extern void fos_nim_invalidate_settings_impl(void);
+extern void fos_nim_apply_service_settings_impl(const char *json);
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
@@ -534,6 +535,16 @@ void frameos_nim_invalidate_settings(void)
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_invalidate_settings_impl();
+    nim_lock_give();
+}
+
+void frameos_nim_apply_service_settings(const char *json)
+{
+    if (!s_nim_ready) return;
+    /* A NULL payload is the revocation case: clear every cloud-owned group. */
+    if (json == NULL) json = "{}";
+    if (!nim_lock_take()) return;
+    fos_nim_apply_service_settings_impl(json);
     nim_lock_give();
 }
 

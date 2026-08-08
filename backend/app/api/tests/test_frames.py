@@ -13,6 +13,7 @@ from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frame_sync, frames as frames_api
+from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
@@ -989,7 +990,10 @@ async def test_api_frame_assets_refresh_bypasses_cache(async_client, db, redis):
     await redis.delete(cache_key, lock_key)
     await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
 
-    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+    with patch(
+        "app.api.frames._load_frame_assets",
+        new=AsyncMock(return_value=AssetListing(assets=fresh_assets)),
+    ) as load_assets:
         response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
 
     assert response.status_code == 200
@@ -1019,7 +1023,10 @@ async def test_api_frame_assets_returns_stale_cache_and_refreshes(async_client, 
         fetched_at=time.time() - frames_api.FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS - 1,
     )
 
-    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+    with patch(
+        "app.api.frames._load_frame_assets",
+        new=AsyncMock(return_value=AssetListing(assets=fresh_assets)),
+    ) as load_assets:
         response = await async_client.get(f'/api/frames/{frame.id}/assets')
 
     assert response.status_code == 200

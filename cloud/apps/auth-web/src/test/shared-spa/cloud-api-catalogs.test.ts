@@ -36,9 +36,6 @@ describe("cloud mode backend catalogs", () => {
     const templates = await apiFetch("/api/templates");
     expect(await templates.json()).toEqual([]);
 
-    const settings = await apiFetch("/api/settings");
-    expect(await settings.json()).toEqual({});
-
     const assets = await apiFetch("/api/assets");
     expect(await assets.json()).toEqual([]);
 
@@ -73,5 +70,10 @@ describe("cloud mode backend catalogs", () => {
   it("leaves the cloud's own endpoints alone", async () => {
     await apiFetch("/api/frames");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // /api/settings used to be a stubbed catalog; the cloud now serves it
+    // for real (app/api/settings/route.ts), so it must reach the network.
+    await apiFetch("/api/settings");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

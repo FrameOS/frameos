@@ -88,15 +88,126 @@ async def test_list_assets_returns_absolute_sorted_paths(async_client, db, redis
 
 
 @pytest.mark.asyncio
-async def test_list_assets_unmounted_sd_card_is_empty(async_client, db, redis):
+async def test_list_assets_unmounted_sd_card_reports_storage_state(async_client, db, redis):
+    """An unmounted card must never read as "the card is empty": the panel
+    needs the flag to say so, and the empty listing must not be cached."""
     frame = await create_embedded_frame(async_client, db)
     device = FakeDevice([json_response({"assets": [], "mounted": False})])
+    cache_key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets")
 
     with patch(FETCH, new=device):
         response = await async_client.get(f'/api/frames/{frame.id}/assets')
 
     assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["assets"] == []
+    assert payload["storage"] == {"mounted": False}
+    # Nothing cached: 30 days of "no assets" is the bug this fixes.
+    assert await redis.get(cache_key) is None
+
+
+@pytest.mark.asyncio
+async def test_unmounted_listing_does_not_replace_a_good_cached_listing(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    cache_key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets")
+    await frames_api._write_frame_assets_cache(
+        redis,
+        cache_key,
+        [{"path": "/srv/assets/photo.jpg", "size": 10, "mtime": 1, "is_dir": False}],
+    )
+    device = FakeDevice([json_response({"assets": [], "mounted": False})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
+
+    assert response.status_code == 200, response.text
+    assert response.json()["storage"] == {"mounted": False}
+    assert await redis.get(cache_key) is None
+
+
+@pytest.mark.asyncio
+async def test_list_assets_returning_card_shows_files_on_the_next_request(async_client, db, redis):
+    """A card that comes back must show up immediately, not once the 30-day
+    cache TTL expires."""
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({"assets": [], "mounted": False}),
+        json_response({
+            "assets": [{"path": "photo.jpg", "size": 10, "mtime": 200, "is_dir": False}],
+            "mounted": True,
+        }),
+    ])
+
+    with patch(FETCH, new=device):
+        while_unmounted = await async_client.get(f'/api/frames/{frame.id}/assets')
+        after_reinsert = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert while_unmounted.json()["assets"] == []
+    assert while_unmounted.json()["storage"] == {"mounted": False}
+    assert len(device.calls) == 2  # the device is re-asked, not served from cache
+    payload = after_reinsert.json()
+    assert payload["assets"] == [
+        {"path": "/srv/assets/photo.jpg", "size": 10, "mtime": 200, "is_dir": False},
+    ]
+    assert payload["storage"] == {"mounted": True}
+
+
+@pytest.mark.asyncio
+async def test_list_assets_mounted_card_is_cached_with_storage_state(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({
+            "assets": [{"path": "a.txt", "size": 1, "mtime": 1, "is_dir": False}],
+            "mounted": True,
+        })
+    ])
+
+    with patch(FETCH, new=device):
+        first = await async_client.get(f'/api/frames/{frame.id}/assets')
+        second = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert first.json()["storage"] == {"mounted": True}
+    assert second.json()["cache"]["cached"] is True
+    assert second.json()["storage"] == {"mounted": True}
+    assert len(device.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_assets_without_mounted_flag_keeps_old_behaviour(async_client, db, redis):
+    """Older firmware (and every non-SD frame) says nothing about mounting —
+    those must never be warned about, and must stay cached as before."""
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({"assets": [{"path": "a.txt", "size": 1, "mtime": 1, "is_dir": False}]})
+    ])
+
+    with patch(FETCH, new=device):
+        first = await async_client.get(f'/api/frames/{frame.id}/assets')
+        second = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert first.json()["storage"] is None
+    assert first.json()["assets"] == [
+        {"path": "/srv/assets/a.txt", "size": 1, "mtime": 1, "is_dir": False},
+    ]
+    assert second.json()["cache"]["cached"] is True
+    assert second.json()["storage"] is None
+    assert len(device.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_mounted_card_is_cached_as_empty(async_client, db, redis):
+    """A genuinely empty card is still an empty listing: no warning, and the
+    cache keeps working."""
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [], "mounted": True})])
+    cache_key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets")
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
     assert response.json()["assets"] == []
+    assert response.json()["storage"] == {"mounted": True}
+    assert await redis.get(cache_key) is not None
 
 
 @pytest.mark.asyncio

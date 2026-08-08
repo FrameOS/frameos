@@ -31,6 +31,11 @@ const KNOWN_FRAME_SCOPES* = [
   "auth:login",
   "backup:assets",
   "remote:access",
+  # Lets the provider serve this frame the account's service API keys
+  # (docs/cloud-frames.md, "Service settings"). Granted per frame on the
+  # provider; a managed frame usually learns it from the `ready` scope list
+  # rather than asking for it here.
+  "settings:services",
   "telemetry:logs",
   "telemetry:metrics",
 ]

@@ -316,6 +316,16 @@ def _frame_image_refresh_lock_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image:refreshing"
 
 
+def _as_asset_listing(
+    assets: "list[dict[str, Any]] | embedded_assets.AssetListing",
+) -> embedded_assets.AssetListing:
+    """Accept either a bare list (SSH/agent/virtual sources) or a listing that
+    also carries the device's storage state."""
+    if isinstance(assets, embedded_assets.AssetListing):
+        return assets
+    return embedded_assets.AssetListing(assets=list(assets or []))
+
+
 async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
     cached = await redis.get(cache_key)
     if not cached:
@@ -332,14 +342,25 @@ async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, An
 async def _write_frame_assets_cache(
     redis: Redis,
     cache_key: str,
-    assets: list[dict[str, Any]],
+    assets: "list[dict[str, Any]] | embedded_assets.AssetListing",
     *,
     fetched_at: float | None = None,
 ) -> float:
+    listing = _as_asset_listing(assets)
     cache_time = fetched_at if fetched_at is not None else time.time()
+    if listing.mounted is False:
+        # An unmounted SD card is a transient fault, not an empty card. Caching
+        # its empty listing for 30 days is how "where did all my files go?!"
+        # happens — drop whatever is stored and re-ask the device next time, so
+        # a card that comes back shows up on the very next listing.
+        await redis.delete(cache_key)
+        return cache_time
+    payload: dict[str, Any] = {"assets": listing.assets, "fetched_at": cache_time}
+    if listing.storage is not None:
+        payload["storage"] = listing.storage
     await redis.set(
         cache_key,
-        json.dumps({"assets": assets, "fetched_at": cache_time}).encode(),
+        json.dumps(payload).encode(),
         ex=FRAME_ASSETS_CACHE_TTL_SECONDS,
     )
     return cache_time
@@ -2360,14 +2381,16 @@ async def _load_frame_assets(
     redis: Redis,
     frame: Frame,
     assets_path: str,
-) -> list[dict[str, Any]]:
+) -> embedded_assets.AssetListing:
     if _is_embedded_frame(frame):
-        return await _device_assets(frame).list_assets(frame, redis)
+        # Embedded devices report whether their SD card is mounted; virtual
+        # frames answer with a plain list (their store is always there).
+        return _as_asset_listing(await _device_assets(frame).list_assets(frame, redis))
 
     if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
-        return assets
+        return _as_asset_listing(assets)
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
@@ -2393,7 +2416,7 @@ async def _load_frame_assets(
                 "is_dir": ftype == "directory",
             })
     assets.sort(key=lambda a: a["path"])
-    return assets
+    return _as_asset_listing(assets)
 
 
 async def _refresh_frame_assets_cache(
@@ -2411,7 +2434,7 @@ async def _refresh_frame_assets_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        assets = await _load_frame_assets(db, redis, frame, assets_path)
+        listing = await _load_frame_assets(db, redis, frame, assets_path)
         invalidated_at = await redis.get(invalidated_key)
         if invalidated_at:
             invalidated_at = (
@@ -2423,7 +2446,7 @@ async def _refresh_frame_assets_cache(
                 if float(invalidated_at) > started_at:
                     completed = True
                     return
-        await _write_frame_assets_cache(redis, cache_key, assets)
+        await _write_frame_assets_cache(redis, cache_key, listing)
         completed = True
     except Exception:
         # Keep serving the previous cached list. The lock TTL throttles retries.
@@ -2507,8 +2530,10 @@ async def api_frame_get_assets(
                 cache_key,
                 lock_key,
             )
+        cached_storage = cached.get("storage")
         return {
             "assets": cached["assets"],
+            "storage": cached_storage if isinstance(cached_storage, dict) else None,
             "cache": _frame_assets_cache_meta(
                 cached=True,
                 refreshing=refreshing,
@@ -2516,10 +2541,13 @@ async def api_frame_get_assets(
             ),
         }
 
-    assets = await _load_frame_assets(db, redis, frame, assets_path)
-    fetched_at = await _write_frame_assets_cache(redis, cache_key, assets)
+    listing = await _load_frame_assets(db, redis, frame, assets_path)
+    fetched_at = await _write_frame_assets_cache(redis, cache_key, listing)
     return {
-        "assets": assets,
+        "assets": listing.assets,
+        # None for every source that says nothing about its storage (SSH,
+        # agent, virtual, pre-flag firmware) — the UI only warns on False.
+        "storage": listing.storage,
         "cache": _frame_assets_cache_meta(
             cached=False,
             refreshing=False,

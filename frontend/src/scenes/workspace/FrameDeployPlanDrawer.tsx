@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   ArrowsRightLeftIcon,
   ChevronRightIcon,
+  CloudArrowDownIcon,
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
@@ -66,6 +67,12 @@ import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
+import {
+  frameMenuActionDisabledReason,
+  frameMenuActionIsAllowed,
+  isEsp32CloudFrame,
+  workspaceMode,
+} from './workspaceSurfaces'
 import { timezoneOptions } from '../../decorators/timezones'
 
 interface DeployPlanProgressStep {
@@ -1999,6 +2006,95 @@ function EmbeddedFirmwareSection({
   )
 }
 
+/**
+ * The deploy dialog for a cloud-managed frame.
+ *
+ * Nothing the backend drawer shows applies here: there is no build host, no
+ * SSH transport to pick, no fast/full distinction (cloud frames are
+ * interpreted-only), no SD-card image and no deploy plan endpoint. What the
+ * cloud DOES have is three deploy-shaped actions that used to live in three
+ * different places (a dialog-less sidebar button, the "…" menu, and nowhere
+ * at all), so they are collected here:
+ *
+ *   1. Push scenes      the settings push + one checksummed set_scenes
+ *                       (frameLogic's cloudSaveAndDeploy) — the footer's
+ *                       primary button.
+ *   2. Update firmware  notify_update_available; the device fetches and
+ *                       signature-verifies the image itself.
+ *   3. USB setup        WebSerial provisioning for esp32 boards, the same
+ *                       component the backend's embedded view mounts. It
+ *                       speaks only to the serial port, so it works
+ *                       identically on a control plane with no device HTTP
+ *                       API at all — and it is the only way to fix the Wi-Fi
+ *                       credentials of a board that cannot reach the cloud.
+ *
+ * Deliberately absent: the firmware BUILD/flash controls
+ * (EmbeddedWebFlasher, OTA-from-this-backend, esptool command, footprint
+ * chart). Those all read frame.embedded.firmware, which the backend builds
+ * and cloud frames do not have. Re-flashing an enrolled cloud board also
+ * needs a claim token bound to the existing frame — see docs/todo.md.
+ */
+function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
+  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { updateFrameFirmware } = useActions(framesModel)
+  const mode = workspaceMode()
+  const isEsp32 = isEsp32CloudFrame(frame, mode)
+  const canUpdateFirmware = isEsp32 && frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
+  const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
+  const offline = frame.connected === false
+
+  return (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Push to frame</DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
+            {offline
+              ? 'The frame is offline right now — the push is queued and applied when it reconnects.'
+              : 'The frame applies them as soon as it syncs.'}
+          </div>
+          <SummaryRows
+            items={[
+              { label: 'Scenes', value: `${scenes.length} scene${scenes.length === 1 ? '' : 's'}` },
+              {
+                label: 'Unsaved changes',
+                value:
+                  unsavedChangeDetails.length === 0
+                    ? 'None — this re-sends the current scenes'
+                    : unsavedChangeDetails.map((change) => change.label).join(', '),
+              },
+            ]}
+          />
+        </div>
+      </section>
+      {canUpdateFirmware ? (
+        <section className="space-y-2">
+          <DrawerHeading>Firmware</DrawerHeading>
+          <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
+            <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
+              Ask the frame to check for new firmware and install it in the background. The device downloads the image
+              and verifies its signature itself.
+            </div>
+            <button
+              type="button"
+              title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
+              disabled={Boolean(firmwareDisabledReason)}
+              onClick={() => updateFrameFirmware(frame.id)}
+              className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              <CloudArrowDownIcon className="h-4 w-4" />
+              Update firmware
+            </button>
+          </div>
+        </section>
+      ) : null}
+      {isEsp32 ? <EmbeddedUsbSetup frame={frame} /> : null}
+    </div>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
@@ -2029,6 +2125,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     loadDeployPlans,
     loadFrameSyncStatus,
     restartRemote,
+    saveAndDeployFrame,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setFrameSyncItemChoice,
@@ -2041,6 +2138,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
 
+  // Everything below this line is backend-shaped: frame.mode, deploy plans,
+  // SSH transports, firmware the backend builds. A cloud frame has none of
+  // those fields (its summary carries `hardware`, not `mode`), so the cloud
+  // takes its own branch in both the body and the footer and reads none of
+  // it. See CloudDeploySection.
+  const isCloud = workspaceMode() === 'cloud'
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
@@ -2150,7 +2253,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {activeDeployDrawerView === 'embedded' ? (
+          {isCloud ? (
+            <CloudDeploySection frame={frame} />
+          ) : activeDeployDrawerView === 'embedded' ? (
             <EmbeddedFirmwareSection
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
@@ -2315,7 +2420,25 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           )}
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          {(frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
+          {isCloud ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                title="Save this frame's settings and push its scenes to the device"
+                onClick={() => closeAndRun(saveAndDeployFrame)}
+                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Push scenes
+              </button>
+            </>
+          ) : (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
             <>
               <button
                 type="button"

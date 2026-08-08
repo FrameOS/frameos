@@ -14,6 +14,7 @@ import {
 } from "../../../../../src/lib/device-flow";
 import {
   buildScenesPayloadForFrame,
+  declaredServiceSettingGroups,
   enqueueFrameCommand,
   frameForAccount,
   pinnedSceneVersion,
@@ -248,9 +249,19 @@ export async function POST(
     throw error;
   }
 
+  // Which service-settings groups (unsplash, openAI, …) these scenes declare,
+  // denormalized onto the frame row while we still hold the assembled scenes.
+  // The device's service-settings pull needs this on every poll, and deriving
+  // it there would mean unzipping every assigned scene version (32 MiB apiece
+  // at the store's cap) per request. Group NAMES only — no credential ever
+  // lands in a frames row.
   await db
     .update(frames)
-    .set({ assignedChecksum: payload.checksum, updatedAt: new Date() })
+    .set({
+      assignedChecksum: payload.checksum,
+      serviceSettingGroups: declaredServiceSettingGroups(payload.scenes),
+      updatedAt: new Date(),
+    })
     .where(eq(frames.id, frame.id));
 
   await supersedePendingCommands(db, frame.id, "set_scenes");

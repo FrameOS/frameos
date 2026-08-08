@@ -44,6 +44,12 @@ typedef struct {
 
 typedef struct {
     bool enabled;
+    /* Format a card at boot when — and only when — the probe in fos_sd_probe.c
+     * can prove it holds nothing (no filesystem at all, or an exFAT volume with
+     * an empty root directory). Anything it cannot prove empty is left
+     * untouched. On by default so a brand-new card just works; turn it off with
+     * `set assets_sd_autoformat 0` to require the explicit `sd format`. */
+    bool autoformat;
     int8_t cs;
     int8_t sck;
     int8_t miso;
@@ -99,6 +105,12 @@ fos_config_t *fos_config(void);
 esp_err_t fos_config_save(void);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
+/* Normalize a rotation onto the four the renderer supports. Any equivalent
+ * angle is accepted (mod 360, negatives included); anything that is not a
+ * right angle is refused. Every writer of `rotate` — the USB console, the
+ * backend settings poll and the cloud set_settings verb — goes through this
+ * so they cannot drift apart. */
+bool fos_config_normalize_rotate(double value, uint16_t *out);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);

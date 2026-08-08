@@ -94,6 +94,11 @@
 #ifndef FRAMEOS_DEFAULT_ASSETS_SD_ENABLE
 #define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 0
 #endif
+/* Auto-format a card at boot only when the probe proves it empty; see
+ * fos_sd_probe.h. On by default: a new card should just work. */
+#ifndef FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT
+#define FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT 1
+#endif
 #ifndef FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS
 #define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS -1
 #endif
