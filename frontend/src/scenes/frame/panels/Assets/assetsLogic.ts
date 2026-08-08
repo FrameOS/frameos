@@ -65,6 +65,21 @@ interface FrameAssetsResponse {
     refreshing?: boolean
     retry_after?: number
   }
+  /** Backend shape. Only SD-backed frames report it. */
+  storage?: { mounted?: boolean | null } | null
+  /** The on-device admin API answers with the flag at the top level. */
+  mounted?: boolean | null
+}
+
+/**
+ * Whether the frame's storage is mounted, or null when nothing said either way
+ * (Pi/agent frames, virtual frames, firmware older than the flag). Only an
+ * explicit false is worth telling the user about: it turns "no assets" from
+ * "the card is empty" into "the card is not readable".
+ */
+function storageMountedFromResponse(data: FrameAssetsResponse): boolean | null {
+  const mounted = data.storage?.mounted ?? data.mounted
+  return typeof mounted === 'boolean' ? mounted : null
 }
 
 function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
@@ -268,6 +283,7 @@ export const assetsLogic = kea<assetsLogicType>([
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
+    setStorageMounted: (storageMounted: boolean | null) => ({ storageMounted }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
     assetDeleted: (path: string) => ({ path }),
@@ -289,6 +305,7 @@ export const assetsLogic = kea<assetsLogicType>([
             }
             const data = (await response.json()) as FrameAssetsResponse
             window.clearTimeout(cache.reloadTimer)
+            actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
               cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
@@ -318,6 +335,7 @@ export const assetsLogic = kea<assetsLogicType>([
               throw new Error('Failed to refresh assets')
             }
             const data = (await response.json()) as FrameAssetsResponse
+            actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               // The listing is being fetched (cloud: an assets_list command is
               // on its way to the device) — poll until it lands, exactly like
@@ -390,6 +408,14 @@ export const assetsLogic = kea<assetsLogicType>([
       false,
       {
         setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
+      },
+    ],
+    // null until something reports it, and null forever for the frames that
+    // never do — see storageMountedFromResponse.
+    storageMounted: [
+      null as boolean | null,
+      {
+        setStorageMounted: (_, { storageMounted }) => storageMounted,
       },
     ],
     showSystemFolders: [
@@ -485,6 +511,7 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
+    storageUnmounted: [(s) => [s.storageMounted], (storageMounted): boolean => storageMounted === false],
     diskStats: [
       (s) => [s.sortedMetrics, s.cleanedAssets, s.frame],
       (sortedMetrics, cleanedAssets, frame): DiskStats | null => {

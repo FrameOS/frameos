@@ -251,9 +251,17 @@ class FrameAssetsCacheResponse(BaseModel):
     retry_after: Optional[int] = None
 
 
+class FrameAssetsStorageResponse(BaseModel):
+    # None whenever the source does not report it (SSH/agent/virtual frames and
+    # ESP32 firmware older than the flag). False means the SD card is missing,
+    # so an empty listing is "cannot see the card", not "the card is empty".
+    mounted: Optional[bool] = None
+
+
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
     cache: Optional[FrameAssetsCacheResponse] = None
+    storage: Optional[FrameAssetsStorageResponse] = None
 
 
 class FramePingResponse(BaseModel):

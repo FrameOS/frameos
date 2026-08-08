@@ -9,7 +9,14 @@ import {
   type AssetStats,
   type DiskStats,
 } from './assetsLogic'
-import { DocumentIcon, EyeIcon, EyeSlashIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
+import {
+  DocumentIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  FolderIcon,
+  FolderOpenIcon,
+} from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
@@ -596,6 +603,21 @@ function AssetsSummaryHeader({
   )
 }
 
+/** Shown only when the frame explicitly reports an unmounted card. Without it
+ * an empty listing reads as "the card is empty", which it is not — the files
+ * are all still on the card the frame cannot see. */
+function StorageUnmountedNotice(): JSX.Element {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+      <div>
+        SD card not mounted — files on the card are not visible to the frame. Nothing has been deleted: reseat the card
+        (or power cycle the frame), then hit Refresh.
+      </div>
+    </div>
+  )
+}
+
 interface AssetsProps {
   scrollContainer?: boolean
 }
@@ -605,8 +627,16 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const assetsLogicProps = { frameId: frame.id }
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
-  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders, showHiddenFiles } =
-    useValues(assetsLogic(assetsLogicProps))
+  const {
+    assetsLoading,
+    assetsRefreshing,
+    assetStats,
+    assetTree,
+    diskStats,
+    showSystemFolders,
+    showHiddenFiles,
+    storageUnmounted,
+  } = useValues(assetsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
@@ -624,8 +654,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   // render with the fonts bundled into the wasm renderer, so the button could
   // only ever produce the backend's "not supported" error.
   const readOnly = false
-  const showSyncAction =
-    workspaceMode() === 'backend' && !isEmbeddedHardwareFrame(frame) && !isVirtualFrame(frame)
+  const showSyncAction = workspaceMode() === 'backend' && !isEmbeddedHardwareFrame(frame) && !isVirtualFrame(frame)
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
@@ -685,6 +714,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             onRefresh={refreshAssets}
             onSync={handleSyncAssets}
           />
+          {storageUnmounted ? <StorageUnmountedNotice /> : null}
           <TreeNode
             node={assetTree}
             frameId={frame.id}
