@@ -15,10 +15,15 @@ import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
 when defined(frameosEmbedded):
+  # pixie.nim imports the fileformat modules without re-exporting them, so
+  # every format the streaming decode paths reach for has to be imported by
+  # name here. Miss one and its `when compiles(...)` branch below quietly
+  # evaluates false — the format silently loses its file-backed decoder.
   import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
+  import pixie/fileformats/ppm
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
