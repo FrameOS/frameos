@@ -11,6 +11,7 @@ import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
+import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { CloudFirstRunAddFrame } from '../../components/CloudFirstRunAddFrame'
 
 interface CloudSceneProps {
@@ -91,6 +92,14 @@ export function CloudAppsWorkspace({ frameId, sceneId, nodeId }: CloudSceneProps
   return (
     <CloudGate>
       <AppsWorkspace frameId={frameId} sceneId={sceneId} nodeId={nodeId} />
+    </CloudGate>
+  )
+}
+
+export function CloudSettings() {
+  return (
+    <CloudGate>
+      <Settings />
     </CloudGate>
   )
 }

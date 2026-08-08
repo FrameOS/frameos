@@ -298,6 +298,48 @@ static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
     return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, (const char *)encoded) == 0;
 }
 
+static const char *http_method_name(int method)
+{
+    switch (method) {
+        case HTTP_GET: return "GET";
+        case HTTP_POST: return "POST";
+        case HTTP_PUT: return "PUT";
+        case HTTP_DELETE: return "DELETE";
+        case HTTP_HEAD: return "HEAD";
+        case HTTP_OPTIONS: return "OPTIONS";
+        case HTTP_PATCH: return "PATCH";
+        default: return "OTHER";
+    }
+}
+
+static void log_http_denied(httpd_req_t *req, int status)
+{
+    /* A client polling with stale credentials (a backend or cloud UI retries
+     * /logs every few seconds) would otherwise fill the 128-line ring with
+     * denials; one line per window is enough to see it happening. */
+    static int64_t s_last_denied_us = 0;
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_denied_us != 0 && now_us - s_last_denied_us < 10 * 1000 * 1000) {
+        return;
+    }
+    s_last_denied_us = now_us;
+
+    char path[272];
+    if (!copy_request_path(req, path, sizeof(path))) {
+        strlcpy(path, req->uri, sizeof(path));
+    }
+    char *escaped_path = json_escape_dup(path);
+    if (!escaped_path) return;
+
+    char log_line[640];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"http:denied\",\"source\":\"esp32\",\"method\":\"%s\","
+             "\"path\":\"%s\",\"status\":%d}",
+             http_method_name(req->method), escaped_path, status);
+    free(escaped_path);
+    frameos_nim_log_hook(log_line);
+}
+
 static esp_err_t require_protected_access(httpd_req_t *req)
 {
     if (s_portal_mode) return ESP_OK;
@@ -308,6 +350,7 @@ static esp_err_t require_protected_access(httpd_req_t *req)
     }
 
     if (!admin_auth_configured(config)) {
+        log_http_denied(req, 403);
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_send_err(
             req,
@@ -316,6 +359,7 @@ static esp_err_t require_protected_access(httpd_req_t *req)
             "Connect through the FrameOS hotspot, or set frame admin auth in the backend and redeploy.");
     }
 
+    log_http_denied(req, 401);
     httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
     return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
 }
@@ -2236,11 +2280,149 @@ static esp_err_t probe_handler(httpd_req_t *req)
     return portal_redirect_handler(req, 0);
 }
 
+/* Incoming-request logging: every route is registered through a trampoline
+ * (logged_dispatch) that times the real handler and emits one JSON log line
+ * via frameos_nim_log_hook. Per-route state lives in a static table; each
+ * registration (plain + TLS server both call register_routes) gets its own
+ * slot, whose address becomes the registered user_ctx. */
+typedef struct {
+    esp_err_t (*handler)(httpd_req_t *req);
+    void *user_ctx;
+    httpd_method_t method;
+    char uri[32];
+} logged_route_t;
+
+/* 25 routes per server (13 GET + 12 POST), x2 servers (http + https), or
+ * 25 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
+#define FOS_HTTP_MAX_LOGGED_ROUTES 64
+static logged_route_t s_logged_routes[FOS_HTTP_MAX_LOGGED_ROUTES];
+static size_t s_logged_route_count = 0;
+
+static bool path_has_suffix(const char *path, const char *suffix)
+{
+    size_t path_len = strlen(path);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > path_len) return false;
+    return strcmp(path + path_len - suffix_len, suffix) == 0;
+}
+
+/* True when POST <path> is a "frame update" (/api/frames/<id> or
+ * /api/frames/<id>/), which already logs its own http:command line. */
+static bool path_is_frame_update_root(const char *path)
+{
+    const char *prefix = "/api/frames/";
+    size_t prefix_len = strlen(prefix);
+    if (strncmp(path, prefix, prefix_len) != 0) return false;
+    const char *p = path + prefix_len;
+    if (*p < '0' || *p > '9') return false;
+    while (*p >= '0' && *p <= '9') p++;
+    return *p == '\0' || (p[0] == '/' && p[1] == '\0');
+}
+
+static bool should_log_request(int method, const char *path)
+{
+    /* High-frequency polling / image endpoints: never log. Matched on the
+     * ACTUAL request path so /api/frames/<id>/... wildcards are covered. */
+    if (path_has_suffix(path, "/ping") ||
+        path_has_suffix(path, "/image") ||
+        path_has_suffix(path, "/logs") ||
+        path_has_suffix(path, "/metrics") ||
+        path_has_suffix(path, "/status") ||
+        strcmp(path, "/api/preview.bmp") == 0 ||
+        strstr(path, "/scene_images/") != NULL) {
+        return false;
+    }
+
+    /* Captive-portal probe paths (registered in portal mode only). */
+    if (strcmp(path, "/generate_204") == 0 ||
+        strcmp(path, "/gen_204") == 0 ||
+        strcmp(path, "/hotspot-detect.html") == 0 ||
+        strcmp(path, "/connecttest.txt") == 0 ||
+        strcmp(path, "/ncsi.txt") == 0 ||
+        strcmp(path, "/redirect") == 0 ||
+        strcmp(path, "/success.txt") == 0) {
+        return false;
+    }
+
+    /* POSTs whose handlers already emit an http:command line with command
+     * detail (log_http_command / log_http_command_from_path) would double
+     * log; keep the richer http:command line and skip http:request. */
+    if (method == HTTP_POST) {
+        if (strncmp(path, "/api/action/", strlen("/api/action/")) == 0 ||
+            strstr(path, "/event/") != NULL ||
+            path_has_suffix(path, "/reload") ||
+            path_has_suffix(path, "/uploadScenes") ||
+            path_has_suffix(path, "/upload_scenes") ||
+            path_has_suffix(path, "/uploaded_scenes") ||
+            path_has_suffix(path, "/assets/upload") ||
+            path_has_suffix(path, "/assets/mkdir") ||
+            path_has_suffix(path, "/assets/delete") ||
+            path_has_suffix(path, "/assets/rename") ||
+            strcmp(path, "/api/scenes") == 0 ||
+            path_is_frame_update_root(path)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static esp_err_t logged_dispatch(httpd_req_t *req)
+{
+    logged_route_t *route = (logged_route_t *)req->user_ctx;
+    /* Restore the original user_ctx before dispatching: handlers such as
+     * action_handler read their callback out of req->user_ctx. */
+    req->user_ctx = route->user_ctx;
+
+    char path[272];
+    bool have_path = copy_request_path(req, path, sizeof(path));
+    if (!have_path || !should_log_request(req->method, path)) {
+        return route->handler(req);
+    }
+
+    int64_t start_us = esp_timer_get_time();
+    esp_err_t err = route->handler(req);
+    int64_t elapsed_ms = (esp_timer_get_time() - start_us) / 1000;
+
+    char *escaped_path = json_escape_dup(path);
+    if (escaped_path) {
+        char log_line[640];
+        snprintf(log_line, sizeof(log_line),
+                 "{\"event\":\"http:request\",\"source\":\"esp32\",\"method\":\"%s\","
+                 "\"path\":\"%s\",\"ok\":%s,\"ms\":%lld}",
+                 http_method_name(req->method), escaped_path,
+                 err == ESP_OK ? "true" : "false", (long long)elapsed_ms);
+        free(escaped_path);
+        frameos_nim_log_hook(log_line);
+    }
+    return err;
+}
+
+static esp_err_t register_logged_route(httpd_handle_t server, const httpd_uri_t *route)
+{
+    if (s_logged_route_count >= FOS_HTTP_MAX_LOGGED_ROUTES) {
+        ESP_LOGE(TAG, "logged route table full, cannot register %s", route->uri);
+        return ESP_ERR_NO_MEM;
+    }
+    logged_route_t *slot = &s_logged_routes[s_logged_route_count];
+    slot->handler = route->handler;
+    slot->user_ctx = route->user_ctx;
+    slot->method = route->method;
+    strlcpy(slot->uri, route->uri, sizeof(slot->uri));
+
+    httpd_uri_t wrapped = *route;
+    wrapped.handler = logged_dispatch;
+    wrapped.user_ctx = slot;
+    esp_err_t err = httpd_register_uri_handler(server, &wrapped);
+    if (err == ESP_OK) s_logged_route_count++;
+    return err;
+}
+
 static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 {
     esp_err_t err = ESP_OK;
 #define REGISTER_ROUTE(route) do { \
-        err = httpd_register_uri_handler(server, &(route)); \
+        err = register_logged_route(server, &(route)); \
         if (err != ESP_OK) return err; \
     } while (0)
 
@@ -2335,6 +2517,7 @@ esp_err_t fos_http_start(bool portal_mode)
 {
     if (s_http_server || s_https_server) return ESP_OK;
     s_portal_mode = portal_mode;
+    s_logged_route_count = 0;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     configure_httpd_defaults(&config);

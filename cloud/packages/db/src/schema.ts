@@ -582,6 +582,35 @@ export const rateLimitBuckets = pgTable("rate_limit_buckets", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
 
+// Account-level service settings (Unsplash/OpenAI/Home Assistant/... API keys
+// scenes use), one row per settings group — the cloud mirror of the backend's
+// settings table (backend/app/models/settings.py). Which groups and fields
+// are storable is enforced in auth-web (src/lib/account-settings.ts), not
+// here.
+export const accountSettings = pgTable(
+  "account_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountKeyUnique: uniqueIndex("account_settings_account_key_unique").on(
+      table.accountId,
+      table.key,
+    ),
+  }),
+);
+
 // Cloud-managed frames (wire contract: docs/cloud-frames.md at the repo
 // root; design: cloud/docs/cloud-frames.md). A frame is 1:1 with a
 // linked_clients row (client_kind = "frame"). We store only the device's
@@ -610,6 +639,10 @@ export const frames = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     lastState: jsonb("last_state"),
     lastMetrics: jsonb("last_metrics"),
+    // Wake/event schedule pushed to the device via set_schedule (shape per
+    // embedded/esp32/main/fos_schedule.h: {events: [...], disabled?}). Stored
+    // so the panel can render it and edits survive the device being offline.
+    schedule: jsonb("schedule"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),

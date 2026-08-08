@@ -1,3 +1,4 @@
+import { createSocket } from "node:dgram";
 import { readFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
@@ -41,25 +42,81 @@ function isPrivateLanIPv4(hostname: string) {
   );
 }
 
+// Interfaces a frame on the WiFi cannot reach even when their address is
+// RFC1918: VM/Internet-Sharing bridges, container networks, tunnels. macOS
+// Internet Sharing's bridge100 (192.168.139.x) once beat the real en0 LAN
+// address purely by enumeration order, and every provisioned frame dialed a
+// host-only bridge forever.
+const virtualInterfacePrefix =
+  /^(bridge|vmnet|vboxnet|docker|veth|virbr|utun|tun|tap|zt|ts|tailscale|llw|awdl|anpi|ap)\d*$/i;
+
+// Ask the routing table which source address reaches the internet: connecting
+// a UDP socket sends no packets, it only makes the OS pick the outbound
+// interface for the destination. Same trick the firmware's primaryIpAddress()
+// uses. Returns undefined on machines with no route at all.
+function defaultRouteAddress(): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const socket = createSocket("udp4");
+    const done = (address?: string) => {
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+      resolve(address);
+    };
+    socket.once("error", () => done(undefined));
+    try {
+      socket.connect(53, "8.8.8.8", () => {
+        try {
+          done(socket.address().address);
+        } catch {
+          done(undefined);
+        }
+      });
+    } catch {
+      done(undefined);
+    }
+  });
+}
+
 // The enrollment origin is written into ESP32 NVS and SD images — a frame on
 // the WiFi then dials it. On a dev server reached as localhost that origin is
 // useless (the frame would dial itself and never connect), so substitute this
 // machine's LAN IPv4, which the device firmware accepts over plain http for
 // private-network hosts. Real hostnames are never touched, and with no LAN
 // address the localhost origin is kept (still correct for wasm previews).
-function enrollmentOrigin(accountOrigin: string): string {
+//
+// Which IPv4? The default route's source address when it is RFC1918 — that is
+// the LAN the machine actually shares with the frame. When the default route
+// goes elsewhere (full-tunnel VPN, carrier NAT), fall back to scanning
+// interfaces, preferring RFC1918 addresses on physical-looking interfaces
+// over virtual bridges.
+async function enrollmentOrigin(accountOrigin: string): Promise<string> {
   const url = new URL(accountOrigin);
   if (!localHosts.has(url.hostname)) {
     return accountOrigin;
   }
-  const addresses = Object.values(networkInterfaces())
-    .flatMap((entries) => entries ?? [])
-    .filter((entry) => entry.family === "IPv4" && !entry.internal)
-    .map((entry) => entry.address);
-  // Prefer RFC1918 space: a machine can also hold carrier or VPN addresses a
-  // frame on the home network cannot reach.
-  const lan =
-    addresses.find((address) => rfc1918Prefix.test(address)) ?? addresses[0];
+  let lan = await defaultRouteAddress();
+  if (!lan || !rfc1918Prefix.test(lan)) {
+    const candidates = Object.entries(networkInterfaces())
+      .flatMap(([name, entries]) =>
+        (entries ?? []).map((entry) => ({ name, ...entry })),
+      )
+      .filter((entry) => entry.family === "IPv4" && !entry.internal);
+    // Prefer RFC1918 space (a machine can also hold carrier or VPN addresses
+    // a frame on the home network cannot reach), and within it real NICs over
+    // virtual bridges.
+    lan = (
+      candidates.find(
+        (entry) =>
+          rfc1918Prefix.test(entry.address) &&
+          !virtualInterfacePrefix.test(entry.name),
+      ) ??
+      candidates.find((entry) => rfc1918Prefix.test(entry.address)) ??
+      candidates[0]
+    )?.address;
+  }
   if (!lan) {
     return accountOrigin;
   }
@@ -67,7 +124,7 @@ function enrollmentOrigin(accountOrigin: string): string {
   return url.origin;
 }
 
-function appConfigLines(): string[] {
+async function appConfigLines(): Promise<string[]> {
   const accountOrigin = new URL(getAccountBaseUrl()).origin;
   return [
     `cloud_account_url: ${JSON.stringify(getAccountUrl())},`,
@@ -75,7 +132,7 @@ function appConfigLines(): string[] {
     `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
     `cloud_logout_url: ${JSON.stringify(new URL("/api/auth/logout", getCloudBaseUrl()).toString())},`,
     `cloud_scenes_url: ${JSON.stringify(new URL("/", getScenesBaseUrl()).toString())},`,
-    `cloud_origin: ${JSON.stringify(enrollmentOrigin(accountOrigin))},`,
+    `cloud_origin: ${JSON.stringify(await enrollmentOrigin(accountOrigin))},`,
     `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
     // The workspace and the account pages are two different apps sharing one
     // theme preference, carried in the frameos_theme cookie. The SPA has to
@@ -243,7 +300,11 @@ export async function GET(request: NextRequest) {
   // Unconditional, unlike the websocket origin: the account header's links and
   // the enrollment origin are wrong on every deployment without them, not just
   // in dev.
-  const withAppConfig = injectAtAnchor(html, appConfigAnchor, appConfigLines());
+  const withAppConfig = injectAtAnchor(
+    html,
+    appConfigAnchor,
+    await appConfigLines(),
+  );
   if (withAppConfig === undefined) {
     return anchorMissing(
       appConfigAnchor,

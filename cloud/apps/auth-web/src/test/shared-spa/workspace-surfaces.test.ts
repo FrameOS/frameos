@@ -3,6 +3,8 @@ import {
   addFrameFlows,
   allowedFrameMenuActions,
   allowedFrameSettingsSections,
+  allowedGlobalSettingsSections,
+  globalSettingsSectionIsAllowed,
   allowedFrameToolPanels,
   allowedSceneToolPanels,
   allowedSceneUtilityPanels,
@@ -85,6 +87,46 @@ describe("cloud mode hides everything the protocol cannot do", () => {
       expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(false);
       expect(allowedFrameSettingsSections.cloud).not.toContain(section);
     }
+  });
+
+  it("keeps only the service-key sections of the GLOBAL settings page", () => {
+    // The cloud's /frames/settings page persists service API keys
+    // (account_settings via /api/settings) and nothing else: no local
+    // account, deploy defaults, SSH keys, build environment, font store,
+    // backend PostHog or backend system info.
+    expect(allowedGlobalSettingsSections.cloud).toEqual([
+      "settings-gallery",
+      "settings-openai",
+      "settings-home-assistant",
+      "settings-github",
+      "settings-immich",
+      "settings-unsplash",
+    ]);
+    for (const section of [
+      "settings-account",
+      "settings-cloud",
+      "settings-defaults",
+      "settings-ssh",
+      "settings-build-environment",
+      "settings-fonts",
+      "settings-posthog",
+      "settings-system",
+    ]) {
+      expect(globalSettingsSectionIsAllowed("cloud", section)).toBe(false);
+    }
+    // The storable groups (account-settings.ts) and the visible sections
+    // must describe the same six services.
+    expect(globalSettingsSectionIsAllowed("cloud", "settings-unsplash")).toBe(
+      true,
+    );
+    // The backend keeps everything (null = all); the on-device admin never
+    // mounts this page (urls.settings() routes to the frame's own panel),
+    // so its list stays permissive too.
+    expect(allowedGlobalSettingsSections.backend).toBeNull();
+    expect(globalSettingsSectionIsAllowed("backend", "settings-ssh")).toBe(
+      true,
+    );
+    expect(allowedGlobalSettingsSections.frameAdmin).toBeNull();
   });
 });
 

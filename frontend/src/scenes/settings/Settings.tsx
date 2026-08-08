@@ -25,6 +25,7 @@ import { Tag } from '../../components/Tag'
 import { Label } from '../../components/Label'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
+import { globalSettingsSectionIsAllowed, workspaceMode } from '../workspace/workspaceSurfaces'
 import { accountLogic } from './accountLogic'
 import { CloudSettingsSection } from './CloudSettings'
 import versions from '../../../../versions.json'
@@ -39,7 +40,7 @@ type SettingsNavSection = {
 }
 type SettingsSectionId = string
 
-const settingsNavSections: readonly SettingsNavSection[] = [
+const allSettingsNavSections: readonly SettingsNavSection[] = [
   {
     label: '',
     items: [
@@ -73,6 +74,18 @@ const settingsNavSections: readonly SettingsNavSection[] = [
     items: [['System information', '#settings-system']],
   },
 ] as const
+
+// One page, three control planes: the mode's allow-list
+// (workspaceSurfaces.ts allowedGlobalSettingsSections) decides which sections
+// exist — on the cloud only the service API keys scenes use. Module scope is
+// safe: the mode is constant for the app's lifetime, and this scene loads
+// lazily, after the app config is injected.
+const settingsNavSections: readonly SettingsNavSection[] = allSettingsNavSections
+  .map((section) => ({
+    ...section,
+    items: section.items.filter(([_label, href]) => globalSettingsSectionIsAllowed(workspaceMode(), href.slice(1))),
+  }))
+  .filter((section) => section.items.length > 0)
 
 const settingsNavItems = settingsNavSections.flatMap((section) => section.items)
 
@@ -298,6 +311,28 @@ function SettingsGroupDivider({ label }: { label: string }): JSX.Element {
   )
 }
 
+// Own component so systemInfoLogic (which polls /api/system/* on mount) only
+// mounts when the build-environment section is actually rendered — the cloud
+// hides it, and has no such endpoints to poll.
+function DockerDaemonStatus(): JSX.Element {
+  const { systemInfo } = useValues(systemInfoLogic)
+  const { loadSystemInfo } = useActions(systemInfoLogic)
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className={systemInfo?.docker?.daemonAvailable ? 'text-emerald-600' : 'text-amber-600'}>
+        {systemInfo?.docker?.daemonAvailable
+          ? 'Docker daemon is reachable.'
+          : systemInfo?.docker?.cliAvailable
+          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+          : 'Docker CLI is not installed.'}
+      </p>
+      <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
+        Recheck
+      </Button>
+    </div>
+  )
+}
+
 export function Settings() {
   const {
     settings,
@@ -332,11 +367,20 @@ export function Settings() {
     toggleSshKeyExpanded,
     toggleOpenAiModelOverrides,
   } = useActions(settingsLogic)
-  const { systemInfo } = useValues(systemInfoLogic)
-  const { loadSystemInfo } = useActions(systemInfoLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const { closeSecondarySidebar } = useActions(workspaceLogic)
+  const mode = workspaceMode()
+  const showSection = (sectionId: string): boolean => globalSettingsSectionIsAllowed(mode, sectionId)
+  // Sections kept on the cloud still hide the fields only a self-hosted
+  // backend can act on (its own OpenAI key and model overrides, the Home
+  // Assistant MQTT sync bridge).
+  const showBackendOnlyFields = mode !== 'cloud'
+  // The "Settings" group is all-or-nothing per mode today (the cloud hides
+  // every section in it), so the whole block shares one gate.
+  const showSettingsGroup = ['settings-defaults', 'settings-ssh', 'settings-build-environment', 'settings-fonts'].some(
+    showSection
+  )
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const buildEnvironmentProvider = settings?.buildEnvironment?.provider || 'docker'
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavItems[0][1])
@@ -465,597 +509,633 @@ export function Settings() {
           {settingsActions}
         </div>
         <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
-          {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection onLogout={logout} />}
-          <CloudSettingsSection />
+          {showSection('settings-account') ? (
+            isHassioIngress ? (
+              <IngressAccountSettingsSection />
+            ) : (
+              <AccountSettingsSection onLogout={logout} />
+            )
+          ) : null}
+          {showSection('settings-cloud') ? <CloudSettingsSection /> : null}
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
             <>
-              <SettingsGroupDivider label="Settings" />
-              <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
-                <Group name="defaults">
-                  <H6 id="settings-defaults" className="pt-4">
-                    Defaults
-                  </H6>
-                  <Box className="p-3 space-y-3">
-                    <Field
-                      name="timezone"
-                      label="Default timezone"
-                      tooltip="Used for Buildroot SD card images unless a frame overrides it. Raspberry Pi OS frames keep their existing timezone until one is set on the frame."
-                    >
-                      <Select options={timezoneOptions} />
-                    </Field>
-                    <Field
-                      name="wifiSSID"
-                      label="Default WiFi network"
-                      tooltip="Prefilled when adding Buildroot SD card frames."
-                    >
-                      <TextInput autoComplete="off" />
-                    </Field>
-                    <Field
-                      name="wifiPassword"
-                      label="Default WiFi password"
-                      secret={!!savedSettings?.defaults?.wifiPassword}
-                      tooltip="Prefilled when adding Buildroot SD card frames."
-                    >
-                      <TextInput type="password" autoComplete="new-password" />
-                    </Field>
-                    <Field
-                      name="backendHost"
-                      label="Default backend host"
-                      tooltip="Prefilled when adding frames. Leave blank to use the host detected from this browser."
-                    >
-                      <TextInput autoComplete="off" placeholder={detectedBackendAddress.host} />
-                    </Field>
-                    <Field
-                      name="backendPort"
-                      label="Default backend port"
-                      tooltip="Prefilled when adding frames. Leave blank to use the port detected from this browser."
-                    >
-                      <TextInput
-                        autoComplete="off"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        placeholder={detectedBackendAddress.port}
-                      />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="ssh_keys">
-                  <H6 id="settings-ssh" className="pt-4">
-                    SSH Keys
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      These SSH keys are available for frame access. Choose which ones should be installed on new
-                      frames.
-                    </p>
-                    <div className="space-y-4">
-                      {(settings?.ssh_keys?.keys ?? []).map((key, index) => {
-                        const savedKey = normalizeSshKeys(savedSettings?.ssh_keys).keys.find(
-                          (saved) => saved.id === key.id
-                        )
-                        const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
-                        const isGenerating = generatingSshKeyId === key.id
-                        const matchingFrames = framesUsingKey(key.id)
-                        const isExpanded = sshKeyExpandedIds.includes(key.id)
-                        const hasKey = !!(key.private || key.public)
-                        const isUsedForNewFrames = key.use_for_new_frames ?? false
-                        return (
-                          <Box key={key.id} className="border border-white/10 p-3 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div className="frameos-strong text-sm font-semibold">
-                                {key.name || `Key ${index + 1}`}
-                                {isUsedForNewFrames ? (
-                                  <Tag color="primary" className="ml-2">
-                                    Default on new frames
-                                  </Tag>
-                                ) : null}
-                              </div>
-                              <Button
-                                size="tiny"
-                                color="secondary"
-                                onClick={() => toggleSshKeyExpanded(key.id)}
-                                className="inline-flex items-center gap-1"
-                              >
-                                {isExpanded ? 'Hide details' : 'Show details'}
-                              </Button>
-                            </div>
-                            {isExpanded ? (
-                              <>
-                                <Field name={`keys.${index}.name`} label="Key name">
-                                  <TextInput />
-                                </Field>
-                                <Field
-                                  name={`keys.${index}.use_for_new_frames`}
-                                  label="Use for new frames"
-                                  tooltip="Automatically install this key on new frames."
-                                >
-                                  <Switch fullWidth />
-                                </Field>
-                                <Field
-                                  name={`keys.${index}.private`}
-                                  label="Private SSH key"
-                                  secret={!!savedKey?.private}
-                                >
-                                  <TextArea />
-                                </Field>
-                                <Field
-                                  name={`keys.${index}.public`}
-                                  label="Public SSH key (use this in the RPi Imager)"
-                                  secret={!!savedKey?.public}
-                                >
-                                  <TextArea />
-                                </Field>
-                                <div className="frameos-muted text-xs space-y-1">
-                                  <span className="frameos-strong font-semibold">Frames using this key:</span>
-                                  {matchingFrames.length === 0 ? (
-                                    <div>None.</div>
-                                  ) : (
-                                    <div className="flex flex-wrap gap-2">
-                                      {matchingFrames.map((frame) => (
-                                        <A
-                                          key={frame.id}
-                                          href={urls.frame(frame.id)}
-                                          className="frameos-link hover:underline"
-                                        >
-                                          {frame.name || frameHost(frame)}
-                                        </A>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex justify-end gap-2">
+              {showSettingsGroup ? (
+                <>
+                  <SettingsGroupDivider label="Settings" />
+                  <Form
+                    logic={settingsLogic}
+                    formKey="settings"
+                    props={{}}
+                    onSubmit={submitSettings}
+                    className="space-y-4"
+                  >
+                    <Group name="defaults">
+                      <H6 id="settings-defaults" className="pt-4">
+                        Defaults
+                      </H6>
+                      <Box className="p-3 space-y-3">
+                        <Field
+                          name="timezone"
+                          label="Default timezone"
+                          tooltip="Used for Buildroot SD card images unless a frame overrides it. Raspberry Pi OS frames keep their existing timezone until one is set on the frame."
+                        >
+                          <Select options={timezoneOptions} />
+                        </Field>
+                        <Field
+                          name="wifiSSID"
+                          label="Default WiFi network"
+                          tooltip="Prefilled when adding Buildroot SD card frames."
+                        >
+                          <TextInput autoComplete="off" />
+                        </Field>
+                        <Field
+                          name="wifiPassword"
+                          label="Default WiFi password"
+                          secret={!!savedSettings?.defaults?.wifiPassword}
+                          tooltip="Prefilled when adding Buildroot SD card frames."
+                        >
+                          <TextInput type="password" autoComplete="new-password" />
+                        </Field>
+                        <Field
+                          name="backendHost"
+                          label="Default backend host"
+                          tooltip="Prefilled when adding frames. Leave blank to use the host detected from this browser."
+                        >
+                          <TextInput autoComplete="off" placeholder={detectedBackendAddress.host} />
+                        </Field>
+                        <Field
+                          name="backendPort"
+                          label="Default backend port"
+                          tooltip="Prefilled when adding frames. Leave blank to use the port detected from this browser."
+                        >
+                          <TextInput
+                            autoComplete="off"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder={detectedBackendAddress.port}
+                          />
+                        </Field>
+                      </Box>
+                    </Group>
+                    <Group name="ssh_keys">
+                      <H6 id="settings-ssh" className="pt-4">
+                        SSH Keys
+                      </H6>
+                      <Box className="p-2 space-y-2">
+                        <p className="text-sm leading-loose">
+                          These SSH keys are available for frame access. Choose which ones should be installed on new
+                          frames.
+                        </p>
+                        <div className="space-y-4">
+                          {(settings?.ssh_keys?.keys ?? []).map((key, index) => {
+                            const savedKey = normalizeSshKeys(savedSettings?.ssh_keys).keys.find(
+                              (saved) => saved.id === key.id
+                            )
+                            const isOnlyKey = (settings?.ssh_keys?.keys ?? []).length <= 1
+                            const isGenerating = generatingSshKeyId === key.id
+                            const matchingFrames = framesUsingKey(key.id)
+                            const isExpanded = sshKeyExpandedIds.includes(key.id)
+                            const hasKey = !!(key.private || key.public)
+                            const isUsedForNewFrames = key.use_for_new_frames ?? false
+                            return (
+                              <Box key={key.id} className="border border-white/10 p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="frameos-strong text-sm font-semibold">
+                                    {key.name || `Key ${index + 1}`}
+                                    {isUsedForNewFrames ? (
+                                      <Tag color="primary" className="ml-2">
+                                        Default on new frames
+                                      </Tag>
+                                    ) : null}
+                                  </div>
                                   <Button
                                     size="tiny"
                                     color="secondary"
-                                    onClick={() => generateSshKey(key.id)}
+                                    onClick={() => toggleSshKeyExpanded(key.id)}
                                     className="inline-flex items-center gap-1"
-                                    disabled={isGenerating}
                                   >
-                                    {isGenerating ? <Spinner className="text-white" color="white" /> : null}
-                                    {hasKey ? 'Regenerate' : 'Generate'}
+                                    {isExpanded ? 'Hide details' : 'Show details'}
                                   </Button>
-                                  {!isOnlyKey ? (
-                                    <Button
-                                      size="tiny"
-                                      color="secondary"
-                                      onClick={() => removeSshKey(key.id)}
-                                      disabled={isOnlyKey}
-                                      className="inline-flex gap-1"
-                                    >
-                                      <TrashIcon className="w-4 h-4" /> Delete
-                                    </Button>
-                                  ) : null}
                                 </div>
-                              </>
-                            ) : null}
-                          </Box>
-                        )
-                      })}
-                    </div>
-                    <div className="flex gap-2">
-                      <Button onClick={addSshKey} color="secondary" size="small" className="flex gap-1">
-                        <PlusIcon className="w-4 h-4" />
-                        Add key
-                      </Button>
-                    </div>
-                  </Box>
-                </Group>
-                <H6 id="settings-build-environment" className="pt-4">
-                  Build environment
-                </H6>
-                <Box className="p-3 space-y-3">
-                  <p className="text-sm leading-loose">
-                    To compile FrameOS from source, we need access to a Linux shell where we can run commands through
-                    Docker. There are a few options for that.
-                  </p>
-                  <Group name="buildEnvironment">
-                    <Field name="provider" label="Build system">
-                      <Select
-                        options={[
-                          { value: 'none', label: 'Compile on device' },
-                          { value: 'docker', label: 'Docker (privileged mode)' },
-                          { value: 'buildHost', label: 'Build host via SSH' },
-                          { value: 'modal', label: 'Modal sandboxes' },
-                        ]}
-                      />
-                    </Field>
-                  </Group>
-                  {buildEnvironmentProvider === 'none' ? (
-                    <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
-                      You can still use prebuilt images and binaries for quick deploys. FrameOS source cross-compilation
-                      on the backend is disabled. Raspberry Pi OS frames will compile custom code on device (might be
-                      very slow).
-                    </div>
-                  ) : null}
-                  {buildEnvironmentProvider === 'docker' ? (
-                    <div className="frameos-inset rounded-lg border p-3 text-sm leading-loose">
-                      <p>
-                        FrameOS will use Docker from the backend host. If this backend runs in a container, the
-                        container needs Docker CLI access and a reachable Docker daemon, usually by running privileged
-                        Docker-in-Docker or mounting the host Docker socket. See the{' '}
-                        <A
-                          href="https://github.com/FrameOS/frameos#running-via-docker-manually"
-                          target="_blank"
-                          className="frameos-link hover:underline"
-                        >
-                          readme
-                        </A>{' '}
-                        for details.
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className={systemInfo?.docker?.daemonAvailable ? 'text-emerald-600' : 'text-amber-600'}>
-                          {systemInfo?.docker?.daemonAvailable
-                            ? 'Docker daemon is reachable.'
-                            : systemInfo?.docker?.cliAvailable
-                            ? `Docker daemon is not reachable${
-                                systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'
-                              }`
-                            : 'Docker CLI is not installed.'}
-                        </p>
-                        <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
-                          Recheck
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-                  {buildEnvironmentProvider === 'buildHost' ? (
-                    <Group name="buildHost">
-                      <div className="space-y-2">
-                        <p className="text-sm leading-loose">
-                          Connect to a host over SSH. Install Docker and the Docker Buildx plugin on that host.
-                        </p>
-                        <Field name="host" label="Build host address">
-                          <TextInput placeholder="builder.example.com" />
-                        </Field>
-                        <Field name="port" label="SSH port">
-                          <NumberTextInput placeholder="22" />
-                        </Field>
-                        <Field name="user" label="SSH user">
-                          <TextInput placeholder="ubuntu" />
-                        </Field>
-                        <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
-                          <TextArea rows={3} />
-                        </Field>
-                        <Field
-                          name="sshPublicKey"
-                          label="Public SSH key"
-                          secret={!!savedSettings?.buildHost?.sshPublicKey}
-                        >
-                          <TextArea rows={3} />
-                        </Field>
-                        <div className="flex flex-wrap gap-2">
-                          <Button onClick={testBuildHost} color="secondary" size="small" disabled={isTestingBuildHost}>
-                            {isTestingBuildHost ? 'Checking...' : 'Check connection'}
-                          </Button>
-                          <Button
-                            onClick={newBuildHostKey}
-                            color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
-                            size="small"
-                          >
-                            Generate new keypair
+                                {isExpanded ? (
+                                  <>
+                                    <Field name={`keys.${index}.name`} label="Key name">
+                                      <TextInput />
+                                    </Field>
+                                    <Field
+                                      name={`keys.${index}.use_for_new_frames`}
+                                      label="Use for new frames"
+                                      tooltip="Automatically install this key on new frames."
+                                    >
+                                      <Switch fullWidth />
+                                    </Field>
+                                    <Field
+                                      name={`keys.${index}.private`}
+                                      label="Private SSH key"
+                                      secret={!!savedKey?.private}
+                                    >
+                                      <TextArea />
+                                    </Field>
+                                    <Field
+                                      name={`keys.${index}.public`}
+                                      label="Public SSH key (use this in the RPi Imager)"
+                                      secret={!!savedKey?.public}
+                                    >
+                                      <TextArea />
+                                    </Field>
+                                    <div className="frameos-muted text-xs space-y-1">
+                                      <span className="frameos-strong font-semibold">Frames using this key:</span>
+                                      {matchingFrames.length === 0 ? (
+                                        <div>None.</div>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                          {matchingFrames.map((frame) => (
+                                            <A
+                                              key={frame.id}
+                                              href={urls.frame(frame.id)}
+                                              className="frameos-link hover:underline"
+                                            >
+                                              {frame.name || frameHost(frame)}
+                                            </A>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                      <Button
+                                        size="tiny"
+                                        color="secondary"
+                                        onClick={() => generateSshKey(key.id)}
+                                        className="inline-flex items-center gap-1"
+                                        disabled={isGenerating}
+                                      >
+                                        {isGenerating ? <Spinner className="text-white" color="white" /> : null}
+                                        {hasKey ? 'Regenerate' : 'Generate'}
+                                      </Button>
+                                      {!isOnlyKey ? (
+                                        <Button
+                                          size="tiny"
+                                          color="secondary"
+                                          onClick={() => removeSshKey(key.id)}
+                                          disabled={isOnlyKey}
+                                          className="inline-flex gap-1"
+                                        >
+                                          <TrashIcon className="w-4 h-4" /> Delete
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </>
+                                ) : null}
+                              </Box>
+                            )
+                          })}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button onClick={addSshKey} color="secondary" size="small" className="flex gap-1">
+                            <PlusIcon className="w-4 h-4" />
+                            Add key
                           </Button>
                         </div>
-                      </div>
+                      </Box>
                     </Group>
-                  ) : null}
-                  {buildEnvironmentProvider === 'modal' ? (
-                    <Group name="modalSandbox">
-                      <div className="space-y-2">
-                        <p className="text-sm leading-loose">
-                          FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
-                          compilation containers directly.
-                        </p>
-                        <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
-                          <TextInput placeholder="ak-..." />
+                    <H6 id="settings-build-environment" className="pt-4">
+                      Build environment
+                    </H6>
+                    <Box className="p-3 space-y-3">
+                      <p className="text-sm leading-loose">
+                        To compile FrameOS from source, we need access to a Linux shell where we can run commands
+                        through Docker. There are a few options for that.
+                      </p>
+                      <Group name="buildEnvironment">
+                        <Field name="provider" label="Build system">
+                          <Select
+                            options={[
+                              { value: 'none', label: 'Compile on device' },
+                              { value: 'docker', label: 'Docker (privileged mode)' },
+                              { value: 'buildHost', label: 'Build host via SSH' },
+                              { value: 'modal', label: 'Modal sandboxes' },
+                            ]}
+                          />
                         </Field>
-                        <Field
-                          name="tokenSecret"
-                          label="Token secret"
-                          secret={!!savedSettings?.modalSandbox?.tokenSecret}
-                        >
-                          <TextInput placeholder="as-..." />
-                        </Field>
-                        <Field name="appName" label="Modal app name">
-                          <TextInput placeholder="frameos-build" />
-                        </Field>
-                        <Field name="image" label="Source-generation image">
-                          <TextInput placeholder="frameos/frameos:latest" />
-                        </Field>
-                        <Field name="timeout" label="Sandbox timeout (seconds)">
-                          <NumberTextInput placeholder="21600" />
-                        </Field>
-                        <Field name="idleTimeout" label="Idle timeout (seconds)">
-                          <NumberTextInput placeholder="900" />
-                        </Field>
-                        <Field name="cpu" label="CPU cores">
-                          <NumberTextInput placeholder="4" />
-                        </Field>
-                        <Field name="memory" label="Memory (MiB)">
-                          <NumberTextInput placeholder="8192" />
-                        </Field>
-                        <Field name="region" label="Region">
-                          <TextInput placeholder="us-east-1" />
-                        </Field>
-                        <Field name="cloud" label="Cloud">
-                          <TextInput placeholder="aws" />
-                        </Field>
-                        <Field name="environmentName" label="Environment">
-                          <TextInput placeholder="main" />
-                        </Field>
-                        <Button
-                          onClick={testModalSandbox}
-                          color="secondary"
-                          size="small"
-                          disabled={isTestingModalSandbox}
-                        >
-                          {isTestingModalSandbox ? 'Testing...' : 'Test Modal sandbox'}
-                        </Button>
-                      </div>
-                    </Group>
-                  ) : null}
-                </Box>
-              </Form>
-              <div className="space-y-4 mt-4">
-                <H6 id="settings-fonts" className="pt-4">
-                  Custom fonts
-                </H6>
-                <Box className="p-3 space-y-3">
-                  <p className="text-sm leading-loose">
-                    These fonts will be uploaded to all frames and can be used in the FrameOS editor.
-                  </p>
-                  <div className="space-y-1">
-                    {customFonts.map((font) => (
-                      <div key={font.id} className="flex items-center gap-2">
-                        <div className="flex-1">{font.path.substring(6)}</div>
-                        <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
-                          <TrashIcon className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                  {customFontsLoading || isCustomFontsFormSubmitting ? <Spinner /> : <div className="flex gap-2"></div>}
-                  <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
-                    <Field label="" name="files">
-                      {({ onChange }) => (
-                        <input
-                          type="file"
-                          accept=".ttf"
-                          multiple
-                          className="w-full"
-                          onChange={(e: React.FormEvent<HTMLInputElement>) => {
-                            const target = e.target as HTMLInputElement & {
-                              files: FileList
-                            }
-                            onChange(target.files)
-                          }}
-                        />
-                      )}
-                    </Field>
-                    <div className="flex gap-2">
-                      <Button type="submit" size="small" color="primary">
-                        Upload fonts
-                      </Button>
-                    </div>
+                      </Group>
+                      {buildEnvironmentProvider === 'none' ? (
+                        <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
+                          You can still use prebuilt images and binaries for quick deploys. FrameOS source
+                          cross-compilation on the backend is disabled. Raspberry Pi OS frames will compile custom code
+                          on device (might be very slow).
+                        </div>
+                      ) : null}
+                      {buildEnvironmentProvider === 'docker' ? (
+                        <div className="frameos-inset rounded-lg border p-3 text-sm leading-loose">
+                          <p>
+                            FrameOS will use Docker from the backend host. If this backend runs in a container, the
+                            container needs Docker CLI access and a reachable Docker daemon, usually by running
+                            privileged Docker-in-Docker or mounting the host Docker socket. See the{' '}
+                            <A
+                              href="https://github.com/FrameOS/frameos#running-via-docker-manually"
+                              target="_blank"
+                              className="frameos-link hover:underline"
+                            >
+                              readme
+                            </A>{' '}
+                            for details.
+                          </p>
+                          <DockerDaemonStatus />
+                        </div>
+                      ) : null}
+                      {buildEnvironmentProvider === 'buildHost' ? (
+                        <Group name="buildHost">
+                          <div className="space-y-2">
+                            <p className="text-sm leading-loose">
+                              Connect to a host over SSH. Install Docker and the Docker Buildx plugin on that host.
+                            </p>
+                            <Field name="host" label="Build host address">
+                              <TextInput placeholder="builder.example.com" />
+                            </Field>
+                            <Field name="port" label="SSH port">
+                              <NumberTextInput placeholder="22" />
+                            </Field>
+                            <Field name="user" label="SSH user">
+                              <TextInput placeholder="ubuntu" />
+                            </Field>
+                            <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
+                              <TextArea rows={3} />
+                            </Field>
+                            <Field
+                              name="sshPublicKey"
+                              label="Public SSH key"
+                              secret={!!savedSettings?.buildHost?.sshPublicKey}
+                            >
+                              <TextArea rows={3} />
+                            </Field>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                onClick={testBuildHost}
+                                color="secondary"
+                                size="small"
+                                disabled={isTestingBuildHost}
+                              >
+                                {isTestingBuildHost ? 'Checking...' : 'Check connection'}
+                              </Button>
+                              <Button
+                                onClick={newBuildHostKey}
+                                color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
+                                size="small"
+                              >
+                                Generate new keypair
+                              </Button>
+                            </div>
+                          </div>
+                        </Group>
+                      ) : null}
+                      {buildEnvironmentProvider === 'modal' ? (
+                        <Group name="modalSandbox">
+                          <div className="space-y-2">
+                            <p className="text-sm leading-loose">
+                              FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
+                              compilation containers directly.
+                            </p>
+                            <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
+                              <TextInput placeholder="ak-..." />
+                            </Field>
+                            <Field
+                              name="tokenSecret"
+                              label="Token secret"
+                              secret={!!savedSettings?.modalSandbox?.tokenSecret}
+                            >
+                              <TextInput placeholder="as-..." />
+                            </Field>
+                            <Field name="appName" label="Modal app name">
+                              <TextInput placeholder="frameos-build" />
+                            </Field>
+                            <Field name="image" label="Source-generation image">
+                              <TextInput placeholder="frameos/frameos:latest" />
+                            </Field>
+                            <Field name="timeout" label="Sandbox timeout (seconds)">
+                              <NumberTextInput placeholder="21600" />
+                            </Field>
+                            <Field name="idleTimeout" label="Idle timeout (seconds)">
+                              <NumberTextInput placeholder="900" />
+                            </Field>
+                            <Field name="cpu" label="CPU cores">
+                              <NumberTextInput placeholder="4" />
+                            </Field>
+                            <Field name="memory" label="Memory (MiB)">
+                              <NumberTextInput placeholder="8192" />
+                            </Field>
+                            <Field name="region" label="Region">
+                              <TextInput placeholder="us-east-1" />
+                            </Field>
+                            <Field name="cloud" label="Cloud">
+                              <TextInput placeholder="aws" />
+                            </Field>
+                            <Field name="environmentName" label="Environment">
+                              <TextInput placeholder="main" />
+                            </Field>
+                            <Button
+                              onClick={testModalSandbox}
+                              color="secondary"
+                              size="small"
+                              disabled={isTestingModalSandbox}
+                            >
+                              {isTestingModalSandbox ? 'Testing...' : 'Test Modal sandbox'}
+                            </Button>
+                          </div>
+                        </Group>
+                      ) : null}
+                    </Box>
                   </Form>
-                </Box>
-              </div>
+                  <div className="space-y-4 mt-4">
+                    <H6 id="settings-fonts" className="pt-4">
+                      Custom fonts
+                    </H6>
+                    <Box className="p-3 space-y-3">
+                      <p className="text-sm leading-loose">
+                        These fonts will be uploaded to all frames and can be used in the FrameOS editor.
+                      </p>
+                      <div className="space-y-1">
+                        {customFonts.map((font) => (
+                          <div key={font.id} className="flex items-center gap-2">
+                            <div className="flex-1">{font.path.substring(6)}</div>
+                            <Button size="tiny" color="secondary" onClick={() => deleteCustomFont(font)}>
+                              <TrashIcon className="w-5 h-5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      {customFontsLoading || isCustomFontsFormSubmitting ? (
+                        <Spinner />
+                      ) : (
+                        <div className="flex gap-2"></div>
+                      )}
+                      <Form logic={settingsLogic} formKey="customFontsForm" enableFormOnSubmit className="space-y-2">
+                        <Field label="" name="files">
+                          {({ onChange }) => (
+                            <input
+                              type="file"
+                              accept=".ttf"
+                              multiple
+                              className="w-full"
+                              onChange={(e: React.FormEvent<HTMLInputElement>) => {
+                                const target = e.target as HTMLInputElement & {
+                                  files: FileList
+                                }
+                                onChange(target.files)
+                              }}
+                            />
+                          )}
+                        </Field>
+                        <div className="flex gap-2">
+                          <Button type="submit" size="small" color="primary">
+                            Upload fonts
+                          </Button>
+                        </div>
+                      </Form>
+                    </Box>
+                  </div>
+                </>
+              ) : null}
               <SettingsGroupDivider label="Services" />
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
-                <Group name="frameOS">
-                  <H6 id="settings-gallery" className="pt-4">
-                    FrameOS Gallery
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      <a className="frameos-link hover:underline" target="_blank" href="https://gallery.frameos.net/">
-                        Premium AI slop
-                      </a>{' '}
-                      to get you started.
-                    </p>
-                    <Field
-                      name="apiKey"
-                      label="API key"
-                      secret={!!savedSettings?.frameOS?.apiKey}
-                      tooltip="Just use 2024 for now. We might add custom accounts in the future"
-                    >
-                      <TextInput />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="openAI">
-                  <H6 id="settings-openai" className="pt-4">
-                    OpenAI
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <p className="text-sm leading-loose">
-                      The OpenAI API key is used within OpenAI apps on frames. The backend key powers AI features in the
-                      control plane.
-                    </p>
-                    <Field name="apiKey" label="API key for frames" secret={!!savedSettings?.openAI?.apiKey}>
-                      <TextInput name="apiKey" />
-                    </Field>
-                    <Field
-                      name="backendApiKey"
-                      label="API key for backend"
-                      secret={!!savedSettings?.openAI?.backendApiKey}
-                    >
-                      <TextInput name="backendApiKey" />
-                    </Field>
-                    <Field name="model" label="Model">
-                      <TextInput name="model" placeholder="gpt-5.5" />
-                    </Field>
-                    <div className="pt-1">
-                      <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>
-                        {openAiModelOverridesExpanded ? 'Hide model overrides' : 'Show model overrides'}
-                      </Button>
-                    </div>
-                    {openAiModelOverridesExpanded ? (
-                      <div className="space-y-2 border-t border-slate-500/20 pt-3">
-                        <Field name="chatModel" label="Chat model">
-                          <TextInput name="chatModel" placeholder="Use shared model" />
-                        </Field>
-                        <Field name="sceneModel" label="Scene generation model">
-                          <TextInput name="sceneModel" placeholder="Use shared model" />
-                        </Field>
-                        <Field name="reviewModel" label="Scene review model">
-                          <TextInput name="reviewModel" placeholder="Use shared model" />
-                        </Field>
-                        <Field name="appChatModel" label="App chat model">
-                          <TextInput name="appChatModel" placeholder="Use shared model" />
-                        </Field>
-                        <Field name="appEditModel" label="App edit chat model">
-                          <TextInput name="appEditModel" placeholder="Use shared model" />
-                        </Field>
-                        <Field name="appEnhanceModel" label="App source enhance model">
-                          <TextInput name="appEnhanceModel" placeholder="Use shared model" />
-                        </Field>
-                      </div>
-                    ) : null}
-                  </Box>
-                </Group>
-                <Group name="posthog">
-                  <H6 id="settings-posthog" className="pt-4">
-                    PostHog
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <Field
-                      name="backendApiKey"
-                      label="Backend API key"
-                      secret={!!savedSettings?.posthog?.backendApiKey}
-                    >
-                      <TextInput />
-                    </Field>
-                    <Field name="backendHost" label="Backend host">
-                      <TextInput placeholder="https://us.i.posthog.com" />
-                    </Field>
-                    <Field name="backendEnableErrorTracking" label="Backend - enable error tracking">
-                      <Switch fullWidth />
-                    </Field>
-                    <Field name="backendEnableLlmAnalytics" label="Backend - enable llm analytics">
-                      <Switch fullWidth />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="homeAssistant">
-                  <H6 id="settings-home-assistant" className="pt-4">
-                    Home Assistant
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="url" label="Home assistant URL">
-                      <TextInput placeholder="http://homeassistant.local:8123" />
-                    </Field>
-                    <Field
-                      name="accessToken"
-                      label="Access token (Profile -> Long-Lived Access Tokens)"
-                      secret={!!savedSettings?.homeAssistant?.accessToken}
-                    >
-                      <TextInput />
-                    </Field>
-                    <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                {showSection('settings-gallery') ? (
+                  <Group name="frameOS">
+                    <H6 id="settings-gallery" className="pt-4">
+                      FrameOS Gallery
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <p className="text-sm leading-loose">
+                        <a className="frameos-link hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                          Premium AI slop
+                        </a>{' '}
+                        to get you started.
+                      </p>
                       <Field
-                        name="syncEnabled"
-                        label="Share frames with Home Assistant"
-                        tooltip={
-                          <>
-                            Each frame becomes a device with a live image and status/scene sensors (via MQTT discovery),
-                            and frame events are forwarded to the Home Assistant event bus as <code>frameos_event</code>{' '}
-                            for use in automations. Archived frames are not shared.
-                          </>
-                        }
+                        name="apiKey"
+                        label="API key"
+                        secret={!!savedSettings?.frameOS?.apiKey}
+                        tooltip="Just use 2024 for now. We might add custom accounts in the future"
                       >
-                        <Switch fullWidth />
+                        <TextInput />
                       </Field>
-                      {isHassioIngress ? (
-                        <p className="frameos-muted text-sm leading-loose">
-                          Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker
-                          (Mosquitto add-on) are discovered automatically. The URL and access token above are only
-                          needed by Home Assistant apps running on your frames.
-                        </p>
-                      ) : null}
-                      {!isHassioIngress && settings?.homeAssistant?.syncEnabled ? (
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-openai') ? (
+                  <Group name="openAI">
+                    <H6 id="settings-openai" className="pt-4">
+                      OpenAI
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <p className="text-sm leading-loose">
+                        The OpenAI API key is used within OpenAI apps on frames.
+                        {showBackendOnlyFields ? ' The backend key powers AI features in the control plane.' : ''}
+                      </p>
+                      <Field name="apiKey" label="API key for frames" secret={!!savedSettings?.openAI?.apiKey}>
+                        <TextInput name="apiKey" />
+                      </Field>
+                      {showBackendOnlyFields ? (
                         <>
-                          <p className="text-sm leading-loose">
-                            To get an MQTT login, in Home Assistant go to Settings → Apps → Mosquitto broker →
-                            Configuration → Logins → Add. Then press the Save button.
-                          </p>
-                          <Field name="mqttUsername" label="MQTT username">
-                            <TextInput />
-                          </Field>
                           <Field
-                            name="mqttPassword"
-                            label="MQTT password"
-                            secret={!!savedSettings?.homeAssistant?.mqttPassword}
+                            name="backendApiKey"
+                            label="API key for backend"
+                            secret={!!savedSettings?.openAI?.backendApiKey}
                           >
-                            <TextInput />
+                            <TextInput name="backendApiKey" />
                           </Field>
-                          <Field name="mqttHost" label="MQTT host (optional)">
-                            <TextInput placeholder={homeAssistantMqttHostDefault} />
+                          <Field name="model" label="Model">
+                            <TextInput name="model" placeholder="gpt-5.5" />
                           </Field>
-                          <Field name="mqttPort" label="MQTT port (optional)">
-                            <NumberTextInput placeholder="1883" />
-                          </Field>
+                          <div className="pt-1">
+                            <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>
+                              {openAiModelOverridesExpanded ? 'Hide model overrides' : 'Show model overrides'}
+                            </Button>
+                          </div>
                         </>
                       ) : null}
-                      {settings?.homeAssistant?.syncEnabled ? (
-                        <div className="pt-1">
-                          <Button
-                            size="small"
-                            color="secondary"
-                            onClick={syncHomeAssistant}
-                            disabled={isSyncingHomeAssistant}
-                          >
-                            {isSyncingHomeAssistant ? 'Syncing...' : 'Save & sync now'}
-                          </Button>
+                      {showBackendOnlyFields && openAiModelOverridesExpanded ? (
+                        <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                          <Field name="chatModel" label="Chat model">
+                            <TextInput name="chatModel" placeholder="Use shared model" />
+                          </Field>
+                          <Field name="sceneModel" label="Scene generation model">
+                            <TextInput name="sceneModel" placeholder="Use shared model" />
+                          </Field>
+                          <Field name="reviewModel" label="Scene review model">
+                            <TextInput name="reviewModel" placeholder="Use shared model" />
+                          </Field>
+                          <Field name="appChatModel" label="App chat model">
+                            <TextInput name="appChatModel" placeholder="Use shared model" />
+                          </Field>
+                          <Field name="appEditModel" label="App edit chat model">
+                            <TextInput name="appEditModel" placeholder="Use shared model" />
+                          </Field>
+                          <Field name="appEnhanceModel" label="App source enhance model">
+                            <TextInput name="appEnhanceModel" placeholder="Use shared model" />
+                          </Field>
                         </div>
                       ) : null}
-                    </div>
-                  </Box>
-                </Group>
-                <Group name="github">
-                  <H6 id="settings-github" className="pt-4">
-                    GitHub
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
-                      <TextInput />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="immich">
-                  <H6 id="settings-immich" className="pt-4">
-                    Immich
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="url" label="Server URL">
-                      <TextInput placeholder="https://immich.example.com" />
-                    </Field>
-                    <Field
-                      name="apiKey"
-                      label="API key (Account Settings -> API Keys)"
-                      secret={!!savedSettings?.immich?.apiKey}
-                    >
-                      <TextInput />
-                    </Field>
-                  </Box>
-                </Group>
-                <Group name="unsplash">
-                  <H6 id="settings-unsplash" className="pt-4">
-                    Unsplash API
-                  </H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
-                      <TextInput />
-                    </Field>
-                  </Box>
-                </Group>
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-posthog') ? (
+                  <Group name="posthog">
+                    <H6 id="settings-posthog" className="pt-4">
+                      PostHog
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <Field
+                        name="backendApiKey"
+                        label="Backend API key"
+                        secret={!!savedSettings?.posthog?.backendApiKey}
+                      >
+                        <TextInput />
+                      </Field>
+                      <Field name="backendHost" label="Backend host">
+                        <TextInput placeholder="https://us.i.posthog.com" />
+                      </Field>
+                      <Field name="backendEnableErrorTracking" label="Backend - enable error tracking">
+                        <Switch fullWidth />
+                      </Field>
+                      <Field name="backendEnableLlmAnalytics" label="Backend - enable llm analytics">
+                        <Switch fullWidth />
+                      </Field>
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-home-assistant') ? (
+                  <Group name="homeAssistant">
+                    <H6 id="settings-home-assistant" className="pt-4">
+                      Home Assistant
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <Field name="url" label="Home assistant URL">
+                        <TextInput placeholder="http://homeassistant.local:8123" />
+                      </Field>
+                      <Field
+                        name="accessToken"
+                        label="Access token (Profile -> Long-Lived Access Tokens)"
+                        secret={!!savedSettings?.homeAssistant?.accessToken}
+                      >
+                        <TextInput />
+                      </Field>
+                      {showBackendOnlyFields ? (
+                        <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                          <Field
+                            name="syncEnabled"
+                            label="Share frames with Home Assistant"
+                            tooltip={
+                              <>
+                                Each frame becomes a device with a live image and status/scene sensors (via MQTT
+                                discovery), and frame events are forwarded to the Home Assistant event bus as{' '}
+                                <code>frameos_event</code> for use in automations. Archived frames are not shared.
+                              </>
+                            }
+                          >
+                            <Switch fullWidth />
+                          </Field>
+                          {isHassioIngress ? (
+                            <p className="frameos-muted text-sm leading-loose">
+                              Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker
+                              (Mosquitto add-on) are discovered automatically. The URL and access token above are only
+                              needed by Home Assistant apps running on your frames.
+                            </p>
+                          ) : null}
+                          {!isHassioIngress && settings?.homeAssistant?.syncEnabled ? (
+                            <>
+                              <p className="text-sm leading-loose">
+                                To get an MQTT login, in Home Assistant go to Settings → Apps → Mosquitto broker →
+                                Configuration → Logins → Add. Then press the Save button.
+                              </p>
+                              <Field name="mqttUsername" label="MQTT username">
+                                <TextInput />
+                              </Field>
+                              <Field
+                                name="mqttPassword"
+                                label="MQTT password"
+                                secret={!!savedSettings?.homeAssistant?.mqttPassword}
+                              >
+                                <TextInput />
+                              </Field>
+                              <Field name="mqttHost" label="MQTT host (optional)">
+                                <TextInput placeholder={homeAssistantMqttHostDefault} />
+                              </Field>
+                              <Field name="mqttPort" label="MQTT port (optional)">
+                                <NumberTextInput placeholder="1883" />
+                              </Field>
+                            </>
+                          ) : null}
+                          {settings?.homeAssistant?.syncEnabled ? (
+                            <div className="pt-1">
+                              <Button
+                                size="small"
+                                color="secondary"
+                                onClick={syncHomeAssistant}
+                                disabled={isSyncingHomeAssistant}
+                              >
+                                {isSyncingHomeAssistant ? 'Syncing...' : 'Save & sync now'}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-github') ? (
+                  <Group name="github">
+                    <H6 id="settings-github" className="pt-4">
+                      GitHub
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
+                        <TextInput />
+                      </Field>
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-immich') ? (
+                  <Group name="immich">
+                    <H6 id="settings-immich" className="pt-4">
+                      Immich
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <Field name="url" label="Server URL">
+                        <TextInput placeholder="https://immich.example.com" />
+                      </Field>
+                      <Field
+                        name="apiKey"
+                        label="API key (Account Settings -> API Keys)"
+                        secret={!!savedSettings?.immich?.apiKey}
+                      >
+                        <TextInput />
+                      </Field>
+                    </Box>
+                  </Group>
+                ) : null}
+                {showSection('settings-unsplash') ? (
+                  <Group name="unsplash">
+                    <H6 id="settings-unsplash" className="pt-4">
+                      Unsplash API
+                    </H6>
+                    <Box className="p-2 space-y-2">
+                      <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
+                        <TextInput />
+                      </Field>
+                    </Box>
+                  </Group>
+                ) : null}
               </Form>
-              <SettingsGroupDivider label="Information" />
-              <H6 id="settings-system" className="pt-4">
-                System information
-              </H6>
-              <SystemInfo />
+              {showSection('settings-system') ? (
+                <>
+                  <SettingsGroupDivider label="Information" />
+                  <H6 id="settings-system" className="pt-4">
+                    System information
+                  </H6>
+                  <SystemInfo />
+                </>
+              ) : null}
             </>
           )}
         </div>

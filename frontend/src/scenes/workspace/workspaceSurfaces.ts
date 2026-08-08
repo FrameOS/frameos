@@ -199,6 +199,33 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
 }
 
 /**
+ * Sections of the GLOBAL settings page (scenes/settings/Settings.tsx) — not
+ * the per-frame settings panel above. `null` means "everything the page
+ * renders": the backend owns all of it, and the on-device admin never mounts
+ * this page at all (urls.settings() routes it to the frame's own settings
+ * panel instead). The cloud keeps only the service API keys scenes use —
+ * there is no local account, deploy host, SSH, build environment, font
+ * store, backend PostHog or backend system info to configure.
+ */
+export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly string[] | null> = {
+  backend: null,
+  frameAdmin: null,
+  cloud: [
+    'settings-gallery',
+    'settings-openai',
+    'settings-home-assistant',
+    'settings-github',
+    'settings-immich',
+    'settings-unsplash',
+  ],
+}
+
+export function globalSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {
+  const allowed = allowedGlobalSettingsSections[mode]
+  return allowed === null || allowed.includes(sectionId)
+}
+
+/**
  * What "Add frame" opens.
  *
  *   backendForm  the self-hosted creation form (POST /api/frames/new): SSH

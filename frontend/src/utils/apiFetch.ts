@@ -56,18 +56,19 @@ function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
   return new Promise(() => {})
 }
 
-// Catalogs owned by a self-hosted backend. The cloud serves only /api/frames/**,
-// so in cloud mode these are guaranteed 404s: three failed requests and three
-// console errors on every page load, purely to reach fallbacks the callers
-// already have (the embedded app catalog, an empty font list). Answer them
-// locally with the empty shape each loader expects instead.
+// Catalogs owned by a self-hosted backend. The cloud serves /api/frames/**
+// and /api/settings, so in cloud mode these are guaranteed 404s: failed
+// requests and console errors on every page load, purely to reach fallbacks
+// the callers already have (the embedded app catalog, an empty font list).
+// Answer them locally with the empty shape each loader expects instead.
 //
 // GET only: a POST to /api/templates imports a template, and pretending that
 // succeeded would silently swallow the import. Exact paths only, so
 // /api/templates/{id}/image still goes to the network and fails honestly.
 //
 // If the cloud ever grows one of these for real, delete its line — leaving it
-// here would mask the new endpoint.
+// here would mask the new endpoint. (/api/settings lived here until the cloud
+// grew account settings — app/api/settings/route.ts.)
 const cloudEmptyCatalogs: Record<string, string> = {
   '/api/apps': '{"apps":{}}',
   // The workspace's uploaded-asset catalog (settingsLogic loadCustomFonts
@@ -80,9 +81,6 @@ const cloudEmptyCatalogs: Record<string, string> = {
     '{"enabled":false,"provider_url":null,"default_provider_url":null,"status":"disconnected",' +
     '"can_edit_provider":false,"poll_error":null,"connection":null,"link":null}',
   '/api/fonts': '{"fonts":[]}',
-  // Backend-wide settings (SSH defaults, API keys, repositories…). The cloud
-  // stores none of that; loaders merge this over their defaults.
-  '/api/settings': '{}',
   '/api/templates': '[]',
 }
 

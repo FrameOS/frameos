@@ -124,6 +124,7 @@ export const allowedFrameSettings = new Map<
 ]);
 
 export const allowedFrameCommandTypes = new Set([
+  "get_metrics",
   // Advisory only: the device fetches the manifest and verifies the image
   // signature itself (docs/cloud-frames.md "Signed OTA") — the queue can
   // only suggest, never install.
@@ -132,6 +133,7 @@ export const allowedFrameCommandTypes = new Set([
   "render",
   "restart_runtime",
   "set_current_scene",
+  "set_schedule",
 ]);
 
 export function validateFrameSettings(
@@ -153,6 +155,140 @@ export function validateFrameSettings(
     }
   }
   return { settings: Object.fromEntries(entries) };
+}
+
+// ---------------------------------------------------------------------------
+// Scene schedule (docs/cloud-frames.md `set_schedule`)
+// ---------------------------------------------------------------------------
+
+// Caps sized to the smallest schedule engine in the fleet — the ESP32's
+// (embedded/esp32/main/fos_schedule.c): SCHEDULE_MAX_EVENTS 64 and
+// SCHEDULE_MAX_BYTES 32 KiB, enforced here so a push the device would refuse
+// (or silently truncate) is refused up front instead. The per-event payload
+// cap is server-side prudence for a jsonb column the SPA replays; note the
+// ESP32 additionally drops any single event whose payload serializes past
+// its own 512-byte SCHEDULE_PAYLOAD_LEN.
+export const maxScheduleEvents = 64;
+export const maxScheduleEventPayloadBytes = 4 * 1024;
+export const maxScheduleBytes = 32 * 1024;
+// UTC offsets of real zones span -12:00 (Etc/GMT+12) to +14:00 (Kiritimati).
+export const minScheduleUtcOffsetMinutes = -12 * 60;
+export const maxScheduleUtcOffsetMinutes = 14 * 60;
+
+export interface FrameScheduleEvent {
+  id: string;
+  minute: number;
+  hour: number;
+  weekday: number;
+  event: string;
+  payload: Record<string, unknown>;
+  disabled?: boolean;
+}
+
+export interface FrameSchedule {
+  events: FrameScheduleEvent[];
+  disabled?: boolean;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// Validate and rebuild a schedule from the SPA's Schedule panel. Sanitize by
+// reconstruction (the parseAssetEntries doctrine — this jsonb is persisted
+// and replayed to every browser and to devices), but refuse the WHOLE
+// schedule on any invalid event: an edit that silently dropped events is
+// exactly the bug this write path exists to fix. Shape per
+// embedded/esp32/main/fos_schedule.h and the Pi's config.nim loadSchedule:
+// {events: [{id, minute 0-59, hour 0-23, weekday 0-9, event, payload,
+// disabled?}], disabled?}.
+export function validateFrameSchedule(
+  value: unknown,
+): { schedule?: FrameSchedule; error?: string } {
+  if (!isPlainObject(value) || !Array.isArray(value.events)) {
+    return { error: "invalid_schedule" };
+  }
+  if (value.events.length > maxScheduleEvents) {
+    return { error: "schedule_too_large" };
+  }
+  const events: FrameScheduleEvent[] = [];
+  for (const item of value.events) {
+    if (!isPlainObject(item)) {
+      return { error: "invalid_schedule" };
+    }
+    const { id, minute, hour, weekday, event, payload, disabled } = item;
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      id.length > 64 ||
+      !Number.isInteger(minute) ||
+      (minute as number) < 0 ||
+      (minute as number) > 59 ||
+      !Number.isInteger(hour) ||
+      (hour as number) < 0 ||
+      (hour as number) > 23 ||
+      // 0 daily, 1-7 mon-sun, 8 weekdays, 9 weekends; absent = daily.
+      (weekday !== undefined &&
+        weekday !== null &&
+        (!Number.isInteger(weekday) ||
+          (weekday as number) < 0 ||
+          (weekday as number) > 9)) ||
+      typeof event !== "string" ||
+      event.length === 0 ||
+      // The ESP32 stores the name in a 64-byte buffer, NUL included.
+      event.length > 63 ||
+      (payload !== undefined && !isPlainObject(payload)) ||
+      (disabled !== undefined && typeof disabled !== "boolean")
+    ) {
+      return { error: "invalid_schedule" };
+    }
+    const eventPayload = isPlainObject(payload) ? payload : {};
+    if (
+      Buffer.byteLength(JSON.stringify(eventPayload), "utf8") >
+      maxScheduleEventPayloadBytes
+    ) {
+      return { error: "schedule_too_large" };
+    }
+    events.push({
+      // weekday/payload always materialized: the Pi runtime parses frame.json
+      // into a concrete object and the ESP32 defaults absent fields the same
+      // way — explicit beats relying on two parsers' defaults agreeing.
+      event,
+      hour: hour as number,
+      id,
+      minute: minute as number,
+      payload: eventPayload,
+      weekday: (weekday ?? 0) as number,
+      ...(disabled === true ? { disabled: true } : {}),
+    });
+  }
+  const schedule: FrameSchedule = {
+    events,
+    ...(value.disabled === true ? { disabled: true } : {}),
+  };
+  if (Buffer.byteLength(JSON.stringify(schedule), "utf8") > maxScheduleBytes) {
+    return { error: "schedule_too_large" };
+  }
+  return { schedule };
+}
+
+// The schedule object a set_schedule push carries. Devices fire every event
+// they are given — the backend's embedded_device.py strips disabled events
+// before serving frame.json for exactly this reason — so the disabled flags
+// are resolved here and never reach the wire. A fully disabled schedule
+// ships as zero events, NOT as null: the Pi's set_schedule handler
+// (hub_client.nim handleSetSchedule) refuses a non-object schedule.
+export function scheduleDevicePayload(schedule: FrameSchedule): {
+  events: Omit<FrameScheduleEvent, "disabled">[];
+} {
+  if (schedule.disabled) {
+    return { events: [] };
+  }
+  return {
+    events: schedule.events
+      .filter((event) => !event.disabled)
+      .map(({ disabled: _disabled, ...event }) => event),
+  };
 }
 
 export function isValidEd25519PublicKey(publicKeyBase64: unknown): boolean {
@@ -211,6 +347,7 @@ export function frameSummary(frame: typeof frames.$inferSelect) {
     linked_client_id: frame.linkedClientId,
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,
+    schedule: frame.schedule,
     status: frame.status,
   };
 }

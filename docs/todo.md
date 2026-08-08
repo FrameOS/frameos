@@ -5,6 +5,45 @@ One tracker for everything still open across the repo (last swept
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
+## ESP32 backend→cloud parity (current push, 2026-08)
+
+Goal: everything the self-hosted backend can do with an ESP32 frame, the
+cloud can too. Standing rule (also in AGENTS.md): frame-facing features and
+fixes land on BOTH control planes unless explicitly one-sided.
+Constraints and direction:
+
+- The cloud only installs **prebuilt release binaries** — no compilation
+  ever happens cloud-side. Do as much as possible **in the browser**
+  (WebSerial flashing/provisioning, wasm previews/renders).
+- Unify the flashing/provisioning steps and code across control planes:
+  the backend should adopt the same **browser-centric flash system** the
+  cloud uses (Esp32CloudFlasher / EmbeddedWebFlasher convergence). The
+  backend may still build a frame-specific binary server-side when a
+  custom source build is needed — the browser flasher then just flashes
+  that artifact instead of a release download.
+- Inventory to port/verify per surface: settings (incl. account-level API
+  keys like Unsplash/OpenAI), metrics, schedule, assets, logs, OTA,
+  scene state/control, USB provisioning. Track gaps in the parity matrix
+  (`docs/api-triality.md`) and delete items here as they ship.
+
+Known gaps from the 2026-08-08 audit (in flight or open):
+
+- **Service-settings delivery to cloud-managed frames** — account API keys
+  (Unsplash/OpenAI/HA/…) now persist on the cloud and feed previews, but no
+  path carries them to the device: `set_settings` is allow-listed to
+  name/rotate/interval/scaling_mode/timezone/debug and refuses unknown keys
+  wholesale (`hub_client.nim` CLOUD_SETTINGS_ALLOWLIST). Needs a deliberate
+  protocol change (new verb like `set_service_settings`, or a device-bearer
+  `/embedded/settings`-style pull route on auth-web mirroring
+  `backend/app/api/embedded_device.py`) updated in lockstep: docs/cloud-frames.md,
+  hub allow-lists, Nim handler + tests, ESP32 fos_cloud/fos_settings, C3 stub.
+- Cloud metrics responses omit the backend's `reboots` markers (cosmetic;
+  SPA degrades gracefully).
+- Terminal / ping / debug panels are backend-only by design (no shell verbs
+  in the cloud protocol — structural, not a gap to close).
+- Cloud-managed ESP32-C3 frames still have no render source (wasm harness
+  is the building block; C3 boards stay out of the cloud flasher until then).
+
 ## Cloud-managed frames
 
 - **Signed OTA** — the one open item from the cloud-workspace push and the

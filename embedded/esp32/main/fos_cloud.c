@@ -2015,8 +2015,6 @@ static void ws_start(void)
     /* Tee runtime log lines toward this session (flushed by ws_poll_logs on
      * the cloud task once telemetry:logs is confirmed by `ready`). */
     ws_logs_init();
-    /* TODO(cloud-frames): apply set_schedule for the declarative
-     * allowlist (set_settings ships the interval/name subset already). */
 }
 
 /* Cloud task only: the websocket task must not be torn down from inside its

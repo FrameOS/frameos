@@ -27,6 +27,7 @@ import {
   GET as getFrameScenes,
   POST as assignFrameScenes,
 } from "../../../app/api/frames/[frameId]/scenes/route";
+import { POST as pushFrameSchedule } from "../../../app/api/frames/[frameId]/schedule/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
 import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
 import {
@@ -1378,6 +1379,201 @@ describe("frame management API", () => {
     expect(commands).toHaveLength(0);
   });
 
+  // The Schedule panel's write path. The full schedule — disabled events
+  // included — is provider-side state the panel round-trips via
+  // GET /api/frames/{id}; the device push carries only the events it should
+  // actually fire (devices fire everything they are given), and gets no TTL:
+  // a schedule is declarative, and a battery frame that connects tomorrow
+  // should still receive today's schedule.
+  const scheduleEvent = (overrides: Record<string, unknown> = {}) => ({
+    event: "setCurrentScene",
+    hour: 8,
+    id: "on",
+    minute: 30,
+    payload: { sceneId: "scene-1", state: {} },
+    weekday: 0,
+    ...overrides,
+  });
+
+  it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const onEvent = scheduleEvent();
+    const offEvent = scheduleEvent({ disabled: true, id: "off" });
+    const response = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [onEvent, offEvent] }, utcOffsetMinutes: 120 },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      command_id: string | null;
+      status: string;
+    };
+    expect(body.status).toBe("queued");
+    expect(body.command_id).toBeTruthy();
+
+    // The panel reads its truth back from the detail route, disabled event
+    // and all.
+    const detail = await getFrameDetail(
+      getRequest(`/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    const { frame } = (await detail.json()) as {
+      frame: { schedule?: unknown };
+    };
+    expect(frame.schedule).toEqual({ events: [onEvent, offEvent] });
+
+    // The device push: disabled events resolved away, the offset alongside
+    // (the hub flattens the payload, so this IS the wire shape minus
+    // id/type), and no expiry.
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe("set_schedule");
+    expect(commands[0]?.payload).toEqual({
+      schedule: { events: [onEvent] },
+      utcOffsetMinutes: 120,
+    });
+    expect(commands[0]?.expiresAt).toBeNull();
+    expect(commands[0]?.status).toBe("pending");
+  });
+
+  it("supersedes an undelivered set_schedule instead of stacking pushes", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    for (const minute of [10, 20]) {
+      const response = await pushFrameSchedule(
+        postJson(
+          `/api/frames/${frame_id}/schedule`,
+          { schedule: { events: [scheduleEvent({ minute })] } },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.map((c) => c.status).sort()).toEqual([
+      "expired",
+      "pending",
+    ]);
+    const superseded = commands.find((c) => c.status === "expired");
+    expect(superseded?.error).toBe("superseded");
+    const [frameRow] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frameRow?.schedule).toEqual({
+      events: [scheduleEvent({ minute: 20 })],
+    });
+  });
+
+  it("refuses malformed schedules without persisting or enqueueing anything", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const push = (body: Record<string, unknown>) =>
+      pushFrameSchedule(
+        postJson(`/api/frames/${frame_id}/schedule`, body, {
+          origin: baseUrl,
+        }),
+        routeParams(frame_id),
+      );
+
+    const cases: [Record<string, unknown>, string][] = [
+      [{}, "invalid_schedule"],
+      [{ schedule: { events: "soon" } }, "invalid_schedule"],
+      [
+        { schedule: { events: [scheduleEvent({ minute: 75 })] } },
+        "invalid_schedule",
+      ],
+      [
+        { schedule: { events: [scheduleEvent({ id: "" })] } },
+        "invalid_schedule",
+      ],
+      [
+        {
+          schedule: {
+            events: Array.from({ length: 65 }, (_, i) =>
+              scheduleEvent({ id: `id-${i}` }),
+            ),
+          },
+        },
+        "schedule_too_large",
+      ],
+      [
+        { schedule: { events: [] }, utcOffsetMinutes: "120" },
+        "invalid_utc_offset",
+      ],
+      [
+        { schedule: { events: [] }, utcOffsetMinutes: 30 * 60 },
+        "invalid_utc_offset",
+      ],
+    ];
+    for (const [body, error] of cases) {
+      const response = await push(body);
+      expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([
+        400,
+        error,
+      ]);
+    }
+
+    const [frameRow] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frameRow?.schedule).toBeNull();
+    expect(
+      await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id)),
+    ).toHaveLength(0);
+  });
+
+  it("refuses schedule pushes while the frame is pending, and without an app origin", async () => {
+    const { frame_id } = await enrolledFrame();
+
+    const pending = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [] } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(pending.status).toBe(409);
+
+    const noOrigin = await pushFrameSchedule(
+      postJson(`/api/frames/${frame_id}/schedule`, {
+        schedule: { events: [] },
+      }),
+      routeParams(frame_id),
+    );
+    expect(noOrigin.status).toBe(403);
+  });
+
   it("answers 404, not 500, for frame ids that are not uuids", async () => {
     await signIn();
     const bogus = "not-a-uuid";
@@ -1411,6 +1607,14 @@ describe("frame management API", () => {
         postJson(
           `/api/frames/${bogus}/settings`,
           { settings: { rotate: 90 } },
+          { origin: baseUrl },
+        ),
+        routeParams(bogus),
+      ),
+      pushFrameSchedule(
+        postJson(
+          `/api/frames/${bogus}/schedule`,
+          { schedule: { events: [] } },
           { origin: baseUrl },
         ),
         routeParams(bogus),

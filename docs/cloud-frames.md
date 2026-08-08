@@ -219,7 +219,7 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | Verb | Payload | Device behavior |
 |---|---|---|
 | `set_scenes` | `{"scenes": […interpreted scene JSON…], "checksum", "scene_id"?: "…", "state"?: {…}}` | validate as interpreted node-graph JSON (`error: "invalid_scenes"`); refuse any compiled/source payload — an app node shipping `.nim` sources without a JS implementation refuses the whole push (`error: "not_interpreted"`); hot-reload via the uploaded-scenes path; persist locally so a reboot without cloud keeps rendering; ack once the payload is accepted and persisted, then `scene_ack` once it is actually live (no `scene_ack` if the hot-load fails — the frame is then genuinely out of sync). The optional `scene_id` names which of the pushed scenes to activate (default: the first) and `state` carries its initial public scene-state values — the shape the workspace's "preview on frame" flow produces |
-| `set_schedule` | `{"schedule": {…}}` | replace the scene schedule |
+| `set_schedule` | `{"schedule": {…}, "utcOffsetMinutes"?: N}` | replace the scene schedule (`{"events": [{"id", "minute": 0-59, "hour": 0-23, "weekday": 0 daily/1-7 mon-sun/8 weekdays/9 weekends, "event", "payload"}…]}`); the provider resolves `disabled` flags before pushing — devices fire every event they are given. The optional `utcOffsetMinutes` is the provider's current frame-local UTC offset, for devices that match in local wall-clock time without a tz database; a device without that need (or one that takes its offset from a backend settings poll, as the ESP32 firmware does today) ignores the key |
 | `set_settings` | `{"settings": {…}}` | allowlisted declarative keys only (`name`, `rotate`, `interval`, `scaling_mode`, `timezone`, `debug`; `brightness` joins the list once the runtime grows a brightness setting); unknown or non-allowlisted keys → the whole verb is refused (`error: "setting_not_allowed"`) |
 | `set_current_scene` | `{"scene_id": "…", "state"?: {…}}` | switch active scene; the optional `state` object carries public scene-state field values, forwarded to the scene exactly as the local `setCurrentScene` event would |
 | `get_state` | `{}` | bare ack, then a separate `{"id", "type": "state", …}` message with the same `id` carrying the `hello`-shaped state |
@@ -541,6 +541,7 @@ GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
 GET  {provider}/api/frames/{id}/scenes         # assigned scenes
 POST {provider}/api/frames/{id}/scenes         # assign scene versions → enqueues set_scenes
 POST {provider}/api/frames/{id}/settings       # declarative settings → enqueues set_settings
+POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)

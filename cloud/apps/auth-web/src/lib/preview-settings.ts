@@ -2,9 +2,11 @@
 // preview can ask for them instead of drawing "please provide an API key".
 // Mirrors frameos' settings groups (frontend/src/scenes/frame/panels/
 // secretSettings.ts) and the `settings` lists in the apps' config.json files.
-// Keys entered on the cloud stay in the browser: they go straight into the
+// Keys TYPED into the preview stay in the browser: they go straight into the
 // wasm runtime and out with its requests, never to our server (except hosts
-// that need the CORS fallback proxy, which forwards headers verbatim).
+// that need the CORS fallback proxy, which forwards headers verbatim). Keys
+// SAVED on the account settings page persist server-side (account_settings)
+// and seed the preview automatically.
 
 export type PreviewSettingsField = {
   label: string;
@@ -18,7 +20,12 @@ export type PreviewSettingsGroup = {
   fields: PreviewSettingsField[];
 };
 
-const settingsGroups: Record<string, PreviewSettingsGroup> = {
+// Also the source of truth for which settings an ACCOUNT may persist
+// (account-settings.ts derives its allow-list from these groups) — one list,
+// two consumers, so the preview and the stored settings cannot drift.
+export const previewSettingsGroups: Readonly<
+  Record<string, PreviewSettingsGroup>
+> = {
   frameOS: {
     key: "frameOS",
     title: "FrameOS Gallery",
@@ -104,5 +111,7 @@ export function requiredSettingsForScenes(
       }
     }
   }
-  return Object.values(settingsGroups).filter((group) => keys.has(group.key));
+  return Object.values(previewSettingsGroups).filter((group) =>
+    keys.has(group.key),
+  );
 }

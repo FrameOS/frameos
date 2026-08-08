@@ -386,11 +386,21 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     expect(await commandsOfType(frame.id, "render")).toHaveLength(1);
   });
 
+  it("maps the metrics event to get_metrics", async () => {
+    const { frame } = await activeFrame();
+    const metrics = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/metrics`, {}),
+      eventParams(frame.id, "metrics"),
+    );
+    expect(metrics.status).toBe(200);
+    expect(await commandsOfType(frame.id, "get_metrics")).toHaveLength(1);
+  });
+
   it("refuses events without a cloud verb, bad payloads and pending frames", async () => {
     const { frame } = await activeFrame();
     const unsupported = await postFrameEvent(
-      postJson(`/api/frames/${frame.id}/event/metrics`, {}),
-      eventParams(frame.id, "metrics"),
+      postJson(`/api/frames/${frame.id}/event/toggleDebug`, {}),
+      eventParams(frame.id, "toggleDebug"),
     );
     expect(unsupported.status).toBe(404);
 

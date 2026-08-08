@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/require-database-url.mjs development && node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs",
+    "predev": "node scripts/require-database-url.mjs development && node scripts/build-frames-app.mjs && node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs",
     "dev": "next dev --turbopack",
     "prebuild": "node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs",
     "build": "next build",
