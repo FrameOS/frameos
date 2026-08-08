@@ -28,36 +28,28 @@ Constraints and direction:
 
 Known gaps from the 2026-08-08 audit (in flight or open):
 
-- **Service-settings delivery: the DEVICE half** — the protocol and the whole
-  provider side shipped 2026-08-08 (docs/cloud-frames.md "Service settings"):
-  device-authed `GET /api/frames/{id}/service-settings` with ETag→304 and
-  `Cache-Control: no-store`, the `settings:services` scope (granted at
-  enrollment, never backfilled; owner toggle at
-  `POST .../service-settings/enabled`), the zero-payload
-  `refresh_service_settings` nudge verb, and per-frame narrowing to the groups
-  the frame's own scenes declare (`frames.service_setting_groups`). Keys ride
-  HTTPS, never the command queue — `frame_commands` rows are never deleted.
-  **No device implements the client yet**, so end to end this still does
-  nothing. Remaining, in order:
-  1. **Nim runtime (Pi)**: a fetch module + a `refresh_service_settings`
-     handler in `hub_client.nim` (gated on the scope), a pull at `ready` and
-     on a long timer, `403 insufficient_scope` → clear all six groups,
-     `401` → the existing demotion counter. Apply via a sibling of
-     `persistFrameAdminSettingsUpdate` (`server/api.nim`), which already does
-     the six-group merge into frame.json.
-  2. **ESP32**: source-select in `fos_settings.c` (backend poll today; cloud
-     URL when `fos_cloud_api_access()` is set — note the backend poll bails
-     out entirely for cloud-only frames), the verb in `fos_cloud.c`, one new
-     glue export, and the matching no-op in `frameos_nim_stub.c` (C3 links
-     the stub — a missing symbol only explodes in the release job).
-  3. **Cleanup once 1–2 land**: delete the duplicate Nim-side fetch
-     (`apps.nim loadEmbeddedServiceSettings` + the `settingsUrl` seed in
-     `embedded_runtime.nim`, and `should_authorize_backend_url` in the glue) —
-     the ESP32 currently fetches the same payload twice per boot.
-  Also open: `frameSummary` returns nothing about the scope, so the workspace
-  cannot yet show whether a frame receives keys; and assigning a scene that
-  newly declares a group writes the column but sends no nudge (the frame picks
-  it up at its next `ready`).
+- **Service-settings follow-ups** — the feature shipped end to end 2026-08-08
+  (contract in docs/cloud-frames.md "Service settings"; provider routes +
+  `settings:services` scope + `refresh_service_settings` nudge, Nim runtime
+  client, ESP32 client). What is left is smaller:
+  1. **Delete the duplicate ESP32 fetch**: `apps.nim`
+     `loadEmbeddedServiceSettings`/`ensureEmbeddedServiceSettings`, the
+     `settingsUrl` seed in `embedded_runtime.nim`, `should_authorize_backend_url`
+     in the glue, and the `ensureEmbeddedServiceSettings()` calls in the ~8 app
+     files. The device now fetches the same payload twice per boot on backend
+     frames; firmware and Nim ship as one binary, so there is no version skew
+     to fear. Harmless today (the lazy path can only re-merge identical values
+     and cannot resurrect a deleted group) — it is dead weight, not a bug.
+  2. **Surface it in the workspace**: `frameSummary` returns nothing about the
+     scope, so nothing can show whether a frame receives keys or which groups
+     its scenes declare (`frames.service_setting_groups` already holds the
+     latter). Adding a field means updating frame-hub's `protocol.test.ts`
+     fixture in the same commit.
+  3. **Nudge on scene assignment**: assigning a scene that newly declares a
+     group writes the column but sends no `refresh_service_settings`, so the
+     frame learns about it at its next `ready` or settings save.
+  4. Hardware verification: no cloud-managed frame has run the pull against a
+     real provider yet — both clients are unit-tested and build-verified only.
 - Cloud metrics responses omit the backend's `reboots` markers (cosmetic;
   SPA degrades gracefully).
 - Terminal / ping / debug panels are backend-only by design (no shell verbs
