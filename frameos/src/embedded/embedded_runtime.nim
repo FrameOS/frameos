@@ -7,7 +7,7 @@
 # run the AOT-compiled standard app library. The firmware's C side feeds us
 # scene JSON (from SPIFFS or the backend) and asks for rendered frames.
 
-import std/[json, locks, options, strformat, strutils, tables]
+import std/[json, locks, options, strformat, tables]
 import pixie
 
 import frameos/types
@@ -96,18 +96,17 @@ proc getFrameConfig*(): FrameConfig =
   frameConfig
 
 proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
-    backendUrl = "", frameId = 0, rotate = 0) =
+    rotate = 0) =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Logs go synchronously to the firmware's ESP_LOG hook; events (e.g. a
   ## "render" dispatched from a scene) set a flag the C render loop polls.
+  ##
+  ## `settings` starts empty and stays owned by the firmware: the settings poll
+  ## (fos_settings.c) delivers backend and cloud service settings alike through
+  ## fos_nim_apply_service_settings. Nim never fetches them itself.
   let httpResponseLimit =
     if maxHttpResponseBytes > 0: maxHttpResponseBytes else: DefaultMaxHttpResponseBytes
-  let normalizedBackendUrl = backendUrl.strip(chars = {'/'})
   var settings = %*{}
-  if normalizedBackendUrl.len > 0 and frameId > 0:
-    settings["embedded"] = %*{
-      "settingsUrl": &"{normalizedBackendUrl}/api/frames/{frameId}/embedded/settings",
-    }
   frameConfig = FrameConfig(
     name: name,
     mode: "embedded",

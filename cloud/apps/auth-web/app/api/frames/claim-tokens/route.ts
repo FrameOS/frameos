@@ -9,11 +9,13 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import {
+  boundClaimTokenTtlMs,
   claimTokenExpiry,
   claimTokenPrefix,
   countActiveClaimTokens,
   countFramesForAccount,
   evictOldestUnusedClaimTokens,
+  frameForAccount,
   maxClaimTokensPerAccount,
   maxFramesPerAccount,
   sweepExpiredClaimTokens,
@@ -27,6 +29,13 @@ export const runtime = "nodejs";
 // Mint a single-use claim token for "Add frame" (wire contract:
 // docs/cloud-frames.md, enrollment flow A). The token is shown once and
 // stored only as a hash.
+//
+// With `frame_id` it mints a RE-ENROLLMENT token instead: bound to a frame
+// this account already owns, so redeeming it re-keys that frame (new device
+// key, rotated link token) rather than enrolling a second row for the same
+// physical board. That is the path for moving a board or rescuing one whose
+// NVS was erased. Bound tokens are always single-use, expire in an hour, and
+// do NOT consume frame quota — no frame is created.
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -54,6 +63,29 @@ export async function POST(request: NextRequest) {
 
   const body = await readJsonObject(request);
   const name = parseOptionalString(body.name)?.slice(0, 256);
+
+  // Re-enrollment: bind the token to one of the account's own frames.
+  // frameForAccount IS the ownership check (and screens the uuid shape), so
+  // someone else's frame id is a 404 — invisible, not forbidden.
+  const boundFrameId = parseOptionalString(body.frame_id);
+  let boundFrame: Awaited<ReturnType<typeof frameForAccount>>;
+  if (boundFrameId !== undefined) {
+    boundFrame = await frameForAccount(db, session.accountId, boundFrameId);
+    if (!boundFrame) {
+      return jsonError("invalid_frame", 404);
+    }
+    // A revoked frame's link is dead; re-keying it would resurrect access the
+    // owner deliberately took away. Delete it and enroll fresh instead.
+    if (boundFrame.status === "revoked") {
+      return jsonError("frame_revoked", 409);
+    }
+    // Multi-use makes no sense for a token whose whole job is to re-key ONE
+    // row: a second redemption would hand a second board the same identity.
+    if (body.multi_use === true || (body.max_uses !== undefined && body.max_uses !== 1)) {
+      return jsonError("invalid_max_uses", 400);
+    }
+  }
+
   // Multi-use tokens back the SD-image download: one image, many cards,
   // each boot enrolls a distinct pending frame. Budget capped at the frame
   // quota — a leaked image can never enroll more than the account could
@@ -104,7 +136,12 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+  // Frame quota applies to tokens that CREATE a frame. A re-enrollment token
+  // re-keys a row that already counts, so an account sitting at its quota
+  // must still be able to rescue a board — refusing here would make the
+  // limit into a lockout.
   if (
+    boundFrame === undefined &&
     (await countFramesForAccount(db, session.accountId)) >= maxFramesPerAccount
   ) {
     return jsonError("frame_quota_exceeded", 403, {
@@ -136,11 +173,18 @@ export async function POST(request: NextRequest) {
   }
 
   const token = createSecretToken(claimTokenPrefix, 24);
-  const expiresAt = ttlMs ? new Date(Date.now() + ttlMs) : claimTokenExpiry();
+  // A bound token ignores any requested TTL: it is redeemed minutes after it
+  // is minted, and it is worth more than an ordinary code.
+  const expiresAt = boundFrame
+    ? new Date(Date.now() + boundClaimTokenTtlMs)
+    : ttlMs
+      ? new Date(Date.now() + ttlMs)
+      : claimTokenExpiry();
   const [row] = await db
     .insert(frameEnrollmentTokens)
     .values({
       accountId: session.accountId,
+      boundFrameId: boundFrame?.id ?? null,
       expiresAt,
       maxUses,
       name: name ?? null,
@@ -157,14 +201,22 @@ export async function POST(request: NextRequest) {
       accountId: session.accountId,
       providerSubject: session.providerSubject,
     },
-    eventType: "frame.claim_token_created",
+    eventType: boundFrame
+      ? "frame.rebind_token_created"
+      : "frame.claim_token_created",
     metadata: { maxUses },
-    target: { claimTokenId: row.id },
+    target: {
+      claimTokenId: row.id,
+      ...(boundFrame ? { frameId: boundFrame.id } : {}),
+    },
   });
 
   return NextResponse.json({
     claim_token: token,
     expires_at: expiresAt.toISOString(),
     max_uses: maxUses,
+    // Echoed so the flasher can assert it is provisioning the frame the user
+    // started from, rather than inferring one from a new-frame watch.
+    ...(boundFrame ? { frame_id: boundFrame.id } : {}),
   });
 }

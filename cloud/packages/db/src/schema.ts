@@ -688,8 +688,21 @@ export const frameEnrollmentTokens = pgTable(
     usedAt: timestamp("used_at", { withTimezone: true }),
     maxUses: integer("max_uses").default(1).notNull(),
     useCount: integer("use_count").default(0).notNull(),
+    // History: which frame this token enrolled. Written AFTER redemption, so
+    // it says nothing about what the token may do.
     frameId: uuid("frame_id").references(() => frames.id, {
       onDelete: "set null",
+    }),
+    // Intent: a token minted for an EXISTING frame (re-enrollment — moving a
+    // board, or rescuing one whose NVS was blanked). Redemption re-keys that
+    // frame in place instead of inserting a new row, so this must be a
+    // separate column from `frame_id` above: a multi-use SD-image token picks
+    // up a frame_id on its first redemption, and reading that back as
+    // "bound" would re-key the first board's frame on every later card.
+    // Always max_uses = 1, short TTL, and cascade-deleted with its frame —
+    // a token that can only re-key a row that no longer exists is dead.
+    boundFrameId: uuid("bound_frame_id").references(() => frames.id, {
+      onDelete: "cascade",
     }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

@@ -9,7 +9,9 @@ import { App } from './scenes/App'
 import './index.css'
 import { initKea } from '../../frontend/src/initKea'
 import { registerAddFramePanel } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
+import { registerReenrollFramePanel } from '../../frontend/src/scenes/workspace/reenrollFramePanelRegistry'
 import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
+import { CloudReenrollFramePanel } from './components/CloudReenrollFramePanel'
 import { cloudAssetsBasePath, cloudRouteBasePath } from './routes'
 import { seedThemeFromSharedCookie, syncThemeToSharedCookie } from './cloudThemeSync'
 
@@ -35,6 +37,10 @@ if (typeof window !== 'undefined') {
 // is handed down instead — registered before the first render, so FramesHome
 // sees it the moment it mounts.
 registerAddFramePanel(CloudAddFrameDrawer)
+
+// Same handoff for re-enrolling an EXISTING frame onto a board that lost its
+// settings — the deploy drawer's Firmware section renders it when present.
+registerReenrollFramePanel(CloudReenrollFramePanel)
 
 // The account pages and this workspace share one theme preference. Seeding
 // must happen before initKea — authThemeLogic reads its stored value once,

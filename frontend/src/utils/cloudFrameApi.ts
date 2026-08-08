@@ -74,6 +74,25 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
 }
 
 /**
+ * The owner's per-frame switch for service-settings delivery: whether this
+ * frame's link holds `settings:services`, i.e. whether the device may pull the
+ * account's Unsplash/OpenAI/… keys (cloud/docs/cloud-frames.md, "Service
+ * settings"). Turning it off REMOVES the scope, so the device's next pull is a
+ * 403 and it drops every cloud-owned key it holds.
+ */
+export async function setCloudFrameServiceSettingsEnabled(
+  frameId: FrameId,
+  enabled: boolean
+): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/service-settings/enabled`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  await assertOk(response, `Failed to ${enabled ? 'enable' : 'disable'} service settings for this frame`)
+}
+
+/**
  * Push the Schedule panel's edits. Schedule is its own verb (`set_schedule`),
  * not a settings key: POST /api/frames/{id}/schedule persists the full
  * schedule server-side (disabled events included, so the panel round-trips)

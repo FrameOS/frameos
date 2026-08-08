@@ -64,6 +64,7 @@ import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
+import { registeredReenrollFramePanel } from './reenrollFramePanelRegistry'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
@@ -2034,17 +2035,22 @@ function EmbeddedFirmwareSection({
  *                       API at all — and it is the only way to fix the Wi-Fi
  *                       credentials of a board that cannot reach the cloud.
  *
+ *   4. Re-enroll        the cloud bundle's flasher in re-enrollment mode
+ *                       (reenrollFramePanelRegistry): a claim token bound to
+ *                       THIS frame, so a board that lost its NVS — factory
+ *                       reset, full 0x0 flash — comes back as this row
+ *                       instead of a duplicate. Updating firmware does not
+ *                       need it: the USB updater writes around the NVS.
+ *
  * Deliberately absent: the firmware BUILD controls (EmbeddedWebFlasher,
  * OTA-from-this-backend, esptool command, footprint chart). Those all read
  * frame.embedded.firmware, which the backend builds and cloud frames do not
- * have — the cloud only ever installs published release binaries. Re-ENROLLING
- * an already-enrolled board (moving it to another account, or recovering a
- * blanked NVS) still needs a claim token bound to the existing frame; see
- * docs/todo.md. Updating one does not: the USB updater writes around the NVS.
+ * have — the cloud only ever installs published release binaries.
  */
 function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
   const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   const { updateFrameFirmware } = useActions(framesModel)
+  const ReenrollFramePanel = registeredReenrollFramePanel()
   const mode = workspaceMode()
   const isEsp32 = isEsp32CloudFrame(frame, mode)
   const canUpdateFirmware = isEsp32 && frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
@@ -2114,6 +2120,21 @@ function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
             </div>
             <EmbeddedUsbFirmwareUpdate frame={frame} />
           </div>
+          {/* Re-enrollment, not an update: this one erases the board and
+              rebuilds its identity against THIS frame row. Only offered when
+              the cloud bundle registered a panel (the backend has its own
+              flashing surfaces). */}
+          {ReenrollFramePanel ? (
+            <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+              <div className="frame-tool-muted text-sm leading-5">
+                <span className="font-semibold text-[color:var(--tool-strong)]">Re-enroll over USB.</span> For a board
+                whose settings were wiped — a factory reset, or a full flash from the "Add frame" panel. It writes the
+                firmware and links the board back to <em>this</em> frame, keeping its scenes, assets and logs. Wi-Fi has
+                to be entered again.
+              </div>
+              <ReenrollFramePanel frameId={frame.id} frameName={frame.name} />
+            </div>
+          ) : null}
         </section>
       ) : null}
       {isEsp32 ? <EmbeddedUsbSetup frame={frame} /> : null}

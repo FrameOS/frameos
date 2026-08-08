@@ -39,6 +39,7 @@ import {
   virtualColorModes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
+import { setCloudFrameServiceSettingsEnabled } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
@@ -323,6 +324,93 @@ function FrameAdminServiceSecretsSection(): JSX.Element {
             Save service secrets
           </Button>
         </div>
+      </div>
+    </>
+  )
+}
+
+/**
+ * Cloud-managed frames only: which service-settings groups this frame's
+ * scenes ask for, and whether the account's keys for them actually reach the
+ * device. Two independent facts, and a scene that renders "please provide an
+ * API key" can be either one — hence both on screen:
+ *
+ *  - the DECLARED groups come from the frame row (the cloud denormalizes them
+ *    on every scene assignment) and say what the scenes want;
+ *  - the SWITCH is the owner's per-frame grant of `settings:services`. Off
+ *    means the device's pull 403s and it drops every cloud-owned key.
+ *
+ * The keys themselves are account-level (Settings → service secrets) and never
+ * travel through this panel.
+ */
+function CloudServiceSettingsSection(): JSX.Element {
+  const { frameId, frame } = useValues(frameLogic)
+  const { loadFrame } = useActions(framesModel)
+  const { savedSettings } = useValues(settingsLogic)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const groups = frame?.service_setting_groups ?? []
+  const enabled = frame?.service_settings_enabled === true
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setSaving(true)
+    setError(null)
+    try {
+      await setCloudFrameServiceSettingsEnabled(frameId, next)
+      loadFrame(frameId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <H6 id="frame-settings-service-settings" className="mt-2">
+        Service settings
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-3">
+        <div className="frameos-muted text-sm">
+          API keys your account stores (Settings → service secrets) are fetched by the frame itself over its own
+          authenticated connection. They are never pushed through the command queue.
+        </div>
+        <Field name="_noop" label="Deliver keys to this frame">
+          <div className="w-full space-y-1">
+            <Switch value={enabled} onChange={toggle} disabled={saving} label={enabled ? 'Enabled' : 'Disabled'} />
+            {!enabled ? (
+              <div className="frameos-muted text-xs">
+                The frame is refused the keys and drops any it still holds at its next check.
+              </div>
+            ) : null}
+            {error ? <div className="text-red-300 text-xs">{error}</div> : null}
+          </div>
+        </Field>
+        <Field name="_noop" label="Requested by this frame's scenes">
+          <div className="w-full">
+            {groups.length === 0 ? (
+              <div className="frameos-muted text-sm">
+                None — no scene assigned to this frame declares a service that needs a key.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {groups.map((group) => {
+                  const details = settingsDetails[group]
+                  const saved = details
+                    ? details.fields.every((field) => hasSettingsFieldValue(getSettingsValue(savedSettings, field.path)))
+                    : false
+                  return (
+                    <Tag key={group} color={saved ? 'teal' : 'yellow'}>
+                      {details?.title ?? group}
+                      {saved ? '' : ' — not set'}
+                    </Tag>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </Field>
       </div>
     </>
   )
@@ -1448,6 +1536,10 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
+        {/* Cloud-only, and above the fold on both profiles: "why is my scene
+            asking for an API key" is answered here, not in the account-wide
+            secrets page. */}
+        {hideForCloud ? <CloudServiceSettingsSection /> : null}
         {!esp32CloudProfile && showFrameInfo ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">

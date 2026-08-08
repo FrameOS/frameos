@@ -493,10 +493,17 @@ const controlClassName =
 
 export function Esp32CloudFlasher({
   cloudOrigin,
+  reenrollFrame,
 }: {
   // Provisioned into the board's NVS as cloud_url, so it must be the
   // deployment's public URL, not whatever host the browser is pointed at.
   cloudOrigin: string
+  // Re-enrollment mode: rebuild an EXISTING frame's identity on this board
+  // instead of enrolling a new one. The claim token is minted bound to this
+  // frame id, so redemption re-keys that row (docs/cloud-frames.md,
+  // "Re-enrollment") — which also means there is no new frame to watch for
+  // and no name to ask for: both already exist.
+  reenrollFrame?: { id: string; name: string }
 }): ReactElement {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   // Each enrollment path names its own frame — the SD builder keeps its own
@@ -556,7 +563,7 @@ export function Esp32CloudFlasher({
   // until a frame appears that predates nothing — then offer to open it.
   // Without a snapshot there is no telling old frames from new; stay quiet.
   const { enrolledFrame, hintDue } = useEnrollmentWatch({
-    active: phase === 'done' && knownFrameIds !== null,
+    active: phase === 'done' && knownFrameIds !== null && !reenrollFrame,
     knownFrameIds,
   })
 
@@ -570,23 +577,36 @@ export function Esp32CloudFlasher({
   }
 
   // Enrollment codes are plumbing, not UX: mint a fresh single-use code per
-  // flash, provision it over serial, never show it to the user.
+  // flash, provision it over serial, never show it to the user. In
+  // re-enrollment mode the code is bound to the frame being rebuilt, and the
+  // cloud echoes that id back — assert it, because provisioning a board with
+  // a code for the wrong frame is exactly the duplicate this mode prevents.
   async function mintEnrollmentCode(): Promise<string> {
     const response = await fetch('/api/frames/claim-tokens', {
-      body: JSON.stringify({ name: frameName.trim() }),
+      body: JSON.stringify(
+        reenrollFrame ? { frame_id: reenrollFrame.id } : { name: frameName.trim() }
+      ),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })
     const data = (await response.json().catch(() => ({}))) as {
       claim_token?: string
       error?: string
+      frame_id?: string
     }
     if (!response.ok || !data.claim_token) {
       throw new Error(
         data.error === 'frame_quota_exceeded'
           ? "You've reached the frame limit for this account."
+          : data.error === 'frame_revoked'
+          ? 'This frame has been revoked — delete it and add the board as a new frame.'
+          : data.error === 'invalid_frame'
+          ? 'This frame no longer exists in your account.'
           : 'Could not prepare the enrollment — are you still signed in?'
       )
+    }
+    if (reenrollFrame && data.frame_id !== reenrollFrame.id) {
+      throw new Error('The cloud issued an enrollment for a different frame; nothing was provisioned.')
     }
     return data.claim_token
   }
@@ -607,7 +627,8 @@ export function Esp32CloudFlasher({
       setPhase('error')
       return
     }
-    if (!frameName.trim()) {
+    // Re-enrollment reuses the existing frame's name; there is nothing to ask.
+    if (!reenrollFrame && !frameName.trim()) {
       setError('Name the frame first — that is how it shows up in this workspace.')
       setPhase('error')
       return
@@ -739,11 +760,15 @@ export function Esp32CloudFlasher({
       // one code per failed attempt. Now nothing is spent unless the firmware
       // is actually on the board and only the serial handshake is left.
       log('Preparing a one-time enrollment for this frame…')
-      // Snapshot the fleet BEFORE the claim token exists: whatever frame
-      // appears beyond this set can only be the one this flash enrolls. A
-      // failed snapshot (undefined) just disables the automatic handoff.
-      const framesBeforeEnrollment = await fetchFrameList()
-      setKnownFrameIds(framesBeforeEnrollment ? new Set(framesBeforeEnrollment.map((frame) => frame.id)) : null)
+      if (!reenrollFrame) {
+        // Snapshot the fleet BEFORE the claim token exists: whatever frame
+        // appears beyond this set can only be the one this flash enrolls. A
+        // failed snapshot (undefined) just disables the automatic handoff.
+        // Re-enrollment needs none of this — no frame is created, and the row
+        // to report against is the one the user started from.
+        const framesBeforeEnrollment = await fetchFrameList()
+        setKnownFrameIds(framesBeforeEnrollment ? new Set(framesBeforeEnrollment.map((frame) => frame.id)) : null)
+      }
       const token = await mintEnrollmentCode()
       const commands: ConsoleCommand[] = [
         {
@@ -806,7 +831,11 @@ export function Esp32CloudFlasher({
 
       setPhase('done')
       log(
-        wifiSsid
+        reenrollFrame
+          ? wifiSsid
+            ? `Done. The board joins WiFi and links back to "${reenrollFrame.name}" — its scenes and settings are already there.`
+            : `Done. Connect the board to WiFi (serial: \`wifi <ssid> <pass>\` or the FrameOS-Setup portal); it then links back to "${reenrollFrame.name}".`
+          : wifiSsid
           ? 'Done. The frame joins WiFi, enrolls, and appears in this workspace as pending — confirm it there.'
           : 'Done. Connect the frame to WiFi (serial: `wifi <ssid> <pass>` or the FrameOS-Setup portal); it then enrolls and appears in this workspace as pending.'
       )
@@ -837,21 +866,25 @@ export function Esp32CloudFlasher({
   return (
     <div className="space-y-2">
       <p className="frameos-muted text-xs">
-        Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the frame to this
-        account automatically. If the port picker lists several ports, choose &ldquo;USB JTAG/serial debug unit&rdquo;
-        (a &ldquo;USB Single Serial&rdquo; port can flash but not provision).
+        {reenrollFrame
+          ? `Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the board back to "${reenrollFrame.name}", keeping that frame's scenes, assets and logs.`
+          : 'Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the frame to this account automatically.'}{' '}
+        If the port picker lists several ports, choose &ldquo;USB JTAG/serial debug unit&rdquo; (a &ldquo;USB Single
+        Serial&rdquo; port can flash but not provision).
       </p>
       <div className="grid gap-2">
-        <input
-          aria-label="Frame name"
-          className={controlClassName}
-          disabled={busy}
-          maxLength={256}
-          onChange={(event) => setFrameName(event.target.value)}
-          placeholder="Frame name"
-          required
-          value={frameName}
-        />
+        {reenrollFrame ? null : (
+          <input
+            aria-label="Frame name"
+            className={controlClassName}
+            disabled={busy}
+            maxLength={256}
+            onChange={(event) => setFrameName(event.target.value)}
+            placeholder="Frame name"
+            required
+            value={frameName}
+          />
+        )}
         {!panelSelectable ? (
           <p className="frameos-muted text-xs">
             This release&apos;s firmware drives the Waveshare 7.5&quot; V2 panel; picking a different e-paper panel at
@@ -944,6 +977,8 @@ export function Esp32CloudFlasher({
               ? 'Provisioning…'
               : phase === 'fetching' || phase === 'connecting'
               ? 'Preparing…'
+              : reenrollFrame
+              ? 'Connect & re-enroll'
               : 'Connect & flash'}
           </button>
         </div>
@@ -956,9 +991,24 @@ export function Esp32CloudFlasher({
       {phase === 'done' ? (
         <div
           data-testid="esp32-flash-done"
-          className={enrolledFrame || knownFrameIds ? 'frameos-card space-y-2 rounded-xl border p-3' : undefined}
+          className={
+            reenrollFrame || enrolledFrame || knownFrameIds
+              ? 'frameos-card space-y-2 rounded-xl border p-3'
+              : undefined
+          }
         >
-          {enrolledFrame ? (
+          {reenrollFrame ? (
+            // No frame watch: nothing new is created, so success is reported
+            // against the row the user started from. The board reconnects on
+            // its own schedule and the workspace shows it online then.
+            <p className="frameos-strong flex items-start gap-1.5 text-sm font-semibold">
+              <CheckCircleIcon aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+              <span>
+                &ldquo;{reenrollFrame.name}&rdquo; is provisioned onto this board. It comes back online here once it
+                reaches WiFi — no confirmation needed.
+              </span>
+            </p>
+          ) : enrolledFrame ? (
             <>
               <p className="frameos-strong flex items-start gap-1.5 text-sm font-semibold">
                 <CheckCircleIcon aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />

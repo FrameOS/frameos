@@ -491,13 +491,6 @@ esp_err_t fos_settings_sync(bool force)
     if (source == SETTINGS_SOURCE_CLOUD) {
         s_cloud_next_pull_us = esp_timer_get_time() + SETTINGS_CLOUD_INTERVAL_US;
     }
-    /* New content (200, not 304): drop the Nim side's cached copy of the
-     * legacy per-boot backend fetch (apps.loadEmbeddedServiceSettings) so it
-     * re-reads the same payload. It only ever runs when a backend seeded a
-     * settingsUrl, and it merges the very keys just applied above — a cloud
-     * frame has no such URL, so nothing there can overwrite what the apply
-     * installed. */
-    frameos_nim_invalidate_settings();
     if (s_restart_after_apply) {
         s_restart_after_apply = false;
         ESP_LOGW(TAG, "rotation changed; restarting to re-init the renderer");

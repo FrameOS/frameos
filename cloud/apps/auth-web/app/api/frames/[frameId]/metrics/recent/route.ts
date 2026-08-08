@@ -5,6 +5,7 @@ import {
   jsonError,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
+import { frameRebootMarkers } from "../../../../../../src/lib/frame-reboots";
 import {
   frameForAccount,
   maxMetricsPerFrame,
@@ -66,5 +67,13 @@ export async function GET(
 
   return NextResponse.json({
     metrics: rows.map((row) => metricsRow(frame.id, row)),
+    // Same window as the samples: markers at or after `since`, so a
+    // reconnecting panel picks up the boot it missed without re-shipping the
+    // whole history (the SPA dedupes what overlaps).
+    reboots: await frameRebootMarkers(
+      db,
+      frame.id,
+      since === undefined ? {} : { since },
+    ),
   });
 }

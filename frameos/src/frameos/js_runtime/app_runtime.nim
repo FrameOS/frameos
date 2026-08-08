@@ -456,7 +456,6 @@ proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
       "\" is not declared in the app config's \"settings\" list")
     return jsUndefSentinel(ctx)
 
-  frameos_apps.ensureEmbeddedServiceSettings(e.owner)
   var node = e.owner.frameConfig.settings
   for part in path.items:
     if node.isNil:

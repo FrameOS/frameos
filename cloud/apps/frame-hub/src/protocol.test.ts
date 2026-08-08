@@ -332,8 +332,9 @@ describe("browser event shaping", () => {
       publicKey: "pk",
       schedule: { events: [] },
       scenesChecksum: "have",
-      // Denormalized scene-declared service settings groups; group names
-      // only, and never part of the frame summary the browser sees.
+      // Denormalized scene-declared service settings groups. Group NAMES
+      // travel to the browser (so the workspace can say which keys this
+      // frame's scenes want); no field or value ever does.
       serviceSettingGroups: ["unsplash"],
       settings: { interval: 300, rotate: 90 },
       status: "active",
@@ -357,7 +358,54 @@ describe("browser event shaping", () => {
       rotate: 90,
       scenes_checksum: "have",
       schedule: { events: [] },
+      service_setting_groups: ["unsplash"],
       status: "active",
     });
+  });
+
+  it("reports the service-settings switch only when the link is supplied", () => {
+    const now = new Date("2026-08-01T12:00:00.000Z");
+    const frame = {
+      accountId: "acct",
+      assignedChecksum: null,
+      connected: false,
+      createdAt: now,
+      frameosVersion: null,
+      hardware: null,
+      hubSessionId: null,
+      id: "frame-uuid",
+      lastMetrics: null,
+      lastSeenAt: null,
+      lastState: null,
+      linkedClientId: "lc-1",
+      name: "Kitchen frame",
+      publicKey: "pk",
+      schedule: null,
+      scenesChecksum: null,
+      serviceSettingGroups: null,
+      settings: null,
+      status: "active",
+      updatedAt: now,
+    } satisfies FrameRow;
+
+    // No link: the field is absent, not false. The SPA merges update_frame
+    // over the frame it holds, so absent means "unchanged" rather than
+    // "switched off".
+    expect("service_settings_enabled" in frameUpdateEvent(frame)).toBe(false);
+    // A NULL column reads as "declares nothing" on the wire.
+    expect(frameUpdateEvent(frame).service_setting_groups).toEqual([]);
+
+    expect(
+      frameUpdateEvent(frame, {
+        providerClientMetadata: {
+          requestedScopes: ["frame:managed", "settings:services"],
+        },
+      }).service_settings_enabled,
+    ).toBe(true);
+    expect(
+      frameUpdateEvent(frame, {
+        providerClientMetadata: { requestedScopes: ["frame:managed"] },
+      }).service_settings_enabled,
+    ).toBe(false);
   });
 });

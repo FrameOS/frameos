@@ -309,6 +309,33 @@ the existing `embedded/` pipeline with the claim token passed at flash time.
 No SD card involved. This is the flagship onboarding demo when embedded
 frames are ready.
 
+### Re-enrollment (an existing frame onto a board)
+
+A fourth flow, reached from a frame rather than from "Add frame": the deploy
+drawer's Firmware section offers **Re-enroll over USB** for a board whose
+NVS is gone (factory reset, full `0x0` flash) or one being pointed at a frame
+the account already has. It is the same browser flasher in a mode where the
+claim token is minted BOUND to that frame id (`POST /api/frames/claim-tokens`
+with `frame_id`), so redemption re-keys the row rather than creating one.
+
+Why it has to exist as its own flow: `Esp32CloudFlasher`'s ordinary path
+watches the frames list for an id it has not seen before, which is exactly
+wrong here — nothing new appears. Point the enrollment flow at an already
+owned board and the account ends up with two rows for one device, the older
+one orphaned but still counting against `maxFramesPerAccount`.
+
+Invariants (enforced in `app/api/frames/enroll/route.ts`, `rebindEnrollment`):
+the token is single-use with a one-hour expiry, never consumes frame quota,
+and re-keying touches only the device public key, the reported
+hardware/version, and the link's token — never the frame's id, name, scenes,
+assets, logs, status, or the link's scopes. The previous link token is
+dropped with no grace window, and the hub kicks a socket whose session key no
+longer matches the frame row.
+
+Not covered: moving a board to a DIFFERENT account. That is a delete plus a
+fresh enrollment, and deliberately so — a bound token is minted by the owner
+of the frame it names, so it can never hand a row to a third party.
+
 ## Cloud data model (sketch)
 
 New tables, hanging off existing machinery:
@@ -324,7 +351,13 @@ New tables, hanging off existing machinery:
 - `frame_telemetry` — recent health/log/metric samples, opt-in per scope,
   aggressively capped and pruned (single Postgres, 8 MB-blob-era budgets).
 - `enrollment_tokens` — hashed single-use claim tokens with expiry, minted
-  by "Add frame".
+  by "Add frame". A `bound_frame_id` (distinct from the `frame_id` that
+  merely records which frame a token created) turns one into a
+  **re-enrollment** token: redemption re-keys that frame instead of
+  inserting a row. Two columns, not one, because a multi-use SD-image token
+  picks up a `frame_id` on its first redemption — reading that back as
+  "bound" would re-key the first board's frame on every card flashed after.
+  See "Re-enrollment" below.
 
 Scenes themselves need no new storage: store scenes and private account
 scenes (`store_scenes` + versions) are already the unit of content. "My

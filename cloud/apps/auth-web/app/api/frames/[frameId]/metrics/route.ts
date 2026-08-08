@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { frameMetrics } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
+import { frameRebootMarkers } from "../../../../../src/lib/frame-reboots";
 import { frameForAccount, maxMetricsPerFrame } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
@@ -10,8 +11,8 @@ import { metricsRow } from "./shape";
 export const runtime = "nodejs";
 
 // Retained metrics history for a frame, in the shape the shared SPA's
-// metricsLogic loads on mount ({metrics: MetricsType[]}, reboots optional —
-// the panel also derives reboot markers from the samples and live log lines).
+// metricsLogic loads on mount ({metrics, reboots} — the panel merges these
+// markers with the ones it derives from the samples and from live log lines).
 // Retention is capped at maxMetricsPerFrame on insert (storeFrameMetrics), so
 // serving the whole window is bounded.
 export async function GET(
@@ -51,5 +52,6 @@ export async function GET(
 
   return NextResponse.json({
     metrics: rows.map((row) => metricsRow(frame.id, row)),
+    reboots: await frameRebootMarkers(db, frame.id),
   });
 }

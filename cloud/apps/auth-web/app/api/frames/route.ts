@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { frames } from "@frameos-cloud/db";
+import { frames, linkedClients } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../src/lib/device-flow";
 import { frameSummary } from "../../../src/lib/frames";
@@ -27,15 +27,19 @@ export async function GET(request: NextRequest) {
     return response;
   }
 
+  // The link rides along so the summary can report whether the frame still
+  // receives the account's service settings; a LEFT join keeps a frame whose
+  // linked client vanished visible (it just cannot answer that question).
   const rows = await db
-    .select()
+    .select({ frame: frames, linkedClient: linkedClients })
     .from(frames)
+    .leftJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
     .where(eq(frames.accountId, session.accountId))
     .orderBy(asc(frames.createdAt));
 
   return NextResponse.json({
-    frames: rows.map((frame) => ({
-      ...frameSummary(frame),
+    frames: rows.map(({ frame, linkedClient }) => ({
+      ...frameSummary(frame, linkedClient ?? undefined),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
     })),

@@ -40,7 +40,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize)
 
 extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
-                              const char *backend_url, int frame_id, int rotate);
+                              int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
@@ -49,7 +49,6 @@ extern const char *fos_nim_scene_info_json_impl(void);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
-extern void fos_nim_invalidate_settings_impl(void);
 extern void fos_nim_apply_service_settings_impl(const char *json);
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
@@ -60,7 +59,6 @@ static bool s_nim_started = false;
 static bool s_nim_ready = false;
 static SemaphoreHandle_t s_nim_lock = NULL;
 static char s_backend_url[256] = "";
-static char s_backend_embedded_prefix[320] = "";
 static char s_backend_auth[192] = "";
 static bool s_log_upload_configured = false;
 static bool s_log_upload_enabled = false;
@@ -233,10 +231,9 @@ static void nim_oom_abort_note(const char *what)
 
 bool frameos_nim_available(void) { return true; }
 
-static void configure_backend_auth(const char *backend_url, uint32_t frame_id, const char *api_key)
+static void configure_backend_auth(const char *backend_url, const char *api_key)
 {
     s_backend_url[0] = '\0';
-    s_backend_embedded_prefix[0] = '\0';
     s_backend_auth[0] = '\0';
     if (backend_url == NULL || backend_url[0] == '\0') return;
 
@@ -247,8 +244,6 @@ static void configure_backend_auth(const char *backend_url, uint32_t frame_id, c
     }
     if (s_backend_url[0] == '\0') return;
 
-    snprintf(s_backend_embedded_prefix, sizeof(s_backend_embedded_prefix),
-             "%s/api/frames/%lu/embedded/", s_backend_url, (unsigned long)frame_id);
     if (api_key != NULL && api_key[0] != '\0') {
         snprintf(s_backend_auth, sizeof(s_backend_auth), "Bearer %s", api_key);
     }
@@ -283,12 +278,11 @@ static bool log_upload_heap_ready(void)
 
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key,
-                      bool server_send_logs, int rotate)
+                      const char *api_key, bool server_send_logs, int rotate)
 {
     s_frame_width = width;
     s_frame_height = height;
-    configure_backend_auth(backend_url, frame_id, api_key);
+    configure_backend_auth(backend_url, api_key);
     s_log_upload_configured = server_send_logs;
     s_log_upload_enabled = false;
     ensure_log_lock();
@@ -304,7 +298,7 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
         s_nim_started = true;
     }
     s_nim_ready = fos_nim_init_impl(width, height, frame_name, (int)max_http_response_bytes,
-                                    s_backend_url, (int)frame_id, rotate);
+                                    rotate);
     nim_lock_give();
     return s_nim_ready;
 }
@@ -529,14 +523,6 @@ static void queue_log_line(const char *msg)
 }
 
 static void (*s_log_tap)(const char *line) = NULL;
-
-void frameos_nim_invalidate_settings(void)
-{
-    if (!s_nim_ready) return;
-    if (!nim_lock_take()) return;
-    fos_nim_invalidate_settings_impl();
-    nim_lock_give();
-}
 
 void frameos_nim_apply_service_settings(const char *json)
 {
@@ -987,15 +973,6 @@ static fos_nim_http_chunk *chunked_error(int *out_status, size_t *out_count,
     return chunks;
 }
 
-static bool should_authorize_backend_url(const char *url)
-{
-    if (url == NULL || s_backend_embedded_prefix[0] == '\0' || s_backend_auth[0] == '\0') {
-        return false;
-    }
-    size_t prefix_len = strlen(s_backend_embedded_prefix);
-    return strncmp(url, s_backend_embedded_prefix, prefix_len) == 0;
-}
-
 static char *trim_ascii(char *s)
 {
     if (s == NULL) return s;
@@ -1185,9 +1162,10 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     esp_http_client_set_header(client, "User-Agent", "FrameOS-ESP32/1");
     bool has_content_type = set_extra_headers(client, headers, headers_len);
-    if (should_authorize_backend_url(url)) {
-        esp_http_client_set_header(client, "Authorization", s_backend_auth);
-    }
+    /* No implicit Authorization header here: scene HTTP is scene HTTP. The
+     * only backend-authed calls the device makes are the firmware's own
+     * (log upload below, fos_settings.c's settings poll), which set the
+     * header themselves. */
 
     if (body != NULL && body_len > 0 && !has_content_type) {
         esp_http_client_set_header(client, "Content-Type", "application/json");

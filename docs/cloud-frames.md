@@ -110,6 +110,53 @@ The frame stores its access token in a `0600` state file and appears as
 click, showing hardware details) before any scene push is accepted.
 Re-enrolling a revoked frame needs a fresh claim token.
 
+### A2. Re-enrollment (a claim token bound to an existing frame)
+
+A board that loses its settings — a factory reset, a full `0x0` flash, or a
+move to a different account's frame — comes back with a brand new device
+keypair and no link token. Enrolling it normally would create a SECOND frame
+row for one physical device, orphaning the original's scenes, assets and logs
+while it still counts against the frame quota. So the owner mints a token
+*bound to the frame they already have*:
+
+```http
+POST {provider}/api/frames/claim-tokens
+{"frame_id": "…a frame this account owns…"}
+```
+
+The response is an ordinary claim token plus the `frame_id` echoed back, and
+the binding forces `max_uses: 1` and a short expiry (cloud.frameos.net: 1 h)
+regardless of what was asked for — redeeming one hands a device the identity
+of an existing frame, which is worth more than an ordinary code. Minting is
+refused for a frame the session account does not own (`404 invalid_frame`), a
+revoked one (`409 frame_revoked`), or any `multi_use`/`max_uses > 1`
+(`400 invalid_max_uses`). Frame quota is NOT checked: no frame is created, so
+an account at its limit must still be able to rescue a board.
+
+Redemption goes through the same `POST /api/frames/enroll` with the same body
+and returns the same shape, but re-keys instead of inserting:
+
+- `frames.public_key` becomes the key the device just presented, and the
+  link's token is rotated with **no grace window** (the previous credential
+  is being replaced, so it dies immediately);
+- `frames.id`, the frame's name, scenes, assets, logs, schedule, settings and
+  status are untouched, as are the link's SCOPES — re-enrolling re-keys a
+  device, it does not re-approve anything, so a `settings:services` the owner
+  revoked stays revoked and the response's `scope` is the link's current list;
+- a socket still held by the device that used to own the row is closed with
+  `4401`: the hub compares the frame's public key against the one its session
+  authenticated with.
+
+Errors: `400 invalid_claim_token` if the token expired, the frame is gone or
+revoked, or the budget is spent. Retrying with the *same* device key is
+idempotent (a lost response gets a fresh access token); the same spent token
+presented with any other key is refused.
+
+Bound tokens are what the workspace's "Re-enroll over USB" control uses:
+the browser flasher mints one for the frame on screen, provisions it over
+serial, and reports success against that same row — no new-frame watch, no
+confirmation step.
+
 ### B. Link code on the device (RFC 8628)
 
 The device-authorization flow from `docs/cloud-link.md`, initiated from the
@@ -627,9 +674,11 @@ These are the endpoints the management UI uses; they are provider-internal
 but documented so the shared frontend's cloud adapter is reimplementable:
 
 ```http
-POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame")
+POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment)
 GET  {provider}/api/frames                     # list the account's frames
 GET  {provider}/api/frames/{id}                # one frame, state + sync status
+GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)
+GET  {provider}/api/frames/{id}/metrics/recent # the same, from ?since=
 POST {provider}/api/frames/{id}/confirm        # pending → active
 POST {provider}/api/frames/{id}/revoke         # revoke link; device demotes itself on next 401
 GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
@@ -650,6 +699,25 @@ rest into the frame's `settings`, merged onto what was pushed before) and
 spelling, so the Settings panel renders current state rather than blanks
 after a reload — and an edit made while the device is offline survives until
 the device reconnects.
+
+The frame summary those routes (and the hub's `update_frame` event) return
+also carries the service-settings picture, so the workspace can explain a
+scene that wants a key it does not have:
+
+- `service_setting_groups` — the group NAMES this frame's assigned scenes
+  declare (`[]` when they declare none). Never a field or a value.
+- `service_settings_enabled` — whether the frame's link still holds
+  `settings:services`. Omitted, never `false`, when the caller could not
+  answer (a hub broadcast without the link row); the SPA merges summaries
+  over the frame it holds, so an absent field keeps its last known value.
+
+The metrics routes return `{"metrics": [...], "reboots": [...]}`, matching the
+self-hosted backend. Markers are derived from the device's own
+`{"event": "bootup"}` log lines (and the `reboot` object the Linux runtime
+attaches to them: boot ids, systemd service result, OOM/watchdog kind). The
+backend additionally guesses a reason from the shell output preceding a boot;
+the cloud has no shell verbs, so a cloud marker carries only what the device
+reported.
 
 Frame log retention and any stored previews count toward the account's
 storage usage figure, itemized per frame.

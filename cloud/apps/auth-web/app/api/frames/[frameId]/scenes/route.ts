@@ -16,8 +16,10 @@ import {
   buildScenesPayloadForFrame,
   declaredServiceSettingGroups,
   enqueueFrameCommand,
+  enqueueServiceSettingsRefreshIfScoped,
   frameForAccount,
   pinnedSceneVersion,
+  readServiceSettingGroups,
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -255,14 +257,34 @@ export async function POST(
   // it there would mean unzipping every assigned scene version (32 MiB apiece
   // at the store's cap) per request. Group NAMES only — no credential ever
   // lands in a frames row.
+  const serviceSettingGroups = declaredServiceSettingGroups(payload.scenes);
+  const previousGroups = readServiceSettingGroups(frame.serviceSettingGroups);
   await db
     .update(frames)
     .set({
       assignedChecksum: payload.checksum,
-      serviceSettingGroups: declaredServiceSettingGroups(payload.scenes),
+      serviceSettingGroups,
       updatedAt: new Date(),
     })
     .where(eq(frames.id, frame.id));
+
+  // A scene set that declares a DIFFERENT group set changes what the device's
+  // pull answers, so nudge it to re-pull. Both directions matter: a newly
+  // declared group means keys the frame does not have yet (without this it
+  // would render "please provide an API key" until its next `ready`), and a
+  // group that fell away means keys it should stop holding — the pull deletes
+  // every cloud-owned group absent from the answer. Order-insensitive compare:
+  // declaredServiceSettingGroups follows scene order, so reordering the same
+  // scenes must not cost a wake-up. The nudge carries no payload (the keys
+  // travel over the device-authed pull only) and supersedes its own pending
+  // rows, so N assignments while a frame is offline are one re-pull.
+  // A NULL column counts as "declares nothing": a frame that never had the
+  // column computed also never received a key, so going NULL → [] is not a
+  // change worth waking it for.
+  const previous = previousGroups ?? [];
+  const groupsChanged =
+    previous.length !== serviceSettingGroups.length ||
+    !serviceSettingGroups.every((group) => previous.includes(group));
 
   await supersedePendingCommands(db, frame.id, "set_scenes");
   const command = await enqueueFrameCommand(db, {
@@ -275,6 +297,10 @@ export async function POST(
     },
     type: "set_scenes",
   });
+
+  if (groupsChanged) {
+    await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
+  }
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
