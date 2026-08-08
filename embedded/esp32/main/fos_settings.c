@@ -112,16 +112,15 @@ static bool apply_frame_settings(const cJSON *frame)
     }
 
     const cJSON *rotate = cJSON_GetObjectItem(frame, "rotate");
-    if (cJSON_IsNumber(rotate)) {
-        int rot = (((int)rotate->valuedouble % 360) + 360) % 360;
-        if ((rot == 0 || rot == 90 || rot == 180 || rot == 270) &&
-            (int)config->rotate != rot) {
-            config->rotate = (uint16_t)rot;
-            /* The Nim runtime sizes the scene canvas at init; a rotation
-             * change needs a restart to take effect. */
-            s_restart_after_apply = true;
-            changed = true;
-        }
+    uint16_t normalized_rotate = 0;
+    if (cJSON_IsNumber(rotate) &&
+        fos_config_normalize_rotate(rotate->valuedouble, &normalized_rotate) &&
+        config->rotate != normalized_rotate) {
+        config->rotate = normalized_rotate;
+        /* The Nim runtime sizes the scene canvas at init; a rotation
+         * change needs a restart to take effect. */
+        s_restart_after_apply = true;
+        changed = true;
     }
 
     return changed;

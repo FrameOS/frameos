@@ -246,6 +246,15 @@ bool fos_config_wifi_ready(void)
     return s_config.wifi_ssid[0] != '\0';
 }
 
+bool fos_config_normalize_rotate(double value, uint16_t *out)
+{
+    if (!(value >= -100000.0 && value <= 100000.0)) return false; /* NaN too */
+    int rot = (((int)value % 360) + 360) % 360;
+    if (rot != 0 && rot != 90 && rot != 180 && rot != 270) return false;
+    if (out != NULL) *out = (uint16_t)rot;
+    return true;
+}
+
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)
 {
     char buf[FOS_STR_LEN];

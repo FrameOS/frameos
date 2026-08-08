@@ -1421,10 +1421,29 @@ export function FrameSettings({
               >
                 <TextInput name="interval" placeholder="300" />
               </Field>
+              <Field
+                name="rotate"
+                label="Rotation"
+                tooltip="How the scene is rotated onto the panel. The firmware sizes its canvas once at boot, so saving a new rotation reboots the frame."
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={value || '0'}
+                    onChange={(v) => onChange(parseInt(v))}
+                    name="rotate"
+                    options={[
+                      { value: 0, label: '0 degrees' },
+                      { value: 90, label: '90 degrees' },
+                      { value: 180, label: '180 degrees' },
+                      { value: 270, label: '270 degrees' },
+                    ]}
+                  />
+                )}
+              </Field>
               <p className="frameos-muted text-sm">
-                This ESP32 frame accepts its name and refresh interval from the cloud. The panel driver, WiFi, GPIO
-                and other hardware settings are provisioned on the device itself — over its USB console or the
-                FrameOS-Setup portal.
+                This ESP32 frame accepts its name, refresh interval and rotation from the cloud. The panel driver,
+                WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console
+                or the FrameOS-Setup portal.
               </p>
             </div>
           </>

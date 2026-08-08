@@ -643,6 +643,12 @@ export const frames = pgTable(
     // embedded/esp32/main/fos_schedule.h: {events: [...], disabled?}). Stored
     // so the panel can render it and edits survive the device being offline.
     schedule: jsonb("schedule"),
+    // Last-pushed declarative settings (allowedFrameSettings in
+    // auth-web's src/lib/frames.ts — interval/rotate/…). Devices own their
+    // own copy; this is the control plane's mirror so the Settings panel
+    // renders what was pushed instead of blanks after a reload. `name` is
+    // NOT stored here: frames.name is authoritative for the display name.
+    settings: jsonb("settings"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),

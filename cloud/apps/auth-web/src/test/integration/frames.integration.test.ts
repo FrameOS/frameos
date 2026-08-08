@@ -32,6 +32,7 @@ import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/set
 import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
 import {
   allowedFrameSettings,
+  esp32SettableKeys,
   maxClaimTokensPerAccount,
   maxFramesPerAccount,
   maxScenesPayloadBytes,
@@ -1126,6 +1127,14 @@ describe("frame management API", () => {
     expect([...allowedFrameSettings.keys()].sort()).toEqual(
       ["debug", "interval", "name", "rotate", "scaling_mode", "timezone"].sort(),
     );
+    // The ESP32 profile is a strict subset of that list: exactly what
+    // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies.
+    expect([...esp32SettableKeys].sort()).toEqual(
+      ["interval", "name", "rotate"].sort(),
+    );
+    for (const key of esp32SettableKeys) {
+      expect(allowedFrameSettings.has(key)).toBe(true);
+    }
 
     const { frame_id } = await enrolledFrame();
     await confirmFrame(
@@ -1160,10 +1169,11 @@ describe("frame management API", () => {
   });
 
   // The frame's name is provider-side data (frames.name, what frameSummary
-  // returns) — the device never has to accept it. The ESP32 firmware answers
-  // `unsupported_verb` for set_settings, so the route applies `name` directly
-  // to the row and skips the enqueue for esp32 platforms; anything else in
-  // the payload is refused up front so nothing is half-applied.
+  // returns) — the device never has to accept it, and older firmware without
+  // the set_settings verb would refuse the push for nothing. So the route
+  // applies a name-only payload directly to the row and skips the enqueue
+  // for esp32 platforms; anything outside the device's subset is refused up
+  // front so nothing is half-applied.
   it("renames an esp32 frame in the DB without enqueueing set_settings", async () => {
     const accountId = await signIn();
     const keys = deviceKeypair();
@@ -1205,9 +1215,10 @@ describe("frame management API", () => {
     expect(commands.filter((c) => c.type === "set_settings")).toHaveLength(0);
   });
 
-  it("queues set_settings toward an esp32 for its interval/name subset", async () => {
-    // The firmware's set_settings persists interval (render cadence) and
-    // name (hostname); the provider enqueues those and refuses the rest.
+  it("queues set_settings toward an esp32 for its interval/name/rotate subset", async () => {
+    // The firmware's set_settings applies interval (render cadence), name
+    // (hostname) and rotate (renderer canvas, deferred reboot); the provider
+    // enqueues those and refuses the rest.
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -1223,7 +1234,7 @@ describe("frame management API", () => {
     const response = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { interval: 600, name: "Desk, renamed" } },
+        { settings: { interval: 600, name: "Desk, renamed", rotate: 90 } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),
@@ -1243,14 +1254,96 @@ describe("frame management API", () => {
     const settingsCommands = commands.filter((c) => c.type === "set_settings");
     expect(settingsCommands).toHaveLength(1);
     expect(settingsCommands[0]?.payload).toEqual({
-      settings: { interval: 600, name: "Desk, renamed" },
+      settings: { interval: 600, name: "Desk, renamed", rotate: 90 },
     });
-    // The rename also applied provider-side.
+    // The rename also applied provider-side, and the device-side keys are
+    // mirrored into frames.settings (never the name — frames.name owns it).
     const [frame] = await db
       .select()
       .from(frames)
       .where(eq(frames.id, frame_id));
     expect(frame?.name).toBe("Desk, renamed");
+    expect(frame?.settings).toEqual({ interval: 600, rotate: 90 });
+
+    // …and GET /api/frames/{id} hands them back as top-level fields, which
+    // is what the Settings panel hydrates from. Without this the Interval
+    // and Rotation controls rendered blank after every reload.
+    const detail = await getFrameDetail(
+      new NextRequest(`${baseUrl}/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    expect(detail.status).toBe(200);
+    const detailBody = (await detail.json()) as {
+      frame: { interval?: number; name?: string; rotate?: number };
+    };
+    expect(detailBody.frame.interval).toBe(600);
+    expect(detailBody.frame.rotate).toBe(90);
+    expect(detailBody.frame.name).toBe("Desk, renamed");
+
+    // A later one-key push merges rather than blanking the rest.
+    const again = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { rotate: 270 } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(again.status).toBe(200);
+    const [merged] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(merged?.settings).toEqual({ interval: 600, rotate: 270 });
+  });
+
+  it("refuses the settings an esp32 has no consumer for", async () => {
+    // scaling_mode and debug are not fields of fos_config_t at all, and
+    // timezone is unimplementable on a device with no tz database (its only
+    // timezone concept is the utcOffsetMinutes riding with set_schedule).
+    // The firmware refuses the whole verb on any of them; the route says so
+    // first, so nothing is half-applied.
+    const keys = deviceKeypair();
+    await signIn();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    for (const settings of [
+      { scaling_mode: "cover" },
+      { debug: true },
+      { timezone: "Europe/Tallinn" },
+    ]) {
+      const refused = await pushFrameSettings(
+        postJson(
+          `/api/frames/${frame_id}/settings`,
+          { settings },
+          { origin: baseUrl },
+        ),
+        routeParams(frame_id),
+      );
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as { error: string }).error).toBe(
+        "settings_not_supported_by_device",
+      );
+    }
+
+    const [frame] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(frame?.settings).toBeNull();
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(0);
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
@@ -1274,7 +1367,7 @@ describe("frame management API", () => {
     const refused = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { name: "Half-applied", rotate: 90 } },
+        { settings: { name: "Half-applied", scaling_mode: "cover" } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),

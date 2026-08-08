@@ -1585,11 +1585,12 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
 
 /* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
  * profile persists the subset that maps onto fos_config: `interval`
- * (interval_sec, picked up by the render loop's next pass, no reboot) and
+ * (interval_sec, picked up by the render loop's next pass, no reboot),
  * `name` (the DHCP hostname — the provider-side display name stays
- * authoritative on the provider). Any other key refuses the WHOLE verb with
- * setting_not_allowed, mirroring the Nim runtime, so the provider never
- * half-applies a settings push. */
+ * authoritative on the provider) and `rotate` (the renderer sizes its canvas
+ * once at init, so this one costs a reboot). Any other key refuses the WHOLE
+ * verb with setting_not_allowed, mirroring the Nim runtime, so the provider
+ * never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -1600,7 +1601,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, settings) {
         const char *key = entry->string ? entry->string : "";
-        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0) {
+        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0 &&
+            strcmp(key, "rotate") != 0) {
             ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
             ws_ack(id, false, "setting_not_allowed");
             return;
@@ -1627,11 +1629,36 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
     }
+    /* Validate rotate before touching config, so an invalid one leaves the
+     * whole verb unapplied (the interval/name writes above are still in RAM
+     * — nothing is persisted until fos_config_save() below). */
+    bool rotate_changed = false;
+    const cJSON *rotate = cJSON_GetObjectItem(settings, "rotate");
+    if (rotate != NULL) {
+        uint16_t normalized = 0;
+        if (!cJSON_IsNumber(rotate) ||
+            !fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        rotate_changed = config->rotate != normalized;
+        config->rotate = normalized;
+    }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
     }
     ws_ack(id, true, NULL);
+    if (rotate_changed) {
+        /* The Nim runtime sizes the scene canvas at init (main.c passes
+         * config->rotate into frameos_nim_init), and the panel packers read
+         * the config directly — a restart is what makes a new rotation take
+         * effect, exactly as on the backend settings poll. Ack first: the
+         * reboot task's delay is what lets it flush over the socket. */
+        ESP_LOGW(TAG, "ws: rotation changed to %u; restarting to re-init the renderer",
+                 (unsigned)config->rotate);
+        ws_schedule_reboot();
+    }
 }
 
 /* Ack a message we could not parse, so the provider's durable queue moves on. */

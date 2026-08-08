@@ -298,12 +298,12 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
     else if (strcmp(key, "spill_force") == 0) config->http_spill_force_bytes = strtoul(value, NULL, 10);
     else if (strcmp(key, "rotate") == 0) {
-        unsigned long rot = strtoul(value, NULL, 10) % 360;
-        if (rot != 0 && rot != 90 && rot != 180 && rot != 270) {
+        uint16_t rot = 0;
+        if (!fos_config_normalize_rotate(strtod(value, NULL), &rot)) {
             printf("bad rotate value, want 0, 90, 180 or 270\n");
             return 1;
         }
-        config->rotate = (uint16_t)rot;
+        config->rotate = rot;
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));

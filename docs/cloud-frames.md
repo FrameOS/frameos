@@ -261,7 +261,7 @@ drains either way.
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
 | Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
-| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `set_settings` (the `interval`/`name` subset only — any other allowlisted key refuses the whole verb with `setting_not_allowed`, so a provider should not enqueue them), `assets_list`, `asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` (all six only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned; write acks are sent after the SD write finishes, from the same job queue the reads use), `image_get` (`image/bmp`), `get_logs` (replays the on-device ring of the last 128 lines), `get_metrics` (newest sample; the device also pushes a `metrics` message after every render pass when `telemetry:metrics` is granted), `set_schedule` (evaluated on-device once per wall-clock minute; matching uses UTC plus a provider/backend-supplied `utcOffsetMinutes` — the device carries no tz database), `notify_update_available` (signed cloud OTA: manifest + download from the provider, minisign Ed25519 over BLAKE2b-512 verified against the baked key before the boot slot switches) | — |
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `set_settings` (the `interval`/`name`/`rotate` subset only — any other allowlisted key refuses the whole verb with `setting_not_allowed`, so a provider should not enqueue them; `rotate` is normalized to 0/90/180/270 and, when it actually changes, acked first and then rebooted, because the renderer sizes its canvas once at init. `scaling_mode` and `debug` have no on-device consumer at all and `timezone` is unimplementable without a tz database — the device's only timezone concept is the `utcOffsetMinutes` that rides along with `set_schedule`), `assets_list`, `asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` (all six only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned; write acks are sent after the SD write finishes, from the same job queue the reads use), `image_get` (`image/bmp`), `get_logs` (replays the on-device ring of the last 128 lines), `get_metrics` (newest sample; the device also pushes a `metrics` message after every render pass when `telemetry:metrics` is granted), `set_schedule` (evaluated on-device once per wall-clock minute; matching uses UTC plus a provider/backend-supplied `utcOffsetMinutes` — the device carries no tz database), `notify_update_available` (signed cloud OTA: manifest + download from the provider, minisign Ed25519 over BLAKE2b-512 verified against the baked key before the boot slot switches) | — |
 
 The ESP32 profile is a subset because the firmware has no scheduler, no log
 buffer and no metrics buffer to expose, and updates itself from its own
@@ -540,12 +540,19 @@ POST {provider}/api/frames/{id}/revoke         # revoke link; device demotes its
 GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
 GET  {provider}/api/frames/{id}/scenes         # assigned scenes
 POST {provider}/api/frames/{id}/scenes         # assign scene versions → enqueues set_scenes
-POST {provider}/api/frames/{id}/settings       # declarative settings → enqueues set_settings
+POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
 POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)
 ```
+
+The settings push persists what it validated (`name` into the frame row, the
+rest into the frame's `settings`, merged onto what was pushed before) and
+`GET /api/frames/{id}` returns them as top-level fields in the device's own
+spelling, so the Settings panel renders current state rather than blanks
+after a reload — and an edit made while the device is offline survives until
+the device reconnects.
 
 Frame log retention and any stored previews count toward the account's
 storage usage figure, itemized per frame.

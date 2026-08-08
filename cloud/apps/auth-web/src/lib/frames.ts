@@ -157,6 +157,61 @@ export function validateFrameSettings(
   return { settings: Object.fromEntries(entries) };
 }
 
+// The subset the ESP32 firmware really applies in its `set_settings` handler
+// (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
+// (interval_sec), `name` (the DHCP hostname) and `rotate` (validated with
+// the same 0/90/180/270 normalization the backend settings poll uses, then
+// deferred-rebooted so the renderer re-inits). Everything else has no
+// on-device consumer — `scaling_mode` and `debug` are not even fields of
+// fos_config_t, and `timezone` is unimplementable without a tz database —
+// so the firmware refuses the WHOLE verb on them and the route refuses them
+// up front instead of half-applying a push.
+export const esp32SettableKeys = new Set(["interval", "name", "rotate"]);
+
+// The settings frames.settings mirrors, in the device's spelling. `name` is
+// excluded on purpose: frames.name is the authoritative display name, and a
+// second copy here could disagree with it.
+function persistableSettings(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([key]) => key !== "name"),
+  );
+}
+
+// Merge a validated push onto whatever was stored before, so a push carrying
+// only `interval` does not blank out a previously pushed `rotate`. Returns
+// undefined when the push has nothing to mirror (a name-only rename).
+export function mergeFrameSettings(
+  stored: unknown,
+  pushed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const incoming = persistableSettings(pushed);
+  if (Object.keys(incoming).length === 0) {
+    return undefined;
+  }
+  return { ...readFrameSettings(stored), ...incoming };
+}
+
+// Read the stored jsonb back through the allowlist. It is written through
+// validateFrameSettings, but it is still jsonb from a previous release's
+// (or a future release's) allowlist — screening it here keeps a retired key
+// from reappearing in the summary and, from there, in the next push.
+export function readFrameSettings(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const stored = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, check] of allowedFrameSettings) {
+    if (key === "name") continue;
+    if (Object.hasOwn(stored, key) && check(stored[key])) {
+      out[key] = stored[key];
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Scene schedule (docs/cloud-frames.md `set_schedule`)
 // ---------------------------------------------------------------------------
@@ -337,6 +392,13 @@ export function verifyFrameSignature(
 
 export function frameSummary(frame: typeof frames.$inferSelect) {
   return {
+    // The last-pushed settings round-trip as TOP-LEVEL fields in the
+    // device's own spelling (interval, rotate, …) because that is how the
+    // shared SPA's frameForm reads them — see cloudFrameSettingKeys in
+    // frontend/src/utils/cloudFrameSettings.ts. Without this the Settings
+    // panel rendered blanks after every reload. Spread first so the
+    // provider-owned fields below always win, `name` above all.
+    ...readFrameSettings(frame.settings),
     assigned_checksum: frame.assignedChecksum,
     connected: frame.connected,
     created_at: frame.createdAt,

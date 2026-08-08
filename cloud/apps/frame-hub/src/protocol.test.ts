@@ -332,6 +332,7 @@ describe("browser event shaping", () => {
       publicKey: "pk",
       schedule: { events: [] },
       scenesChecksum: "have",
+      settings: { interval: 300, rotate: 90 },
       status: "active",
       updatedAt: now,
     } satisfies FrameRow;
@@ -342,11 +343,15 @@ describe("browser event shaping", () => {
       frameos_version: "2026.8.1",
       hardware: { platform: "pi-zero2w" },
       id: "frame-uuid",
+      // The last-pushed settings ride along as top-level fields, in the
+      // device's spelling — that is what the SPA's frameForm hydrates from.
+      interval: 300,
       last_metrics: { cpu: 1 },
       last_seen_at: now,
       last_state: { active_scene: "s1" },
       linked_client_id: "lc-1",
       name: "Kitchen frame",
+      rotate: 90,
       scenes_checksum: "have",
       schedule: { events: [] },
       status: "active",
