@@ -33,6 +33,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1694,6 +1695,10 @@ static void ws_handle_message(const char *data, size_t len)
      * mutations defer to the backend; telemetry, assets and OTA still work. */
     static const char *backend_owned_verbs[] = {
         "set_scenes", "set_current_scene", "set_settings", "set_schedule",
+        /* Service settings too: the settings poll takes its payload from the
+         * backend whenever one is configured, so acking a provider's nudge
+         * `ok: true` would promise a fetch that never reads the provider. */
+        "refresh_service_settings",
     };
     if (fos_config()->backend_url[0] != '\0') {
         for (size_t i = 0; i < sizeof(backend_owned_verbs) / sizeof(backend_owned_verbs[0]); i++) {
@@ -1714,6 +1719,7 @@ static void ws_handle_message(const char *data, size_t len)
          * revocations since enrollment. */
         bool logs_granted = false;
         bool metrics_granted = false;
+        bool service_settings_granted = false;
         const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
         const cJSON *scope = NULL;
         cJSON_ArrayForEach(scope, scopes) {
@@ -1722,10 +1728,19 @@ static void ws_handle_message(const char *data, size_t len)
                 logs_granted = true;
             } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
                 metrics_granted = true;
+            } else if (strcmp(scope->valuestring, "settings:services") == 0) {
+                service_settings_granted = true;
             }
         }
         s_logs_granted = logs_granted;
         s_metrics_granted = metrics_granted;
+        /* Service settings are fetched, never pushed: this only tells the
+         * settings poll it may ask. It pulls once before the next render, so a
+         * key the owner changed while this frame was offline lands on
+         * reconnect without waiting for a nudge. Unlike the telemetry flags
+         * this one is additive and outlives the session — the provider's
+         * `403 insufficient_scope` is what removes the keys again. */
+        fos_settings_cloud_scope_granted(service_settings_granted);
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
@@ -1793,6 +1808,21 @@ static void ws_handle_message(const char *data, size_t len)
                 ws_ack(id, false, "invalid_schedule");
             }
             cJSON_free(printed);
+        }
+    } else if (strcmp(type, "refresh_service_settings") == 0) {
+        /* Advisory nudge: "your service settings changed, re-fetch them". The
+         * payload is always empty — API keys never ride the command queue
+         * (docs/cloud-frames.md, "Service settings") and nothing here reads
+         * one. Disjoint from set_settings: the six service groups are not in
+         * that verb's allowlist and never become settable over the socket.
+         * Ack on ACCEPTING the nudge, not on completing the fetch: the fetch
+         * is HTTP on the render task's schedule, and a failed fetch must not
+         * look like a refused verb. */
+        if (!fos_settings_cloud_scope()) {
+            ws_ack(id, false, "insufficient_scope");
+        } else {
+            ws_ack(id, true, NULL);
+            fos_settings_request_sync();
         }
     } else if (strcmp(type, "get_logs") == 0) {
         ws_handle_get_logs(root, id);

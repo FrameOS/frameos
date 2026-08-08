@@ -104,6 +104,94 @@ proc invalidateEmbeddedServiceSettings*(config: FrameConfig) =
         config.settings{"embedded"}.kind == JObject:
       config.settings["embedded"]["settingsLoaded"] = %false
 
+const CloudServiceSettingsGroups* = [
+  "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
+]
+  ## The settings groups a cloud provider owns on a cloud-managed frame
+  ## (docs/cloud-frames.md, "Service settings"). Everything else in
+  ## `config.settings` stays under local control and is never touched here.
+  ## The Linux runtime keeps the same list in server/api.nim
+  ## (`frameCloudServiceSettingsGroups`, pinned to the admin-editable fields
+  ## by a static block); this copy exists because that module — and the whole
+  ## frame.json persistence layer under it — is not part of the embedded
+  ## build, where settings live in RAM and are re-pulled every boot.
+
+const CloudServiceSettingsFields* = [
+  ("frameOS", "apiKey"),
+  ("openAI", "apiKey"),
+  ("homeAssistant", "url"),
+  ("homeAssistant", "accessToken"),
+  ("github", "api_key"),
+  ("immich", "url"),
+  ("immich", "apiKey"),
+  ("unsplash", "accessKey"),
+]
+  ## Every field a provider may deliver, per group. Mirrors
+  ## `frameAdminEditableSettingsFields` in server/api.nim and the field list in
+  ## docs/cloud-frames.md; anything else in a delivered group is dropped.
+
+proc cloudServiceSettingsGroup(group: string, payload: JsonNode): JsonNode =
+  ## One group as the device will store it: only the fields this frame knows
+  ## for that group, only non-empty strings. nil when nothing usable is left —
+  ## the caller then deletes the group, exactly as it treats an absent one (the
+  ## provider omits empty values for the same reason).
+  if payload == nil or payload.kind != JObject:
+    return nil
+  var fields = newJObject()
+  for (section, field) in CloudServiceSettingsFields:
+    if section != group:
+      continue
+    let value = payload{field}
+    if value != nil and value.kind == JString and value.getStr("").len > 0:
+      fields[field] = %value.getStr("")
+  if fields.len == 0: nil else: fields
+
+proc applyServiceSettings*(config: FrameConfig, settings: JsonNode): bool {.discardable.} =
+  ## Applies one cloud service-settings pull (docs/cloud-frames.md) to the live
+  ## config, and reports whether anything changed.
+  ##
+  ## `settings` is the pull's `settings` object (group → field → value). The six
+  ## groups above are cloud-owned: each one present is REPLACED wholesale and
+  ## each one absent is DELETED — revoking a key in the provider account, or
+  ## dropping the last scene that used it, has to take the key off the device.
+  ## `nil` or an empty object clears all six, which is what the provider's
+  ## `403 insufficient_scope` means. No other settings key is read or written.
+  ##
+  ## The Linux counterpart is `persistCloudServiceSettingsUpdate` in
+  ## server/api.nim, which does the same thing to frame.json. On embedded there
+  ## is no frame.json: `config.settings` IS the copy, rebuilt from scratch on
+  ## every boot, so a device that never pulls again simply has no keys.
+  if config == nil:
+    return false
+  if config.settings == nil or config.settings.kind != JObject:
+    config.settings = %*{}
+  let incoming = if settings != nil and settings.kind == JObject: settings else: nil
+  for group in CloudServiceSettingsGroups:
+    let desired =
+      if incoming == nil: nil
+      else: cloudServiceSettingsGroup(group, incoming{group})
+    let existing = config.settings{group}
+    if desired == nil:
+      if existing != nil:
+        config.settings.delete(group)
+        result = true
+    elif existing == nil or existing.kind != JObject or existing != desired:
+      config.settings[group] = desired
+      result = true
+
+proc applyServiceSettings*(config: FrameConfig, json: string): bool {.discardable.} =
+  ## String entrypoint for the firmware (embedded_main.fos_nim_apply_service_settings_impl).
+  ## An unparseable payload changes nothing — only a well-formed `{}` clears the
+  ## groups, so a truncated read can never look like a revocation.
+  var parsed: JsonNode = nil
+  try:
+    parsed = parseJson(if json.len == 0: "null" else: json)
+  except CatchableError:
+    return false
+  if parsed == nil or parsed.kind != JObject:
+    return false
+  config.applyServiceSettings(parsed)
+
 proc ensureEmbeddedServiceSettings*(self: AppRoot) =
   if self != nil:
     self.frameConfig.ensureEmbeddedServiceSettings()
