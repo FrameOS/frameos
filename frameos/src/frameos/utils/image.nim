@@ -593,11 +593,11 @@ when defined(frameosEmbedded):
   proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,
       fit: ScaledDecodeFit): Image =
     ## Decodes an image whose HTTP body was spilled to storage (SD/SPIFFS)
-    ## because PSRAM could not buffer it. JPEGs stream from the file through
-    ## pixie's windowed decoder — neither the compressed body nor a full-size
-    ## RGBA intermediate ever lives in RAM. Formats without a file-backed
-    ## streaming decoder fail with a clear error: buffering the file back
-    ## would recreate the OOM the spill just avoided.
+    ## because PSRAM could not buffer it. JPEGs and PNGs stream from the file
+    ## through pixie's windowed decoders — neither the compressed body nor a
+    ## full-size RGBA intermediate ever lives in RAM. Formats without a
+    ## file-backed streaming decoder fail with a clear error: buffering the
+    ## file back would recreate the OOM the spill just avoided.
     var file: File
     if not file.open(path):
       raise newException(PixieError, "Cannot open spilled image file: " & path)
@@ -613,6 +613,16 @@ when defined(frameosEmbedded):
         # Progressive JPEGs raise here; the buffered retry other paths use is
         # exactly the allocation that could not be made, so let it surface.
         decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Row-streamed chunk walk over the spilled file: a small read buffer
+        # plus pixie's fixed inflate window, never the whole compressed body.
+        # Interlaced/16-bit PNGs raise here — decoding those would need the
+        # buffered copy the spill exists to avoid, so let it surface.
+        decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
         return target
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")
