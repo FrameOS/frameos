@@ -531,14 +531,22 @@ export const assetsLogic = kea<assetsLogicType>([
             detail,
           })
         }
+        // Embedded frames always upload in chunks: the backend forwards each
+        // chunk to the device synchronously, so one slow request never has to
+        // carry the whole file and the progress bar tracks what the device
+        // actually received. Retried chunks overwrite themselves (offset
+        // semantics) — safe on the backend + ESP32, not on the Nim admin API.
+        const chunkedUpload = isInFrameAdminMode() || values.frame.mode === 'embedded'
         try {
-          const asset = isInFrameAdminMode()
+          const asset = chunkedUpload
             ? await uploadFileInChunks({
                 frameId: props.frameId,
                 suffix: 'assets/upload',
                 file,
                 path,
                 filename: file.name,
+                chunkSize: isInFrameAdminMode() ? undefined : 256 * 1024,
+                retries: isInFrameAdminMode() ? 0 : 2,
                 onProgress: (size) => updateProgress(size),
               })
             : await (async () => {

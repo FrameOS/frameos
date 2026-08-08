@@ -45,6 +45,7 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_file_path,
 )
 from app.utils.build_environment import selected_build_environment_provider
+from app.utils import embedded_assets
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
@@ -1098,6 +1099,8 @@ class FrameDeployWorkflow:
             "stdinfo",
             f"{icon} Uploading {len(scenes)} scene(s) to embedded frame over HTTP",
         )
+        # Scene payloads reach a few hundred KB; on a weak link the default
+        # 20s frame timeout is not enough (observed 408s at ~114KB).
         status, body, _headers = await _fetch_frame_http_bytes(
             frame,
             self.redis,
@@ -1105,6 +1108,7 @@ class FrameDeployWorkflow:
             method="POST",
             body=payload,
             headers={"Content-Type": "application/json"},
+            timeout=embedded_assets.UPLOAD_TIMEOUT,
         )
         if status >= 300:
             message = body.decode("utf-8", errors="replace").strip()

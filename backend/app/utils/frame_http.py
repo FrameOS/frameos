@@ -233,8 +233,12 @@ async def _fetch_frame_http_bytes(
     method: str = "GET",
     body: bytes | str | None = None,
     headers: Optional[dict[str, str]] = None,
+    timeout: Optional[httpx.Timeout] = None,
 ) -> tuple[int, bytes, dict[str, str]]:
-    """Fetch *path* from the frame returning (status, body-bytes, headers)."""
+    """Fetch *path* from the frame returning (status, body-bytes, headers).
+
+    `timeout` overrides FRAME_HTTP_TIMEOUT for requests that legitimately
+    take long (e.g. asset uploads crawling over a weak WiFi link)."""
     if await _use_remote(frame, redis):
         remote_body: str | None
         if isinstance(body, bytes):
@@ -277,7 +281,7 @@ async def _fetch_frame_http_bytes(
                             url,
                             headers=hdrs,
                             content=body,
-                            timeout=FRAME_HTTP_TIMEOUT,
+                            timeout=timeout if timeout is not None else FRAME_HTTP_TIMEOUT,
                         )
                         return response.status_code, response.content, dict(response.headers)
                     except timeout_errors:

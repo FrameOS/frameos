@@ -38,7 +38,7 @@ class FakeDevice:
         self.responses = list(responses)
         self.calls = []
 
-    async def __call__(self, frame, redis, *, path, method="GET", body=None, headers=None):
+    async def __call__(self, frame, redis, *, path, method="GET", body=None, headers=None, timeout=None):
         self.calls.append({"path": path, "method": method, "body": body, "headers": headers})
         if not self.responses:
             raise AssertionError(f"Unexpected device request: {method} {path}")
@@ -468,3 +468,178 @@ async def test_write_operations_invalidate_assets_cache(async_client, db, redis)
 
     assert response.status_code == 200
     assert await redis.get(cache_key) is None
+
+
+# ---------------------------------------------------------------------------
+# chunked upload
+# ---------------------------------------------------------------------------
+
+
+def _chunk_url(frame_id, upload_id, filename, chunk_index, offset, complete, path=""):
+    from urllib.parse import urlencode
+
+    params = {
+        "upload_id": upload_id,
+        "filename": filename,
+        "chunk_index": chunk_index,
+        "offset": offset,
+        "complete": "1" if complete else "0",
+    }
+    if path:
+        params["path"] = path
+    return f"/api/frames/{frame_id}/assets/upload?{urlencode(params)}"
+
+
+def _device_query(call):
+    from urllib.parse import urlsplit
+
+    split = urlsplit(call["path"])
+    return {k: v[0] for k, v in parse_qs(split.query).items()}
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_forwards_each_chunk_to_device(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    chunks = [b"aaaa", b"bbbb", b"cc"]
+    device = FakeDevice([
+        json_response({"pending": True, "received": 4}),
+        json_response({"pending": True, "received": 8}),
+        json_response({"path": "sub/big.bin", "size": 10, "mtime": 1712345678, "is_dir": False}),
+    ])
+
+    with patch(FETCH, new=device):
+        for index, chunk in enumerate(chunks):
+            response = await async_client.post(
+                _chunk_url(frame.id, "chunky1", "big.bin", index, index * 4,
+                           index == len(chunks) - 1, path="sub"),
+                content=chunk,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            assert response.status_code == 200, response.text
+            if index < len(chunks) - 1:
+                assert response.json() == {"pending": True, "received": (index + 1) * 4}
+
+    final = response.json()
+    assert final["path"] == "sub/big.bin"
+    assert final["size"] == 10
+    assert final["is_dir"] is False
+
+    assert [call["body"] for call in device.calls] == chunks
+    queries = [_device_query(call) for call in device.calls]
+    assert [q["offset"] for q in queries] == ["0", "4", "8"]
+    assert [q["complete"] for q in queries] == ["0", "0", "1"]
+    assert all(q["upload_id"] == "chunky1" for q in queries)
+    assert all(q["path"] == "sub/big.bin" for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_legacy_firmware_accumulates_and_sends_whole_file(
+    async_client, db, redis
+):
+    frame = await create_embedded_frame(async_client, db)
+    chunks = [b"aaaa", b"bbbb", b"cc"]
+    device = FakeDevice([
+        # Legacy firmware ignores chunk params: replies with a stat dict (no
+        # "pending") for the probe chunk...
+        json_response({"path": "big.bin", "size": 4, "mtime": 1, "is_dir": False}),
+        # ...and receives one whole-file upload at the end.
+        json_response({"path": "big.bin", "size": 10, "mtime": 2, "is_dir": False}),
+    ])
+
+    with patch(FETCH, new=device):
+        for index, chunk in enumerate(chunks):
+            response = await async_client.post(
+                _chunk_url(frame.id, "legacy1", "big.bin", index, index * 4,
+                           index == len(chunks) - 1),
+                content=chunk,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            assert response.status_code == 200, response.text
+
+    final = response.json()
+    assert final["path"] == "big.bin"
+    assert final["size"] == 10
+
+    assert len(device.calls) == 2
+    assert device.calls[0]["body"] == b"aaaa"          # the chunked probe
+    assert "upload_id" in _device_query(device.calls[0])
+    assert device.calls[1]["body"] == b"aaaabbbbcc"    # the whole file
+    assert "upload_id" not in _device_query(device.calls[1])
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_device_gap_maps_to_conflict(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([(409, b'{"error":"chunk_gap"}', {})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.post(
+            _chunk_url(frame.id, "gappy1", "big.bin", 3, 12, False),
+            content=b"dddd",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_rejects_bad_upload_id(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([])
+
+    with patch(FETCH, new=device):
+        response = await async_client.post(
+            f"/api/frames/{frame.id}/assets/upload?upload_id=..%2Fevil&filename=x.bin",
+            content=b"x",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert response.status_code == 400
+    assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_asset_splits_large_payload_into_chunks(async_client, db, redis, monkeypatch):
+    from app.utils import embedded_assets
+
+    frame = await create_embedded_frame(async_client, db)
+    monkeypatch.setattr(embedded_assets, "EMBEDDED_UPLOAD_CHUNK_BYTES", 4)
+    data = b"aaaabbbbcc"
+    device = FakeDevice([
+        json_response({"pending": True, "received": 4}),
+        json_response({"pending": True, "received": 8}),
+        json_response({"path": "big.bin", "size": 10, "mtime": 1, "is_dir": False}),
+    ])
+
+    with patch(FETCH, new=device):
+        payload = await embedded_assets.upload_asset(frame, redis, "/srv/assets/big.bin", data)
+
+    assert payload["size"] == 10
+    assert [call["body"] for call in device.calls] == [b"aaaa", b"bbbb", b"cc"]
+    queries = [_device_query(call) for call in device.calls]
+    assert [q["offset"] for q in queries] == ["0", "4", "8"]
+    assert [q["complete"] for q in queries] == ["0", "0", "1"]
+    assert len({q["upload_id"] for q in queries}) == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_asset_legacy_firmware_falls_back_to_single_shot(
+    async_client, db, redis, monkeypatch
+):
+    from app.utils import embedded_assets
+
+    frame = await create_embedded_frame(async_client, db)
+    monkeypatch.setattr(embedded_assets, "EMBEDDED_UPLOAD_CHUNK_BYTES", 4)
+    data = b"aaaabbbbcc"
+    device = FakeDevice([
+        json_response({"path": "big.bin", "size": 4, "mtime": 1, "is_dir": False}),
+        json_response({"path": "big.bin", "size": 10, "mtime": 2, "is_dir": False}),
+    ])
+
+    with patch(FETCH, new=device):
+        payload = await embedded_assets.upload_asset(frame, redis, "/srv/assets/big.bin", data)
+
+    assert payload["size"] == 10
+    assert len(device.calls) == 2
+    assert device.calls[1]["body"] == data
+    assert "upload_id" not in _device_query(device.calls[1])

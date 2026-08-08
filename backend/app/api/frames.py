@@ -2612,36 +2612,177 @@ async def api_frame_assets_upload_image(
     }
 
 
-@api_project.post("/frames/{id:int}/assets/upload")
-async def api_frame_assets_upload(
-    id: int,
-    path: Optional[str] = Form(
-        None,
-        description="Sub-folder inside the frame's assets directory (optional)",
-    ),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id) or _not_found()
-
-    subdir = (path or "").lstrip("/")
+def _asset_upload_combined_path(frame: Frame, subdir: str, filename: str) -> tuple[str, str]:
+    """Validate subdir + filename against the frame's assets root; returns
+    (assets_path, combined_path)."""
+    subdir = (subdir or "").lstrip("/")
     if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
         _bad_request("Invalid character * in path")
-
     assets_path = frame.assets_path or "/srv/assets"
     combined_path = os.path.normpath(
-        os.path.join(assets_path, subdir, file.filename or "uploaded_file")
+        os.path.join(assets_path, subdir, filename or "uploaded_file")
     )
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
+    return assets_path, combined_path
 
-    data = await file.read()
 
+async def _asset_upload_store(
+    db: Session, redis: Redis, frame: Frame, combined_path: str, data: bytes
+) -> None:
     if _is_embedded_frame(frame):
         await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
     else:
         await upload_file(db, redis, frame, combined_path, data)
+
+
+_UPLOAD_CHUNK_DIR = os.path.join(tempfile.gettempdir(), "frameos-upload-chunks")
+_UPLOAD_CHUNK_STALE_SECONDS = 24 * 3600
+
+
+def _upload_chunk_part_path(frame_id: int, upload_id: str) -> str:
+    return os.path.join(_UPLOAD_CHUNK_DIR, f"{frame_id}-{upload_id}.part")
+
+
+def _cleanup_stale_upload_parts() -> None:
+    try:
+        cutoff = time.time() - _UPLOAD_CHUNK_STALE_SECONDS
+        for name in os.listdir(_UPLOAD_CHUNK_DIR):
+            part = os.path.join(_UPLOAD_CHUNK_DIR, name)
+            try:
+                if os.path.getmtime(part) < cutoff:
+                    os.unlink(part)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+async def _chunked_asset_upload(
+    request: Request, frame: Frame, db: Session, redis: Redis
+) -> dict[str, Any]:
+    """One chunk of a client-driven chunked upload (raw body + query params,
+    same protocol as the on-device admin API). Real embedded devices get each
+    chunk forwarded immediately — a completed chunk is on the device, so
+    client progress is device progress. Virtual/SSH frames (and embedded
+    devices on legacy firmware) accumulate locally and store on complete."""
+    qp = request.query_params
+    upload_id = qp.get("upload_id") or ""
+    if not embedded_assets.valid_upload_id(upload_id):
+        _bad_request("Invalid upload id")
+    filename = os.path.basename((qp.get("filename") or "").strip()) or "uploaded_file"
+    try:
+        chunk_index = int(qp.get("chunk_index") or "0")
+        offset = int(qp.get("offset") or "-1")
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid chunk parameters")
+    if chunk_index < 0:
+        _bad_request("Invalid chunk parameters")
+    if chunk_index == 0 and offset < 0:
+        offset = 0
+    complete = (qp.get("complete") or "1") == "1"
+    chunk = await request.body()
+    if not chunk and not complete:
+        _bad_request("Empty chunk")
+
+    assets_path, combined_path = _asset_upload_combined_path(frame, qp.get("path") or "", filename)
+
+    part_path = _upload_chunk_part_path(frame.id, upload_id)
+    accumulate = os.path.exists(part_path)
+
+    if _is_embedded_frame(frame) and not is_virtual_frame(frame) and not accumulate:
+        if offset < 0:
+            _bad_request("Missing offset")
+        payload = await embedded_assets.upload_asset_chunk(
+            frame,
+            redis,
+            combined_path,
+            chunk,
+            upload_id=upload_id,
+            chunk_index=chunk_index,
+            offset=offset,
+            complete=complete,
+        )
+        if payload is not None:
+            if not complete:
+                return {"pending": True, "received": payload.get("received", offset + len(chunk))}
+            await _invalidate_frame_assets_cache(redis, frame, assets_path)
+            rel = os.path.relpath(combined_path, assets_path)
+            return {
+                "path": rel,
+                "size": payload.get("size", offset + len(chunk)),
+                "mtime": payload.get("mtime", int(datetime.now().timestamp())),
+                "is_dir": False,
+            }
+        # Legacy firmware without chunk support: accumulate locally instead
+        # and deliver the whole file on the final chunk.
+        accumulate = True
+
+    if chunk_index > 0 and not accumulate:
+        # The part vanished (backend restart, stale cleanup): client restarts.
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+
+    os.makedirs(_UPLOAD_CHUNK_DIR, exist_ok=True)
+    _cleanup_stale_upload_parts()
+    if chunk_index == 0:
+        with open(part_path, "wb") as fh:
+            fh.write(chunk)
+    else:
+        part_size = os.path.getsize(part_path)
+        seek_to = offset if offset >= 0 else part_size
+        if seek_to > part_size:
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+        with open(part_path, "r+b") as fh:
+            fh.seek(seek_to)
+            fh.write(chunk)
+
+    if not complete:
+        return {"pending": True, "received": os.path.getsize(part_path)}
+
+    with open(part_path, "rb") as fh:
+        data = fh.read()
+    os.unlink(part_path)
+    await _asset_upload_store(db, redis, frame, combined_path, data)
+    await _invalidate_frame_assets_cache(redis, frame, assets_path)
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path": rel,
+        "size": len(data),
+        "mtime": int(datetime.now().timestamp()),
+        "is_dir": False,
+    }
+
+
+@api_project.post("/frames/{id:int}/assets/upload")
+async def api_frame_assets_upload(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Upload an asset. Two request shapes share this route:
+
+    * multipart form (``file`` + optional ``path``) — the whole file at once;
+    * chunked (query params ``upload_id``/``filename``/``chunk_index``/
+      ``offset``/``complete`` + raw body) — the protocol the on-device admin
+      API already speaks; used by the frontend for embedded frames so a slow
+      device link never has to survive one giant request.
+    """
+    frame = _project_frame(db, id) or _not_found()
+
+    if "upload_id" in request.query_params:
+        return await _chunked_asset_upload(request, frame, db, redis)
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        _bad_request("Missing file")
+    assets_path, combined_path = _asset_upload_combined_path(
+        frame, str(form.get("path") or ""), upload.filename or ""
+    )
+
+    data = await upload.read()
+    await _asset_upload_store(db, redis, frame, combined_path, data)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
     rel = os.path.relpath(combined_path, assets_path)
