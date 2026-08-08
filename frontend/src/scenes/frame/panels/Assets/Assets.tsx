@@ -95,6 +95,8 @@ function TreeNode({
   setFrameAssetFolderExpanded,
   showSystemFolders,
   toggleShowSystemFolders,
+  showHiddenFiles,
+  toggleShowHiddenFiles,
   readOnly,
 }: {
   node: AssetNode
@@ -110,6 +112,8 @@ function TreeNode({
   setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
   showSystemFolders: boolean
   toggleShowSystemFolders: () => void
+  showHiddenFiles: boolean
+  toggleShowHiddenFiles: () => void
   /** Cloud mode: the wire contract is read-only (assets_list/asset_get), so
    * every mutation affordance disappears — browse, thumbs, download and the
    * run-image-scene buttons stay. */
@@ -221,13 +225,20 @@ function TreeNode({
                   : null,
                 !node.path
                   ? {
-                      label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
-                      icon: showSystemFolders ? (
-                        <EyeSlashIcon className="w-5 h-5" />
-                      ) : (
-                        <EyeIcon className="w-5 h-5" />
-                      ),
+                      label: showSystemFolders
+                        ? 'Hide system folders (.frameos, .thumbs)'
+                        : 'Show system folders (.frameos, .thumbs)',
+                      icon: showSystemFolders ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
                       onClick: toggleShowSystemFolders,
+                    }
+                  : null,
+                !node.path
+                  ? {
+                      label: showHiddenFiles
+                        ? 'Hide hidden files (.DS_Store, Thumbs.db, …)'
+                        : 'Show hidden files (.DS_Store, Thumbs.db, …)',
+                      icon: showHiddenFiles ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
+                      onClick: toggleShowHiddenFiles,
                     }
                   : null,
                 node.path && !readOnly
@@ -285,6 +296,8 @@ function TreeNode({
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
                 showSystemFolders={showSystemFolders}
                 toggleShowSystemFolders={toggleShowSystemFolders}
+                showHiddenFiles={showHiddenFiles}
+                toggleShowHiddenFiles={toggleShowHiddenFiles}
                 readOnly={readOnly}
               />
             ))}
@@ -592,13 +605,12 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const assetsLogicProps = { frameId: frame.id }
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
-  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders } = useValues(
-    assetsLogic(assetsLogicProps)
-  )
+  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders, showHiddenFiles } =
+    useValues(assetsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
-  const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
+  const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync pulls from the backend's own store; the on-device panel and the
   // cloud have nothing to sync from. Everything else works on every control
@@ -687,6 +699,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
             showSystemFolders={showSystemFolders}
             toggleShowSystemFolders={toggleShowSystemFolders}
+            showHiddenFiles={showHiddenFiles}
+            toggleShowHiddenFiles={toggleShowHiddenFiles}
             readOnly={readOnly}
           />
         </div>

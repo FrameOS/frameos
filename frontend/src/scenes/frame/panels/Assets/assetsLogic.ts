@@ -14,6 +14,7 @@ import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 
 export interface AssetsLogicProps {
   frameId: FrameId
@@ -274,6 +275,7 @@ export const assetsLogic = kea<assetsLogicType>([
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
+    toggleShowHiddenFiles: true,
   }),
   loaders(({ actions, cache, props, values }) => ({
     assets: [
@@ -396,6 +398,16 @@ export const assetsLogic = kea<assetsLogicType>([
         toggleShowSystemFolders: (state) => !state,
       },
     ],
+    // OS junk (.DS_Store, ._sidecars, Thumbs.db, @eaDir, …) is hidden by
+    // default; the preference is global, not per frame — you plug the same
+    // SD card into several frames.
+    showHiddenFiles: [
+      false,
+      { persist: true, storageKey: 'assetsLogic.showHiddenFiles' },
+      {
+        toggleShowHiddenFiles: (state) => !state,
+      },
+    ],
     assets: {
       assetUploaded: (state, { asset }) =>
         state.find((a) => a.path === asset.path)
@@ -459,11 +471,16 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders],
-      (cleanedAssets, frame, showSystemFolders) => {
-        const visibleAssets = showSystemFolders
-          ? cleanedAssets
-          : cleanedAssets.filter((asset) => !isSystemAssetPath(asset.path))
+      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles],
+      (cleanedAssets, frame, showSystemFolders, showHiddenFiles) => {
+        const visibleAssets = cleanedAssets.filter((asset) => {
+          // The FrameOS-owned folders (.frameos, .thumbs) keep their own
+          // toggle: they are ours, not the operating system's droppings.
+          if (isSystemAssetPath(asset.path)) {
+            return showSystemFolders
+          }
+          return showHiddenFiles || !isHiddenOrJunkAssetPath(asset.path)
+        })
         return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
