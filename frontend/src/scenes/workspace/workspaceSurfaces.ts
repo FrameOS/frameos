@@ -300,11 +300,12 @@ export function isVirtualFrame(frame?: FrameCapabilityInput | null): boolean {
  * Unlike the esp32 cloud profile above — which DISABLES controls, because the
  * verbs exist and the firmware merely doesn't answer them yet — a virtual
  * frame HIDES these surfaces: the concepts themselves don't exist. There is
- * no shell to open, no device to ping or reboot, no on-device storage to
- * browse, and no host to chart metrics for, so a disabled button would have
- * nothing to explain.
+ * no shell to open, no device to ping or reboot, and no host to chart
+ * metrics for, so a disabled button would have nothing to explain. Assets
+ * stay: the backend stores them (quota-limited) and preloads them into the
+ * wasm renderer, so the panel works like on any other frame.
  */
-const virtualFrameHiddenPanels: readonly WorkspaceUtilityPanel[] = ['terminal', 'ping', 'assets', 'metrics']
+const virtualFrameHiddenPanels: readonly WorkspaceUtilityPanel[] = ['terminal', 'ping', 'metrics']
 
 const virtualFrameHiddenMenuActions: readonly FrameMenuAction[] = [
   'buildSdCard',

@@ -2109,6 +2109,24 @@ export function FrameSettings({
                     />
                   )}
                 </Field>
+                <Field
+                  name="assetsQuotaMb"
+                  label="Assets quota (MB)"
+                  tooltip="How much disk space this frame's assets may use on the backend — uploads and images scenes save (OpenAI, Wikimedia, ...). Leave empty for the default of 100 MB."
+                >
+                  {({ value, onChange }) => (
+                    <TextInput
+                      name="device_config.assetsQuotaMb"
+                      type="number"
+                      placeholder="100"
+                      value={value === undefined || value === null ? '' : String(value)}
+                      onChange={(newValue) => {
+                        const parsed = parseFloat(String(newValue))
+                        onChange(Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
+                      }}
+                    />
+                  )}
+                </Field>
               </Group>
             </div>
           </>

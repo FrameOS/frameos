@@ -316,9 +316,11 @@ describe("embedded-hardware frames on the backend control plane", () => {
   });
 
   it("leaves virtual frames to the stricter virtual gating", () => {
-    // Virtual frames additionally hide assets/metrics and reboot/restart;
-    // the embedded-hardware list must not soften that.
-    expect(frameToolPanelIsAllowed("backend", "assets", virtualFrame)).toBe(false);
+    // Virtual frames additionally hide metrics and reboot/restart; the
+    // embedded-hardware list must not soften that. Assets stay: the backend
+    // stores them (quota-limited) and feeds them to the wasm renderer.
+    expect(frameToolPanelIsAllowed("backend", "assets", virtualFrame)).toBe(true);
+    expect(frameToolPanelIsAllowed("backend", "metrics", virtualFrame)).toBe(false);
     expect(frameMenuActionIsAllowed("backend", "reboot", virtualFrame)).toBe(false);
   });
 

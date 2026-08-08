@@ -259,6 +259,138 @@ void fos_assets_write_abort(fos_assets_writer_t *writer)
     unlink(writer->tmp_path);
 }
 
+void fos_assets_cleanup_stale_uploads(void)
+{
+    if (!fos_assets_available()) return;
+    char dir_path[FOS_ASSETS_FULL_PATH_MAX];
+    snprintf(dir_path, sizeof(dir_path), "%s/.uploads", fos_assets_root());
+    DIR *dir = opendir(dir_path);
+    if (!dir) return;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        char full[FOS_ASSETS_FULL_PATH_MAX + sizeof(entry->d_name)];
+        snprintf(full, sizeof(full), "%s/%s", dir_path, entry->d_name);
+        unlink(full);
+    }
+    closedir(dir);
+}
+
+bool fos_assets_valid_upload_id(const char *upload_id)
+{
+    if (!upload_id || !upload_id[0]) return false;
+    size_t len = strlen(upload_id);
+    if (len >= FOS_ASSETS_UPLOAD_ID_MAX) return false;
+    for (size_t i = 0; i < len; i++) {
+        char c = upload_id[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void chunk_part_path(char *out, size_t out_len, const char *upload_id)
+{
+    snprintf(out, out_len, "%s/.uploads/%s.part", fos_assets_root(), upload_id);
+}
+
+esp_err_t fos_assets_chunk_begin(const char *upload_id, long long offset,
+                                 fos_assets_writer_t *writer, const char **err)
+{
+    set_err(err, NULL);
+    if (!writer) return ESP_ERR_INVALID_ARG;
+    writer->file = NULL;
+    writer->final_path[0] = '\0';
+    if (!fos_assets_available()) {
+        set_err(err, "not_found");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!fos_assets_valid_upload_id(upload_id)) {
+        set_err(err, "invalid_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char dir[FOS_ASSETS_FULL_PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s/.uploads", fos_assets_root());
+    if (mkdir(dir, 0775) != 0 && errno != EEXIST) {
+        ESP_LOGW(TAG, "mkdir %s failed: errno=%d", dir, errno);
+        set_err(err, "write_failed");
+        return ESP_FAIL;
+    }
+    chunk_part_path(writer->tmp_path, sizeof(writer->tmp_path), upload_id);
+    if (offset <= 0) {
+        writer->file = fopen(writer->tmp_path, "wb");
+    } else {
+        struct stat st;
+        if (stat(writer->tmp_path, &st) != 0 || (long long)st.st_size < offset) {
+            /* An earlier chunk never landed — the client must restart. */
+            set_err(err, "chunk_gap");
+            return ESP_ERR_INVALID_STATE;
+        }
+        writer->file = fopen(writer->tmp_path, "rb+");
+        if (writer->file && fseek(writer->file, (long)offset, SEEK_SET) != 0) {
+            fclose(writer->file);
+            writer->file = NULL;
+        }
+    }
+    if (!writer->file) {
+        ESP_LOGW(TAG, "open %s failed: errno=%d", writer->tmp_path, errno);
+        set_err(err, "write_failed");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void fos_assets_chunk_close(fos_assets_writer_t *writer)
+{
+    if (!writer || !writer->file) return;
+    fclose(writer->file);
+    writer->file = NULL;
+}
+
+esp_err_t fos_assets_chunk_finish(fos_assets_writer_t *writer,
+                                  const char *final_rel, long long *received,
+                                  const char **err)
+{
+    set_err(err, NULL);
+    if (received) *received = 0;
+    if (!writer || !writer->file) return ESP_ERR_INVALID_STATE;
+    bool flushed = fflush(writer->file) == 0;
+    long size_now = flushed ? ftell(writer->file) : -1;
+    bool closed = fclose(writer->file) == 0;
+    writer->file = NULL;
+    if (!flushed || !closed) {
+        unlink(writer->tmp_path);
+        set_err(err, "write_failed");
+        return ESP_FAIL;
+    }
+    struct stat st;
+    if (received) {
+        if (stat(writer->tmp_path, &st) == 0) *received = (long long)st.st_size;
+        else if (size_now >= 0) *received = size_now;
+    }
+    if (!final_rel) return ESP_OK; /* more chunks coming; part stays */
+    if (ensure_dirs(final_rel, false) != ESP_OK) {
+        unlink(writer->tmp_path);
+        set_err(err, "write_failed");
+        return ESP_FAIL;
+    }
+    fos_assets_full_path(writer->final_path, sizeof(writer->final_path), final_rel);
+    /* FatFS rename refuses an existing destination — replace explicitly. */
+    unlink(writer->final_path);
+    if (rename(writer->tmp_path, writer->final_path) != 0) {
+        ESP_LOGW(TAG, "rename %s -> %s failed: errno=%d", writer->tmp_path,
+                 writer->final_path, errno);
+        unlink(writer->tmp_path);
+        set_err(err, "write_failed");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 esp_err_t fos_assets_write_file(const char *rel, const void *data, size_t len,
                                 const char **err)
 {

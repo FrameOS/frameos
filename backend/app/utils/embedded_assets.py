@@ -25,16 +25,21 @@ from __future__ import annotations
 import json
 import os
 import posixpath
+import re
+import uuid
 from http import HTTPStatus
 from typing import Any, Optional
 
+import httpx
 from arq import ArqRedis as Redis
 from fastapi import HTTPException
 
 from app.models.frame import Frame
+from app.utils.env import get_env_float, get_env_int
 from app.utils.frame_http import _fetch_frame_http_bytes
 
 _FORM_URLENCODED = {"Content-Type": "application/x-www-form-urlencoded"}
+_OCTET_STREAM = {"Content-Type": "application/octet-stream"}
 # Device statuses forwarded to the caller verbatim; anything else becomes 502.
 _PASSTHROUGH_STATUSES = {
     HTTPStatus.BAD_REQUEST,
@@ -43,6 +48,29 @@ _PASSTHROUGH_STATUSES = {
     HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
     HTTPStatus.INSUFFICIENT_STORAGE,
 }
+
+# One backend→device request per chunk keeps each transfer well inside the
+# frame HTTP timeouts on slow links (an 8MB single POST to an ESP32 on weak
+# WiFi reliably outlives them).
+EMBEDDED_UPLOAD_CHUNK_BYTES = get_env_int("FRAME_EMBEDDED_UPLOAD_CHUNK_BYTES", 256 * 1024)
+
+# Upload requests get a far longer read/write budget than the 20s default:
+# a 256KB chunk on a struggling link (weak RSSI, VPN hop, device mid-render)
+# can legitimately take minutes. The device aborts a genuinely dead transfer
+# itself after ~30s of zero bytes, so this mostly bounds slow-but-alive ones.
+_UPLOAD_RW_TIMEOUT = get_env_float("FRAME_HTTP_UPLOAD_TIMEOUT", 180.0)
+UPLOAD_TIMEOUT = httpx.Timeout(
+    connect=get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
+    read=_UPLOAD_RW_TIMEOUT,
+    write=_UPLOAD_RW_TIMEOUT,
+    pool=get_env_float("FRAME_HTTP_POOL_TIMEOUT", 10.0),
+)
+
+_UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,47}$")
+
+
+def valid_upload_id(upload_id: str) -> bool:
+    return bool(_UPLOAD_ID_RE.fullmatch(upload_id or ""))
 
 
 def embedded_assets_path(frame: Frame) -> str:
@@ -151,25 +179,106 @@ async def download_asset(frame: Frame, redis: Redis, full_path: str) -> tuple[by
     return body, content_type or "application/octet-stream"
 
 
-async def upload_asset(frame: Frame, redis: Redis, full_path: str, data: bytes) -> dict[str, Any]:
-    """Upload raw bytes to the device (parent dirs auto-created, existing file
-    replaced). Returns the device's stat dict for the new file when parseable."""
-    rel = to_relative_asset_path(frame, full_path)
+def _parse_device_payload(body: bytes) -> dict[str, Any]:
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        payload = None
+    return payload if isinstance(payload, dict) else {}
+
+
+async def _upload_asset_single(
+    frame: Frame, redis: Redis, rel: str, data: bytes
+) -> dict[str, Any]:
     status, body, _headers = await _fetch_frame_http_bytes(
         frame,
         redis,
         path=f"/api/frames/{frame.id}/assets/upload?path={_quote_rel(rel)}",
         method="POST",
         body=data,
-        headers={"Content-Type": "application/octet-stream"},
+        headers=dict(_OCTET_STREAM),
+        timeout=UPLOAD_TIMEOUT,
     )
     if status not in (HTTPStatus.OK, HTTPStatus.CREATED):
         raise _device_error(status, body)
-    try:
-        payload = json.loads(body)
-    except ValueError:
-        payload = None
-    return payload if isinstance(payload, dict) else {}
+    return _parse_device_payload(body)
+
+
+async def upload_asset_chunk(
+    frame: Frame,
+    redis: Redis,
+    full_path: str,
+    chunk: bytes,
+    *,
+    upload_id: str,
+    chunk_index: int,
+    offset: int,
+    complete: bool,
+) -> Optional[dict[str, Any]]:
+    """Forward one chunk of a chunked upload to the device.
+
+    Returns the device payload ({"pending": true, ...} for a non-final chunk,
+    the final stat dict for the last one) — or None when the device firmware
+    predates chunked uploads: legacy firmware ignores the chunk params, stores
+    the chunk as the whole file and answers with a stat dict, which is only
+    distinguishable on a non-final chunk (no "pending" key). Callers must then
+    fall back to a single-shot upload of the full payload.
+    """
+    if not valid_upload_id(upload_id):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid upload id")
+    rel = to_relative_asset_path(frame, full_path)
+    status, body, _headers = await _fetch_frame_http_bytes(
+        frame,
+        redis,
+        path=(
+            f"/api/frames/{frame.id}/assets/upload?path={_quote_rel(rel)}"
+            f"&upload_id={upload_id}&chunk_index={int(chunk_index)}"
+            f"&offset={int(offset)}&complete={1 if complete else 0}"
+        ),
+        method="POST",
+        body=chunk,
+        headers=dict(_OCTET_STREAM),
+        timeout=UPLOAD_TIMEOUT,
+    )
+    if status not in (HTTPStatus.OK, HTTPStatus.CREATED):
+        raise _device_error(status, body)
+    payload = _parse_device_payload(body)
+    if not complete and not payload.get("pending"):
+        return None
+    return payload
+
+
+async def upload_asset(frame: Frame, redis: Redis, full_path: str, data: bytes) -> dict[str, Any]:
+    """Upload raw bytes to the device (parent dirs auto-created, existing file
+    replaced). Returns the device's stat dict for the new file when parseable.
+
+    Payloads larger than EMBEDDED_UPLOAD_CHUNK_BYTES are streamed as several
+    chunk requests so no single device request outlives the HTTP timeouts."""
+    rel = to_relative_asset_path(frame, full_path)
+    if len(data) <= EMBEDDED_UPLOAD_CHUNK_BYTES:
+        return await _upload_asset_single(frame, redis, rel, data)
+
+    upload_id = uuid.uuid4().hex[:32]
+    chunk_size = EMBEDDED_UPLOAD_CHUNK_BYTES
+    total_chunks = (len(data) + chunk_size - 1) // chunk_size
+    payload: Optional[dict[str, Any]] = {}
+    for index in range(total_chunks):
+        offset = index * chunk_size
+        payload = await upload_asset_chunk(
+            frame,
+            redis,
+            full_path,
+            data[offset:offset + chunk_size],
+            upload_id=upload_id,
+            chunk_index=index,
+            offset=offset,
+            complete=index == total_chunks - 1,
+        )
+        if payload is None:
+            # Legacy firmware without chunk support: one big request is the
+            # only option it understands.
+            return await _upload_asset_single(frame, redis, rel, data)
+    return payload or {}
 
 
 async def _post_form(

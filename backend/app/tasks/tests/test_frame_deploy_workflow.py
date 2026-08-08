@@ -1902,6 +1902,7 @@ async def test_execute_embedded_fast_uploads_scenes_then_reloads(monkeypatch: py
         method: str,
         body=None,
         headers=None,
+        timeout=None,
     ):
         calls.append({"path": path, "method": method, "body": body, "headers": headers})
         return 200, b'{"status":"ok"}', {}
@@ -1978,6 +1979,7 @@ async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch
         method: str,
         body=None,
         headers=None,
+        timeout=None,
     ):
         calls.append(path)
         if path == "/status":
@@ -2541,7 +2543,7 @@ async def test_execute_embedded_full_builds_ota_waits_for_boot_and_uploads_scene
         }
         return {"ok": True}
 
-    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None):
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, timeout=None):
         http_calls.append(path)
         return 200, b"{}", {}
 
@@ -2636,7 +2638,7 @@ async def test_execute_embedded_full_skips_boot_wait_when_device_runs_current_fi
     async def fake_request_ota(_db, _redis, _frame, *_args, **_kwargs):
         return {"ok": True}
 
-    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None):
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path, method, body=None, headers=None, timeout=None):
         http_calls.append(path)
         return 200, b"{}", {}
 

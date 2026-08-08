@@ -1798,14 +1798,25 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
 
 /* ---------------------------------------------------------- asset routes */
 
+/* Query strings on asset routes carry the (url-encoded) path plus, for
+ * chunked uploads, upload_id/offset/complete. */
+#define FOS_ASSETS_QUERY_MAX (FOS_ASSETS_PATH_MAX + 192)
+
+/* Pull one url-decoded query parameter; false when absent or truncated. */
+static bool asset_query_param(httpd_req_t *req, const char *key, char *out, size_t out_len)
+{
+    char query[FOS_ASSETS_QUERY_MAX];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) return false;
+    if (httpd_query_key_value(query, key, out, out_len) != ESP_OK) return false;
+    url_decode(out);
+    return true;
+}
+
 /* Pull a sanitized asset path out of the request's query string. */
 static bool asset_query_path(httpd_req_t *req, bool write_rule, char *out, size_t out_len)
 {
-    char query[FOS_ASSETS_PATH_MAX + 64];
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) return false;
     char raw[FOS_ASSETS_PATH_MAX];
-    if (httpd_query_key_value(query, "path", raw, sizeof(raw)) != ESP_OK) return false;
-    url_decode(raw);
+    if (!asset_query_param(req, "path", raw, sizeof(raw))) return false;
     return write_rule ? fos_assets_sanitize_write_path(raw, out, out_len)
                       : fos_assets_sanitize_path(raw, out, out_len);
 }
@@ -1873,6 +1884,11 @@ static esp_err_t asset_file_get_handler(httpd_req_t *req)
     return err;
 }
 
+/* How many consecutive soft recv timeouts (recv_wait_timeout, 5s each) to
+ * ride out before giving up on an upload chunk. Slow links stall; a stall
+ * is only fatal once it outlives ~30s. */
+#define FOS_UPLOAD_RECV_STALL_LIMIT 6
+
 static esp_err_t asset_upload_post_handler(httpd_req_t *req)
 {
     keep_awake_for_http_mutation();
@@ -1887,9 +1903,35 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
     if (total <= 0) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
     }
+    /* Chunked mode: bytes accumulate in a part file across requests sharing
+     * upload_id; complete=1 commits the part to `path`. Offsets make chunk
+     * retries idempotent (a resent chunk overwrites itself). */
+    char upload_id[FOS_ASSETS_UPLOAD_ID_MAX] = "";
+    bool chunked = asset_query_param(req, "upload_id", upload_id, sizeof(upload_id));
+    long long offset = 0;
+    bool complete = true;
+    if (chunked) {
+        if (!fos_assets_valid_upload_id(upload_id)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid upload id");
+        }
+        char val[24];
+        if (asset_query_param(req, "offset", val, sizeof(val))) offset = atoll(val);
+        if (asset_query_param(req, "complete", val, sizeof(val))) {
+            complete = strcmp(val, "1") == 0;
+        }
+    }
     const char *asset_err = NULL;
     fos_assets_writer_t writer;
-    if (fos_assets_write_begin(rel, &writer, &asset_err) != ESP_OK) {
+    esp_err_t begin = chunked
+        ? fos_assets_chunk_begin(upload_id, offset, &writer, &asset_err)
+        : fos_assets_write_begin(rel, &writer, &asset_err);
+    if (begin != ESP_OK) {
+        if (asset_err && strcmp(asset_err, "chunk_gap") == 0) {
+            /* An earlier chunk is missing — client must restart from 0. */
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_set_type(req, "application/json");
+            return httpd_resp_sendstr(req, "{\"error\":\"chunk_gap\"}");
+        }
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    asset_err ? asset_err : "write failed");
     }
@@ -1900,19 +1942,27 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
         chunk = malloc(cap);
     }
     if (!chunk) {
-        fos_assets_write_abort(&writer);
+        if (chunked) fos_assets_chunk_close(&writer);
+        else fos_assets_write_abort(&writer);
         return httpd_resp_send_500(req);
     }
     int received = 0;
+    int stalls = 0;
     esp_err_t err = ESP_OK;
     while (received < total) {
         int want = total - received;
         if (want > (int)cap) want = (int)cap;
         int r = httpd_req_recv(req, chunk, want);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++stalls <= FOS_UPLOAD_RECV_STALL_LIMIT) continue;
+            err = ESP_FAIL;
+            break;
+        }
         if (r <= 0) {
             err = ESP_FAIL;
             break;
         }
+        stalls = 0;
         if (fos_assets_write_chunk(&writer, chunk, (size_t)r) != ESP_OK) {
             err = ESP_FAIL;
             break;
@@ -1921,14 +1971,30 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
     }
     free(chunk);
     if (err != ESP_OK) {
-        fos_assets_write_abort(&writer);
+        /* Keep the part on chunked failures so the client can retry the
+         * same offset; single-shot uploads roll back as before. */
+        if (chunked) fos_assets_chunk_close(&writer);
+        else fos_assets_write_abort(&writer);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
     }
-    if (fos_assets_write_commit(&writer, &asset_err) != ESP_OK) {
+    long long part_size = 0;
+    if (chunked) {
+        if (fos_assets_chunk_finish(&writer, complete ? rel : NULL, &part_size,
+                                    &asset_err) != ESP_OK) {
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                       asset_err ? asset_err : "write failed");
+        }
+    } else if (fos_assets_write_commit(&writer, &asset_err) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    asset_err ? asset_err : "write failed");
     }
-    log_http_command(req, "assetUpload", (size_t)total);
+    if (chunked && !complete) {
+        char reply[96];
+        snprintf(reply, sizeof(reply), "{\"pending\":true,\"received\":%lld}", part_size);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, reply);
+    }
+    log_http_command(req, "assetUpload", chunked ? (size_t)part_size : (size_t)total);
     struct stat st;
     bool have_stat = fos_assets_stat(rel, &st) == ESP_OK;
     char *escaped = json_escape_dup(rel);
@@ -1937,7 +2003,8 @@ static esp_err_t asset_upload_post_handler(httpd_req_t *req)
     snprintf(reply, sizeof(reply),
              "{\"path\":\"%s\",\"size\":%lld,\"mtime\":%lld,\"is_dir\":false}",
              escaped,
-             (long long)(have_stat ? st.st_size : total),
+             have_stat ? (long long)st.st_size
+                       : (chunked ? part_size : (long long)total),
              (long long)(have_stat ? st.st_mtime : 0));
     free(escaped);
     httpd_resp_set_type(req, "application/json");
