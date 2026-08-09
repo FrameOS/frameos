@@ -1284,12 +1284,31 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
     discard
 
   if scene.eventListeners.hasKey(context.event):
+    # Track filtered-out listeners so a press that matches nothing says so.
+    # A scene whose event node filters on label "A" and a frame whose buttons
+    # are labelled BOOT/KEY1 (board silkscreen, per the ESP32 preset) is a
+    # dead button with no error anywhere: the GPIO fires, the event reaches
+    # the scene, every listener rejects it, and runEvent returns quietly.
+    var listenersFiltered = 0
+    var matched = 0
+    var expectedFilters: seq[string] = @[]
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
         if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
+          listenersFiltered += 1
+          let d = scene.nodes[nodeId].data
+          if not d.isNil and d.kind == JObject:
+            if d.hasKey("config") and d["config"].kind == JObject:
+              for key, value in d["config"].pairs:
+                let expected = eventFilterValue(value)
+                if expected.len > 0: expectedFilters.add(key & "=" & expected)
+            elif d.hasKey("label"):
+              let expected = eventFilterValue(d["label"])
+              if expected.len > 0: expectedFilters.add("label=" & expected)
           continue
         try:
+          matched += 1
           discard scene.runNode(nextNode, context)
         except Exception as e:
           self.logger.log(%*{
@@ -1300,6 +1319,18 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
             "error": $e.msg,
             "stacktrace": e.getStackTrace()
           })
+      else:
+        listenersFiltered += 1
+    if listenersFiltered > 0 and matched == 0:
+      self.logger.log(%*{
+        "event": "runEvent:noListenerMatched",
+        "sceneId": self.id,
+        "contextEvent": context.event,
+        "payload": context.payload,
+        "expected": expectedFilters,
+        "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
+          (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
+      })
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   if TRACING:

@@ -603,6 +603,36 @@ static int cmd_render(int argc, char **argv)
     return 0;
 }
 
+static int cmd_event(int argc, char **argv)
+{
+    /* Send a scene event by hand. Scene event handlers were previously only
+     * reachable by physically pressing a button wired to the right GPIO with
+     * the label the scene happens to filter on — three things that all have
+     * to line up before anything visibly happens, and nothing tells you which
+     * one is wrong when it does not. This exercises the same path the button
+     * driver and the HTTP /event/<name> route use. */
+    if (argc < 2) {
+        printf("usage: event <name> [json payload]\n");
+        printf("  e.g. event button {\"label\":\"A\"}   (the label a scene node filters on)\n");
+        return 1;
+    }
+    if (!frameos_nim_available()) {
+        printf("no interpreted scene runtime on this build\n");
+        return 1;
+    }
+    const char *payload = argc >= 3 ? argv[2] : "{}";
+    if (!frameos_nim_send_event(argv[1], payload)) {
+        printf("event rejected by the scene runtime\n");
+        return 1;
+    }
+    printf("sent %s %s\n", argv[1], payload);
+    if (frameos_nim_render_requested()) {
+        fos_client_render_now();
+        printf("scene asked for a render\n");
+    }
+    return 0;
+}
+
 static void display_test_set_4bpp(uint8_t *buf, int width, int x, int y, uint8_t color)
 {
     size_t row_bytes = ((size_t)width + 1u) / 2u;
@@ -1374,6 +1404,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},
         {.command = "render", .help = "Render now", .func = cmd_render},
+        {.command = "event", .help = "event <name> [json] — send a scene event by hand (e.g. event button {\"label\":\"A\"})", .func = cmd_event},
         {.command = "display_test", .help = "display_test [bands|black|white|red|green|blue|yellow] — draw direct panel test", .func = cmd_display_test},
         {.command = "sd", .help = "sd [status|remount|format] — SD assets card; format ERASES an unreadable card and is never automatic", .func = cmd_sd},
         {.command = "ota", .help = "Check for OTA update now", .func = cmd_ota},
