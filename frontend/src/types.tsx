@@ -175,6 +175,13 @@ export interface FrameType {
   active_scene_id?: string
   /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
   last_state?: Record<string, any>
+  /** Cloud only: the checksum of the scene payload the CONTROL PLANE has
+   * assigned, and the one the DEVICE last acknowledged applying. Equal means
+   * in sync; a device that never acked one has never had a scene delivered,
+   * which is the cloud's notion of "not deployed yet" (there is no
+   * last_successful_deploy_at on this control plane). */
+  assigned_checksum?: string | null
+  scenes_checksum?: string | null
   /** Cloud only: the newest metrics sample the device sent. Read for the
    * memory advisory (utils/frameMemory.ts) — an embedded frame can render
    * fine while having too little internal RAM left to open its TLS link. */
