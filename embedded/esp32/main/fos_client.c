@@ -783,8 +783,22 @@ static esp_err_t render_once(void)
 /* Called once at startup, before the first render. */
 void fos_client_render_recovery_boot(void)
 {
+    /* A power-on reset means a person intervened, and intervening is how they
+     * say "try again" — so the streak starts over.
+     *
+     * esp_reset_reason(), not the RTC magic below: RTC memory is NOT reliably
+     * cleared by a brief unplug. Observed on hardware — a frame paused after
+     * repeated out-of-memory renders was unplugged, replugged, and came back
+     * still paused, because the counter survived the power interruption. The
+     * magic can only detect memory that was never stamped, which is a
+     * different (and rarer) thing than a deliberate power cycle. */
+    if (esp_reset_reason() == ESP_RST_POWERON) {
+        s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
+        s_render_recovery_restarts = 0;
+        return;
+    }
     if (s_render_recovery_magic != FOS_RENDER_RECOVERY_MAGIC) {
-        /* Cold boot: RTC memory is undefined until we stamp it. */
+        /* First boot on this board, or RTC memory that was never stamped. */
         s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
         s_render_recovery_restarts = 0;
         return;

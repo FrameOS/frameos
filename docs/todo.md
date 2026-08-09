@@ -87,7 +87,13 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   1. That scene's render needs more PSRAM than an 8 MB board has. This is the
      case the large-image spill work exists for — measure what it actually
      allocates before assuming which buffer is at fault.
-  2. **A failed render abandons its PSRAM.** After the failure the pool sits
+  2. ~~A failed render abandons its PSRAM~~ — HANDLED: the frame now restarts
+     when PSRAM does not come back, and after two consecutive rescues pauses
+     rendering and stays online so a lighter scene can be assigned. All three
+     paths verified on hardware (restart, pause, resume-on-scene-select).
+     What remains is the cause below.
+
+  Historical note on 2: After the failure the pool sits
      at ~4 KB indefinitely, so the frame can neither render nor open its
      cloud link (mbedTLS allocates from PSRAM under
      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC). It is dead until power-cycled.
