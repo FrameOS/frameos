@@ -45,6 +45,7 @@ interface UsbLogSession {
   readLoop?: Promise<void>
   stopRequested: boolean
   pendingLine: string
+  logFilter: (line: string) => string | null
   failureMessage?: string
 }
 
@@ -69,6 +70,11 @@ interface EmbeddedUsbApiCommandOptions {
   // the flasher's reconnect flow (resolveLiveSerialPort) instead of
   // surfacing the dead port as a read error.
   expectReboot?: boolean
+  // A liveness probe repeated until the board answers (e.g. while it boots
+  // after a flash). Its attempts are not events a person needs to see, and
+  // its failures are the expected case, so keep them out of the log — the
+  // caller reports the progress and the final error itself.
+  probe?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -114,12 +120,20 @@ export function appendEmbeddedUsbLogLine(frameId: FrameId, line: string, type = 
   appendUsbLine(frameId, line, type)
 }
 
+/** Append a line that came off the device's console, minus the wire protocol. */
+function appendFilteredUsbLine(frameId: FrameId, filter: (line: string) => string | null, line: string): void {
+  const visible = filter(line)
+  if (visible !== null) {
+    appendUsbLine(frameId, visible)
+  }
+}
+
 function appendUsbText(session: UsbLogSession, text: string): void {
   session.pendingLine += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const lines = session.pendingLine.split('\n')
   session.pendingLine = lines.pop() ?? ''
   for (const line of lines) {
-    appendUsbLine(session.frameId, line)
+    appendFilteredUsbLine(session.frameId, session.logFilter, line)
   }
 }
 
@@ -127,7 +141,7 @@ function flushUsbText(session: UsbLogSession): void {
   if (!session.pendingLine) {
     return
   }
-  appendUsbLine(session.frameId, session.pendingLine)
+  appendFilteredUsbLine(session.frameId, session.logFilter, session.pendingLine)
   session.pendingLine = ''
 }
 
@@ -442,6 +456,91 @@ function tailHasUsbTerminator(received: string, freshLength: number): boolean {
   return usbResponseTerminators.some((marker) => tail.includes(marker))
 }
 
+/** One-line digest of the device's status JSON, for people reading the log. */
+export function summarizeUsbStatusJson(text: string): string | null {
+  let status: EmbeddedUsbStatus
+  try {
+    status = JSON.parse(text) as EmbeddedUsbStatus
+  } catch (error) {
+    return null
+  }
+  const parts: string[] = []
+  if (status.version) {
+    parts.push(`version=${status.version}`)
+  }
+  if (status.config?.panel) {
+    parts.push(`panel=${status.config.panel}`)
+  }
+  if (status.scenes) {
+    parts.push(`scenes=${status.scenes.loaded ?? 0}/${status.scenes.available ?? 0}`)
+  }
+  const wifi = [status.config?.wifiSsid, status.wifi?.ip].filter(Boolean).join(' ')
+  parts.push(`wifi=${wifi || 'not connected'}`)
+  return parts.join(' ')
+}
+
+// Slack over the declared payload size: base64 line breaks and the trailing
+// newline are not counted in it.
+const USB_PAYLOAD_SUPPRESSION_SLACK = 1024
+const USB_PAYLOAD_SUMMARY_CHARS = 16384
+
+/**
+ * The device console is a shared stdout: the usb_api wire protocol (BEGIN/END
+ * markers, base64 or JSON payload bodies) lands in the same stream a person
+ * reads in the logs panel. Strip the framing, drop payload bodies, and turn a
+ * status dump into a single summary line. Stateful across lines, so each sink
+ * (log stream, command mirror) needs its own instance.
+ */
+export function createUsbProtocolLogFilter(): (line: string) => string | null {
+  let payloadCommand: string | null = null
+  let payloadEncoding = ''
+  let payloadBudget = 0
+  let payloadText = ''
+
+  const endPayload = (): void => {
+    payloadCommand = null
+    payloadText = ''
+  }
+
+  return (line: string): string | null => {
+    if (payloadCommand !== null) {
+      if (line.startsWith(`__FRAMEOS_USB_END__ ${payloadCommand}`)) {
+        const summary = payloadCommand === 'status' ? summarizeUsbStatusJson(payloadText) : null
+        const command = payloadCommand
+        endPayload()
+        return summary ? `${command}: ${summary}` : null
+      }
+      if (payloadEncoding === 'text' && payloadText.length < USB_PAYLOAD_SUMMARY_CHARS) {
+        payloadText += line
+      }
+      payloadBudget -= line.length + 1
+      // A payload whose END never arrives (board reset mid-transfer) must not
+      // swallow every log line that follows it.
+      if (payloadBudget < 0) {
+        endPayload()
+      }
+      return null
+    }
+
+    const begin = line.match(/^__FRAMEOS_USB_BEGIN__\s+(\S+)\s+(\d+)\s+(\S+)/)
+    if (begin) {
+      payloadCommand = begin[1]
+      payloadBudget = Number(begin[2]) + USB_PAYLOAD_SUPPRESSION_SLACK
+      payloadEncoding = begin[3]
+      payloadText = ''
+      return null
+    }
+    const error = line.match(/^__FRAMEOS_USB_ERROR__\s+(\S+)\s+(.*)$/)
+    if (error) {
+      return `${error[1]} failed: ${error[2].trim()}`
+    }
+    if (/^__FRAMEOS_USB_(OK|READY|END)__\b/.test(line)) {
+      return null
+    }
+    return line
+  }
+}
+
 async function writeUsbPayload(writer: WritableStreamDefaultWriter<Uint8Array>, payload: Uint8Array): Promise<void> {
   for (let offset = 0; offset < payload.byteLength; offset += USB_PAYLOAD_CHUNK_SIZE) {
     await writer.write(payload.slice(offset, Math.min(payload.byteLength, offset + USB_PAYLOAD_CHUNK_SIZE)))
@@ -685,11 +784,14 @@ async function runEmbeddedUsbApiCommandLocked(
     await prepareSerialPortReconnect(port)
   }
   const payload = typeof options?.payload === 'string' ? new TextEncoder().encode(options.payload) : options?.payload
-  appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
-  if (payload) {
-    appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
+  if (!options?.probe) {
+    appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
+    if (payload) {
+      appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
+    }
   }
   const mirrorSerialText = options?.mirrorOutput !== false && usbApiResponseCommand(command) !== 'image'
+  const commandLogFilter = createUsbProtocolLogFilter()
   let pendingCommandLogLine = ''
   const appendCommandLogText = mirrorSerialText
     ? (text: string): void => {
@@ -697,13 +799,13 @@ async function runEmbeddedUsbApiCommandLocked(
         const lines = pendingCommandLogLine.split('\n')
         pendingCommandLogLine = lines.pop() ?? ''
         for (const line of lines) {
-          appendUsbLine(frameId, line)
+          appendFilteredUsbLine(frameId, commandLogFilter, line)
         }
       }
     : undefined
   const flushCommandLogText = (): void => {
     if (pendingCommandLogLine) {
-      appendUsbLine(frameId, pendingCommandLogLine)
+      appendFilteredUsbLine(frameId, commandLogFilter, pendingCommandLogLine)
       pendingCommandLogLine = ''
     }
   }
@@ -749,12 +851,16 @@ async function runEmbeddedUsbApiCommandLocked(
       )
     }
     flushCommandLogText()
-    appendUsbLine(frameId, `[USB API] ${command} complete`)
+    if (!options?.probe) {
+      appendUsbLine(frameId, `[USB API] ${command} complete`)
+    }
     rebootAcknowledged = options?.expectReboot === true
     return result
   } catch (error) {
     flushCommandLogText()
-    appendUsbLine(frameId, `[USB API] ${command} failed: ${serialErrorMessage(error)}`)
+    if (!options?.probe) {
+      appendUsbLine(frameId, `[USB API] ${command} failed: ${serialErrorMessage(error)}`)
+    }
     throw error
   } finally {
     if (rebootAcknowledged) {
@@ -883,6 +989,7 @@ export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialP
 
     const session: UsbLogSession = {
       frameId,
+      logFilter: createUsbProtocolLogFilter(),
       pendingLine: '',
       port: selectedPort,
       stopRequested: false,

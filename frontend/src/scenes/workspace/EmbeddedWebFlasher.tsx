@@ -15,6 +15,7 @@ import {
   serialPortReconnectRequiresReselection,
   startEmbeddedUsbLogStream,
   stopEmbeddedUsbLogStream,
+  summarizeUsbStatusJson,
 } from '../../models/embeddedUsbLogsModel'
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType, FrameId } from '../../types'
@@ -173,16 +174,59 @@ export function createUsbLogTerminal(frameId: FrameId): FlashLogTerminal {
   }
 }
 
-export function mirrorTransportTrace(frameId: FrameId, transport: EspTransport): void {
+// esptool's transport chatter ("command op:0x09 data len=16", "Read 12
+// bytes") is the only record of what the protocol did, and the only thing
+// worth having when a flash fails — but it is meaningless to someone
+// watching a working flash. Keep it in a ring buffer and put it in the log
+// only if the flash actually fails.
+const FLASH_TRACE_BUFFERED_LINES = 500
+
+export interface FlashTraceRecorder {
+  /** The write finished: the next port loss is the reboot, not a fault. */
+  expectReboot: () => void
+  /** Replay the buffered protocol trace so a failed flash stays diagnosable. */
+  dumpAfterFailure: () => void
+}
+
+export function recordTransportTrace(frameId: FrameId, transport: EspTransport): FlashTraceRecorder {
   const traceableTransport = transport as unknown as TraceableTransportInternals
   const originalTrace = traceableTransport.trace.bind(traceableTransport)
+  const buffered: string[] = []
+  let rebootExpected = false
+
   traceableTransport.trace = (message: string): void => {
     const delta = Date.now() - (traceableTransport.lastTraceTime ?? Date.now())
     const logMessage = flashTraceLogMessage(message)
     if (logMessage) {
-      appendEmbeddedUsbLogLine(frameId, `TRACE ${delta.toFixed(3)} ${logMessage}`)
+      buffered.push(`TRACE ${delta.toFixed(3)} ${logMessage}`)
+      if (buffered.length > FLASH_TRACE_BUFFERED_LINES) {
+        buffered.shift()
+      }
+    }
+    // esptool reports the post-write reboot as "Unrecoverable serial port
+    // error: The device has been lost." — a catastrophe only if it happens
+    // before the image is written, and then the flash fails and says so.
+    if (rebootExpected && /device has been lost|unrecoverable serial port error/i.test(message)) {
+      rebootExpected = false
+      appendBrowserFlashLog(frameId, 'The board dropped off USB — it is rebooting into the new firmware.')
     }
     originalTrace(message)
+  }
+
+  return {
+    expectReboot: () => {
+      rebootExpected = true
+    },
+    dumpAfterFailure: () => {
+      if (buffered.length === 0) {
+        return
+      }
+      appendBrowserFlashLog(frameId, `Flasher protocol trace (last ${buffered.length} lines):`)
+      for (const line of buffered) {
+        appendEmbeddedUsbLogLine(frameId, line)
+      }
+      buffered.length = 0
+    },
   }
 }
 
@@ -314,28 +358,8 @@ async function uploadScenesOverUsbAfterFlash(
 }
 
 function usbStatusSummary(text: string | undefined): string {
-  if (!text) {
-    return 'USB API ready'
-  }
-  try {
-    const status = JSON.parse(text)
-    const parts = ['USB API ready']
-    if (status.version) {
-      parts.push(`version=${status.version}`)
-    }
-    if (status.config?.panel) {
-      parts.push(`panel=${status.config.panel}`)
-    }
-    if (status.render?.count !== undefined) {
-      parts.push(`renders=${status.render.count}`)
-    }
-    if (status.scenes?.loaded !== undefined) {
-      parts.push(`scenes=${status.scenes.loaded}`)
-    }
-    return parts.join(' ')
-  } catch (error) {
-    return 'USB API ready'
-  }
+  const summary = text ? summarizeUsbStatusJson(text) : null
+  return summary ? `The board answered on USB: ${summary}` : 'The board answered on USB'
 }
 
 // Returns the port the board answered on: the watchdog reset after flashing
@@ -373,14 +397,24 @@ export async function waitForUsbApiReadyAfterFlash(
         timeoutMs: Math.min(POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS, Math.max(1000, deadline - Date.now())),
         mirrorOutput: false,
         keepOpen: true,
+        probe: true,
       })
       appendBrowserFlashLog(frame.id, usbStatusSummary(result.text))
       return port
     } catch (error) {
       lastError = error
       if (attempt === 1 || attempt % 4 === 0) {
+        // A board that is still booting simply does not answer; that is
+        // progress, not a failure. Anything else is worth naming.
         const detail = error instanceof Error ? error.message : String(error)
-        appendBrowserFlashLog(frame.id, `USB API not ready yet: ${detail}`)
+        const stillBooting = /Timed out waiting for USB command (?:response|ready)/i.test(detail)
+        const waited = Math.round((Date.now() - started) / 1000)
+        appendBrowserFlashLog(
+          frame.id,
+          stillBooting
+            ? `Waiting for the board to boot (attempt ${attempt}, ${waited}s)`
+            : `Waiting for the board to boot (attempt ${attempt}, ${waited}s): ${detail}`
+        )
       }
       if (!resetHintShown && Date.now() - started > POST_FLASH_USB_RESET_HINT_MS) {
         resetHintShown = true
@@ -485,6 +519,7 @@ export function EmbeddedWebFlasher({
     let port: SerialPort | null = null
     let transport: EspTransport | null = null
     let flashTerminal: FlashLogTerminal | null = null
+    let traceRecorder: FlashTraceRecorder | null = null
     let streamLogsAfterFlash = false
     const setFlashMessage = (nextMessage: string | null): void => {
       setMessage(nextMessage)
@@ -516,7 +551,7 @@ export function EmbeddedWebFlasher({
       // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
       const { ESPLoader, Transport } = await import('esptool-js')
       transport = new Transport(port, false)
-      mirrorTransportTrace(frame.id, transport)
+      traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)
 
       setFlashMessage('Connecting to the board')
@@ -551,6 +586,7 @@ export function EmbeddedWebFlasher({
           setProgress(total > 0 ? Math.round((written / total) * 100) : null)
         },
       })
+      traceRecorder.expectReboot()
       // Prefer a watchdog reset: a DTR/RTS pulse can strap USB-Serial/JTAG
       // boards back into ROM download mode instead of booting the app. Fall
       // back to pulsing the reset line the way the esptool CLI does —
@@ -586,6 +622,7 @@ export function EmbeddedWebFlasher({
         setPhase('idle')
       } else if (displayMessage) {
         appendBrowserFlashLog(frame.id, `Flash failed: ${displayMessage}`)
+        traceRecorder?.dumpAfterFailure()
       }
     } finally {
       flashTerminal?.flush()
