@@ -1,6 +1,7 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
+import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import {
   assetsLogic,
   isInThumbsFolder,
@@ -126,6 +127,11 @@ function TreeNode({
    * run-image-scene buttons stay. */
   readOnly: boolean
 }): JSX.Element {
+  // An esp32 serves these thumbnails from the device itself — one small HTTP
+  // server on a microcontroller that also has a render loop to run. Asking for
+  // five at once makes the whole panel slower than asking for one.
+  const { frame } = useValues(frameLogic)
+  const thumbnailConcurrency = isEsp32Frame(frame) ? 1 : undefined
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
   const [isDragOver, setIsDragOver] = useState(false)

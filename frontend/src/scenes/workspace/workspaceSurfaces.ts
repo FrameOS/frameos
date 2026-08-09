@@ -330,6 +330,20 @@ export function isEsp32CloudFrame(frame?: FrameCapabilityInput | null, mode: Wor
 }
 
 /**
+ * An esp32 frame under any control plane: enrolled into the cloud (its
+ * hardware report says esp32) or driven by a backend/on-device build (its
+ * embedded platform does). Callers that care about the DEVICE rather than
+ * the control plane want this — how much a microcontroller can be asked to
+ * do at once does not depend on who is asking.
+ */
+export function isEsp32Frame(
+  frame?: FrameCapabilityInput | null,
+  mode: WorkspaceMode = workspaceMode()
+): boolean {
+  return isEsp32CloudFrame(frame, mode) || isEsp32Platform(frame?.embedded?.platform)
+}
+
+/**
  * An embedded-mode frame on the "virtual" platform (devices.ts
  * EMBEDDED_VIRTUAL; string literal here so this module stays import-free):
  * no hardware at all — the backend renders the frame and serves it as an
