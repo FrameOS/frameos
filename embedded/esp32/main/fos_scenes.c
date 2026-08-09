@@ -644,6 +644,10 @@ static int load_scene_index(void)
 }
 
 /* Make one scene resident from its slot file. */
+/* Which scene the Nim runtime currently holds parsed, so re-selecting it can
+ * be recognised as a no-op. Empty means "nothing resident". */
+static char s_resident_scene_id[SCENE_ID_LEN] = "";
+
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
     char path[SCENES_SLOT_PATH_LEN];
@@ -666,6 +670,8 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
         return false;
     }
     s_loaded = 1;
+    snprintf(s_resident_scene_id, sizeof(s_resident_scene_id), "%s",
+             scene_id ? scene_id : "");
     size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "scene slot %d live (%s); %d available, internal RAM %u -> %u",
              slot, scene_id ? scene_id : "?", s_slot_count,
@@ -771,6 +777,8 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
 bool fos_scenes_apply_pending(void)
 {
     if (!s_pending || !s_mounted) return false;
+    /* A new payload invalidates whatever is parsed, even if the id matches. */
+    s_resident_scene_id[0] = '\0';
     s_pending = false;
     bool ok = false;
     size_t len = 0;
@@ -886,9 +894,25 @@ bool fos_scenes_apply_pending_selection(void)
     portEXIT_CRITICAL(&s_scene_select_lock);
 
     if (!pending) return false;
-    /* Lazy path: the scene lives on flash, so load it (which replaces the
-     * resident one). frameos_nim_set_scene alone would only record the
-     * choice, leaving the runtime with the previous scene. */
+    /* Already the resident scene: nothing to load. Re-parsing it would throw
+     * away everything the runtime has built for it — the interpreted graph and
+     * every JS app's QuickJS context and transpiled source — and rebuild the
+     * lot. That is not a small waste: with the scene resident this frame
+     * renders the bundled Weather scene in ~15 s, and reloading it first
+     * takes ~69 s, because ~29 s of that is re-transpiling app sources that
+     * did not change. The cloud re-announces the current scene on every
+     * reconnect, so this path ran on essentially every render.
+     *
+     * A changed payload does not come through here: it sets s_pending and
+     * goes through fos_scenes_apply_pending, which clears the resident id
+     * above, so a redeploy still reloads. */
+    if (s_slot_count > 0 && s_resident_scene_id[0] &&
+        strcmp(scene_id, s_resident_scene_id) == 0) {
+        log_scene_event("scenes:select", "ok", "queued", scene_id,
+                        "already-resident", 0, 1, 0, ESP_OK);
+        frameos_nim_set_scene(scene_id);
+        return true;
+    }
     if (s_slot_count > 0) {
         if (!activate_scene_id(scene_id)) {
             ESP_LOGW(TAG, "scene selection failed: %s", scene_id);

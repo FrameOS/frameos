@@ -1,8 +1,10 @@
 import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
+import frameos/utils/memory
 import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
+import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
@@ -20,6 +22,14 @@ type
     js*: QuickJS
     ready*: bool
     initialized*: bool
+    # Transpiling is the most expensive thing a JS app does on a frame: 22
+    # seconds for the 36 KB app in the bundled Weather scene, on top of 7 for
+    # the 11 KB one. Evicting a runtime under memory pressure would otherwise
+    # pay that again on every render, so the result is kept — it is ~50 KB
+    # against ~29 s per render.
+    transpiled*: bool
+    transpiledCode*: string
+    transpiledMap*: SourceLineMap
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
@@ -32,6 +42,47 @@ type
     contextImageJson: JsonNode
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
+
+when defined(frameosEmbedded):
+  # Every JS app node builds its own QuickJS runtime, and each one costs about
+  # 580 KB of PSRAM: ~151 KB for the runtime itself, the rest for the prelude
+  # and the compiled app source. A scene with four JS nodes — the bundled
+  # Weather scene has three weatherPanels and a weatherIcons — therefore holds
+  # ~2.3 MB of interpreter that only one node is ever using, on a board whose
+  # whole render budget is 3.4 MB. Measured with -d:memProbe; it was the
+  # single largest term in the Weather OOM, larger than the canvas.
+  #
+  # Nodes run one at a time, so under memory pressure we keep one live runtime
+  # and rebuild the others on demand. Rebuilding re-runs the app's init(), so
+  # this only happens when headroom is actually short: a Pi, the backend and a
+  # roomy frame never evict and keep today's behaviour exactly.
+  var liveJsRuntimes: seq[JsAppRuntime] = @[]
+  var jsRuntimeStack: seq[JsAppRuntime] = @[]
+  const JsEvictHeadroomBytes = 2 * 1024 * 1024
+
+  proc teardownJsRuntime(runtime: JsAppRuntime) =
+    if not runtime.ready:
+      return
+    if not runtime.js.context.isNil:
+      if jsAppEnvByCtx.hasKey(runtime.js.context):
+        jsAppEnvByCtx.del(runtime.js.context)
+      # The transpiler's source map is held in a global keyed by context, and
+      # for a large app it is a bigger object than the QuickJS runtime itself.
+      # Dropping the runtime without this recovers only the interpreter.
+      clearJsSourceMaps(runtime.js.context)
+    runtime.js.close()
+    runtime.ready = false
+    runtime.initialized = false
+    runtime.images.clear()
+    runtime.transientImageIds.setLen(0)
+
+  proc evictIdleJsRuntimes(keep: JsAppRuntime) =
+    let headroom = availableRenderBytes()
+    if headroom <= 0 or headroom >= JsEvictHeadroomBytes:
+      return
+    for other in liveJsRuntimes:
+      if other != keep and other.ready and not jsRuntimeStack.contains(other):
+        teardownJsRuntime(other)
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
   if e != nil:
@@ -487,6 +538,13 @@ proc jsGetAppConfig(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let configJson = if e.configJson.isNil: %*{} else: e.configJson
   let keyStr = toNimString(ctx, key)
   if configJson.kind == JObject and configJson.hasKey(keyStr):
+    when defined(memProbe):
+      let approx = ($configJson[keyStr]).len
+      if approx > 8192:
+        memProbe("      cfg." & keyStr & " ->JS src=" & $approx & "B BEFORE")
+        let converted = jsonToJS(ctx, configJson[keyStr])
+        memProbe("      cfg." & keyStr & " ->JS AFTER")
+        return converted
     return jsonToJS(ctx, configJson[keyStr])
   return jsUndefSentinel(ctx)
 
@@ -591,6 +649,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
     settingsKeys: seq[string] = @[]): JsAppRuntime =
+  when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
   return JsAppRuntime(
     category: category,
     outputType: outputType,
@@ -768,7 +827,15 @@ proc ensureReady(runtime: JsAppRuntime) =
   if runtime.ready:
     return
 
+  when defined(frameosEmbedded):
+    # Reclaim the other nodes' interpreters before building this one.
+    evictIdleJsRuntimes(runtime)
+    if not liveJsRuntimes.contains(runtime):
+      liveJsRuntimes.add(runtime)
+
+  when defined(memProbe): memProbe("    newQuickJS BEFORE")
   runtime.js = newQuickJS()
+  when defined(memProbe): memProbe("    newQuickJS AFTER")
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
@@ -880,12 +947,22 @@ proc ensureReady(runtime: JsAppRuntime) =
   }
   """ & sceneJsPrelude)
   let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
-  let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+  if not runtime.transpiled:
+    when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
+    let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.code.len & "B")
+    runtime.transpiledCode = transformed.code
+    runtime.transpiledMap = transformed.sourceMap
+    runtime.transpiled = true
+  else:
+    when defined(memProbe): memProbe("      transpile CACHED code=" & $runtime.transpiledCode.len & "B")
   try:
-    discard runtime.js.eval(transformed.code, filename)
+    discard runtime.js.eval(runtime.transpiledCode, filename)
   except CatchableError as error:
-    raise newException(JSException, error.msg.mapJsErrorText(transformed.sourceMap))
-  registerJsSourceMap(runtime.js.context, transformed.sourceMap)
+    raise newException(JSException, error.msg.mapJsErrorText(runtime.transpiledMap))
+  when defined(memProbe): memProbe("      module eval AFTER")
+  registerJsSourceMap(runtime.js.context, runtime.transpiledMap)
+  when defined(memProbe): memProbe("      sourcemap registered")
   runtime.ready = true
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
@@ -946,7 +1023,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     return nil
   of "image":
     if spec.hasKey("svg"):
+      when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
       let image = decodeSvgWithFallback(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()
       return nil
@@ -1050,12 +1129,20 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   defer: JS_FreeValue(ctx, fnNameValue)
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
+  # A JS app can run another node, which can be another JS app, so track the
+  # whole call chain — an ancestor mid-call must never be evicted underneath.
+  when defined(frameosEmbedded): jsRuntimeStack.add(runtime)
+  when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
       callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
+      when defined(frameosEmbedded):
+        if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
+          discard jsRuntimeStack.pop()
+      when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:
     let details = mappedJsExceptionDetails(ctx)
