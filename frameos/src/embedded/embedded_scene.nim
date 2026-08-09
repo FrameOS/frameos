@@ -11,13 +11,25 @@ import frameos/utils/font as fontUtils
 const frameosSceneName {.strdefine.}: string = "default"
 const frameosSceneBackground {.strdefine.}: string = "#ffffff"
 
-var typeface: Typeface
-
 proc initScene*() =
-  typeface = fontUtils.getDefaultTypeface()
+  ## Deliberately does nothing but exist.
+  ##
+  ## This used to parse the default typeface, which is 1.57 MB of PSRAM on an
+  ## ESP32-S3 — measured with -d:memProbe, it was the whole of the resident
+  ## baseline apart from the 1 MB emergency reserve, and it was paid at boot by
+  ## every frame whether or not anything ever drew text. The scene below is
+  ## only rendered when no interpreted scene is loaded, and plenty of scenes
+  ## (the bundled Weather scene, for one, which draws through SVG) never ask
+  ## for a glyph at all.
+  ##
+  ## getDefaultTypeface already caches behind a lock, so the parse simply
+  ## happens on the first piece of text instead of on every boot. Kept as a
+  ## no-op rather than removed so the init sequence in embedded_main stays
+  ## readable, and so there is somewhere for this explanation to live.
+  discard
 
 proc newFont(size: float32; color: Color): Font =
-  result = newFont(typeface)
+  result = newFont(fontUtils.getDefaultTypeface())
   result.size = size
   result.paint = newPaint(SolidPaint)
   result.paint.color = color
