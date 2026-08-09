@@ -20,12 +20,16 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
 
 Loose ends:
 
-- Item 1's full loop still awaits a re-enrolled frame — the `image_get`
-  verb is device-side verified (ESP32 BMP pack) but the end-to-end
-  device → cloud → UI path hasn't been exercised.
+- ~~Item 1's full loop~~ — DONE 2026-08-09: `image_get` was acked
+  end to end by frame 02e05f35 (a cloud-managed PhotoPainter) against
+  production, so the device → cloud → UI path is exercised, not just the
+  device-side BMP pack.
 - Bench finding: the PhotoPainter gallery scene OOMs downloading a ~3 MB
   image (`total=2686976 psram_free≈894k`; 12 resident scenes ate the old
-  headroom). The fix is spilling large HTTP bodies to SD/flash plus
+  headroom). NOTE 2026-08-09: "12 resident scenes" is no longer how the
+  firmware behaves — scenes are stored per file and only the active one is
+  resident, and the Nim heap moved to PSRAM, so the headroom figure in this
+  finding is stale and the OOM wants re-measuring before more work goes in. The fix is spilling large HTTP bodies to SD/flash plus
   streaming decode — design + inert prototype in
   `esp32-large-image-spill.md`; firmware wiring and hardware validation
   are left. NOT proxy resizing (hard rule: no image proxies, ever).

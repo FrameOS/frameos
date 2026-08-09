@@ -1,7 +1,7 @@
 # FrameOS — consolidated remaining work
 
 One tracker for everything still open across the repo (last swept
-2026-08-05). Reference material — principles, permission scopes, store
+2026-08-09). Reference material — principles, permission scopes, store
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
@@ -26,29 +26,25 @@ Constraints and direction:
   scene state/control, USB provisioning. Track gaps in the parity matrix
   (`docs/api-triality.md`) and delete items here as they ship.
 
-Known gaps (last swept 2026-08-09):
+Known gaps (last swept 2026-08-09, after a full hardware pass on frame
+02e05f35 — a Waveshare PhotoPainter, the first cloud-managed ESP32 to run
+the whole surface against production):
 
-- **Service settings — hardware verification**: no cloud-managed frame has
-  run the pull against a real provider yet; both clients are unit-tested and
-  build-verified only. (The feature itself, the workspace surface, the
-  scene-assignment nudge and the removal of the device's duplicate fetch all
-  shipped — contract in docs/cloud-frames.md "Service settings".)
+- **Service settings — Nim client unverified on hardware**: the ESP32 client
+  is now proven (that frame pulled `GET /api/frames/{id}/service-settings`
+  → 200 from cloud.frameos.net with its enrollment bearer). The Linux/Pi
+  client in the Nim runtime is still unit-tested and build-verified only.
 - Terminal / ping / debug panels are backend-only by design (no shell verbs
   in the cloud protocol — structural, not a gap to close).
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Re-enrollment — hardware verification**: frame-bound claim tokens, the
-  re-keying redemption path and the flasher's "Re-enroll over USB" mode
-  shipped 2026-08-09 (docs/cloud-frames.md "A2. Re-enrollment"), covered by
-  integration tests but not yet run against a real blanked board. Moving a
-  board to a DIFFERENT account remains delete-and-enroll by design.
-- **Cloud OTA needs a released `-app.bin`** — fixed 2026-08-08 in the release
-  workflow and the manifest/download routes, but every release up to and
-  including v2026.8.12 published only the merged flash image, which an OTA
-  slot can never accept. Cloud OTA therefore does nothing until the first
-  release carrying `…-esp32-s3-generic-app.bin`; the routes answer
-  `ota_image_not_published` (404) until then, and the USB updater is the way
-  to move a board onto a newer build meanwhile.
+- **Cloud OTA** — the manifest/download routes and the release workflow were
+  fixed 2026-08-08, but every release up to and including v2026.8.12
+  published only the merged flash image, which an OTA slot can never accept,
+  so the routes answer `ota_image_not_published` (404). The first release
+  carrying `…-esp32-s3-generic-app.bin` unblocks it; until one is out the USB
+  updater is the way to move a board onto a newer build. Worth re-testing
+  against the first such release rather than assuming.
 
 ## Cloud-managed frames
 
@@ -74,9 +70,6 @@ Known gaps (last swept 2026-08-09):
 - **Backend↔cloud promotion/demotion ceremony** — the explicit local
   action that moves a frame between control planes without a reset (exact
   UX still an open design question).
-- **`image_get` full-loop verification** — the current-image endpoint is
-  device-side verified (ESP32 BMP pack) but the end-to-end loop still
-  awaits a re-enrolled frame (`cloud/docs/cloud-workspace-gaps.md`).
 - **Free-tier quotas** — pick numbers (frame count, backup size, private
   scene count) when provisioning starts, not before.
 - **Fleet extras** (design phase 4): offline alerting/notifications,
@@ -100,6 +93,33 @@ Known gaps (last swept 2026-08-09):
   stream too; URL+ETag decode cache.
 - ~~**FAT long filenames**~~ — DONE: `CONFIG_FATFS_LFN_HEAP` in
   sdkconfig.defaults + the dev sdkconfig; listings show full names.
+
+### Memory: what is left after the 2026-08-09 pass
+
+The Nim heap now allocates from PSRAM explicitly, and scenes are stored one
+file per scene and loaded one at a time (frame 02e05f35: 12.5 KB → ~109 KB
+free internal, 13 resident scenes → 1). What that pass did NOT do:
+
+- **QuickJS still allocates through libc malloc**, so with
+  `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` its many small allocations
+  come out of internal RAM. Only the Nim heap was moved. The active scene's
+  JS context is therefore still an internal-RAM cost — bounded to one scene
+  now, but the next thing to move if internal RAM gets tight again
+  (`JS_NewRuntime2` with PSRAM-backed `js_malloc_functions`).
+- **cJSON likewise**: the firmware parses WS frames and settings payloads
+  with it, all in internal RAM. `cJSON_InitHooks` with PSRAM allocators
+  would move the lot, but it is a broad change and wants its own
+  measurement — the scene splitter deliberately avoids cJSON on the large
+  payload for exactly this reason.
+- **The workspace low-memory advisory cannot fire for the frame that needs
+  it most.** It reads the device's metrics, and a frame too low on internal
+  RAM to open its link reports nothing. It is preventive (flagging a frame
+  at 60 KB before the next scene takes it offline); a frame already over the
+  edge is only visible over USB. Closing that needs memory surfaced over a
+  channel that survives the link being down.
+- Per-scene storage is **ESP32-only**. The Pi/buildroot runtime still loads
+  every scene from one scenes.json; it has RAM to spare today, so this is a
+  note rather than a task.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
