@@ -18,6 +18,8 @@ type
     category*: string
     outputType*: string
     source*: string
+    ## Only .tsx/.jsx sources get the JSX transform, as in TypeScript itself.
+    allowJsx*: bool
     settingsKeys*: seq[string]
     js*: QuickJS
     ready*: bool
@@ -30,6 +32,8 @@ type
     transpiled*: bool
     transpiledCode*: string
     transpiledMap*: SourceLineMap
+    transpiledMapBuilt*: bool
+    transpiledName*: string
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
@@ -648,12 +652,13 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   return jsonToJS(ctx, arr)
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
-    settingsKeys: seq[string] = @[]): JsAppRuntime =
+    settingsKeys: seq[string] = @[], sourceName: string = ""): JsAppRuntime =
   when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
   return JsAppRuntime(
     category: category,
     outputType: outputType,
     source: source,
+    allowJsx: sourceName.endsWith(".tsx") or sourceName.endsWith(".jsx"),
     settingsKeys: settingsKeys,
     nextImageId: 0,
     images: initTable[int, Image](),
@@ -664,6 +669,24 @@ type
   DynamicJsApp* = ref object of AppRoot
     configJson*: JsonNode
     runtime*: JsAppRuntime
+
+proc sourceMapForRuntime(runtime: JsAppRuntime): SourceLineMap {.gcsafe, raises: [].} =
+  ## This app's line map, built the first time an error needs one.
+  ##
+  ## Building it is ~45% of a transform — about 10 s of the 22 s a 36 KB app
+  ## cost on an ESP32-S3 — and it is read only to rewrite line numbers in an
+  ## error message. Both inputs are already retained (the original source and
+  ## the transpiled output), so deferring keeps nothing alive that was not.
+  if runtime.transpiledMapBuilt:
+    return runtime.transpiledMap
+  try:
+    runtime.transpiledMap = lineBasedSourceLineMap(
+      runtime.source, runtime.transpiledCode,
+      runtime.transpiledName, runtime.transpiledName)
+  except CatchableError, Defect:
+    runtime.transpiledMap = emptySourceLineMap(runtime.transpiledName, runtime.transpiledName)
+  runtime.transpiledMapBuilt = true
+  runtime.transpiledMap
 
 proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if image.isNil:
@@ -730,10 +753,26 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   of fkNone:
     return newJNull()
 
+const JsAppSourceNames = ["app.ts", "app.js", "app.tsx", "app.jsx"]
+
+proc jsAppSourceNameFromSources*(sources: JsonNode): string =
+  ## Which of the candidate files the source came from. The extension decides
+  ## whether the JSX pass runs at all: TypeScript itself only treats `<x>` as
+  ## JSX in .tsx/.jsx — in a .ts file it is a type assertion. Running the JSX
+  ## walk there is both wasted work (about half of a transform: 12 ms of the
+  ## 24 ms a 36 KB app takes on a host, and it is the slowest stage on an
+  ## ESP32) and the wrong reading of the syntax.
+  if sources.isNil or sources.kind != JObject:
+    return ""
+  for filename in JsAppSourceNames:
+    if sources.hasKey(filename) and sources[filename].kind == JString:
+      return filename
+  return ""
+
 proc jsAppSourceFromSources*(sources: JsonNode): string =
   if sources.isNil or sources.kind != JObject:
     return ""
-  for filename in ["app.ts", "app.js", "app.tsx", "app.jsx"]:
+  for filename in JsAppSourceNames:
     if sources.hasKey(filename) and sources[filename].kind == JString:
       return sources[filename].getStr()
   return ""
@@ -801,7 +840,8 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     for key in settingsNode.items:
       if key.kind == JString and key.getStr().len > 0:
         settingsKeys.add(key.getStr())
-  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys)
+  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
+                                jsAppSourceNameFromSources(sources))
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
@@ -949,19 +989,48 @@ proc ensureReady(runtime: JsAppRuntime) =
   let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
   if not runtime.transpiled:
     when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
-    let transformed = transpileModuleSourceWithMap(runtime.source, filename)
-    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.code.len & "B")
-    runtime.transpiledCode = transformed.code
-    runtime.transpiledMap = transformed.sourceMap
+    # Erase types and stop: the module form goes to QuickJS as-is, and no line
+    # map is built here.
+    let transformed = transpileAppSource(runtime.source, filename, runtime.allowJsx)
+    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.len & "B")
+    runtime.transpiledCode = transformed
+    runtime.transpiledName = filename
+    runtime.transpiledMapBuilt = false
     runtime.transpiled = true
   else:
     when defined(memProbe): memProbe("      transpile CACHED code=" & $runtime.transpiledCode.len & "B")
+
+  # Evaluate as a real ES module and publish its namespace where the prelude's
+  # __frameosExports() looks for it.
+  let ctx = runtime.js.context
+  var namespace: JSValue
   try:
-    discard runtime.js.eval(runtime.transpiledCode, filename)
+    namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
   except CatchableError as error:
-    raise newException(JSException, error.msg.mapJsErrorText(runtime.transpiledMap))
+    # FrameOS used to run the JSX pass over every source, so an app could have
+    # JSX in a plain .ts file and work. TypeScript itself does not allow that
+    # — `<x>` is a type assertion in .ts — and the pass is the single most
+    # expensive stage on a frame, so it is now gated on the extension. Rather
+    # than break such an app, notice the syntax error it produces and retry
+    # with JSX enabled. The happy path never pays for this.
+    if not runtime.allowJsx and error.msg.contains("'<'"):
+      runtime.transpiledCode = transpileAppSource(runtime.source, filename, allowJsx = true)
+      runtime.transpiledMapBuilt = false
+      runtime.allowJsx = true
+      try:
+        namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
+      except CatchableError as retryError:
+        raise newException(JSException, retryError.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+    else:
+      raise newException(JSException, error.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+  let globalObj = JS_GetGlobalObject(ctx)
+  let installed = JS_SetPropertyStr(ctx, globalObj, "__frameosModule", namespace)
+  JS_FreeValue(ctx, globalObj)
+  if installed < 0:
+    raise newException(JSException, "Could not install the app module: " & filename)
   when defined(memProbe): memProbe("      module eval AFTER")
-  registerJsSourceMap(runtime.js.context, runtime.transpiledMap)
+  registerJsSourceMapProvider(ctx, filename,
+    proc(): SourceLineMap {.closure, gcsafe, raises: [].} = runtime.sourceMapForRuntime())
   when defined(memProbe): memProbe("      sourcemap registered")
   runtime.ready = true
 

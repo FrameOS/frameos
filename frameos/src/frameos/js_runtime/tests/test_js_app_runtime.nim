@@ -620,3 +620,103 @@ suite "js app runtime":
 
     setDynamicJsAppField(app, "inputImage", VString("not an image"))
     check runtime.images.len == 0
+
+suite "js app source handling":
+  # These pin the three things that make an app cheap to load on a frame:
+  # JSX runs only where TypeScript says it may, the module form goes to
+  # QuickJS untouched, and the line map is built only if an error needs it.
+
+  test "picks the source file name, which decides whether JSX runs":
+    check jsAppSourceNameFromSources(%*{"app.ts": "x"}) == "app.ts"
+    check jsAppSourceNameFromSources(%*{"app.tsx": "x"}) == "app.tsx"
+    check jsAppSourceNameFromSources(%*{"config.json": "{}"}) == ""
+
+  test "a .tsx source renders JSX":
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-jsx".SceneId, frameConfig: config, state: %*{},
+                           logger: testLogger(config))
+    let owner = AppRoot(nodeId: 1.NodeId, nodeName: "jsx", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "image",
+      source = """export const get = () => <image width={4} height={2} color="#112233" />""",
+      sourceName = "app.tsx")
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkImage
+    check value.asImage().width == 4
+
+  test "JSX in a .ts source still works, via the retry":
+    # TypeScript would reject this, and the JSX pass is skipped for .ts — but
+    # apps written before that gate existed must keep working.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-legacy".SceneId, frameConfig: config, state: %*{},
+                           logger: testLogger(config))
+    let owner = AppRoot(nodeId: 2.NodeId, nodeName: "legacy", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "image",
+      source = """export const get = () => <image width={5} height={2} color="#445566" />""",
+      sourceName = "app.ts")
+    check runtime.allowJsx == false
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkImage
+    check value.asImage().width == 5
+    check runtime.allowJsx == true  # the retry stuck, so later renders skip it
+
+  test "a runtime error still names the original source line":
+    # The map is no longer built up front, so the error path has to build it —
+    # and it has to be a real map, not identity. The interface below is erased,
+    # so the failing call sits on a different line in the generated code (3)
+    # than in what the author wrote (7).
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = Logger(frameConfig: config, enabled: true)
+    logger.log = proc(payload: JsonNode) = logged.add(payload)
+    logger.enable = proc() = logger.enabled = true
+    logger.disable = proc() = logger.enabled = false
+    let scene = FrameScene(id: "tests/js-err".SceneId, frameConfig: config, state: %*{},
+                           logger: logger)
+    let owner = AppRoot(nodeId: 3.NodeId, nodeName: "err", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text",
+      source = """interface Removed {
+  a: number
+  b: string
+  c: boolean
+}
+const helper = () => {
+  return missingGlobal()
+}
+export const get = () => helper()""",
+      sourceName = "app.ts")
+    discard runtime.get(owner, %*{}, context)
+    var stack = ""
+    for entry in logged:
+      if entry{"stack"}.getStr().len > 0:
+        stack = entry{"stack"}.getStr()
+    check logged.len > 0
+    check stack.len > 0
+    # helper's body is line 7 of the source; without the map it would be 3.
+    check ":7:" in stack
+
+  test "export default still resolves through the module namespace":
+    # __frameosExports() prefers `.default`; with real ES modules that is a
+    # property of the namespace rather than something the imports transform
+    # assembled.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-default".SceneId, frameConfig: config, state: %*{},
+                           logger: testLogger(config))
+    let owner = AppRoot(nodeId: 4.NodeId, nodeName: "def", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text",
+      source = """export default { get: (app, context) => `default:${context.event}` }""",
+      sourceName = "app.ts")
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkString
+    check value.asString() == "default:render"
