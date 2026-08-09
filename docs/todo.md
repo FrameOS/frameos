@@ -36,12 +36,6 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ## Cloud-managed frames
 
-- **Signed OTA, buildroot/Pi half** — `upgrade.nim` checks URL shape and
-  nothing else, so a buildroot frame cannot safely take an update from the
-  cloud. Needs a release tarball swap via the frameos binary with the
-  signature verified independently on-device, as `main/fos_ota.c` already
-  does on ESP32. Must land before SD images are widely distributed. Design:
-  `cloud/docs/cloud-frames.md` ("Signed OTA").
 - **JS-runtime capability audit** — enumerate every native binding exposed
   to scene JS; per-scene asset sandboxes; CPU/time/memory limits per scene;
   confirm RFC1918 fetch blocking and the local-presence elevation ceremony
