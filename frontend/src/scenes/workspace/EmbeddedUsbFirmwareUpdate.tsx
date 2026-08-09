@@ -17,12 +17,13 @@ import {
   POST_FLASH_BOOT_WAIT_MS,
   appendBrowserFlashLog,
   createUsbLogTerminal,
-  mirrorTransportTrace,
+  recordTransportTrace,
   sleep,
   waitForUsbApiReadyAfterFlash,
   watchdogResetAfterFlash,
   type FlashLogTerminal,
   type FlashPhase,
+  type FlashTraceRecorder,
 } from './EmbeddedWebFlasher'
 import {
   ESP32_PARTITION_TABLE_OFFSET,
@@ -146,6 +147,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
     let port: SerialPort | null = null
     let transport: EspTransport | null = null
     let flashTerminal: FlashLogTerminal | null = null
+    let traceRecorder: FlashTraceRecorder | null = null
     let flashed = false
     const setFlashMessage = (nextMessage: string | null): void => {
       setMessage(nextMessage)
@@ -180,7 +182,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
       const { ESPLoader, Transport } = await import('esptool-js')
       transport = new Transport(port, false)
-      mirrorTransportTrace(frame.id, transport)
+      traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)
 
       setFlashMessage('Connecting to the board')
@@ -213,6 +215,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
         },
       })
       flashed = true
+      traceRecorder.expectReboot()
 
       if (!(await watchdogResetAfterFlash(loader))) {
         try {
@@ -242,6 +245,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
           : detail
         setMessage(displayMessage)
         appendBrowserFlashLog(frame.id, `Firmware update failed: ${displayMessage}`)
+        traceRecorder?.dumpAfterFailure()
       }
     } finally {
       flashTerminal?.flush()
