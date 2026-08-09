@@ -134,8 +134,18 @@ static int cmd_status(int argc, char **argv)
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
-    printf("heap:        internal %u free, psram %u free\n",
-           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+    /* Internal RAM is the scarce one and the largest BLOCK is what decides
+     * whether TLS can start, so both are printed. The cloud link needs
+     * ~48 KB free with a 16 KB block (FOS_CLOUD_WS_MIN_INTERNAL_* in
+     * fos_cloud.c); below that `cloud_error:` above says so outright. */
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t internal_block =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    printf("heap:        internal %u free (%u largest block)%s, psram %u free\n",
+           (unsigned)internal_free, (unsigned)internal_block,
+           (internal_free < 48 * 1024 || internal_block < 16 * 1024)
+               ? " — TOO LOW for the cloud link (needs 49152 free / 16384 block)"
+               : "",
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     return 0;
 }

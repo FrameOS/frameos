@@ -7,6 +7,7 @@ import {
   ClipboardDocumentIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
+  ExclamationTriangleIcon,
   InformationCircleIcon,
   PhotoIcon,
   PlusIcon,
@@ -21,6 +22,7 @@ import { useEffect, type DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
 import { Tag } from '../../components/Tag'
 import { framesModel } from '../../models/framesModel'
+import { frameMemoryAdvisory } from '../../utils/frameMemory'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData, FrameId } from '../../types'
 import { parseRouteFrameId } from '../../utils/frameId'
@@ -126,6 +128,43 @@ function nodeKindLabel(item: DiagramNodeTreeItem): string {
   return item.node.type ?? item.kind
 }
 
+/**
+ * "This frame is out of internal RAM" — shown on the scene list because that
+ * is where the cause is: on an ESP32 every parsed scene lives in the small
+ * internal pool (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL sends sub-16 KB
+ * allocations there), while the render canvas sits in PSRAM. A frame can
+ * therefore render perfectly and still have too little left to open the TLS
+ * session its cloud link needs — which surfaces as a connection error and
+ * looks like a network fault. The numbers come from the device's own metrics;
+ * the thresholds match the firmware (see utils/frameMemory.ts).
+ */
+function FrameMemoryNotice({ frame }: { frame: FrameType }): JSX.Element | null {
+  const advisory = frameMemoryAdvisory(frame.last_metrics, { cloudManaged: workspaceMode() === 'cloud' })
+  if (!advisory) {
+    return null
+  }
+  const critical = advisory.level === 'critical'
+  return (
+    <div
+      role="status"
+      className={clsx(
+        'mb-2 rounded-xl border px-3 py-2 text-xs leading-5',
+        critical
+          ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200'
+          : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200'
+      )}
+    >
+      <div className="flex items-start gap-1.5">
+        <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div>
+          <div className="font-semibold">{advisory.headline}</div>
+          <div className="mt-0.5 opacity-90">{advisory.detail}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SceneSelector({
   frame,
   frames,
@@ -224,6 +263,7 @@ function SceneSelector({
             </button>
           </div>
         </div>
+        <FrameMemoryNotice frame={frame} />
         {scenes.length === 0 ? (
           <div className="frameos-muted rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-400">
             <div>No scenes</div>

@@ -410,6 +410,17 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
                         len, 0, 0, ESP_ERR_INVALID_STATE);
         return false;
     }
+    /* Measure what the payload actually costs in INTERNAL RAM. The Nim heap
+     * is served by plain malloc, and CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
+     * (16 KB) sends every allocation below that size to internal RAM — so the
+     * parsed scene graphs and the QuickJS context land in the scarce pool
+     * while PSRAM sits mostly idle. That is what starves the TLS handshake
+     * the cloud link needs (FOS_CLOUD_WS_MIN_INTERNAL_* in fos_cloud.c).
+     *
+     * Measured rather than estimated: scene cost varies enormously with node
+     * count and inline JS, so a constant in the UI would be fiction. This
+     * gives the control plane a real per-frame number to advise from. */
+    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int count = frameos_nim_load_scenes(json);
     if (count <= 0) {
         ESP_LOGE(TAG, "scene payload rejected by runtime");
@@ -417,10 +428,32 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
                         len, count, 0, ESP_FAIL);
         return false;
     }
+    size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t internal_cost = internal_before > internal_after
+                               ? internal_before - internal_after : 0;
     s_loaded = count;
-    ESP_LOGI(TAG, "%d scene(s) live", count);
+    ESP_LOGI(TAG, "%d scene(s) live; internal RAM %u -> %u (%u B for %d scenes, ~%u B each)",
+             count, (unsigned)internal_before, (unsigned)internal_after,
+             (unsigned)internal_cost, count,
+             (unsigned)(count > 0 ? internal_cost / (unsigned)count : 0));
     log_scene_event("scenes:load", "ok", origin, "", "runtime-loaded",
                     len, count, 0, ESP_OK);
+    {
+        /* Structured, so the workspace can advise on scene count from a
+         * measurement taken on THIS frame with THESE scenes. */
+        char event[288];
+        snprintf(event, sizeof(event),
+                 "{\"event\":\"scenes:memory\",\"source\":\"esp32\",\"scenes\":%d,"
+                 "\"payloadBytes\":%u,\"internalBefore\":%u,\"internalAfter\":%u,"
+                 "\"internalCost\":%u,\"internalCostPerScene\":%u,"
+                 "\"largestInternalBlock\":%u,\"freePsram\":%u}",
+                 count, (unsigned)len, (unsigned)internal_before,
+                 (unsigned)internal_after, (unsigned)internal_cost,
+                 (unsigned)(count > 0 ? internal_cost / (unsigned)count : 0),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        frameos_nim_log_hook(event);
+    }
     restore_last_scene();
     return true;
 }

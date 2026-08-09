@@ -78,6 +78,27 @@ static const char *NVS_NS = "frameos";
  * client init/start was never retried at all — either way the link used to
  * stay dead until a reboot. */
 #define FOS_CLOUD_WS_STALL_RESTART_US (120LL * 1000 * 1000)
+/* Internal-RAM floor for opening the management WebSocket.
+ *
+ * The dial needs internal (non-PSRAM) memory for three things at once: the
+ * client's own task stack (task_stack below, ~10 KB), lwIP's socket and
+ * pbufs, and the mbedTLS handshake. Below the floor the connect fails deep in
+ * the stack and surfaces as "delayed connect error: Connection reset by peer"
+ * from esp-tls — which reads exactly like a network fault and sent one
+ * debugging session chasing DNS, nginx and Cloudflare before the heap was
+ * looked at. So check first and SAY so.
+ *
+ * The numbers match the log uploader's own TLS thresholds
+ * (FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS / _BLOCK_TLS in
+ * components/frameos_nim/frameos_nim_glue.c): 48 KB free with a 16 KB
+ * contiguous block. Fragmentation matters as much as the total — mbedTLS
+ * wants sizable single buffers — which is why both are checked.
+ *
+ * This is a floor for STARTING a session, not for keeping one: an established
+ * connection costs far less, so a frame that got up before the renderer
+ * claimed memory keeps running. */
+#define FOS_CLOUD_WS_MIN_INTERNAL_FREE (48 * 1024)
+#define FOS_CLOUD_WS_MIN_INTERNAL_BLOCK (16 * 1024)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
 /* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
@@ -2030,10 +2051,67 @@ static bool build_ws_uri(void)
     return true;
 }
 
+/* True when there is enough internal RAM to attempt a TLS WebSocket dial.
+ * Reports the shortfall with numbers — through the console's `cloud_error:`
+ * line as well as the log — because the alternative is an esp-tls "connection
+ * reset by peer" that blames the network for a memory problem. Logged once
+ * per transition so a frame parked below the floor does not spam the console
+ * every retry. */
+static bool ws_heap_ready(void)
+{
+    static bool warned = false;
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_internal =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal >= FOS_CLOUD_WS_MIN_INTERNAL_FREE &&
+        largest_internal >= FOS_CLOUD_WS_MIN_INTERNAL_BLOCK) {
+        if (warned) {
+            warned = false;
+            ESP_LOGI(TAG, "ws: internal RAM recovered (%u free, %u largest); dialing again",
+                     (unsigned)free_internal, (unsigned)largest_internal);
+            set_last_error("");
+        }
+        return true;
+    }
+    char detail[sizeof(s_last_error)];
+    snprintf(detail, sizeof(detail),
+             "low internal RAM for the cloud link: %uB free/%uB block, needs %uB/%uB",
+             (unsigned)free_internal, (unsigned)largest_internal,
+             (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
+             (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK);
+    set_last_error(detail);
+    if (!warned) {
+        warned = true;
+        ESP_LOGW(TAG, "ws: %s", detail);
+        ESP_LOGW(TAG, "ws: the link stays down until internal RAM frees up "
+                      "(fewer/lighter scenes, or a smaller panel canvas). "
+                      "PSRAM is not the constraint: %u free.",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        /* One structured line so this reaches the log panel and the metrics
+         * story, not just whoever is holding a USB cable. */
+        char event[224];
+        snprintf(event, sizeof(event),
+                 "{\"event\":\"cloud:ws_deferred\",\"source\":\"esp32\","
+                 "\"reason\":\"low_internal_ram\",\"freeInternal\":%u,"
+                 "\"largestInternalBlock\":%u,\"needFreeInternal\":%u,"
+                 "\"needInternalBlock\":%u,\"loadedScenes\":%d}",
+                 (unsigned)free_internal, (unsigned)largest_internal,
+                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
+                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK, fos_scenes_loaded());
+        frameos_nim_log_hook(event);
+    }
+    return false;
+}
+
 static void ws_start(void)
 {
     if (s_ws_client) return;
     if (!s_access_token[0] || (!s_ws_path[0] && !s_ws_url[0])) return;
+    /* Before build_ws_uri: a dial that cannot possibly complete should not
+     * even claim the client's 10 KB task stack. The stall watchdog calls this
+     * again every FOS_CLOUD_WS_STALL_RESTART_US, so the link comes up on its
+     * own once memory frees. */
+    if (!ws_heap_ready()) return;
     if (!build_ws_uri()) return;
     snprintf(s_ws_headers, sizeof(s_ws_headers), "Authorization: Bearer %s\r\n",
              s_access_token);
