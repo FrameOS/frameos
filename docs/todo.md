@@ -74,6 +74,33 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ### Memory
 
+- **The Nim heap in PSRAM squeezes the renderer, and an OOM wedges the frame.**
+  Moving the Nim heap to PSRAM fixed internal RAM (12 KB → ~100 KB free) but
+  took the same memory out of the render budget: scene graphs and QuickJS now
+  compete with the canvas and image decode. Measured on an 8 MB XIAO-class
+  board with a 6-scene set, boot timeline over `heapinfo`:
+
+      [16s] render #1 started
+      [19-54s] psram_free 2.7M -> 1.9M          (normal working set)
+      [59s]  psram_free 1,978,364 -> 3,776      blocks 4431 -> 6960
+      [59s+] pinned at 3,776; render never completes, TLS cannot handshake
+
+  The step at 59 s is the OOM abort: `fos_nim_fatal_oom` longjmps out of the
+  render and the ~2 MB it had allocated is abandoned (the glue says as much).
+  PSRAM then sits at ~0, so every later render fails the same way and the
+  cloud link cannot open — the frame is wedged until it is power-cycled.
+  `FOS_NIM_OOM_ABORT_RESTART_STREAK` is 4, and with a 300 s interval that is
+  20 minutes of dead frame at best.
+
+  Two things to decide, and they are separable:
+  1. Where the interpreter's memory should live. Options: keep PSRAM but hold
+     a hard render reserve; split (graphs in PSRAM, QuickJS internal); or
+     revert and solve internal RAM another way. Needs measurement per scene
+     set, not a guess.
+  2. Recovery. An OOM abort that leaks the render's heap should restart the
+     runtime immediately rather than after a streak — a frame that cannot
+     render and cannot phone home is worse than one that reboots.
+
 - **Move QuickJS off internal RAM** — it allocates through libc malloc, and
   `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
   the internal pool, so the active scene's JS context is an internal-RAM cost
