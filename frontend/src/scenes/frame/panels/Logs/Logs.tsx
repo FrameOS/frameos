@@ -663,72 +663,6 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           ) : null}
         </div>
       )}
-      {showUsbLogControls && usbLogStreamOpen && commandOpen && (
-        <div
-          className={clsx(
-            'flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2',
-            renderTheme === 'dark' ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'
-          )}
-        >
-          <span
-            className={clsx(
-              'font-mono text-xs font-semibold',
-              renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
-            )}
-          >
-            frameos&gt;
-          </span>
-          <input
-            ref={commandInputRef}
-            aria-label="Serial console command"
-            className={clsx(
-              'frameos-control min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 font-mono text-xs focus:border-blue-500 focus:ring-blue-500',
-              fullScreen ? 'h-8' : 'h-9'
-            )}
-            disabled={commandSending}
-            onChange={(event) => setCommand(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                void submitCommand()
-              } else if (event.key === 'Escape') {
-                setCommandOpen(false)
-                setCommandError(null)
-              }
-            }}
-            placeholder="status, scenes, set …, restart — the board's own console"
-            spellCheck={false}
-            autoComplete="off"
-            value={command}
-          />
-          <button
-            type="button"
-            onClick={() => void submitCommand()}
-            disabled={commandSending || !command.trim()}
-            className={clsx(
-              'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40',
-              fullScreen ? 'h-8' : 'h-9'
-            )}
-          >
-            {commandSending ? <Spinner className="h-4 w-4" /> : null}
-            Send
-          </button>
-          {commandError ? (
-            <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
-              {commandError}
-            </div>
-          ) : (
-            <div
-              className={clsx(
-                'min-w-0 flex-[1_1_12rem] truncate font-sans text-xs',
-                renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
-              )}
-            >
-              The reply appears in the log above.
-            </div>
-          )}
-        </div>
-      )}
       <Virtuoso
         key={virtuosoKey}
         useWindowScroll={fullScreen && !customScrollParent}
@@ -832,13 +766,87 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           )
         }}
       />
+      {showUsbLogControls && usbLogStreamOpen && commandOpen && (
+        <div
+          className={clsx(
+            'flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2',
+            renderTheme === 'dark' ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'
+          )}
+        >
+          <span
+            className={clsx(
+              'font-mono text-xs font-semibold',
+              renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            )}
+          >
+            frameos&gt;
+          </span>
+          <input
+            ref={commandInputRef}
+            aria-label="Serial console command"
+            className={clsx(
+              'frameos-control min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 font-mono text-xs focus:border-blue-500 focus:ring-blue-500',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+            disabled={commandSending}
+            onChange={(event) => setCommand(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                void submitCommand()
+              } else if (event.key === 'Escape') {
+                setCommandOpen(false)
+                setCommandError(null)
+              }
+            }}
+            placeholder="status, scenes, set …, restart — the board's own console"
+            spellCheck={false}
+            autoComplete="off"
+            value={command}
+          />
+          <button
+            type="button"
+            onClick={() => void submitCommand()}
+            disabled={commandSending || !command.trim()}
+            className={clsx(
+              'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+          >
+            {commandSending ? <Spinner className="h-4 w-4" /> : null}
+            Send
+          </button>
+          {commandError ? (
+            <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
+              {commandError}
+            </div>
+          ) : (
+            <div
+              className={clsx(
+                'min-w-0 flex-[1_1_12rem] truncate font-sans text-xs',
+                renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+              )}
+            >
+              The reply appears in the log above.
+            </div>
+          )}
+        </div>
+      )}
       {!atBottom && (
         <button
           type="button"
           onClick={() => scrollToLatest()}
           className={clsx(
             'frameos-secondary-button z-40 rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            fullScreen ? 'fixed bottom-6 right-4 @4xl:right-8' : 'absolute bottom-5 right-6'
+            fullScreen ? 'fixed right-4 @4xl:right-8' : 'absolute right-6',
+            // Clear the console row when it is open, instead of covering it.
+            showUsbLogControls && usbLogStreamOpen && commandOpen
+              ? fullScreen
+                ? 'bottom-20'
+                : 'bottom-[4.5rem]'
+              : fullScreen
+              ? 'bottom-6'
+              : 'bottom-5'
           )}
         >
           Scroll to latest
