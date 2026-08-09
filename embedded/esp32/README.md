@@ -259,6 +259,40 @@ the device sleeps 6h to keep a low cell from being cycled down to damage. The
 backend can bake these in per-frame via `device_config`:
 `deepSleep`, `wakeSchedule`, `batteryPin`, `batteryDivider`.
 
+## Scene storage and memory (2026.8.13)
+
+Scenes arrive as one combined `scenes.json` — from the USB upload, the
+backend sync or the cloud's `set_scenes` — and that stays the wire format.
+The device does **not** keep them that way. On apply the payload is split
+into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
+file is deleted (the `state` partition is 1M and a payload may be 512K, so
+both do not fit), and only the **active** scene is parsed and resident. The
+index carries ids, names and refresh intervals, so the frame can list and
+switch scenes without holding them.
+
+Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
+32 and a scene id is a 36-character uuid: `/<uuid>.json` cannot be opened at
+all. The id ↔ slot mapping lives in the index. Every failure path (an
+unsplittable payload, more than 32 scenes, a full partition) falls back to
+loading the combined file whole, so a frame cannot lose its scenes to a
+failed optimization.
+
+Two allocation facts worth knowing before profiling anything here:
+
+- The Nim heap allocates from PSRAM explicitly (`fos_nim_heap_malloc` in the
+  glue). Plain `malloc` would not: `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` is
+  16384, so everything smaller than 16K comes from the ~300K internal pool,
+  which is also where Wi-Fi, lwIP and TLS allocate. That is why a frame with
+  many scenes could render happily and still be unable to open a TLS
+  connection.
+- QuickJS and cJSON still use libc `malloc`, so they still land in internal
+  RAM. The scene splitter deliberately avoids cJSON on the large payload for
+  that reason, scanning bracket depth over the raw bytes instead.
+
+The cloud link refuses to dial below 48K free internal with a 16K contiguous
+block (`FOS_CLOUD_WS_MIN_INTERNAL_*`) and says so in `status` and the logs,
+rather than failing inside esp-tls as a connection reset.
+
 ## Memory guardrails (M4)
 
 The on-device renderer composites into an RGBA pixie buffer (4 B/px), packs it

@@ -128,9 +128,12 @@ In `embedded/esp32/main/main.c` after storage init:
   request's own `maxBytes` — default 10MB — still applies).
 - No SD: `esp_spiffs_info("state", …)`; if free space minus a 128KB safety
   margin is meaningful (say ≥256KB), `fos_nim_http_set_spill_dir("/state",
-  free - margin)`; else leave spill disabled. `/state` also holds
-  `scenes.json` — the cap must never let a spill starve a scene update,
-  hence the margin and the low ceiling. Note SPIFFS writes are slow;
+  free - margin)`; else leave spill disabled. `/state` also holds the scene
+  store — the cap must never let a spill starve a scene update, hence the
+  margin and the low ceiling. (Since 2026.8.13 that store is one file per
+  scene plus `scene-index.json` rather than a single `scenes.json`; the
+  reasoning is unchanged, but a scene update now writes several files, so the
+  margin covers a set of writes rather than one.) Note SPIFFS writes are slow;
   acceptable for a once-per-refresh e-ink frame.
 - `frameos_nim_stub.c` already carries the no-op `fos_nim_http_set_spill_dir`
   (stub builds have no Nim and no HTTP glue).

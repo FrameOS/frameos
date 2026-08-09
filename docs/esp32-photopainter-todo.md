@@ -10,7 +10,7 @@ Hardware facts (Waveshare docs): 32 MB flash, 16 MB PSRAM, ETA6098 charge IC
 buttons (BOOT/Reset only), TF slot on SPI3. The existing
 `waveshare_esp32_s3_epaper_13_3e6` preset is correct; no new preset needed.
 
-## Status 2026-08-08
+## Status 2026-08-09
 
 The parity push is essentially done, all hardware-verified on the bench
 13.3E6: assets over HTTP/cloud-WS/USB, full deploy (backend build → OTA),
@@ -23,8 +23,28 @@ and per-profile backend build dirs (#305).
 
 ## Remaining
 
-1. **`image_get` cloud verb**: end-to-end verification (the verb exists and
-   is wired; nobody has confirmed the full path against a live frame).
+Nothing tracked. The last item — end-to-end verification of the `image_get`
+cloud verb — was closed 2026-08-09: a cloud-managed ESP32 acked it against
+production, so the device → cloud → UI path is exercised, not just the
+device-side BMP pack. Note the frame that did it was a PhotoPainter 7.3"
+(`waveshare_esp32_s3_photopainter`), not this 13.3E6; the verb and the BMP
+pack are board-independent, so this is the verb proven rather than this
+board re-proven.
+
+## Note 2026-08-09: the memory picture changed under this board
+
+Anything here (or in bench notes elsewhere) that reasons about "a dozen
+scenes loaded" eating the internal-RAM headroom predates two changes that
+landed in 2026.8.13:
+
+- the Nim heap allocates from PSRAM explicitly, instead of falling into
+  internal RAM via `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`, and
+- scenes are stored one file per scene and only the active one is resident.
+
+On a PhotoPainter that moved internal free from ~12.5 KB to ~109 KB with the
+same scene set. The 13.3E6 was previously measured at ~16-19 KB internal free
+with a dozen scenes — that figure is stale and should be re-measured before
+any conclusion is drawn from it.
 
 ## P2 — later / nice-to-have
 
