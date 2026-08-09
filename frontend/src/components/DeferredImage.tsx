@@ -28,12 +28,29 @@ class LoadLimiter {
     })
   }
 }
-const sharedLimiter = new LoadLimiter(5)
+// One pool per concurrency level, so a caller that needs a stricter cap gets
+// its own queue instead of quietly changing everyone else's.
+const limiters = new Map<number, LoadLimiter>()
+function limiterFor(max: number): LoadLimiter {
+  const key = Math.max(1, Math.floor(max))
+  const existing = limiters.get(key)
+  if (existing) return existing
+  const created = new LoadLimiter(key)
+  limiters.set(key, created)
+  return created
+}
+const defaultMaxConcurrent = 5
 
 export interface DeferredImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   url: string
   startWhenVisible?: boolean
   spinnerClassName?: string
+  /**
+   * How many of these may be in flight at once. Defaults to 5; an esp32 frame
+   * serves its asset thumbnails from the device itself, one small HTTP server
+   * on a microcontroller, so the asset panel asks for 1 there.
+   */
+  maxConcurrent?: number
 }
 
 /** DeferredImage with visibility gate + 5-at-a-time limiter + spinner */
@@ -41,6 +58,7 @@ export function DeferredImage({
   url,
   startWhenVisible = true,
   spinnerClassName,
+  maxConcurrent = defaultMaxConcurrent,
   className,
   onLoad,
   onError,
@@ -79,7 +97,7 @@ export function DeferredImage({
     let cancelled = false
     if (!started || actualSrc) return
     ;(async () => {
-      const release = await sharedLimiter.acquire()
+      const release = await limiterFor(maxConcurrent).acquire()
       if (cancelled) {
         release()
         return

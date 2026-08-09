@@ -9,6 +9,7 @@ import {
   allowedSceneToolPanels,
   allowedSceneUtilityPanels,
   frameCapabilities,
+  isEsp32Frame,
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
   frameSettingsSectionIsAllowed,
@@ -502,5 +503,33 @@ describe("Add frame opens the flow its control plane implements", () => {
   it("leaves the backend and the on-device panel on the creation form", () => {
     expect(addFrameFlows.backend).toBe("backendForm");
     expect(addFrameFlows.frameAdmin).toBe("backendForm");
+  });
+});
+
+describe("isEsp32Frame", () => {
+  // Callers that care about the DEVICE rather than the control plane: an
+  // esp32 serves its own asset thumbnails from a microcontroller, so the
+  // asset panel loads them one at a time instead of five.
+  it("recognises a cloud-enrolled esp32 from its hardware report", () => {
+    expect(isEsp32Frame({ hardware: { platform: "esp32-s3" } }, "cloud")).toBe(true);
+    expect(isEsp32Frame({ hardware: { platform: "esp32" } }, "cloud")).toBe(true);
+  });
+
+  it("recognises a backend/on-device esp32 from its embedded platform", () => {
+    expect(isEsp32Frame({ embedded: { platform: "esp32-s3" } }, "backend")).toBe(true);
+    expect(isEsp32Frame({ embedded: { platform: "esp32-c3" } }, "frameAdmin")).toBe(true);
+  });
+
+  it("is false for everything else", () => {
+    expect(isEsp32Frame({ embedded: { platform: "virtual" } }, "backend")).toBe(false);
+    expect(isEsp32Frame({ hardware: { platform: "pi-zero-2" } }, "cloud")).toBe(false);
+    expect(isEsp32Frame(null, "backend")).toBe(false);
+    expect(isEsp32Frame(undefined, "cloud")).toBe(false);
+  });
+
+  it("does not treat a cloud hardware report as esp32 outside cloud mode", () => {
+    // hardware.platform is the enrollment report; a backend frame's device
+    // identity is embedded.platform.
+    expect(isEsp32Frame({ hardware: { platform: "esp32-s3" } }, "backend")).toBe(false);
   });
 });
