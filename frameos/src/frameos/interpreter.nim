@@ -370,7 +370,18 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       # 7.7MB a decode is, and OOM'd the 16MB-PSRAM ESP32 boards the same way
       # (render/calendar was the repro). Add producers here only after their
       # get() consumes context.decodeTargetImage.
-      const decodeTargetProducers = ["data/localImage", "render/calendar"]
+      const decodeTargetProducers = [
+        "data/localImage", "render/calendar",
+        # Download-based producers: all of these go through
+        # downloadImageWithDataForContext, which consumes the hint and falls
+        # back to a display-bounded decode without one. Before they were on
+        # this list they decoded into the canvas anyway, but with the frame's
+        # scaling mode rather than the consumer's placement — the XKCD scene
+        # asked for "contain" and got "cover".
+        "data/downloadImage", "data/unsplash", "data/immich",
+        "data/googlePhotos", "data/openaiImage", "data/wikicommons",
+        "data/frameOSGallery",
+      ]
       var setDecodeTargetHint = false
       var directImageProducer = false
       if keyword == "render/image" and not asDataNode and cacheEnabled == false and

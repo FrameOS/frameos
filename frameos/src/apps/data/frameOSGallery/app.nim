@@ -34,10 +34,19 @@ proc get*(self: App, context: ExecutionContext): Image =
   let category = self.appConfig.resolvedCategory()
   self.log(%*{"category": category})
   let url = galleryUrl(category)
-  let target = context.contextImage()
+  # Decode straight into the consumer's canvas only when the interpreter says
+  # the consumer will draw this full-frame, and with the placement it asked
+  # for. Taking context.image plus the frame's scaling mode instead meant a
+  # node asking for "contain" silently got the frame default; downloadImageFor-
+  # Target falls back to a display-bounded decode when there is no target.
+  let target = context.decodeTargetImage
+  let targetScalingMode = context.decodeTargetScalingMode
+  if not target.isNil:
+    context.decodeTargetImage = nil
+    context.decodeTargetScalingMode = ""
   try:
     result = galleryDownloadHook(url, self.maxImageResponseBytes(), target,
-        scaledDecodeFitForFrame(self.frameConfig))
+        scaledDecodeFit(targetScalingMode))
   except CatchableError as e:
     let detail = if e.msg.len > 0: e.msg else: "unknown error"
     self.logError "An error occurred while downloading the gallery image: " & detail
