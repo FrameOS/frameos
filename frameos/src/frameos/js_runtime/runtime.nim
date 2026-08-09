@@ -26,7 +26,19 @@ type
     outputTypes: Table[string, string]
     targetField: string
 
-var jsSourceMapsByCtx = initTable[ptr JSContext, Table[string, SourceLineMap]]()
+type
+  LazySourceMap = object
+    ## A line map that may not have been built yet.
+    ##
+    ## Building one costs ~45% of a transform — 10 s of the 22 s a 36 KB app
+    ## takes on an ESP32-S3 — and it exists only to rewrite line numbers in
+    ## error messages. Most runs never throw, so the map is built on the first
+    ## error that needs it and cached from then on.
+    built: bool
+    map: SourceLineMap
+    provider: proc(): SourceLineMap {.closure, gcsafe, raises: [].}
+
+var jsSourceMapsByCtx = initTable[ptr JSContext, Table[string, LazySourceMap]]()
 var currentEvalCtx: ptr JSContext
 var currentEvalEnv: EvalEnv
 var tzName = ""
@@ -125,6 +137,23 @@ proc transpileModuleSource*(source: string, filename: string): string =
     return source
   transformFrameosModule(source, filename)
 
+proc transpileAppSource*(source: string, filename: string, allowJsx = false): string =
+  ## Prepare a JS app's source for QuickJS: erase TypeScript, and stop.
+  ##
+  ## The module form is deliberately left intact — evalModuleNamespace lets
+  ## QuickJS parse it as a real ES module, instead of tokenising the whole
+  ## file here to rewrite `export` into CommonJS. No line map is built either;
+  ## app_runtime rebuilds one from the source and this output if an error ever
+  ## needs to name a line. On an ESP32-S3 those two stages were ~70% of what
+  ## transpiling a 36 KB app cost.
+  if source.len == 0:
+    return source
+  transform(source, TransformOptions(
+    filePath: filename,
+    transforms: if allowJsx: @["typescript", "jsx"] else: @["typescript"],
+    skipSourceMap: true,
+  )).code
+
 proc transpileModuleSourceWithMap*(source: string, filename: string): TransformResult =
   if source.len == 0:
     return TransformResult(code: source, sourceMap: identitySourceLineMap(source, filename, filename))
@@ -134,8 +163,21 @@ proc registerJsSourceMap*(ctx: ptr JSContext, sourceMap: SourceLineMap) =
   if ctx == nil or sourceMap.generatedName.len == 0:
     return
   if not jsSourceMapsByCtx.hasKey(ctx):
-    jsSourceMapsByCtx[ctx] = initTable[string, SourceLineMap]()
-  jsSourceMapsByCtx[ctx][sourceMap.generatedName] = sourceMap
+    jsSourceMapsByCtx[ctx] = initTable[string, LazySourceMap]()
+  jsSourceMapsByCtx[ctx][sourceMap.generatedName] =
+    LazySourceMap(built: true, map: sourceMap)
+
+proc registerJsSourceMapProvider*(ctx: ptr JSContext, generatedName: string,
+    provider: proc(): SourceLineMap {.closure, gcsafe, raises: [].}) =
+  ## Register a map that is only built if an error needs it. `provider` must
+  ## stay valid for as long as the context does — in practice it closes over
+  ## the runtime that holds the source and the generated code.
+  if ctx == nil or generatedName.len == 0 or provider == nil:
+    return
+  if not jsSourceMapsByCtx.hasKey(ctx):
+    jsSourceMapsByCtx[ctx] = initTable[string, LazySourceMap]()
+  jsSourceMapsByCtx[ctx][generatedName] =
+    LazySourceMap(built: false, provider: provider)
 
 proc clearJsSourceMaps*(ctx: ptr JSContext) =
   if ctx != nil and jsSourceMapsByCtx.hasKey(ctx):
@@ -145,8 +187,13 @@ proc mapJsErrorText*(ctx: ptr JSContext, text: string): string =
   result = text
   if ctx == nil or not jsSourceMapsByCtx.hasKey(ctx):
     return
-  for _, sourceMap in jsSourceMapsByCtx[ctx]:
-    result = result.rewriteQuickJsLocations(sourceMap)
+  for _, entry in jsSourceMapsByCtx[ctx].mpairs:
+    if not entry.built:
+      # First error for this source: build the map now, once.
+      if entry.provider != nil:
+        entry.map = entry.provider()
+      entry.built = true
+    result = result.rewriteQuickJsLocations(entry.map)
 
 proc mapJsErrorText*(text: string, sourceMap: SourceLineMap): string =
   text.rewriteQuickJsLocations(sourceMap)

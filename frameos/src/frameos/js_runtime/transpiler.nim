@@ -31,6 +31,12 @@ type
   TransformOptions* = object
     filePath*: string
     transforms*: seq[string]
+    ## Skip building the line map. Building one is ~45% of a transform (10 s
+    ## of the 22 s a 36 KB app costs on an ESP32-S3) and it is only ever read
+    ## to rewrite line numbers in an error message, which most runs never
+    ## produce. Callers that can rebuild it on demand from the source and the
+    ## generated code set this and pay nothing until something throws.
+    skipSourceMap*: bool
 
   JsxParser = object
     code: string
@@ -807,7 +813,20 @@ proc stripMethodAndMemberTypes(code: string): string =
     var lineStart = colonIndex - 1
     while lineStart >= 0 and code[lineStart] notin {'\n', '\r', '{', ';'}:
       dec lineStart
-    let prefix = code[lineStart + 1..<colonIndex]
+    # `?` and `!` immediately before the colon are the optional and definite
+    # assignment markers — part of the member name, not of an expression. The
+    # prefix test below is looking for things that mean "this colon belongs to
+    # a ternary or a call", so the markers must not be counted. Missing this
+    # left `optional?: number` alone here; a later pass then removed the `?`,
+    # producing a plain annotation that this pass had already walked past, and
+    # only a second full strip of the whole file cleaned it up.
+    var annotationStart = colonIndex
+    var marker = colonIndex - 1
+    while marker >= 0 and code[marker] in {' ', '\t'}:
+      dec marker
+    if marker >= 0 and code[marker] in {'?', '!'}:
+      annotationStart = marker
+    let prefix = code[lineStart + 1..<annotationStart]
     if "?" in prefix or "=" in prefix or "(" in prefix or ")" in prefix or "," in prefix:
       return false
     var prev = colonIndex - 1
@@ -1972,6 +1991,23 @@ proc transformImportsTokenDriven(code: string): string =
 proc transformImports(code: string): string =
   return transformImportsTokenDriven(code)
 
+proc mayContainJsx*(code: string): bool =
+  ## Necessary (not sufficient) condition for JSX being present: a '<' that
+  ## opens a tag, closes one, or is a fragment. Comparisons and generics also
+  ## produce '<', so this over-reports — which is the safe direction, since a
+  ## false positive only means running the pass that would have run anyway.
+  ##
+  ## Worth the scan because the JSX pass is ~12% of a transform (about 2.7 s
+  ## for a 36 KB app on an ESP32-S3) and scene apps are plain TypeScript.
+  var index = 0
+  while index < code.len:
+    if code[index] == '<' and index + 1 < code.len:
+      let next = code[index + 1]
+      if next in {'a'..'z', 'A'..'Z', '_', '$', '/', '>'}:
+        return true
+    inc index
+  false
+
 proc transform*(code: string, options: TransformOptions): TransformResult =
   let originalCode = code
   let path = if options.filePath.len == 0: "<frameos>" else: options.filePath
@@ -1979,13 +2015,24 @@ proc transform*(code: string, options: TransformOptions): TransformResult =
     result.code = code
     if options.hasTransform("typescript"):
       result.code = stripTypeScript(result.code)
-    if options.hasTransform("jsx"):
+    var jsxRan = false
+    if options.hasTransform("jsx") and mayContainJsx(result.code):
       result.code = transformJSX(result.code)
-      if options.hasTransform("typescript"):
-        result.code = stripTypeScript(result.code)
+      jsxRan = true
+    if options.hasTransform("jsx") and options.hasTransform("typescript") and jsxRan:
+      # JSX lowering can reintroduce TypeScript syntax, so re-erase after it.
+      # This used to run unconditionally, which cost a full second strip on
+      # every file — 10.7 ms of the 24 ms a 36 KB app takes, and on real app
+      # sources it changed nothing at all. stripTypeScript is complete in one
+      # pass now (it repeats its own member pass when it needs to), so this
+      # is only about what transformJSX itself emits.
+      result.code = stripTypeScript(result.code)
     if options.hasTransform("imports"):
       result.code = transformImports(result.code)
-    result.sourceMap = lineBasedSourceLineMap(originalCode, result.code, path, path)
+    if options.skipSourceMap:
+      result.sourceMap = emptySourceLineMap(path, path)
+    else:
+      result.sourceMap = lineBasedSourceLineMap(originalCode, result.code, path, path)
   except CatchableError as error:
     raise newException(ValueError, "Error transforming " & path & ": " & error.msg)
 
