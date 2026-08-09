@@ -7,7 +7,7 @@
 # run the AOT-compiled standard app library. The firmware's C side feeds us
 # scene JSON (from SPIFFS or the backend) and asks for rendered frames.
 
-import std/[json, locks, options, strformat, tables]
+import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
 import frameos/types
@@ -34,6 +34,22 @@ var
   scenesLoadedCount = 0
   renderRequested = false
 
+type
+  SceneCatalogEntry* = object
+    ## One scene the frame CAN run, as listed in /state/scenes/index.json —
+    ## id, display name and refresh interval, and nothing else. The point is
+    ## that this is all the memory a non-active scene costs: its nodes, its
+    ## app configs and (increasingly) its JavaScript stay on flash until the
+    ## scene is selected. A frame with twenty JS-heavy scenes holds one.
+    id*: string
+    name*: string
+    refreshInterval*: float
+
+var sceneCatalog: seq[SceneCatalogEntry] = @[]
+  ## Empty on the legacy path (one scenes.json parsed whole), in which case
+  ## every listing falls back to the resident cache. Non-empty means the
+  ## firmware is feeding scenes one at a time.
+
 proc sceneCount*(): int =
   scenesLoadedCount
 
@@ -48,17 +64,36 @@ proc currentSceneName*(): string =
   ""
 
 proc sceneInfoJson*(): string =
-  let scenes = getInterpretedScenes()
+  ## The scene list as the console, the USB API and the cloud see it.
+  ##
+  ## Sourced from the CATALOG when the firmware stores scenes as per-scene
+  ## files (the lazy path: only the active scene is parsed, everything else is
+  ## a name and an id read from the index). Falls back to the resident cache
+  ## for the legacy single-payload path, where every scene is parsed anyway.
+  ## `available` is what the frame can switch to; `loaded` is what is actually
+  ## built in memory, which on the lazy path is at most one.
   var sceneItems = newJArray()
-  for sceneId, exported in scenes:
-    sceneItems.add(%*{
-      "id": sceneId.string,
-      "name": if exported.name.len > 0: exported.name else: sceneId.string,
-      "refreshInterval": exported.refreshInterval,
-    })
+  var available = 0
+  if sceneCatalog.len > 0:
+    for entry in sceneCatalog:
+      sceneItems.add(%*{
+        "id": entry.id,
+        "name": if entry.name.len > 0: entry.name else: entry.id,
+        "refreshInterval": entry.refreshInterval,
+      })
+    available = sceneCatalog.len
+  else:
+    let scenes = getInterpretedScenes()
+    for sceneId, exported in scenes:
+      sceneItems.add(%*{
+        "id": sceneId.string,
+        "name": if exported.name.len > 0: exported.name else: sceneId.string,
+        "refreshInterval": exported.refreshInterval,
+      })
+    available = scenes.len
   let payload = %*{
     "loaded": scenesLoadedCount,
-    "available": scenes.len,
+    "available": available,
     "hasScene": hasScene(),
     "currentSceneId": if currentSceneId.isSome: currentSceneId.get().string else: "",
     "currentSceneName": currentSceneName(),
@@ -232,9 +267,104 @@ proc loadScenes*(payload: string): int =
   log(&"loadScenes: {scenesLoadedCount} scene(s) ready, default \"{firstId.get().string}\"")
   scenesLoadedCount
 
+proc setSceneCatalog*(indexJson: string): int =
+  ## Install the list of scenes available on flash, WITHOUT parsing any of
+  ## them. `indexJson` is /state/scenes/index.json:
+  ##   {"scenes": [{"id", "name", "refreshInterval"}, …], "default": "<id>"}
+  ##
+  ## This is what makes lazy loading possible: the frame can list, schedule
+  ## and switch scenes knowing only this, and pays for a scene's nodes and
+  ## JavaScript only while it is the active one.
+  var parsed: JsonNode
+  try:
+    parsed = parseJson(indexJson)
+  except CatchableError as e:
+    log("setSceneCatalog: unparseable index: " & e.msg)
+    return 0
+  if parsed.isNil or parsed.kind != JObject:
+    log("setSceneCatalog: index is not an object")
+    return 0
+  var entries: seq[SceneCatalogEntry] = @[]
+  let scenesNode = parsed{"scenes"}
+  if not scenesNode.isNil and scenesNode.kind == JArray:
+    for item in scenesNode.items:
+      if item.kind != JObject:
+        continue
+      let id = item{"id"}.getStr()
+      if id.len == 0:
+        continue
+      entries.add(SceneCatalogEntry(
+        id: id,
+        name: item{"name"}.getStr(),
+        refreshInterval: item{"refreshInterval"}.getFloat(0.0),
+      ))
+  sceneCatalog = entries
+  if entries.len == 0:
+    log("setSceneCatalog: no scenes in index")
+    return 0
+  # The default is what boots when nothing was selected before; fall back to
+  # the first entry so an index without one still starts something.
+  let defaultId = parsed{"default"}.getStr()
+  defaultSceneId = some(SceneId(
+    if defaultId.len > 0: defaultId else: entries[0].id))
+  # A previously selected scene that is no longer on flash must not stick
+  # around as the target of the next render.
+  if currentSceneId.isSome and
+      not entries.anyIt(it.id == currentSceneId.get().string):
+    currentSceneId = none(SceneId)
+  log(&"setSceneCatalog: {entries.len} scene(s) available, default \"{defaultSceneId.get().string}\"")
+  entries.len
+
+proc catalogHas(sceneIdText: string): bool =
+  sceneCatalog.anyIt(it.id == sceneIdText)
+
+proc loadScene*(payload: string): bool =
+  ## Build ONE scene and make it the only resident one, tearing down whatever
+  ## was live. `payload` is a single scene object (the element the combined
+  ## scenes.json holds in its array); it is wrapped so the existing array
+  ## parser can be reused rather than duplicated.
+  ##
+  ## Returns false and leaves the runtime scene-less on a bad payload — the
+  ## caller (fos_scenes.c) logs and keeps the previous file on flash, so a
+  ## corrupt scene cannot take the frame down permanently.
+  let inputs = parseInterpretedSceneInputs("[" & payload & "]")
+  if inputs.len == 0:
+    log("loadScene: payload contained no scene")
+    return false
+  let newScenes = buildInterpretedScenes(inputs)
+  if newScenes.len == 0:
+    log("loadScene: scene did not survive parsing")
+    return false
+
+  if not currentScene.isNil:
+    cleanupScene(currentScene)
+    currentScene = nil
+    currentExported = nil
+
+  replaceInterpretedScenesCache(newScenes)
+  scenesLoadedCount = newScenes.len
+  let sceneId = inputs[0].id
+  currentSceneId = some(sceneId)
+  if defaultSceneId.isNone:
+    defaultSceneId = some(sceneId)
+  renderRequested = true
+  log(&"loadScene: \"{sceneId.string}\" resident (1 of {max(sceneCatalog.len, 1)})")
+  true
+
 proc selectScene*(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
   let scenes = getInterpretedScenes()
+  # On the lazy path the scene is on flash, not in the cache: record the
+  # choice and let the firmware feed the payload through loadScene. Returning
+  # true here means "known scene", not "already loaded".
+  if sceneCatalog.len > 0 and not scenes.hasKey(sceneId):
+    if not catalogHas(sceneIdText):
+      log("selectScene: scene not found: " & sceneIdText)
+      return false
+    currentSceneId = some(sceneId)
+    renderRequested = true
+    log("selectScene: " & sceneIdText & " (pending load from flash)")
+    return true
   if not scenes.hasKey(sceneId):
     log("selectScene: scene not found: " & sceneIdText)
     return false

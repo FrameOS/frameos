@@ -376,6 +376,42 @@ proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
     recoverEmergencyReserve("scene load failure")
     result = 0
 
+proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.} =
+  ## Lazy path: tell the runtime which scenes exist on flash without parsing
+  ## any of them (/state/scenes/index.json). Returns the count, 0 on a bad
+  ## index — the caller then falls back to the combined payload.
+  try:
+    if indexJson == nil:
+      return 0
+    result = setSceneCatalog($indexJson).cint
+  except Defect as e:
+    log("setSceneCatalog failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene catalog failure")
+    result = 0
+  except CatchableError as e:
+    log("setSceneCatalog failed: " & e.msg)
+    result = 0
+
+proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
+  ## Lazy path: make ONE scene resident, replacing whatever was live. The
+  ## previous scene's QuickJS context and app instances are torn down first,
+  ## so holding twenty JS-heavy scenes costs the memory of one.
+  try:
+    if payload == nil:
+      return 0
+    result = (if loadScene($payload): 1 else: 0).cint
+    recoverEmergencyReserve("scene load")
+  except Defect as e:
+    log("loadScene failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+  except CatchableError as e:
+    log("loadScene failed: " & e.msg)
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+
 proc renderErrorFallback(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;

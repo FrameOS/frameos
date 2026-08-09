@@ -13,35 +13,52 @@ proc fosNimReleaseEmergencyReserve(): bool {.
 proc fosNimFatalOom(size: csize_t) {.
   importc: "fos_nim_fatal_oom", cdecl.}
 
+# PSRAM-first allocation (frameos_nim_glue.c). NOT plain malloc: ESP-IDF is
+# built with CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384, so malloc() serves
+# anything under 16 KB from internal RAM — and almost every Nim allocation is
+# under 16 KB. The interpreter therefore used to fill the ~300 KB internal
+# pool with scene graphs and strings while megabytes of PSRAM went unused,
+# starving the TLS handshake the cloud link needs. These helpers ask for PSRAM
+# explicitly and fall back to internal, so a board without PSRAM (or a
+# fragmented one) still allocates rather than dying.
+proc fosNimHeapMalloc(size: csize_t): pointer {.
+  importc: "fos_nim_heap_malloc", cdecl.}
+proc fosNimHeapCalloc(count, size: csize_t): pointer {.
+  importc: "fos_nim_heap_calloc", cdecl.}
+proc fosNimHeapRealloc(p: pointer, size: csize_t): pointer {.
+  importc: "fos_nim_heap_realloc", cdecl.}
+
 
 {.push stackTrace: off.}
 
 proc allocImpl(size: Natural): pointer =
-  result = c_malloc(size.csize_t)
+  result = fosNimHeapMalloc(size.csize_t)
   if result == nil and fosNimReleaseEmergencyReserve():
-    result = c_malloc(size.csize_t)
+    result = fosNimHeapMalloc(size.csize_t)
   if result == nil:
     fosNimFatalOom(size.csize_t) # longjmps out of the render when guarded
     raiseOutOfMem()
 
 proc alloc0Impl(size: Natural): pointer =
-  result = c_calloc(size.csize_t, 1)
+  result = fosNimHeapCalloc(size.csize_t, 1)
   if result == nil and fosNimReleaseEmergencyReserve():
-    result = c_calloc(size.csize_t, 1)
+    result = fosNimHeapCalloc(size.csize_t, 1)
   if result == nil:
     fosNimFatalOom(size.csize_t) # longjmps out of the render when guarded
     raiseOutOfMem()
 
 proc reallocImpl(p: pointer, newSize: Natural): pointer =
-  result = c_realloc(p, newSize.csize_t)
+  result = fosNimHeapRealloc(p, newSize.csize_t)
   if result == nil and fosNimReleaseEmergencyReserve():
-    result = c_realloc(p, newSize.csize_t)
+    result = fosNimHeapRealloc(p, newSize.csize_t)
   if result == nil:
     fosNimFatalOom(newSize.csize_t) # longjmps out of the render when guarded
     raiseOutOfMem()
 
 proc realloc0Impl(p: pointer, oldsize, newSize: Natural): pointer =
-  result = realloc(p, newSize.csize_t)
+  # reallocImpl, not the C realloc: this must stay on the PSRAM-first path
+  # too, and it inherits the emergency-reserve retry for free.
+  result = reallocImpl(p, newSize)
   if newSize > oldSize:
     zeroMem(cast[pointer](cast[uint](result) + uint(oldSize)), newSize - oldSize)
 

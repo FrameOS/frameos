@@ -106,11 +106,16 @@ static void log_metrics_sample(void)
         json, sizeof(json),
         "{\"event\":\"metrics\",\"source\":\"esp32\","
         "\"uptimeSeconds\":%lld,"
-        "\"freeHeapKB\":%u,\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
+        "\"freeHeapKB\":%u,\"largestHeapBlockKB\":%u,"
+        "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
         "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
         "\"loadedScenes\":%d",
         (long long)(esp_timer_get_time() / 1000000),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+        /* Internal fragmentation, not just the total: TLS wants a contiguous
+         * block, so a frame with 50 KB free in 4 KB pieces still cannot open
+         * the cloud link. This is the number that explains such a frame. */
+        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
         (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,

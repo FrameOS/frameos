@@ -47,6 +47,12 @@ bool frameos_nim_set_scene(const char *scene_id);
  * library. Returns the number of scenes loaded (0 = bad payload or runtime
  * unavailable). Hot-swaps live scenes. */
 int frameos_nim_load_scenes(const char *json);
+/* Lazy scene loading (fos_scenes.c per-scene store). The catalog is every
+ * scene available on flash — ids and names only, nothing parsed — so a frame
+ * can list and switch scenes while holding just one in memory. load_scene
+ * makes exactly one resident, tearing down the previous one. */
+int frameos_nim_set_scene_catalog(const char *index_json);
+int frameos_nim_load_scene(const char *scene_json);
 /* Install the service settings the settings poll just fetched
  * (docs/cloud-frames.md, "Service settings"). `json` is the `settings` OBJECT
  * — group → field → value — for the six cloud-owned groups (frameOS, github,

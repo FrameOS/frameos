@@ -1,10 +1,12 @@
 #include "fos_scenes.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -14,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include "cJSON.h"
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
@@ -25,6 +28,22 @@ static const char *TAG = "fos_scenes";
 #define SCENES_PATH "/state/scenes.json"
 #define SCENES_TMP_PATH "/state/scenes.json.tmp"
 #define SCENES_ETAG_PATH "/state/scenes.etag"
+/* Per-scene storage (the lazy path). A combined scenes.json is split into one
+ * file per scene plus an index, so only the ACTIVE scene is ever parsed and
+ * resident — scenes carrying a lot of JavaScript cost flash, not RAM.
+ *
+ * Slot NUMBERS, not scene ids, because CONFIG_SPIFFS_OBJ_NAME_LEN is 32 and a
+ * scene id is a 36-character uuid: "/<uuid>.json" cannot be opened at all.
+ * The id ↔ slot mapping lives in the index. */
+#define SCENES_INDEX_PATH "/state/scene-index.json"
+#define SCENES_INDEX_TMP_PATH "/state/scene-index.tmp"
+#define SCENES_SLOT_PATH_FMT "/state/scene-%d.json"
+#define SCENES_SLOT_TMP_PATH "/state/scene-slot.tmp"
+/* Above this the payload stays in one file and the legacy path runs: the
+ * split's bookkeeping is bounded, and a frame with this many scenes is not
+ * the case this optimizes for. */
+#define SCENES_SLOT_MAX 32
+#define SCENES_SLOT_PATH_LEN 48
 #define SCENES_MAX_BYTES (512 * 1024)
 #define ETAG_LEN 80
 #define SCENE_ID_LEN 128
@@ -402,6 +421,296 @@ static void restore_last_scene(void)
     }
 }
 
+/* ------------------------------------------------- per-scene split/lazy load
+ *
+ * The device receives one combined scenes.json (from the USB upload or the
+ * backend/cloud sync) — that stays the wire format. What changes is what the
+ * device keeps: the payload is split once, at apply time, into
+ * /state/scene-<slot>.json plus /state/scene-index.json, and the combined file
+ * is then deleted. Deleted, not kept: the `state` partition is 1 MB and a
+ * payload may be 512 KB, so both copies do not fit.
+ *
+ * Splitting at APPLY time rather than at write time is what keeps this to one
+ * code path — both producers already write scenes.json and set s_pending, and
+ * neither needs to know any of this exists. */
+
+/* Defined below, next to the other storage helpers. */
+static esp_err_t write_file_replace(const char *path, const char *tmp_path,
+                                    const char *data, size_t len);
+
+typedef struct {
+    char id[SCENE_ID_LEN];
+    int slot;
+} scene_slot_t;
+
+static scene_slot_t s_slots[SCENES_SLOT_MAX];
+static int s_slot_count = 0;
+
+static void slot_path(int slot, char *out, size_t out_len)
+{
+    snprintf(out, out_len, SCENES_SLOT_PATH_FMT, slot);
+}
+
+static int slot_for_scene(const char *scene_id)
+{
+    if (scene_id == NULL || scene_id[0] == '\0') return -1;
+    for (int i = 0; i < s_slot_count; i++) {
+        if (strcmp(s_slots[i].id, scene_id) == 0) return s_slots[i].slot;
+    }
+    return -1;
+}
+
+/* Element boundaries of a top-level JSON array, without parsing it.
+ *
+ * cJSON would allocate a node per token, and with
+ * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL those small allocations land in
+ * internal RAM — parsing a 300 KB payload whole is exactly the memory spike
+ * this feature exists to avoid. A depth scan costs nothing and lets each
+ * scene be written straight from the buffer we already hold; only the small
+ * per-scene metadata parse below allocates, one scene at a time.
+ *
+ * Returns the element count, or -1 if the payload is not an array. */
+static int scan_array_elements(const char *json, size_t len,
+                               size_t *starts, size_t *ends, int max_items)
+{
+    size_t i = 0;
+    while (i < len && isspace((unsigned char)json[i])) i++;
+    if (i >= len || json[i] != '[') return -1;
+    i++;
+    int count = 0;
+    int depth = 0;
+    bool in_string = false, escaped = false;
+    size_t start = 0;
+    for (; i < len; i++) {
+        char c = json[i];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+            continue;
+        }
+        if (c == '"') { in_string = true; continue; }
+        if (c == '{' || c == '[') {
+            if (depth == 0) start = i;
+            depth++;
+            continue;
+        }
+        if (c == '}' || c == ']') {
+            if (depth == 0) break; /* closing bracket of the outer array */
+            depth--;
+            if (depth == 0) {
+                if (count >= max_items) return -1; /* too many scenes */
+                starts[count] = start;
+                ends[count] = i + 1;
+                count++;
+            }
+            continue;
+        }
+    }
+    return depth == 0 ? count : -1;
+}
+
+/* Write one scene's raw bytes to its slot file. */
+static esp_err_t write_slot(int slot, const char *data, size_t len)
+{
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    return write_file_replace(path, SCENES_SLOT_TMP_PATH, data, len);
+}
+
+static void remove_slots_from(int first_slot)
+{
+    for (int slot = first_slot; slot < SCENES_SLOT_MAX; slot++) {
+        char path[SCENES_SLOT_PATH_LEN];
+        slot_path(slot, path, sizeof(path));
+        if (unlink(path) != 0) break; /* first gap ends the run */
+    }
+}
+
+/* Split the combined payload. On any failure nothing is deleted and the index
+ * is removed, so the caller falls back to loading the combined file whole —
+ * a frame never loses its scenes to a failed optimization. */
+static esp_err_t split_scenes(const char *json, size_t len)
+{
+    static size_t starts[SCENES_SLOT_MAX];
+    static size_t ends[SCENES_SLOT_MAX];
+    int count = scan_array_elements(json, len, starts, ends, SCENES_SLOT_MAX);
+    if (count <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *index = cJSON_CreateObject();
+    cJSON *scenes = cJSON_CreateArray();
+    if (index == NULL || scenes == NULL) {
+        cJSON_Delete(index);
+        cJSON_Delete(scenes);
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddItemToObject(index, "scenes", scenes);
+
+    esp_err_t err = ESP_OK;
+    int written = 0;
+    for (int i = 0; i < count; i++) {
+        size_t item_len = ends[i] - starts[i];
+        err = write_slot(i, json + starts[i], item_len);
+        if (err != ESP_OK) break;
+        written++;
+        /* One scene at a time: peak allocation is the largest scene, not the
+         * whole payload. Only three fields survive into the index. */
+        cJSON *item = cJSON_ParseWithLength(json + starts[i], item_len);
+        const cJSON *id = cJSON_GetObjectItem(item, "id");
+        if (!cJSON_IsString(id) || id->valuestring == NULL) {
+            cJSON_Delete(item);
+            err = ESP_ERR_INVALID_ARG;
+            break;
+        }
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "id", id->valuestring);
+        const cJSON *name = cJSON_GetObjectItem(item, "name");
+        if (cJSON_IsString(name) && name->valuestring) {
+            cJSON_AddStringToObject(entry, "name", name->valuestring);
+        }
+        const cJSON *refresh = cJSON_GetObjectItem(item, "refreshInterval");
+        if (cJSON_IsNumber(refresh)) {
+            cJSON_AddNumberToObject(entry, "refreshInterval", refresh->valuedouble);
+        }
+        cJSON_AddNumberToObject(entry, "slot", i);
+        cJSON_AddItemToArray(scenes, entry);
+        if (i == 0) cJSON_AddStringToObject(index, "default", id->valuestring);
+        cJSON_Delete(item);
+    }
+
+    char *index_json = (err == ESP_OK) ? cJSON_PrintUnformatted(index) : NULL;
+    cJSON_Delete(index);
+    if (index_json == NULL) {
+        remove_slots_from(0);
+        unlink(SCENES_INDEX_PATH);
+        return err == ESP_OK ? ESP_ERR_NO_MEM : err;
+    }
+    err = write_file_replace(SCENES_INDEX_PATH, SCENES_INDEX_TMP_PATH,
+                             index_json, strlen(index_json));
+    cJSON_free(index_json);
+    if (err != ESP_OK) {
+        remove_slots_from(0);
+        unlink(SCENES_INDEX_PATH);
+        return err;
+    }
+    /* Slots left over from a longer previous payload would otherwise linger
+     * and eat the state partition. */
+    remove_slots_from(written);
+    /* Only now is the combined file redundant. */
+    unlink(SCENES_PATH);
+    ESP_LOGI(TAG, "split %d scene(s) into per-scene files (%u bytes total)",
+             written, (unsigned)len);
+    return ESP_OK;
+}
+
+/* Read the index, hand the catalog to the runtime, and fill the id→slot map.
+ * Returns the scene count, 0 when there is no usable index. */
+static int load_scene_index(void)
+{
+    s_slot_count = 0;
+    size_t len = 0;
+    char *index_json = read_file(SCENES_INDEX_PATH, &len);
+    if (index_json == NULL || len == 0) {
+        free(index_json);
+        return 0;
+    }
+    cJSON *index = cJSON_ParseWithLength(index_json, len);
+    const cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
+    if (cJSON_IsArray(scenes)) {
+        const cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, scenes) {
+            if (s_slot_count >= SCENES_SLOT_MAX) break;
+            const cJSON *id = cJSON_GetObjectItem(entry, "id");
+            const cJSON *slot = cJSON_GetObjectItem(entry, "slot");
+            if (!cJSON_IsString(id) || id->valuestring == NULL ||
+                !cJSON_IsNumber(slot)) {
+                continue;
+            }
+            snprintf(s_slots[s_slot_count].id, SCENE_ID_LEN, "%s", id->valuestring);
+            s_slots[s_slot_count].slot = (int)slot->valuedouble;
+            s_slot_count++;
+        }
+    }
+    cJSON_Delete(index);
+    if (s_slot_count > 0) {
+        /* The runtime now knows every scene by name without parsing one. */
+        frameos_nim_set_scene_catalog(index_json);
+    }
+    free(index_json);
+    return s_slot_count;
+}
+
+/* Make one scene resident from its slot file. */
+static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
+{
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    size_t len = 0;
+    char *json = read_file(path, &len);
+    if (json == NULL || len == 0) {
+        free(json);
+        ESP_LOGW(TAG, "scene slot %d unreadable (%s)", slot, scene_id ? scene_id : "?");
+        log_scene_event("scenes:load", "error", origin, scene_id ? scene_id : "",
+                        "slot-read-failed", 0, 0, 0, ESP_ERR_NOT_FOUND);
+        return false;
+    }
+    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    int ok = frameos_nim_load_scene(json);
+    free(json);
+    if (!ok) {
+        log_scene_event("scenes:load", "error", origin, scene_id ? scene_id : "",
+                        "runtime-rejected", len, 0, 0, ESP_FAIL);
+        return false;
+    }
+    s_loaded = 1;
+    size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "scene slot %d live (%s); %d available, internal RAM %u -> %u",
+             slot, scene_id ? scene_id : "?", s_slot_count,
+             (unsigned)internal_before, (unsigned)internal_after);
+    log_scene_event("scenes:load", "ok", origin, scene_id ? scene_id : "",
+                    "runtime-loaded", len, 1, 0, ESP_OK);
+    return true;
+}
+
+/* Boot/apply on the lazy path: catalog first, then exactly one scene — the
+ * one persisted across reboots when it still exists, otherwise the index's
+ * default. */
+static bool activate_from_index(const char *origin)
+{
+    if (load_scene_index() == 0) return false;
+
+    char scene_id[SCENE_ID_LEN] = "";
+    size_t id_len = sizeof(scene_id);
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+        if (nvs_get_str(nvs, LAST_SCENE_NVS_KEY, scene_id, &id_len) != ESP_OK) {
+            scene_id[0] = '\0';
+        }
+        nvs_close(nvs);
+    }
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) {
+        /* Nothing persisted, or that scene is gone from the new payload. */
+        slot = s_slots[0].slot;
+        snprintf(scene_id, sizeof(scene_id), "%s", s_slots[0].id);
+    }
+    s_last_scene_settled = true; /* the index decides; no retry needed */
+    return load_scene_slot(slot, scene_id, origin);
+}
+
+/* Switch scenes on the lazy path: read that scene's file and make it
+ * resident, replacing the previous one. Returns false when the id is not on
+ * flash, so callers can fall through to the legacy in-memory switch. */
+static bool activate_scene_id(const char *scene_id)
+{
+    if (s_slot_count == 0) return false;
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) return false;
+    return load_scene_slot(slot, scene_id, "select");
+}
+
 static bool load_into_nim(const char *json, size_t len, const char *origin)
 {
     if (!frameos_nim_available()) {
@@ -410,6 +719,17 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
                         len, 0, 0, ESP_ERR_INVALID_STATE);
         return false;
     }
+    /* Measure what the payload actually costs in INTERNAL RAM. The Nim heap
+     * is served by plain malloc, and CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
+     * (16 KB) sends every allocation below that size to internal RAM — so the
+     * parsed scene graphs and the QuickJS context land in the scarce pool
+     * while PSRAM sits mostly idle. That is what starves the TLS handshake
+     * the cloud link needs (FOS_CLOUD_WS_MIN_INTERNAL_* in fos_cloud.c).
+     *
+     * Measured rather than estimated: scene cost varies enormously with node
+     * count and inline JS, so a constant in the UI would be fiction. This
+     * gives the control plane a real per-frame number to advise from. */
+    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int count = frameos_nim_load_scenes(json);
     if (count <= 0) {
         ESP_LOGE(TAG, "scene payload rejected by runtime");
@@ -417,10 +737,32 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
                         len, count, 0, ESP_FAIL);
         return false;
     }
+    size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t internal_cost = internal_before > internal_after
+                               ? internal_before - internal_after : 0;
     s_loaded = count;
-    ESP_LOGI(TAG, "%d scene(s) live", count);
+    ESP_LOGI(TAG, "%d scene(s) live; internal RAM %u -> %u (%u B for %d scenes, ~%u B each)",
+             count, (unsigned)internal_before, (unsigned)internal_after,
+             (unsigned)internal_cost, count,
+             (unsigned)(count > 0 ? internal_cost / (unsigned)count : 0));
     log_scene_event("scenes:load", "ok", origin, "", "runtime-loaded",
                     len, count, 0, ESP_OK);
+    {
+        /* Structured, so the workspace can advise on scene count from a
+         * measurement taken on THIS frame with THESE scenes. */
+        char event[288];
+        snprintf(event, sizeof(event),
+                 "{\"event\":\"scenes:memory\",\"source\":\"esp32\",\"scenes\":%d,"
+                 "\"payloadBytes\":%u,\"internalBefore\":%u,\"internalAfter\":%u,"
+                 "\"internalCost\":%u,\"internalCostPerScene\":%u,"
+                 "\"largestInternalBlock\":%u,\"freePsram\":%u}",
+                 count, (unsigned)len, (unsigned)internal_before,
+                 (unsigned)internal_after, (unsigned)internal_cost,
+                 (unsigned)(count > 0 ? internal_cost / (unsigned)count : 0),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        frameos_nim_log_hook(event);
+    }
     restore_last_scene();
     return true;
 }
@@ -433,13 +775,32 @@ bool fos_scenes_apply_pending(void)
     size_t len = 0;
     char *json = read_file(SCENES_PATH, &len);
     if (json == NULL) {
-        ESP_LOGW(TAG, "no readable %s", SCENES_PATH);
-        log_scene_event("scenes:load", "error", "stored", "", "read-failed",
-                        0, 0, 0, ESP_ERR_NOT_FOUND);
+        /* No combined file: either a previous apply already split it (the
+         * normal steady state) or there is genuinely nothing stored. */
+        ok = activate_from_index("stored");
+        if (!ok) {
+            ESP_LOGW(TAG, "no readable %s", SCENES_PATH);
+            log_scene_event("scenes:load", "error", "stored", "", "read-failed",
+                            0, 0, 0, ESP_ERR_NOT_FOUND);
+        }
+    } else if (split_scenes(json, len) == ESP_OK) {
+        /* Split consumed the combined file; hold only the active scene. */
+        free(json);
+        json = NULL;
+        ok = activate_from_index("stored");
+        if (!ok) {
+            ESP_LOGW(TAG, "per-scene load failed after split; nothing live");
+        }
     } else {
+        /* Payload the splitter cannot handle (not an array, too many scenes,
+         * a write that failed): keep the old whole-payload behaviour. */
+        unlink(SCENES_INDEX_PATH);
+        s_slot_count = 0;
         ok = load_into_nim(json, len, "stored");
         free(json);
+        json = NULL;
     }
+    free(json);
     /* Publish the outcome before the generation, so a poller that sees a new
      * generation always reads the matching result. */
     s_apply_ok = ok;
@@ -454,12 +815,48 @@ int fos_scenes_loaded(void) { return s_loaded; }
 const char *fos_scenes_etag(void) { return s_etag; }
 void fos_scenes_request_sync(void) { s_sync_requested = true; }
 
+/* The whole payload, for callers that download or re-upload it (the USB API,
+ * the backend sync's etag comparison). On the lazy path the combined file no
+ * longer exists, so it is rebuilt from the slots — in PSRAM, transiently, and
+ * only when something actually asks. */
 char *fos_scenes_json_copy(size_t *out_len)
 {
     if (out_len != NULL) *out_len = 0;
     esp_err_t err = mount_state();
     if (err != ESP_OK) return NULL;
-    return read_file(SCENES_PATH, out_len);
+    char *combined = read_file(SCENES_PATH, out_len);
+    if (combined != NULL) return combined;
+    if (s_slot_count == 0 && load_scene_index() == 0) return NULL;
+
+    size_t cap = 2; /* "[" + "]" */
+    for (int i = 0; i < s_slot_count; i++) {
+        char path[SCENES_SLOT_PATH_LEN];
+        slot_path(s_slots[i].slot, path, sizeof(path));
+        struct stat st;
+        if (stat(path, &st) != 0) return NULL;
+        cap += (size_t)st.st_size + 1; /* + comma */
+    }
+    char *buf = fos_big_malloc(cap + 1);
+    if (buf == NULL) buf = malloc(cap + 1);
+    if (buf == NULL) return NULL;
+    size_t used = 0;
+    buf[used++] = '[';
+    for (int i = 0; i < s_slot_count; i++) {
+        char path[SCENES_SLOT_PATH_LEN];
+        slot_path(s_slots[i].slot, path, sizeof(path));
+        size_t part_len = 0;
+        char *part = read_file(path, &part_len);
+        if (part == NULL) { free(buf); return NULL; }
+        if (i > 0 && used < cap) buf[used++] = ',';
+        if (used + part_len > cap) { free(part); free(buf); return NULL; }
+        memcpy(buf + used, part, part_len);
+        used += part_len;
+        free(part);
+    }
+    buf[used++] = ']';
+    buf[used] = '\0';
+    if (out_len != NULL) *out_len = used;
+    return buf;
 }
 
 esp_err_t fos_scenes_select(const char *scene_id)
@@ -488,7 +885,17 @@ bool fos_scenes_apply_pending_selection(void)
     portEXIT_CRITICAL(&s_scene_select_lock);
 
     if (!pending) return false;
-    if (!frameos_nim_set_scene(scene_id)) {
+    /* Lazy path: the scene lives on flash, so load it (which replaces the
+     * resident one). frameos_nim_set_scene alone would only record the
+     * choice, leaving the runtime with the previous scene. */
+    if (s_slot_count > 0) {
+        if (!activate_scene_id(scene_id)) {
+            ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
+            log_scene_event("scenes:select", "error", "queued", scene_id,
+                            "apply-failed", 0, 0, 0, ESP_FAIL);
+            return false;
+        }
+    } else if (!frameos_nim_set_scene(scene_id)) {
         ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
         log_scene_event("scenes:select", "error", "queued", scene_id,
                         "apply-failed", 0, 0, 0, ESP_FAIL);
@@ -534,6 +941,12 @@ esp_err_t fos_scenes_init(void)
     if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) {
         ESP_LOGI(TAG, "cached scenes.json (%ld bytes, etag %s)", (long)st.st_size,
                  s_etag[0] ? s_etag : "none");
+        s_pending = true;
+    } else if (stat(SCENES_INDEX_PATH, &st) == 0 && st.st_size > 2) {
+        /* Already split by an earlier boot: the combined file is gone and the
+         * index is the store. Apply still runs — it just loads one scene. */
+        ESP_LOGI(TAG, "cached per-scene store (index %ld bytes, etag %s)",
+                 (long)st.st_size, s_etag[0] ? s_etag : "none");
         s_pending = true;
     } else {
         ESP_LOGI(TAG, "no cached scenes; will sync from backend");

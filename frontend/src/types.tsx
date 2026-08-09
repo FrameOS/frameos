@@ -175,6 +175,10 @@ export interface FrameType {
   active_scene_id?: string
   /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
   last_state?: Record<string, any>
+  /** Cloud only: the newest metrics sample the device sent. Read for the
+   * memory advisory (utils/frameMemory.ts) — an embedded frame can render
+   * fine while having too little internal RAM left to open its TLS link. */
+  last_metrics?: Record<string, any>
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string
