@@ -1,4 +1,4 @@
-import std/[sequtils, strutils]
+import std/[strutils]
 
 type
   SourceMapSegment* = object
@@ -65,62 +65,91 @@ proc addLineSegments(result: var SourceLineMap, generatedLine: int, generatedTex
       sourceColumn: sourceTrim
     ))
 
-  var sourcePos = 0
-  for generatedPos, ch in generatedText:
-    while sourcePos < sourceText.len and sourceText[sourcePos] != ch:
-      inc sourcePos
-    if sourcePos < sourceText.len:
-      result.segments.add(SourceMapSegment(
-        generatedLine: generatedLine,
-        generatedColumn: generatedPos + 1,
-        sourceLine: sourceLine,
-        sourceColumn: sourcePos + 1
-      ))
-      inc sourcePos
+  # There used to be a third kind of segment here: one per character of the
+  # line, produced by walking the source text until it found the same
+  # character. That is one segment per byte of the file — ~36,000 of them,
+  # about 1 MB, for the 36 KB app in the bundled Weather scene, retained for
+  # as long as the app is loaded and scanned linearly on every error lookup.
+  # It was also not really a column map: after type-stripping, "advance until
+  # the characters match" aligns on whichever punctuation happens to come
+  # first, so it bought an expensive guess. Line start and first non-space
+  # cover what an error message actually needs.
 
-# The LCS table below is one int per (generated line x source line) pair, so
-# its cost is quadratic in file length: a 260-line app already needs ~550 KB,
-# and a 1200-line one needs ~11 MB. That is how the bundled Weather scene
-# exhausted an 8 MB ESP32 — not the canvas, not the images, but building a
-# source map for a 36 KB file so error messages could name the right line.
-# Past this budget the map degrades to line-for-line, which is exact for the
-# common case (the transpiler mostly rewrites lines in place) and merely
-# approximate where it is not. Hosts get a generous budget; embedded frames,
-# where the whole render fits in a few megabytes, get a small one.
-const LcsCellBudget* =
-  when defined(frameosEmbedded): 20_000 else: 4_000_000
+# Maps generated lines back to source lines with a single forward scan.
+#
+# This used to build a full longest-common-subsequence table: one int per
+# (generated line x source line) pair, quadratic in file length. A 367-line
+# app needed a 135,056-cell table, a 965-line one 932,190 cells (~11 MB of
+# per-row seqs on the device), and building it is how the bundled Weather
+# scene exhausted an 8 MB ESP32 — not the canvas, not the images, but a
+# source map so that error messages could name the right line.
+#
+# The table earned nothing. Measured on both apps in that scene, the map it
+# produced was identity on every single line; the one line that differed was
+# the `exports.get = get;` epilogue the imports transform appends, which has
+# no source line at all. That is inherent, not luck: the transpiler strips
+# types in place and appends an epilogue, so lines stay put. The scan below
+# tracks the insertions and deletions that do occur by looking a bounded
+# distance ahead, which is what the table was being asked for.
+const LineLookahead = 64
 
 proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: string): SourceLineMap =
   let sourceLines = source.splitLines()
   let generatedLines = generated.splitLines()
-  if sourceLines.len.int64 * generatedLines.len.int64 > LcsCellBudget:
-    return identitySourceLineMap(generated, generatedName, sourceName)
-  var lcs = newSeqWith(generatedLines.len + 1, newSeq[int](sourceLines.len + 1))
-
-  for generatedIndex in countdown(generatedLines.len - 1, 0):
-    for sourceIndex in countdown(sourceLines.len - 1, 0):
-      if normalizedLine(generatedLines[generatedIndex]) == normalizedLine(sourceLines[sourceIndex]):
-        lcs[generatedIndex][sourceIndex] = lcs[generatedIndex + 1][sourceIndex + 1] + 1
-      else:
-        lcs[generatedIndex][sourceIndex] = max(lcs[generatedIndex + 1][sourceIndex], lcs[generatedIndex][sourceIndex + 1])
+  var normalizedSource = newSeq[string](sourceLines.len)
+  for i, line in sourceLines:
+    normalizedSource[i] = normalizedLine(line)
 
   result = emptySourceLineMap(generatedName, sourceName, generated.sourceLineCount())
-  var generatedIndex = 0
-  var sourceIndex = 0
-  var lastGeneratedLine = 0
-  var lastSourceLine = 0
+  # Lines matched in the scan already have their segments; the interpolation
+  # pass below must not add a second copy of each (it used to, doubling the
+  # segment list for every file).
+  var segmented = newSeq[bool](result.generatedToSourceLine.len)
+  var
+    generatedIndex = 0
+    sourceIndex = 0
+    lastGeneratedLine = 0
+    lastSourceLine = 0
 
   while generatedIndex < generatedLines.len and sourceIndex < sourceLines.len:
-    if normalizedLine(generatedLines[generatedIndex]) == normalizedLine(sourceLines[sourceIndex]):
+    let generatedNorm = normalizedLine(generatedLines[generatedIndex])
+    if generatedNorm == normalizedSource[sourceIndex]:
       result.generatedToSourceLine[generatedIndex + 1] = sourceIndex + 1
-      result.addLineSegments(generatedIndex + 1, generatedLines[generatedIndex], sourceIndex + 1, sourceLines[sourceIndex])
+      result.addLineSegments(generatedIndex + 1, generatedLines[generatedIndex],
+                             sourceIndex + 1, sourceLines[sourceIndex])
+      if generatedIndex + 1 < segmented.len: segmented[generatedIndex + 1] = true
       lastGeneratedLine = generatedIndex + 1
       lastSourceLine = sourceIndex + 1
       inc generatedIndex
       inc sourceIndex
-    elif lcs[generatedIndex + 1][sourceIndex] >= lcs[generatedIndex][sourceIndex + 1]:
-      inc generatedIndex
+      continue
+
+    # Lines diverged. Look ahead a bounded distance on each side: a match
+    # found ahead in the source means lines were dropped (a stripped type),
+    # a match ahead in the generated code means lines were inserted.
+    var sourceAhead = -1
+    var limit = min(sourceLines.len, sourceIndex + 1 + LineLookahead)
+    for candidate in sourceIndex + 1 ..< limit:
+      if normalizedSource[candidate] == generatedNorm:
+        sourceAhead = candidate
+        break
+
+    var generatedAhead = -1
+    limit = min(generatedLines.len, generatedIndex + 1 + LineLookahead)
+    for candidate in generatedIndex + 1 ..< limit:
+      if normalizedLine(generatedLines[candidate]) == normalizedSource[sourceIndex]:
+        generatedAhead = candidate
+        break
+
+    if sourceAhead >= 0 and (generatedAhead < 0 or
+        sourceAhead - sourceIndex <= generatedAhead - generatedIndex):
+      sourceIndex = sourceAhead
+    elif generatedAhead >= 0:
+      generatedIndex = generatedAhead
     else:
+      # No anchor nearby: the two files genuinely disagree here, so advance
+      # both and let the interpolation below cover the gap.
+      inc generatedIndex
       inc sourceIndex
 
   for line in 1..<result.generatedToSourceLine.len:
@@ -131,8 +160,12 @@ proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: strin
           result.generatedToSourceLine[line] = estimated
       elif line <= sourceLines.len:
         result.generatedToSourceLine[line] = line
-    if result.generatedToSourceLine[line] > 0 and line <= generatedLines.len and result.generatedToSourceLine[line] <= sourceLines.len:
-      result.addLineSegments(line, generatedLines[line - 1], result.generatedToSourceLine[line], sourceLines[result.generatedToSourceLine[line] - 1])
+    if not segmented[line] and result.generatedToSourceLine[line] > 0 and
+       line <= generatedLines.len and
+       result.generatedToSourceLine[line] <= sourceLines.len:
+      result.addLineSegments(line, generatedLines[line - 1],
+                             result.generatedToSourceLine[line],
+                             sourceLines[result.generatedToSourceLine[line] - 1])
 
 proc withGeneratedName*(sourceMap: SourceLineMap, generatedName: string): SourceLineMap =
   result = sourceMap

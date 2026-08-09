@@ -12,6 +12,7 @@ import pixie
 
 import frameos/types
 import frameos/channels
+when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/js_runtime/runtime as jsRuntime
 
@@ -239,6 +240,7 @@ proc cleanupScene(scene: FrameScene) =
 # ------------------------------------------------------------------- scenes
 
 proc loadScenes*(payload: string): int =
+  when defined(memProbe): memProbe("  >>> loadScenes payload=" & $payload.len & "B")
   ## Parse and install interpreted scenes from the backend's JSON format
   ## (array of scenes; same payload Linux frames read from scenes.json).
   ## Returns the number of scenes loaded; the current scene is re-created
@@ -327,6 +329,7 @@ proc catalogHas(sceneIdText: string): bool =
   sceneCatalog.anyIt(it.id == sceneIdText)
 
 proc loadScene*(payload: string): bool =
+  when defined(memProbe): memProbe("  >>> loadScene payload=" & $payload.len & "B")
   ## Build ONE scene and make it the only resident one, tearing down whatever
   ## was live. `payload` is a single scene object (the element the combined
   ## scenes.json holds in its array); it is wrapped so the existing array
@@ -360,6 +363,7 @@ proc loadScene*(payload: string): bool =
   true
 
 proc selectScene*(sceneIdText: string): bool =
+  when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
   let sceneId = SceneId(sceneIdText)
   let scenes = getInterpretedScenes()
   # On the lazy path the scene is on flash, not in the cache: record the
@@ -398,6 +402,7 @@ proc ensureScene(): bool =
     log("scene not found: " & sceneId.string)
     return false
   currentExported = scenes[sceneId]
+  when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
   currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
   log(&"scene \"{currentSceneName()}\" initialized")
   true

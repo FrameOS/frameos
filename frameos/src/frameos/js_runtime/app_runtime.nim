@@ -4,6 +4,7 @@ import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
+import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
@@ -21,6 +22,14 @@ type
     js*: QuickJS
     ready*: bool
     initialized*: bool
+    # Transpiling is the most expensive thing a JS app does on a frame: 22
+    # seconds for the 36 KB app in the bundled Weather scene, on top of 7 for
+    # the 11 KB one. Evicting a runtime under memory pressure would otherwise
+    # pay that again on every render, so the result is kept — it is ~50 KB
+    # against ~29 s per render.
+    transpiled*: bool
+    transpiledCode*: string
+    transpiledMap*: SourceLineMap
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
@@ -640,6 +649,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
     settingsKeys: seq[string] = @[]): JsAppRuntime =
+  when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
   return JsAppRuntime(
     category: category,
     outputType: outputType,
@@ -937,15 +947,21 @@ proc ensureReady(runtime: JsAppRuntime) =
   }
   """ & sceneJsPrelude)
   let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
-  when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
-  let transformed = transpileModuleSourceWithMap(runtime.source, filename)
-  when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.code.len & "B")
+  if not runtime.transpiled:
+    when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
+    let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.code.len & "B")
+    runtime.transpiledCode = transformed.code
+    runtime.transpiledMap = transformed.sourceMap
+    runtime.transpiled = true
+  else:
+    when defined(memProbe): memProbe("      transpile CACHED code=" & $runtime.transpiledCode.len & "B")
   try:
-    discard runtime.js.eval(transformed.code, filename)
+    discard runtime.js.eval(runtime.transpiledCode, filename)
   except CatchableError as error:
-    raise newException(JSException, error.msg.mapJsErrorText(transformed.sourceMap))
+    raise newException(JSException, error.msg.mapJsErrorText(runtime.transpiledMap))
   when defined(memProbe): memProbe("      module eval AFTER")
-  registerJsSourceMap(runtime.js.context, transformed.sourceMap)
+  registerJsSourceMap(runtime.js.context, runtime.transpiledMap)
   when defined(memProbe): memProbe("      sourcemap registered")
   runtime.ready = true
 
