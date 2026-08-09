@@ -827,6 +827,54 @@ export function embeddedUsbLogStreamSessionPort(frameId: FrameId): SerialPort | 
   return sessions.get(frameId)?.port ?? null
 }
 
+/**
+ * Type a line into the board's console REPL over the live log stream.
+ *
+ * This piggybacks on the streaming session on purpose. Web Serial grants a
+ * port exclusively, so a second opener would fail with "port already open"
+ * — but a port's readable and writable are locked independently, so the log
+ * reader can keep running while we take the writer, push a line and hand it
+ * back. The reply arrives through the same reader as ordinary log output,
+ * which is exactly what makes this useful: you see the answer in context.
+ *
+ * The command is echoed into the log view locally. The firmware's line
+ * editor does not echo input that arrives programmatically, so without this
+ * the transcript would show answers with no questions.
+ *
+ * Whatever is typed is sent verbatim — this is the same REPL the USB cable
+ * exposes (`status`, `scenes`, `set …`, `restart`, `factory-reset`), and it
+ * is reachable by anyone holding the board anyway. No allow-list here; the
+ * device validates its own commands.
+ */
+export async function sendEmbeddedUsbConsoleCommand(frameId: FrameId, command: string): Promise<void> {
+  const line = command.trim()
+  if (!line) {
+    return
+  }
+  const session = sessions.get(frameId)
+  if (!session || session.stopRequested) {
+    throw new Error('Connect the USB log stream first — commands go over that same connection.')
+  }
+  const writable = session.port.writable
+  if (!writable) {
+    throw new Error('The USB serial port is not writable. Reconnect the log stream and try again.')
+  }
+  if (writable.locked) {
+    // Another write is mid-flight; serializing here would hide a bug rather
+    // than fix one, and console commands are hand-typed, not batched.
+    throw new Error('The USB serial port is busy. Try again in a moment.')
+  }
+  const writer = writable.getWriter()
+  try {
+    await writer.write(new TextEncoder().encode(line + '\n'))
+  } catch (error) {
+    throw new Error(serialErrorMessage(error))
+  } finally {
+    writer.releaseLock()
+  }
+  appendEmbeddedUsbLogLine(frameId, `> ${line}`)
+}
+
 export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<SerialPort | null> {
   const session = sessions.get(frameId)
   if (!session) {
