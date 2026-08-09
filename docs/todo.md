@@ -74,32 +74,31 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ### Memory
 
-- **The Nim heap in PSRAM squeezes the renderer, and an OOM wedges the frame.**
-  Moving the Nim heap to PSRAM fixed internal RAM (12 KB → ~100 KB free) but
-  took the same memory out of the render budget: scene graphs and QuickJS now
-  compete with the canvas and image decode. Measured on an 8 MB XIAO-class
-  board with a 6-scene set, boot timeline over `heapinfo`:
+- **One heavy scene can exhaust PSRAM and wedge the frame until it is
+  power-cycled.** Measured on an 8 MB XIAO-class board rendering the
+  "Weather" scene, via the new `heapinfo` console command:
 
-      [16s] render #1 started
-      [19-54s] psram_free 2.7M -> 1.9M          (normal working set)
-      [59s]  psram_free 1,978,364 -> 3,776      blocks 4431 -> 6960
-      [59s+] pinned at 3,776; render never completes, TLS cannot handshake
+      [36s] render #1 started            internal 154K free, psram 5.6M free
+      [80s] Dynamic Impl: alloc(4437) failed -> render #1 failed at complete
+      [84s] psram 3,952 free             abandoned, and it stays there
+      [102s+] TLS cannot allocate -> cloud link down, every later render fails
 
-  The step at 59 s is the OOM abort: `fos_nim_fatal_oom` longjmps out of the
-  render and the ~2 MB it had allocated is abandoned (the glue says as much).
-  PSRAM then sits at ~0, so every later render fails the same way and the
-  cloud link cannot open — the frame is wedged until it is power-cycled.
-  `FOS_NIM_OOM_ABORT_RESTART_STREAK` is 4, and with a 300 s interval that is
-  20 minutes of dead frame at best.
+  Two separate faults, and the second is the damaging one:
+  1. That scene's render needs more PSRAM than an 8 MB board has. This is the
+     case the large-image spill work exists for — measure what it actually
+     allocates before assuming which buffer is at fault.
+  2. **A failed render abandons its PSRAM.** After the failure the pool sits
+     at ~4 KB indefinitely, so the frame can neither render nor open its
+     cloud link (mbedTLS allocates from PSRAM under
+     CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC). It is dead until power-cycled.
+     `FOS_NIM_OOM_ABORT_RESTART_STREAK` is 4 and only covers the longjmp
+     abort path, not this one. A frame that cannot render and cannot phone
+     home should restart itself promptly.
 
-  Two things to decide, and they are separable:
-  1. Where the interpreter's memory should live. Options: keep PSRAM but hold
-     a hard render reserve; split (graphs in PSRAM, QuickJS internal); or
-     revert and solve internal RAM another way. Needs measurement per scene
-     set, not a guess.
-  2. Recovery. An OOM abort that leaks the render's heap should restart the
-     runtime immediately rather than after a streak — a frame that cannot
-     render and cannot phone home is worse than one that reboots.
+  NOT caused by moving the Nim heap to PSRAM: that was the first suspicion,
+  and reverting it changed nothing — the same scene still exhausted PSRAM and
+  still wedged the frame, while internal RAM went back to being tight. The
+  move stays. Do not re-litigate it without re-running this measurement.
 
 - **Move QuickJS off internal RAM** — it allocates through libc malloc, and
   `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
