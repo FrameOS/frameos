@@ -10,6 +10,9 @@ import sequtils
 import strutils
 import strformat
 import uri
+import std/xmlparser
+import std/xmltree
+import std/strtabs
 
 import frameos/utils/http_client
 import frameos/utils/memory
@@ -184,9 +187,96 @@ proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Ima
     return decodeImageMagickOutput(output.get())
   return none(Image)
 
+const SvgBandMinHeight = 8
+const SvgBandMinBytes = 128 * 1024
+
+proc svgNeedsPaintServer*(svg: string): bool =
+  ## True when the SVG paints with a gradient/pattern reference. pixie fills
+  ## those through a full-canvas mask + fill image pair (paths.fillPath), so
+  ## such an SVG costs 3x its output image to rasterise in one pass. Solid
+  ## fills and strokes rasterise straight into the canvas and cost 1x.
+  svg.contains("url(")
+
+proc svgBandHeight*(width, height: int, svg: string): int =
+  ## Height of the horizontal slice an SVG is rasterised in. Returns `height`
+  ## (a single pass, pixie's own behaviour) unless the 3x one-pass plan would
+  ## take a big share of the memory still available for rendering — which on
+  ## development hosts, the backend, wasm and RAM-rich frames it never does.
+  if width <= 0 or height <= 0 or not svgNeedsPaintServer(svg):
+    return height
+  let
+    rowBytes = width.int64 * 4
+    fullBytes = rowBytes * height.int64
+    available = availableRenderBytes().int64
+  # Banding keeps the parsed XML document live across every pass, where a
+  # single pass drops it before allocating the canvas. Documents that big are
+  # not worth banding.
+  if svg.len.int64 * 16 > fullBytes:
+    return height
+  if available <= 0:
+    return height
+  if fullBytes * 3 <= available div 2:
+    return height
+  var bandBytes = available div 12
+  # The finished image stays live while the bands are rasterised, so the
+  # band-sized trio has to fit in what is left once it exists.
+  let headroom = available - fullBytes
+  if headroom > 0 and bandBytes * 3 > headroom:
+    bandBytes = headroom div 3
+  if bandBytes < SvgBandMinBytes:
+    bandBytes = SvgBandMinBytes
+  if bandBytes >= fullBytes:
+    return height
+  result = max(SvgBandMinHeight, int(bandBytes div max(1'i64, rowBytes)))
+  if result >= height:
+    result = height
+
+proc renderSvgBanded(svg: string, width, height, bandHeight: int): Image =
+  ## Rasterises the SVG one horizontal slice at a time, so pixie's gradient
+  ## mask+fill pair is band-sized instead of canvas-sized.
+  ##
+  ## Each pass re-renders the whole element list into a band-tall canvas with
+  ## the root shifted up by the band's offset, so shapes are clipped by the
+  ## band's scanline range rather than being cut geometrically: coverage for
+  ## an output row is computed from the full shape either way.
+  let root = parseXml(svg)
+  let attrs = root.attrs
+  if attrs.isNil:
+    # No attributes means no viewBox; parseSvg would reject it anyway.
+    raise newException(PixieError, "SVG root has no attributes")
+  let baseTransform = root.attr("transform")
+  result = newImage(width, height)
+  try:
+    var y = 0
+    while y < height:
+      let bandH = min(bandHeight, height - y)
+      # Leftmost transform is applied last, i.e. in device space: this shifts
+      # the finished drawing up by `y` so the band shows rows y ..< y+bandH.
+      attrs["transform"] = strutils.strip("translate(0 " & $(-y) & ") " & baseTransform)
+      let parsed = parseSvg(root, width, height)
+      # parseSvg already derived the scale from the full height; shrinking the
+      # canvas afterwards only changes how much of it gets rasterised.
+      parsed.height = bandH
+      let band = newImage(parsed)
+      copyMem(result.data[y * width].addr, band.data[0].addr, bandH * width * 4)
+      y += bandH
+  finally:
+    if baseTransform.len == 0:
+      attrs.del("transform")
+    else:
+      attrs["transform"] = baseTransform
+
 proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
   if useImageMagick():
     return decodeSvgWithImageMagick(svg, width, height)
+  let bandHeight = svgBandHeight(width, height, svg)
+  if bandHeight > 0 and bandHeight < height:
+    try:
+      return some(renderSvgBanded(svg, width, height, bandHeight))
+    except CatchableError:
+      # Banding is an optimisation; anything it cannot handle falls through
+      # to the plain one-pass render below.
+      discard
   try:
     return some(newImage(parseSvg(svg, width, height)))
   except CatchableError:
