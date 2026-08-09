@@ -5,57 +5,53 @@ One tracker for everything still open across the repo (last swept
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
-## ESP32 backend→cloud parity (current push, 2026-08)
+## ESP32 backend→cloud parity (2026-08 push — closing out)
 
 Goal: everything the self-hosted backend can do with an ESP32 frame, the
 cloud can too. Standing rule (also in AGENTS.md): frame-facing features and
-fixes land on BOTH control planes unless explicitly one-sided.
-Constraints and direction:
+fixes land on BOTH control planes unless explicitly one-sided. The doctrine
+behind this push (cloud installs prebuilt binaries only, do as much as
+possible in the browser, the per-surface inventory) lives in
+`docs/cloud-frames.md` and the parity matrix in `docs/api-triality.md`;
+only the open work is listed here.
 
-- The cloud only installs **prebuilt release binaries** — no compilation
-  ever happens cloud-side. Do as much as possible **in the browser**
-  (WebSerial flashing/provisioning, wasm previews/renders).
-- Unify the flashing/provisioning steps and code across control planes:
-  the backend should adopt the same **browser-centric flash system** the
-  cloud uses (Esp32CloudFlasher / EmbeddedWebFlasher convergence). The
-  backend may still build a frame-specific binary server-side when a
-  custom source build is needed — the browser flasher then just flashes
-  that artifact instead of a release download.
-- Inventory to port/verify per surface: settings (incl. account-level API
-  keys like Unsplash/OpenAI), metrics, schedule, assets, logs, OTA,
-  scene state/control, USB provisioning. Track gaps in the parity matrix
-  (`docs/api-triality.md`) and delete items here as they ship.
+Deliberately not gaps: terminal / ping / debug panels are backend-only
+because the cloud protocol has no shell verbs — structural, nothing to close.
 
-Known gaps (last swept 2026-08-09, after a full hardware pass on frame
-02e05f35 — a Waveshare PhotoPainter, the first cloud-managed ESP32 to run
-the whole surface against production):
+Swept 2026-08-09, after a hardware pass on frame 02e05f35 (a Waveshare
+PhotoPainter — the first cloud-managed ESP32 to run the whole surface
+against production):
 
+- **Flashing convergence** — the backend should adopt the same
+  browser-centric flash system the cloud uses (Esp32CloudFlasher /
+  EmbeddedWebFlasher). The backend may still build a frame-specific binary
+  server-side when a custom source build is needed; the browser flasher then
+  flashes that artifact instead of a release download.
 - **Service settings — Nim client unverified on hardware**: the ESP32 client
   is now proven (that frame pulled `GET /api/frames/{id}/service-settings`
   → 200 from cloud.frameos.net with its enrollment bearer). The Linux/Pi
   client in the Nim runtime is still unit-tested and build-verified only.
-- Terminal / ping / debug panels are backend-only by design (no shell verbs
-  in the cloud protocol — structural, not a gap to close).
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Cloud OTA** — the manifest/download routes and the release workflow were
-  fixed 2026-08-08, but every release up to and including v2026.8.12
-  published only the merged flash image, which an OTA slot can never accept,
-  so the routes answer `ota_image_not_published` (404). The first release
-  carrying `…-esp32-s3-generic-app.bin` unblocks it; until one is out the USB
-  updater is the way to move a board onto a newer build. Worth re-testing
-  against the first such release rather than assuming.
+- **Cloud OTA — re-test against 2026.8.13.** The routes and the release
+  workflow were fixed 2026-08-08, but every release through v2026.8.12
+  shipped only the merged flash image, which an OTA slot can never accept
+  (the routes answer `ota_image_not_published`, 404). 2026.8.13 is the first
+  release that should carry `…-esp32-s3-generic-app.bin`, and the first with
+  a real `frameos_version` from an ESP32 — both want confirming rather than
+  assuming. Until then the USB updater moves a board onto a newer build.
 
 ## Cloud-managed frames
 
-- **Signed OTA** — the one open item from the cloud-workspace push and the
-  blocker for FrameOS updates from the cloud. Releases signed
-  (minisign/ed25519) with the public key baked into images; the device
-  verifies independently (`upgrade.nim` today checks URL shape only); an
-  `ota` verb (esp32: pull the published generic image; buildroot: release
-  tarball swap via the frameos binary); an Update button gated on the
-  fleet's reported `frameos_version`. Must land before widely distributing
-  SD images. Design: `cloud/docs/cloud-frames.md` ("Signed OTA").
+- **Signed OTA — buildroot/Pi half.** The ESP32 half shipped (#303):
+  `main/fos_ota.c` fetches the device-authed manifest and verifies the
+  minisign Ed25519 signature against a baked-in public key before writing a
+  slot, and the workspace has the Update button. The Nim runtime has no
+  equivalent — `upgrade.nim` still checks URL shape only — so a buildroot
+  frame cannot safely take an update from the cloud: release tarball swap via
+  the frameos binary, verified independently on-device. Must land before SD
+  images are widely distributed. Design: `cloud/docs/cloud-frames.md`
+  ("Signed OTA").
 - **JS-runtime capability audit** — enumerate every native binding exposed
   to scene JS; per-scene asset sandboxes; CPU/time/memory limits per scene;
   confirm RFC1918 fetch blocking and the local-presence elevation ceremony
@@ -77,28 +73,24 @@ the whole surface against production):
 
 ## ESP32
 
-- **Large-image spill-to-storage: firmware wiring** — C glue, Nim reader
-  and stub no-op are merged and runtime-inert; wire
-  `fos_nim_http_set_spill_dir` in `embedded/esp32/main/main.c` (SD
-  `.cache` dir, or capped SPIFFS `/state` when no SD) plus the boot sweep
-  of leftover `http-spill-*.tmp`, then validate on the bench PhotoPainter
-  (12-scene workload, ~3 MB gallery JPEG, confirm the PSRAM floor during
-  spill+decode). Full design: `cloud/docs/esp32-large-image-spill.md`.
-  UPDATE 2026-08: `fos_nim_http_set_spill_dir` is now wired in main.c
-  (SD `.cache` dot-dir preferred, `/state` fallback, boot sweep of
-  `http-spill-*.tmp`); a forced-spill render on the bench 13.3E6 is still
-  pending validation.
+- **Large-image spill-to-storage: bench validation.** The wiring shipped
+  (`fos_nim_http_set_spill_dir` in main.c, SD `.cache` preferred with a
+  capped `/state` fallback, boot sweep of `http-spill-*.tmp`). What is left
+  is a forced-spill render on the bench 13.3E6 (`set spill_force <bytes>`,
+  ~3 MB gallery JPEG) confirming the PSRAM floor during spill+decode. Note
+  the original premise — a 12-scene workload eating the headroom — no longer
+  holds since scenes stopped being resident, so re-measure rather than
+  reusing the old numbers. Design: `cloud/docs/esp32-large-image-spill.md`.
 - Spill follow-ups (optional): proactive Content-Length trigger;
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.
-- ~~**FAT long filenames**~~ — DONE: `CONFIG_FATFS_LFN_HEAP` in
-  sdkconfig.defaults + the dev sdkconfig; listings show full names.
 
 ### Memory: what is left after the 2026-08-09 pass
 
 The Nim heap now allocates from PSRAM explicitly, and scenes are stored one
 file per scene and loaded one at a time (frame 02e05f35: 12.5 KB → ~109 KB
-free internal, 13 resident scenes → 1). What that pass did NOT do:
+free internal; every scene resident → exactly one, whatever the library
+size). What that pass did NOT do:
 
 - **QuickJS still allocates through libc malloc**, so with
   `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` its many small allocations
