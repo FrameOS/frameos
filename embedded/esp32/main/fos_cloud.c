@@ -352,6 +352,46 @@ static bool ws_url_transport_ok(const char *url, const char **reason)
     return url_transport_ok(url, true, reason);
 }
 
+/* Is this ws_url override plausible for the provider we are enrolled with?
+ *
+ * The override exists for development, where the frame hub is a separate
+ * process on another port, so it is allowed to be a loopback or LAN address.
+ * That makes it dangerous to leave behind: a board moved from a dev cloud to
+ * a real one keeps dialing `ws://localhost:3100`, gets an instant TCP reset
+ * from its own stack, and reports a "Connection reset by peer" that looks
+ * exactly like a network fault — while enrollment over cloud_url keeps
+ * working, because that path never reads this value. One frame lost a day to
+ * this.
+ *
+ * So: a loopback override is only credible when cloud_url is loopback too.
+ * Anything else is a leftover from a previous life and is refused (and
+ * erased by the caller) rather than dialed forever. */
+static bool ws_url_matches_provider(const char *ws_url, const char *cloud_url)
+{
+    if (ws_url == NULL || ws_url[0] == '\0') return true;
+    bool ws_loopback = strstr(ws_url, "://localhost") != NULL ||
+                       strstr(ws_url, "://127.0.0.1") != NULL ||
+                       strstr(ws_url, "://[::1]") != NULL;
+    if (!ws_loopback) return true;
+    if (cloud_url == NULL) return false;
+    return strstr(cloud_url, "://localhost") != NULL ||
+           strstr(cloud_url, "://127.0.0.1") != NULL ||
+           strstr(cloud_url, "://[::1]") != NULL;
+}
+
+/* Drop a ws_url override: NVS, the live copy, and the dial URI built from it.
+ * Used by the stale-override guard and by `set cloud_wsurl ""`. */
+void fos_cloud_clear_ws_url(void)
+{
+    if (s_ws_url[0]) {
+        ESP_LOGW(TAG, "ws: clearing ws_url override; dialing cloud_url + ws_path instead");
+    }
+    memset(s_ws_url, 0, sizeof(s_ws_url));
+    nvs_erase_key_quiet("cloud_wsurl");
+}
+
+const char *fos_cloud_ws_url(void) { return s_ws_url; }
+
 /* ------------------------------------------------------------------ crypto */
 
 /* Load (or create on first use) the Ed25519 seed and derive the keypair.
@@ -2030,8 +2070,19 @@ static bool build_ws_uri(void)
             set_last_error("ws_url refused (needs wss)");
             return false;
         }
-        strlcpy(s_ws_uri, s_ws_url, sizeof(s_ws_uri));
-        return true;
+        /* Self-heal a leftover dev override rather than dialing a loopback
+         * port forever: erase it and fall through to cloud_url + ws_path,
+         * which is the value the provider actually enrolled us with. */
+        if (!ws_url_matches_provider(s_ws_url, fos_config()->cloud_url)) {
+            ESP_LOGW(TAG, "ws: ws_url override points at loopback but cloud_url is %s; "
+                          "discarding the stale override",
+                     fos_config()->cloud_url);
+            set_last_error("stale loopback ws_url discarded");
+            fos_cloud_clear_ws_url();
+        } else {
+            strlcpy(s_ws_uri, s_ws_url, sizeof(s_ws_uri));
+            return true;
+        }
     }
     const fos_config_t *config = fos_config();
     if (!fos_cloud_url_transport_ok(config->cloud_url, &why)) {

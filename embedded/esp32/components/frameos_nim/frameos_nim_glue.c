@@ -119,6 +119,50 @@ void frameos_nim_free_render_buffer(void *ptr)
     free(ptr);
 }
 
+/* ---------------------------------------------------------- Nim heap
+ *
+ * The Nim heap goes to PSRAM, deliberately and explicitly.
+ *
+ * ESP-IDF is built with CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384, so plain
+ * malloc() serves everything smaller than 16 KB from INTERNAL RAM. Nearly
+ * every Nim allocation is smaller than that — parsed scene graphs, strings,
+ * JsonNodes, sequence spines — so the interpreter used to fill the ~300 KB
+ * internal pool while megabytes of PSRAM sat idle. A frame with a dozen
+ * scenes still rendered (the canvas is big enough to reach PSRAM on its own)
+ * but had too little internal RAM left for a TLS handshake, so the cloud link
+ * died with what looked like a network error. See the ws_start heap guard in
+ * main/fos_cloud.c.
+ *
+ * Fixing it here rather than by lowering ALWAYSINTERNAL globally: that knob
+ * would also push Wi-Fi, lwIP and driver buffers into PSRAM, where DMA cannot
+ * reach them. This moves only the Nim heap, which is the actual consumer and
+ * never DMAs.
+ *
+ * Internal RAM stays the fallback: a small allocation that PSRAM cannot serve
+ * (fragmentation, or PSRAM absent on a board built with SPIRAM_IGNORE_NOTFOUND)
+ * still succeeds rather than turning into a fatal OOM. free() needs no
+ * counterpart — heap_caps_free/free accept pointers from either region. */
+void *fos_nim_heap_malloc(size_t size)
+{
+    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr == NULL) ptr = malloc(size);
+    return ptr;
+}
+
+void *fos_nim_heap_calloc(size_t count, size_t size)
+{
+    void *ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr == NULL) ptr = calloc(count, size);
+    return ptr;
+}
+
+void *fos_nim_heap_realloc(void *ptr, size_t size)
+{
+    void *next = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (next == NULL) next = realloc(ptr, size);
+    return next;
+}
+
 /* Live PSRAM headroom for the Nim side (frameos/utils/memory.nim), which
  * derives render allocation and image decode budgets from it. */
 size_t fos_psram_free_bytes(void)

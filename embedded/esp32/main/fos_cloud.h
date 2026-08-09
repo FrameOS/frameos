@@ -57,6 +57,13 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+/* The enrollment-supplied ws_url override, or "" when the frame dials
+ * cloud_url + ws_path (the normal case). Surfaced by `status` because a
+ * leftover dev override is otherwise invisible and makes every dial fail
+ * with an instant TCP reset. */
+const char *fos_cloud_ws_url(void);
+/* Forget that override (NVS + live copy) and go back to cloud_url + ws_path. */
+void fos_cloud_clear_ws_url(void);
 
 /* Provider REST access for device-authed routes (cloud OTA manifest and
  * download): fills the provider base URL, the provider-assigned frame id and

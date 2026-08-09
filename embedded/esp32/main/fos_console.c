@@ -96,6 +96,16 @@ static int cmd_status(int argc, char **argv)
            fos_cloud_frame_id()[0] ? " frame=" : "",
            fos_cloud_frame_id(),
            fos_cloud_ws_connected() ? "connected" : "off");
+    /* The ws_url override, when one is set. It is NOT secret, and it is the
+     * one input that decides where the management socket dials — a leftover
+     * dev value (ws://localhost:3100/...) makes every attempt fail with an
+     * instant TCP reset while enrollment over cloud_url keeps working, which
+     * reads as a network fault. Printing it here turns that into a glance.
+     * Clear it with `set cloud_wsurl ""`. */
+    if (fos_cloud_ws_url()[0]) {
+        printf("cloud_ws_url: %s (override; clear with: set cloud_wsurl \"\")\n",
+               fos_cloud_ws_url());
+    }
     if (fos_cloud_last_error()[0]) {
         printf("cloud_error: %s\n", fos_cloud_last_error());
     }
@@ -154,7 +164,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "hardware|panel|render_mode|rotate|"
+               "cloud_wsurl|hardware|panel|render_mode|rotate|"
                "interval|spill_force|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
@@ -188,6 +198,20 @@ static int cmd_set(int argc, char **argv)
             return 1;
         }
         strlcpy(config->cloud_url, value, sizeof(config->cloud_url));
+    }
+    else if (strcmp(key, "cloud_wsurl") == 0) {
+        /* Only ever cleared from here. The value itself is set by enrollment
+         * (dev providers whose hub is a separate port); typing one in by hand
+         * is how a frame ends up dialing somewhere the provider never named.
+         * `set cloud_wsurl ""` is the escape hatch for a stale one. */
+        if (value[0]) {
+            printf("cloud_wsurl is set by enrollment; only clearing is supported "
+                   "(set cloud_wsurl \"\")\n");
+            return 1;
+        }
+        fos_cloud_clear_ws_url();
+        printf("cloud_wsurl cleared; dialing cloud_url + ws_path from now on\n");
+        return 0;
     }
     else if (strcmp(key, "claim_token") == 0) strlcpy(config->claim_token, value, sizeof(config->claim_token));
     else if (strcmp(key, "frame_id") == 0) config->frame_id = strtoul(value, NULL, 10);
