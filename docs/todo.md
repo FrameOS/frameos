@@ -78,9 +78,31 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
       [102s+] TLS cannot allocate -> cloud link down, every later render fails
 
   Two separate faults, and the second is the damaging one:
-  1. That scene's render needs more PSRAM than an 8 MB board has. This is the
-     case the large-image spill work exists for — measure what it actually
-     allocates before assuming which buffer is at fault.
+  1. That scene's render needs more PSRAM than an 8 MB board has. Now
+     measured, with `-d:memProbe` (PSRAM free logged per interpreter node):
+
+         node app/render/split    psramFree=3428468   <- render starts at 3.4M
+         node app/render/image    psramFree=2804404   <- -624K background image
+         node app/data/weather    psramFree=2176420   <- -620K forecast JSON
+         node state/location      psramFree=2173684
+         heap exhausted: released 1048576 byte emergency reserve
+         render aborted: out of memory (largest PSRAM block 3072)
+
+     The frame enters the render with **3.4 MB, not 8 MB**: ~2.9 MB is already
+     held (scene payload, JS runtime, framebuffer, preview snapshot) and the
+     800x480 canvas takes 1.5 MB more. Everything then stays live at once —
+     background image 624K, forecast JSON 620K, the panel's own 921K output,
+     the band trio, the parsed XML — and the last of it lands inside
+     weatherPanel with 2.1 MB left. Roughly 4.5 MB wanted against 3.6 MB.
+
+     Banded SVG rasterisation (#315) works and engages here (40-row bands);
+     it is simply not the dominant term. The levers now worth costing, in
+     rough order of size: free the forecast JSON before the panels rasterise;
+     draw render/image straight into the canvas instead of holding a decoded
+     copy; shrink the ~2.9 MB resident baseline; drop the parsed XML earlier.
+     A host-side peak measurement predicted 3.7 MB and was wrong about the
+     device by ~1 MB, so reconcile any new host model against a memProbe run
+     before trusting it.
   2. ~~A failed render abandons its PSRAM~~ — HANDLED: the frame now restarts
      when PSRAM does not come back, and after two consecutive rescues pauses
      rendering and stays online so a lighter scene can be assigned. All three
