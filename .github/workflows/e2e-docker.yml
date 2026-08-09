@@ -108,9 +108,24 @@ jobs:
         run: |
           docker build --target esp32-ci -t frameos-esp32-ci .
 
+      # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
+      # They share a nimcache but not a single object file, and ESP-IDF ships
+      # ccache support that was simply never switched on — so every run
+      # recompiled all of ESP-IDF three times over. The cache is keyed loosely
+      # and restored from any previous run: a stale entry only costs misses,
+      # never correctness, since ccache hashes the compiler, flags and source.
+      - name: Cache ESP-IDF ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-esp32-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp32-ccache-
+
       - name: Build and boot ESP32 firmware image
         timeout-minutes: 60
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
           # The esp32-ci image does not carry versions.json (only the
           # app-builder stage copies it), so the firmware version has to come
           # from the runner's checkout. ci_build_image.sh refuses to build
@@ -120,6 +135,10 @@ jobs:
           docker run --rm \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
             -e FRAMEOS_VERSION="$FRAMEOS_VERSION" \
+            -e IDF_CCACHE_ENABLE=1 \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_MAXSIZE=2G \
+            -v "$GITHUB_WORKSPACE/.ccache:/ccache" \
             frameos-esp32-ci \
             bash -lc '
               set -euo pipefail
@@ -131,7 +150,10 @@ jobs:
               # incremental cost is one IDF configure+link.
               FRAMEOS_ESP32_PLATFORM=esp32-s3-32mb FRAMEOS_ESP32_BUILD_DIR=build-ci-32mb \
                 bash embedded/esp32/ci_build_image.sh
+              ccache --show-stats || true
             '
+          # The container writes as root; actions/cache runs as the runner user.
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.ccache"
 
   build-and-test:
     name: build-and-test
