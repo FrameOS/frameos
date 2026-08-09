@@ -2,6 +2,8 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import type { scenesLogicType } from './scenesLogicType'
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
+import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
 import { forms } from 'kea-forms'
@@ -405,23 +407,13 @@ export const scenesLogic = kea<scenesLogicType>([
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame?.scenes ?? []],
     undeployedSceneIds: [
       (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],
-      (scenes, frame, isFrameAdminMode): Set<string> => {
-        if (isFrameAdminMode) {
-          return new Set<string>()
-        }
-
-        const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
-        const undeployed = new Set<string>()
-
-        scenes.forEach((scene) => {
-          const deployed = deployedScenes.find((deployedScene) => deployedScene.id === scene.id)
-          if (!deployed || !sceneEqualForComparison(scene, deployed)) {
-            undeployed.add(scene.id)
-          }
-        })
-
-        return undeployed
-      },
+      (scenes, frame, isFrameAdminMode): Set<string> =>
+        undeployedSceneIdsFor({
+          mode: isFrameAdminMode ? 'frameAdmin' : workspaceMode(),
+          scenes,
+          frame,
+          scenesEqual: sceneEqualForComparison,
+        }),
     ],
     unsavedSceneIds: [
       (s) => [s.frame, s.frameForm],
