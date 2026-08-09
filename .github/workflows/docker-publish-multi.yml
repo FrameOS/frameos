@@ -402,6 +402,7 @@ jobs:
           docker run --rm \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
             -e DOCKER_VERSION \
+            -e FRAMEOS_VERSION="$DOCKER_VERSION" \
             -v "$PWD/release-assets:/release-assets" \
             frameos-esp32-ci \
             bash -lc '

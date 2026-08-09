@@ -58,6 +58,36 @@ if [[ "$QEMU_SMOKE" == "1" && -z "${FRAMEOS_ESP32_SDKCONFIG_DEFAULTS:-}" ]]; the
     SDKCONFIG_DEFAULTS="$SCRIPT_DIR/sdkconfig.defaults;$SCRIPT_DIR/sdkconfig.qemu.defaults"
 fi
 
+# The app version baked into the image descriptor, reported as
+# `frameos_version` at enrollment and in every `hello`, and compared against
+# the OTA manifest to decide "am I already on this build"
+# (main/fos_ota.c). Resolve it HERE and fail loudly if we cannot, because a
+# firmware that reports the wrong version is not a cosmetic problem: the
+# manifest comparison is a string compare, so a build whose version never
+# matches the release re-downloads and re-flashes the same image on every
+# check, forever.
+#
+# v2026.8.13 shipped exactly that. The esp32-ci Docker stage does not copy
+# versions.json (only the app-builder stage does), so CMake fell through to
+# its "0.0.0-unknown" fallback and every ESP32 on that release re-flashed
+# daily. The release workflow now passes FRAMEOS_VERSION explicitly; this
+# check is what stops the silent fallback from shipping again.
+if [[ -z "${FRAMEOS_VERSION:-}" ]]; then
+    versions_json="$SCRIPT_DIR/../../versions.json"
+    if [[ -f "$versions_json" ]]; then
+        FRAMEOS_VERSION="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1]))["frameos"].split("+")[0])
+' "$versions_json")"
+        export FRAMEOS_VERSION
+    else
+        echo "Cannot determine the firmware version: FRAMEOS_VERSION is unset and" >&2
+        echo "$versions_json is missing. Pass FRAMEOS_VERSION=<version> explicitly." >&2
+        exit 1
+    fi
+fi
+echo "firmware version: $FRAMEOS_VERSION"
+
 : "${IDF_PATH:=/opt/esp/esp-idf}"
 NIM_BIN_DIR="${FRAMEOS_NIM_BIN_DIR:-/opt/nim/bin}"
 
