@@ -41,6 +41,14 @@ when defined(testing):
   # headroom) on a development host. 0 disables the override.
   var availableRenderBytesOverride* = 0
 
+when defined(memProbe):
+  proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}
+  proc memProbe*(where: string) =
+    when defined(frameosEmbedded):
+      let free = fos_psram_free_bytes().int
+      let largest = fos_psram_largest_free_block().int
+      c_printf("MEMPROBE %s psramFree=%d largest=%d\n", where.cstring, free.cint, largest.cint)
+
 proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.
