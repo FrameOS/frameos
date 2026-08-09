@@ -111,8 +111,15 @@ jobs:
       - name: Build and boot ESP32 firmware image
         timeout-minutes: 60
         run: |
+          # The esp32-ci image does not carry versions.json (only the
+          # app-builder stage copies it), so the firmware version has to come
+          # from the runner's checkout. ci_build_image.sh refuses to build
+          # without one — a firmware that misreports its version re-flashes
+          # itself on every OTA check (see the guard's comment).
+          FRAMEOS_VERSION="$(python3 -c 'import json; print(json.load(open("versions.json"))["frameos"].split("+")[0])')"
           docker run --rm \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e FRAMEOS_VERSION="$FRAMEOS_VERSION" \
             frameos-esp32-ci \
             bash -lc '
               set -euo pipefail
