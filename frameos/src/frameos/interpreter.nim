@@ -1,6 +1,7 @@
 import frameos/types
 import frameos/values
 from frameos/utils/image import renderError, renderErrorInto
+when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
@@ -324,6 +325,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
+    when defined(memProbe):
+      memProbe("node " & nodeType & "/" & diagnosticKeyword(currentNode) &
+        " #" & $currentNodeId.int)
     let debugRuntime = self.frameConfig.debug
     var checkpointKeyword = ""
     if debugRuntime:
