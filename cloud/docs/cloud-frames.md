@@ -252,14 +252,29 @@ narrow. Required before launch:
 
 ### Signed OTA
 
-`upgrade.nim` currently fetches GitHub releases without signature
-verification. Before the cloud can even *suggest* updates:
+Both halves are in place.
 
-- Releases are signed (minisign/ed25519); the public key is baked into
-  images; the private key is held offline and is never in the cloud DB.
-- The device verifies signatures itself and updates on its own schedule.
-  Cloud compromise therefore cannot become native code execution via the
-  update channel.
+- Releases are signed with minisign's prehashed form (Ed25519 over
+  BLAKE2b-512, `tools/sign_firmware.py`): ESP32 images in the firmware job,
+  `.tar.gz` release archives in the release job. The private key is held
+  offline and is never in the cloud DB; the public key is baked into images
+  (`embedded/esp32/main/fos_ota_pubkey.h`,
+  `frameos/src/frameos/ota_pubkey.nim`, both generated from the same
+  committed `firmware-signing.pub`).
+- ESP32 verifies before switching boot slots (`main/fos_ota.c`). Buildroot
+  and Pi verify the downloaded archive before unpacking it
+  (`frameos/src/frameos/upgrade.nim`) — before `tar -xzf`, because extracting
+  an unverified archive already lets an attacker choose file contents and
+  paths on the device.
+- The cloud can only *suggest*: `notify_update_available` carries a version
+  and no URL, and the device fetches release metadata from its own configured
+  archive. Cloud compromise therefore cannot become native code execution
+  through the update channel — the worst it can do is point a frame at an
+  update it will refuse.
+
+Not covered: the buildroot `.img.gz` SD-card images, which are flashed by
+hand from a machine that already trusts what it downloaded. Nothing
+on-device verifies them, so a signature there would be decoration.
 
 ### Account hardening
 

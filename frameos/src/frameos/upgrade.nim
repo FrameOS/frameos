@@ -1,7 +1,10 @@
-import std/[httpclient, json, os, strutils, tables, times]
+import std/[base64, httpclient, json, os, strutils, tables, times]
 import zippy
 
+import frameos/cloud/identity
 import frameos/config
+import frameos/ota_pubkey
+import frameos/utils/blake2b
 import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
 import frameos/utils/http_client
@@ -209,6 +212,62 @@ proc validateGithubReleaseAssetUrl*(url, version: string) =
   if not url.endsWith(".tar.gz"):
     raise newException(ValueError, "Refusing release asset that is not a .tar.gz archive: " & url)
 
+proc releaseSignatureUrl*(assetUrl: string): string =
+  assetUrl & ".minisig"
+
+proc parseMinisigSignature*(minisig: string): string =
+  ## The first non-comment line of a .minisig is base64(ED + keyid8 + sig64).
+  ## Returns the 64-byte signature, base64 encoded for the Ed25519 verifier.
+  ##
+  ## The trusted-comment line and its global signature are ignored on purpose:
+  ## the device trusts a KEY, not a comment, and minisign's global signature
+  ## only binds the comment to the signature — it adds nothing once the key
+  ## check below has passed. Same reasoning as parse_minisig in
+  ## embedded/esp32/main/fos_ota.c, which this mirrors deliberately: two
+  ## implementations of one format should be readable side by side.
+  for rawLine in minisig.splitLines():
+    let line = rawLine.strip()
+    if line.len == 0 or line.startsWith("untrusted comment:") or
+        line.startsWith("trusted comment:"):
+      continue
+    var blob: string
+    try:
+      blob = decode(line)
+    except CatchableError:
+      raise newException(ValueError, "Release signature is not valid base64")
+    if blob.len != 74:
+      raise newException(ValueError,
+        "Release signature blob has the wrong length (" & $blob.len & ", expected 74)")
+    if blob[0] != 'E' or blob[1] != 'D':
+      raise newException(ValueError,
+        "Release signature is not the prehashed Ed25519 form this build accepts")
+    var keyIdHex = ""
+    for i in 2 ..< 10:
+      keyIdHex.add(toHex(ord(blob[i]), 2).toLowerAscii)
+    if keyIdHex != OtaSigningKeyIdHex:
+      raise newException(ValueError,
+        "Release is signed by key " & keyIdHex & ", not the key this build trusts (" &
+        OtaSigningKeyIdHex & ")")
+    return encode(blob[10 ..< 74])
+  raise newException(ValueError, "Release signature file contained no signature line")
+
+proc verifyReleaseArchiveSignature*(archivePath, minisig: string) =
+  ## Refuses to go further unless the archive was signed by the release key
+  ## baked into this build (ota_pubkey.nim).
+  ##
+  ## This is the whole point of signed OTA: the update channel must not become
+  ## remote code execution if the control plane is compromised. The provider
+  ## says which version exists and where to get it; only this check decides
+  ## whether the bytes are run, and it depends on nothing the provider
+  ## controls. minisign prehashes with BLAKE2b-512 and signs the digest, so
+  ## that digest is the message verified here.
+  let signatureBase64 = parseMinisigSignature(minisig)
+  let digest = blake2b512File(archivePath)
+  if not verifySignatureBase64(OtaSigningPublicKeyBase64, digest, signatureBase64):
+    raise newException(ValueError,
+      "Release signature does not verify against the FrameOS signing key — refusing to install " &
+      archivePath)
+
 proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseInfo =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "GitHub release payload is not an object")
@@ -365,6 +424,16 @@ proc downloadReleaseArchive(release: FrameOSReleaseInfo, destination: string) =
     )
     writeFile(destination, body)
 
+proc downloadReleaseSignature(release: FrameOSReleaseInfo): string =
+  ## The .minisig beside the asset. Small (a few hundred bytes), so it is
+  ## fetched into memory rather than staged on disk.
+  let url = releaseSignatureUrl(release.assetUrl)
+  validateGithubReleaseAssetUrl(release.assetUrl, release.version)
+  var headers = newHttpHeaders()
+  headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+  boundedGetContent(url, headers = headers, timeoutMs = 30_000,
+                    maxBytes = 8 * 1024, maxSeconds = 60)
+
 proc findFileNamed(root, name: string): string =
   for path in walkDirRec(root):
     if fileExists(path) and lastPathPart(path) == name:
@@ -465,6 +534,17 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
 
     setupLog("FrameOS upgrade: downloading " & release.assetName)
     downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+
+    # Verify BEFORE unpacking: `tar -xzf` on an unverified archive is already
+    # letting an attacker choose file contents and paths on this device. The
+    # signature is checked against the key compiled into this binary, so a
+    # compromised provider (or a hijacked download) cannot get code executed
+    # here — it can only offer bytes that fail this check.
+    setupLog("FrameOS upgrade: verifying the release signature")
+    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz",
+                                  downloadReleaseSignature(release))
+    setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
+
     discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
 
     let frameosBinary = findFileNamed(workDir / "extract", "frameos")

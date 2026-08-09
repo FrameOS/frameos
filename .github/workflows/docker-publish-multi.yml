@@ -719,6 +719,48 @@ jobs:
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
 
+      # The Pi/buildroot half of signed OTA. A frame verifies the release
+      # archive against the key compiled into its binary before unpacking it
+      # (frameos/src/frameos/upgrade.nim), which is only possible if the
+      # archive is signed here — so an unsigned archive must fail the release,
+      # exactly as unsigned ESP32 firmware does. The ESP32 images are already
+      # signed in their own job; this covers the .tar.gz assets the upgrade
+      # path consumes.
+      #
+      # Not signed: the buildroot .img.gz SD-card images. Those are flashed by
+      # hand from a machine that already trusts what it downloaded; nothing
+      # on-device verifies them, so a signature there would be decoration.
+      - name: Sign release archives
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned release archives"
+            exit 1
+          fi
+          shopt -s nullglob
+          archives=(release-assets/frameos-*.tar.gz)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::no release archives found to sign"
+            exit 1
+          fi
+          python3 -m pip install --quiet --break-system-packages cryptography             || python3 -m pip install --quiet cryptography
+          keyfile=$(mktemp)
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" "${archives[@]}" || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          # Same counterpart check the firmware job makes: a rotated-but-not-
+          # committed secret would sign archives no frame accepts, and the
+          # failure would only show up on devices.
+          for archive in "${archives[@]}"; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$archive"
+          done
+          ls -lh release-assets
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
