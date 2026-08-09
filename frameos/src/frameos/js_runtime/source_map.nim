@@ -78,9 +78,23 @@ proc addLineSegments(result: var SourceLineMap, generatedLine: int, generatedTex
       ))
       inc sourcePos
 
+# The LCS table below is one int per (generated line x source line) pair, so
+# its cost is quadratic in file length: a 260-line app already needs ~550 KB,
+# and a 1200-line one needs ~11 MB. That is how the bundled Weather scene
+# exhausted an 8 MB ESP32 — not the canvas, not the images, but building a
+# source map for a 36 KB file so error messages could name the right line.
+# Past this budget the map degrades to line-for-line, which is exact for the
+# common case (the transpiler mostly rewrites lines in place) and merely
+# approximate where it is not. Hosts get a generous budget; embedded frames,
+# where the whole render fits in a few megabytes, get a small one.
+const LcsCellBudget* =
+  when defined(frameosEmbedded): 20_000 else: 4_000_000
+
 proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: string): SourceLineMap =
   let sourceLines = source.splitLines()
   let generatedLines = generated.splitLines()
+  if sourceLines.len.int64 * generatedLines.len.int64 > LcsCellBudget:
+    return identitySourceLineMap(generated, generatedName, sourceName)
   var lcs = newSeqWith(generatedLines.len + 1, newSeq[int](sourceLines.len + 1))
 
   for generatedIndex in countdown(generatedLines.len - 1, 0):
