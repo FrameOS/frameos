@@ -68,6 +68,38 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ### Memory
 
+- **One heavy scene can exhaust PSRAM and wedge the frame until it is
+  power-cycled.** Measured on an 8 MB XIAO-class board rendering the
+  "Weather" scene, via the new `heapinfo` console command:
+
+      [36s] render #1 started            internal 154K free, psram 5.6M free
+      [80s] Dynamic Impl: alloc(4437) failed -> render #1 failed at complete
+      [84s] psram 3,952 free             abandoned, and it stays there
+      [102s+] TLS cannot allocate -> cloud link down, every later render fails
+
+  Two separate faults, and the second is the damaging one:
+  1. That scene's render needs more PSRAM than an 8 MB board has. This is the
+     case the large-image spill work exists for — measure what it actually
+     allocates before assuming which buffer is at fault.
+  2. ~~A failed render abandons its PSRAM~~ — HANDLED: the frame now restarts
+     when PSRAM does not come back, and after two consecutive rescues pauses
+     rendering and stays online so a lighter scene can be assigned. All three
+     paths verified on hardware (restart, pause, resume-on-scene-select).
+     What remains is the cause below.
+
+  Historical note on 2: After the failure the pool sits
+     at ~4 KB indefinitely, so the frame can neither render nor open its
+     cloud link (mbedTLS allocates from PSRAM under
+     CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC). It is dead until power-cycled.
+     `FOS_NIM_OOM_ABORT_RESTART_STREAK` is 4 and only covers the longjmp
+     abort path, not this one. A frame that cannot render and cannot phone
+     home should restart itself promptly.
+
+  NOT caused by moving the Nim heap to PSRAM: that was the first suspicion,
+  and reverting it changed nothing — the same scene still exhausted PSRAM and
+  still wedged the frame, while internal RAM went back to being tight. The
+  move stays. Do not re-litigate it without re-running this measurement.
+
 - **Move QuickJS off internal RAM** — it allocates through libc malloc, and
   `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
   the internal pool, so the active scene's JS context is an internal-RAM cost

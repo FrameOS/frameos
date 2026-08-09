@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 
 #include "cJSON.h"
+#include "fos_client.h"
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
@@ -903,6 +904,9 @@ bool fos_scenes_apply_pending_selection(void)
     }
     persist_last_scene(scene_id);
     s_last_scene_settled = true; /* explicit selection makes the boot restore moot */
+    /* Picking a scene is the user saying "try this one instead", so a frame
+     * paused after repeated out-of-memory renders gets another chance. */
+    fos_client_clear_render_pause();
     ESP_LOGI(TAG, "scene selected: %s", scene_id);
     printf("scene changed: %s\n", scene_id); /* visible on the USB serial stream */
     log_scene_event("event:setCurrentScene", "ok", "queued", scene_id,

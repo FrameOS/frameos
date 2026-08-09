@@ -160,6 +160,33 @@ static int cmd_status(int argc, char **argv)
     return 0;
 }
 
+/* Block-level heap truth, for when the totals in `status` are not enough.
+ *
+ * "psram 3856 free" says a frame is out of memory but not what took it, and
+ * guessing from totals wastes hours. This prints ESP-IDF's per-region
+ * breakdown (largest free block, minimum-ever free, allocation counts) for
+ * both pools, which is what distinguishes exhaustion from fragmentation and
+ * a leak from a big legitimate buffer. */
+static int cmd_heapinfo(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    printf("--- internal (MALLOC_CAP_INTERNAL)\n");
+    printf("free=%u largest=%u min_ever_free=%u\n",
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    printf("--- psram (MALLOC_CAP_SPIRAM)\n");
+    printf("total=%u free=%u largest=%u min_ever_free=%u\n",
+           (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+    printf("--- per-region detail\n");
+    heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    return 0;
+}
+
 static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
@@ -1225,6 +1252,7 @@ static esp_err_t register_frameos_console_commands(void)
 {
     const esp_console_cmd_t commands[] = {
         {.command = "status", .help = "Show device status", .func = cmd_status},
+        {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

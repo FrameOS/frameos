@@ -144,8 +144,23 @@ void frameos_nim_free_render_buffer(void *ptr)
  * (fragmentation, or PSRAM absent on a board built with SPIRAM_IGNORE_NOTFOUND)
  * still succeeds rather than turning into a fatal OOM. free() needs no
  * counterpart — heap_caps_free/free accept pointers from either region. */
+/* Zero-size requests are rounded up to one byte, and that is load-bearing
+ * rather than tidy-mindedness.
+ *
+ * heap_caps_realloc(ptr, 0, caps) FREES ptr and returns NULL. The caller
+ * here cannot tell that apart from a failed allocation, so the obvious
+ * `if (next == NULL) next = realloc(ptr, size);` fallback calls realloc on
+ * an already-freed pointer — a double free that corrupts the heap. The Nim
+ * side compounds it by retrying the same call on the same dead pointer after
+ * releasing the emergency reserve.
+ *
+ * Rounding up also keeps the NULL return meaning exactly one thing —
+ * "allocation failed" — which is what patched_malloc.nim treats it as. A
+ * zero-size malloc returning NULL would otherwise be reported as an
+ * out-of-memory abort. */
 void *fos_nim_heap_malloc(size_t size)
 {
+    if (size == 0) size = 1;
     void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ptr == NULL) ptr = malloc(size);
     return ptr;
@@ -153,6 +168,7 @@ void *fos_nim_heap_malloc(size_t size)
 
 void *fos_nim_heap_calloc(size_t count, size_t size)
 {
+    if (count == 0 || size == 0) { count = 1; size = 1; }
     void *ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ptr == NULL) ptr = calloc(count, size);
     return ptr;
@@ -160,7 +176,10 @@ void *fos_nim_heap_calloc(size_t count, size_t size)
 
 void *fos_nim_heap_realloc(void *ptr, size_t size)
 {
+    if (size == 0) size = 1;
     void *next = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* Safe now that size is never 0: a failed heap_caps_realloc leaves the
+     * original block untouched, so the fallback gets a live pointer. */
     if (next == NULL) next = realloc(ptr, size);
     return next;
 }

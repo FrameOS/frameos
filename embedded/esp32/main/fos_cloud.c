@@ -78,27 +78,29 @@ static const char *NVS_NS = "frameos";
  * client init/start was never retried at all — either way the link used to
  * stay dead until a reboot. */
 #define FOS_CLOUD_WS_STALL_RESTART_US (120LL * 1000 * 1000)
-/* Internal-RAM floor for opening the management WebSocket.
+/* Memory floors for opening the management WebSocket, split by pool because
+ * the dial draws on both and they run out for different reasons.
  *
- * The dial needs internal (non-PSRAM) memory for three things at once: the
- * client's own task stack (task_stack below, ~10 KB), lwIP's socket and
- * pbufs, and the mbedTLS handshake. Below the floor the connect fails deep in
- * the stack and surfaces as "delayed connect error: Connection reset by peer"
- * from esp-tls — which reads exactly like a network fault and sent one
- * debugging session chasing DNS, nginx and Cloudflare before the heap was
- * looked at. So check first and SAY so.
+ * INTERNAL pays for the client's own task stack (task_stack below, ~10 KB)
+ * and lwIP's socket and pbufs. PSRAM pays for the mbedTLS handshake: the
+ * build sets CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC, so record buffers and
+ * certificate work come from there. The observed failure when PSRAM runs dry
+ * is "Dynamic Impl: alloc(4770 bytes) failed" followed by
+ * mbedtls_ssl_handshake -0x7F00; when internal runs dry it is esp-tls
+ * "delayed connect error: Connection reset by peer", which reads exactly
+ * like a network fault. Both have cost real debugging time, so check first
+ * and say which pool is short.
  *
- * The numbers match the log uploader's own TLS thresholds
- * (FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS / _BLOCK_TLS in
- * components/frameos_nim/frameos_nim_glue.c): 48 KB free with a 16 KB
- * contiguous block. Fragmentation matters as much as the total — mbedTLS
- * wants sizable single buffers — which is why both are checked.
+ * An earlier version of this guard demanded 48 KB INTERNAL, copied from the
+ * log uploader's thresholds. That was wrong for this path: those thresholds
+ * predate mbedTLS being pushed to PSRAM, and a frame with a healthy PSRAM
+ * budget but a busy internal pool would refuse to dial for no reason.
  *
- * This is a floor for STARTING a session, not for keeping one: an established
- * connection costs far less, so a frame that got up before the renderer
- * claimed memory keeps running. */
-#define FOS_CLOUD_WS_MIN_INTERNAL_FREE (48 * 1024)
-#define FOS_CLOUD_WS_MIN_INTERNAL_BLOCK (16 * 1024)
+ * These are floors for STARTING a session, not for keeping one — an
+ * established connection costs far less. */
+#define FOS_CLOUD_WS_MIN_INTERNAL_FREE (24 * 1024)
+#define FOS_CLOUD_WS_MIN_INTERNAL_BLOCK (12 * 1024)
+#define FOS_CLOUD_WS_MIN_PSRAM_FREE (128 * 1024)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
 /* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
@@ -2114,41 +2116,43 @@ static bool ws_heap_ready(void)
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_internal =
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (free_internal >= FOS_CLOUD_WS_MIN_INTERNAL_FREE &&
-        largest_internal >= FOS_CLOUD_WS_MIN_INTERNAL_BLOCK) {
+        largest_internal >= FOS_CLOUD_WS_MIN_INTERNAL_BLOCK &&
+        free_psram >= FOS_CLOUD_WS_MIN_PSRAM_FREE) {
         if (warned) {
             warned = false;
-            ESP_LOGI(TAG, "ws: internal RAM recovered (%u free, %u largest); dialing again",
-                     (unsigned)free_internal, (unsigned)largest_internal);
+            ESP_LOGI(TAG, "ws: memory recovered (internal %u free/%u block, psram %u free); dialing again",
+                     (unsigned)free_internal, (unsigned)largest_internal, (unsigned)free_psram);
             set_last_error("");
         }
         return true;
     }
+    /* Name the pool that is short: "low memory" alone sends people to the
+     * wrong half of the device. */
+    const char *pool = free_psram < FOS_CLOUD_WS_MIN_PSRAM_FREE ? "PSRAM" : "internal RAM";
+    /* Kept short on purpose: s_last_error is a small fixed buffer and `status`
+     * prints it on one line. The full numbers go to the log line below. */
     char detail[sizeof(s_last_error)];
     snprintf(detail, sizeof(detail),
-             "low internal RAM for the cloud link: %uB free/%uB block, needs %uB/%uB",
-             (unsigned)free_internal, (unsigned)largest_internal,
-             (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
-             (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK);
+             "low %s for the cloud link (internal %uK, psram %uK free)",
+             pool, (unsigned)(free_internal / 1024), (unsigned)(free_psram / 1024));
     set_last_error(detail);
     if (!warned) {
         warned = true;
-        ESP_LOGW(TAG, "ws: %s", detail);
-        ESP_LOGW(TAG, "ws: the link stays down until internal RAM frees up "
-                      "(fewer/lighter scenes, or a smaller panel canvas). "
-                      "PSRAM is not the constraint: %u free.",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        /* One structured line so this reaches the log panel and the metrics
-         * story, not just whoever is holding a USB cable. */
-        char event[224];
+        ESP_LOGW(TAG, "ws: %s — internal %u free/%u block (needs %u/%u), psram %u free (needs %u)",
+                 detail, (unsigned)free_internal, (unsigned)largest_internal,
+                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
+                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK,
+                 (unsigned)free_psram, (unsigned)FOS_CLOUD_WS_MIN_PSRAM_FREE);
+        ESP_LOGW(TAG, "ws: the link stays down until memory frees up; it retries on its own.");
+        char event[288];
         snprintf(event, sizeof(event),
                  "{\"event\":\"cloud:ws_deferred\",\"source\":\"esp32\","
-                 "\"reason\":\"low_internal_ram\",\"freeInternal\":%u,"
-                 "\"largestInternalBlock\":%u,\"needFreeInternal\":%u,"
-                 "\"needInternalBlock\":%u,\"loadedScenes\":%d}",
-                 (unsigned)free_internal, (unsigned)largest_internal,
-                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
-                 (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK, fos_scenes_loaded());
+                 "\"reason\":\"low_memory\",\"pool\":\"%s\",\"freeInternal\":%u,"
+                 "\"largestInternalBlock\":%u,\"freePsram\":%u,\"loadedScenes\":%d}",
+                 pool, (unsigned)free_internal, (unsigned)largest_internal,
+                 (unsigned)free_psram, fos_scenes_loaded());
         frameos_nim_log_hook(event);
     }
     return false;

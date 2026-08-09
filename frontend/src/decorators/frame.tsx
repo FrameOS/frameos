@@ -1,4 +1,5 @@
 import { FrameConnectionDot } from '../components/FrameConnectionDot'
+import { isCloudMode } from '../utils/cloudMode'
 import { Spinner } from '../components/Spinner'
 import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
@@ -120,6 +121,16 @@ export function frameStatusLabel(frame: FrameType): string {
 }
 
 export function frameNeedsInitialDeploy(frame: FrameType): boolean {
+  // Cloud-managed frames are judged by what the DEVICE acked, not by a
+  // deploy record. `last_successful_deploy_at` and `mode` are backend-only
+  // columns that frameSummary does not return, so the rule below read
+  // undefined for both and called every cloud frame "waiting for first
+  // deploy" — permanently, including frames that were rendering and shipping
+  // logs. The cloud's equivalent of a deploy is a set_scenes the device
+  // acknowledged, which is exactly what scenes_checksum records.
+  if (isCloudMode() || frame.managed_by === 'cloud') {
+    return !frame.scenes_checksum && !frameHasActivityLog(frame)
+  }
   if ((frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)) {
     return false
   }

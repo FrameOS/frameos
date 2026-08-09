@@ -18,6 +18,13 @@ void fos_client_start(void);
 /* Allow the render loop to run after startup has reserved its stack. */
 void fos_client_resume(void);
 /* Trigger an immediate render from another task (HTTP action, console). */
+/* Repeated-OOM rescue (fos_client.c). A render that exhausts PSRAM and does
+ * not get it back leaves a frame that can neither render nor reach the cloud,
+ * so it restarts itself; after two consecutive rescues it stops rendering and
+ * stays online instead, so a lighter scene can be assigned. */
+void fos_client_render_recovery_boot(void);
+bool fos_client_render_paused(void);
+void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);

@@ -204,6 +204,9 @@ void app_main(void)
      * consume internal RAM, but after early-boot OTA had a chance to run with
      * the leanest possible task set. The task waits until fos_client_resume()
      * below, so starting it here only claims the stack. */
+    /* Before any render: decides whether the previous boot was a memory
+     * rescue and whether rendering should stay paused this time. */
+    fos_client_render_recovery_boot();
     fos_client_start();
 
     if (frameos_nim_available() && local_render_ok) {
