@@ -332,9 +332,13 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     frameRotate = 0
   frameName = $name
   try:
+    when defined(memProbe): memProbe("INIT start")
     armEmergencyReserve()
+    when defined(memProbe): memProbe("INIT after armEmergencyReserve")
     initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
+    when defined(memProbe): memProbe("INIT after initRuntime")
     initScene()
+    when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
         &"\"{frameName}\", nim {NimVersion}")
     true

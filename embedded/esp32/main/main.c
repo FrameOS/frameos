@@ -107,6 +107,19 @@ static void log_bootup_event(bool online)
     frameos_nim_flush_logs();
 }
 
+/* Boot-time memory attribution, the C-side companion to the Nim -d:memProbe.
+ * Off by default; build with -DFRAMEOS_BOOTMEM=1 to find out which init step
+ * is holding the PSRAM a render needs. This is how the 1.57 MB default-font
+ * parse was found: every other step on this list costs a couple of KB. */
+#if defined(FRAMEOS_BOOTMEM) && FRAMEOS_BOOTMEM
+#define BOOTMEM(stage) ESP_LOGW(TAG, "BOOTMEM %-24s psram_free=%u largest=%u internal=%u", \
+    stage, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), \
+    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM), \
+    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL))
+#else
+#define BOOTMEM(stage) ((void)0)
+#endif
+
 void app_main(void)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -114,6 +127,7 @@ void app_main(void)
     ESP_LOGI(TAG, "FrameOS %s (idf %s) booting from %s",
              app->version, app->idf_ver, running ? running->label : "?");
 
+    BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
@@ -134,6 +148,7 @@ void app_main(void)
         .busy = config->pins.busy, .sck = config->pins.sck,
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
+    BOOTMEM("after-config");
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
@@ -142,6 +157,7 @@ void app_main(void)
      * log ring (and replays it to the backend/cloud once upload is enabled,
      * below) — a mount failure must never be a serial-only event, or "why are
      * my assets empty?" has no remote answer. */
+    BOOTMEM("after-display");
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",
@@ -175,6 +191,7 @@ void app_main(void)
         }
     }
 
+    BOOTMEM("after-sd");
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
 
@@ -206,9 +223,11 @@ void app_main(void)
      * below, so starting it here only claims the stack. */
     /* Before any render: decides whether the previous boot was a memory
      * rescue and whether rendering should stay paused this time. */
+    BOOTMEM("after-wifi");
     fos_client_render_recovery_boot();
     fos_client_start();
 
+    BOOTMEM("after-client-start");
     if (frameos_nim_available() && local_render_ok) {
         int width = fos_display_present() ? fos_display_width() : 800;
         int height = fos_display_present() ? fos_display_height() : 480;
@@ -229,9 +248,11 @@ void app_main(void)
 
     /* Interpreted scenes: mount /state and queue any cached scenes.json;
      * the render task applies it and keeps it synced with the backend. */
+    BOOTMEM("after-nim-init");
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
+    BOOTMEM("after-scenes-init");
     fos_schedule_init();
 
     /* Oversized HTTP bodies (multi-MB gallery images) spill to storage
@@ -270,11 +291,13 @@ void app_main(void)
         }
     }
 
+    BOOTMEM("after-spill");
     fos_console_start();
 
     /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
      * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,
      * then enrolls and, when enrolled, runs the management WebSocket. */
+    BOOTMEM("after-console");
     if (fos_cloud_start() != ESP_OK) {
         ESP_LOGW(TAG, "cloud client unavailable");
     }
@@ -285,6 +308,7 @@ void app_main(void)
         log_bootup_event(true);
         fos_http_start(false);
         fos_ota_start_periodic_task(24);
+        BOOTMEM("after-http+ota");
     } else {
         frameos_nim_set_log_upload_enabled(false);
         if (!fos_config_wifi_ready()) {
