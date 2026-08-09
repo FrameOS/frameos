@@ -10,6 +10,8 @@
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -120,6 +122,16 @@ static int cmd_status(int argc, char **argv)
     printf("hardware:    %s\n", config->hardware_preset[0] ? config->hardware_preset : "(custom)");
     printf("panel:       %s (%dx%d)\n", config->panel, fos_display_width(), fos_display_height());
     printf("pins:        %s\n", pins);
+    if (config->gpio_button_count > 0) {
+        printf("buttons:     ");
+        for (size_t i = 0; i < config->gpio_button_count; i++) {
+            printf("%s%d:%s", i ? "," : "", config->gpio_buttons[i].pin,
+                   config->gpio_buttons[i].label);
+        }
+        printf("\n");
+    } else {
+        printf("buttons:     (none configured)\n");
+    }
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
@@ -184,6 +196,110 @@ static int cmd_heapinfo(int argc, char **argv)
     printf("--- per-region detail\n");
     heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    return 0;
+}
+
+/* Which GPIOs are wired to buttons, what they read right now, and — with
+ * `buttons watch` — which pin actually moves when someone presses one.
+ *
+ * A frame whose buttons "do nothing" gives no clue why: the configured pins
+ * are invisible in `status`, and fos_buttons logs its wiring at INFO, which
+ * the console's WARN level hides. The usual cause is simply that the board's
+ * button is not on the GPIO its hardware preset assumes — boards get
+ * relabelled and DIY builds differ — and that is a question only the board
+ * can answer.
+ *
+ * `watch` polls a curated safe list. Pins driving the panel, the SD card, USB
+ * and the SPI flash/PSRAM are skipped: reconfiguring those as inputs
+ * mid-flight would break the very frame being debugged. */
+static bool console_pin_in_use(const fos_config_t *config, int pin)
+{
+    const int used[] = {
+        config->pins.rst, config->pins.dc, config->pins.cs, config->pins.cs2,
+        config->pins.busy, config->pins.sck, config->pins.mosi, config->pins.pwr,
+        config->assets_sd.cs, config->assets_sd.sck,
+        config->assets_sd.miso, config->assets_sd.mosi,
+        19, 20, /* USB D-/D+ (the console itself) */
+        /* 26-32 SPI flash, 33-37 octal PSRAM. On an S3 module with octal
+         * PSRAM (CONFIG_SPIRAM_MODE_OCT) 33-37 carry the memory bus, and
+         * reconfiguring them as inputs takes the running system's RAM away
+         * mid-instruction: the first attempt at this scan reset the board
+         * with TG1WDT_SYS_RST. Both ranges are excluded unconditionally —
+         * quad-PSRAM parts simply lose a few candidate pins, which is a
+         * cheap price for a diagnostic that cannot crash the frame it is
+         * diagnosing. */
+        26, 27, 28, 29, 30, 31, 32,
+        33, 34, 35, 36, 37
+    };
+    for (size_t i = 0; i < sizeof(used) / sizeof(used[0]); i++) {
+        if (used[i] == pin) return true;
+    }
+    return false;
+}
+
+static int cmd_buttons(int argc, char **argv)
+{
+    fos_config_t *config = fos_config();
+    printf("configured buttons: %u\n", (unsigned)config->gpio_button_count);
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        const fos_gpio_button_t *b = &config->gpio_buttons[i];
+        printf("  GPIO %-2d %-16s level=%d\n", b->pin, b->label, gpio_get_level(b->pin));
+    }
+    if (config->gpio_button_count == 0) {
+        printf("  (none — set them with: set gpio_buttons \"0:BOOT\\n4:KEY1\")\n");
+    }
+    if (argc < 2 || strcmp(argv[1], "watch") != 0) {
+        printf("press a button and run `buttons watch` to find which GPIO it is\n");
+        return 0;
+    }
+
+    int seconds = argc > 2 ? atoi(argv[2]) : 10;
+    if (seconds < 1) seconds = 1;
+    if (seconds > 60) seconds = 60;
+
+    /* Deliberately conservative: no flash/PSRAM pins, no USB, nothing the
+     * panel or SD card is using. A button on an excluded pin is reported as
+     * "not found" rather than risking the board. */
+    static const int candidates[] = {0, 1, 2, 3, 4, 5, 6, 7, 14, 15, 16, 17, 18,
+                                     21, 42, 43, 44, 45, 46, 47, 48};
+    int levels[sizeof(candidates) / sizeof(candidates[0])];
+    size_t count = 0;
+    int watched[sizeof(candidates) / sizeof(candidates[0])];
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        int pin = candidates[i];
+        if (console_pin_in_use(config, pin)) continue;
+        gpio_config_t gpio = {
+            .pin_bit_mask = 1ULL << pin,
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        if (gpio_config(&gpio) != ESP_OK) continue;
+        watched[count] = pin;
+        levels[count] = gpio_get_level(pin);
+        count++;
+    }
+    printf("watching %u pins for %d s — press the button now\n", (unsigned)count, seconds);
+    int64_t end_us = esp_timer_get_time() + (int64_t)seconds * 1000000;
+    int changes = 0;
+    while (esp_timer_get_time() < end_us) {
+        for (size_t i = 0; i < count; i++) {
+            int level = gpio_get_level(watched[i]);
+            if (level != levels[i]) {
+                printf("  GPIO %-2d %d -> %d\n", watched[i], levels[i], level);
+                levels[i] = level;
+                changes++;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (changes == 0) {
+        printf("no pin changed. The button may be on a skipped pin (panel/SD/USB/flash), "
+               "wired to a port expander, or not connected to a GPIO at all.\n");
+    } else {
+        printf("done — set the pin with: set gpio_buttons \"<pin>:KEY1\"\n");
+    }
     return 0;
 }
 
@@ -1253,6 +1369,7 @@ static esp_err_t register_frameos_console_commands(void)
     const esp_console_cmd_t commands[] = {
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
+        {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

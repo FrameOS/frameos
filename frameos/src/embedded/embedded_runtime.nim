@@ -191,9 +191,17 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     espLog(($payload).cstring)
   channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
     {.cast(gcsafe).}:
+      # Every event reaches the scene graph, not a hardcoded few. This used to
+      # dispatch only setSceneState/setCurrentScene, which silently dropped
+      # everything a scene defines its own handler for — a GPIO button press
+      # arrived from the firmware as a "button" event, matched no branch, and
+      # vanished. The Counter scene's `event button` nodes never ran, and the
+      # frame looked like it had dead buttons. The Pi runner has always
+      # dispatched by name (frameos/runner.nim), so this also removes a
+      # difference between the two runtimes that scene authors could not see.
       if event == "render":
         renderRequested = true
-      elif event in ["setSceneState", "setCurrentScene"] and not currentScene.isNil:
+      elif not currentScene.isNil:
         try:
           let context = ExecutionContext(scene: currentScene, event: event,
               payload: if payload.isNil: %*{} else: payload, loopIndex: 0, loopKey: ".")
