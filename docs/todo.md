@@ -18,40 +18,30 @@ only the open work is listed here.
 Deliberately not gaps: terminal / ping / debug panels are backend-only
 because the cloud protocol has no shell verbs — structural, nothing to close.
 
-Swept 2026-08-09, after a hardware pass on frame 02e05f35 (a Waveshare
-PhotoPainter — the first cloud-managed ESP32 to run the whole surface
-against production):
-
 - **Flashing convergence** — the backend should adopt the same
   browser-centric flash system the cloud uses (Esp32CloudFlasher /
   EmbeddedWebFlasher). The backend may still build a frame-specific binary
   server-side when a custom source build is needed; the browser flasher then
   flashes that artifact instead of a release download.
-- **Service settings — Nim client unverified on hardware**: the ESP32 client
-  is now proven (that frame pulled `GET /api/frames/{id}/service-settings`
-  → 200 from cloud.frameos.net with its enrollment bearer). The Linux/Pi
-  client in the Nim runtime is still unit-tested and build-verified only.
+- **Service settings: verify the Nim client on hardware** — the Linux/Pi
+  client is unit-tested and build-verified only, never run against a real
+  provider. (The ESP32 client has been.)
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Cloud OTA — re-test against 2026.8.13.** The routes and the release
-  workflow were fixed 2026-08-08, but every release through v2026.8.12
-  shipped only the merged flash image, which an OTA slot can never accept
-  (the routes answer `ota_image_not_published`, 404). 2026.8.13 is the first
-  release that should carry `…-esp32-s3-generic-app.bin`, and the first with
-  a real `frameos_version` from an ESP32 — both want confirming rather than
-  assuming. Until then the USB updater moves a board onto a newer build.
+- **Cloud OTA: confirm it works against 2026.8.13** — the first release that
+  should publish `…-esp32-s3-generic-app.bin` (an OTA slot cannot accept the
+  merged flash image, so earlier releases 404 as `ota_image_not_published`)
+  and the first to report a real `frameos_version` from an ESP32. Both want
+  checking, not assuming. Meanwhile the USB updater moves a board on.
 
 ## Cloud-managed frames
 
-- **Signed OTA — buildroot/Pi half.** The ESP32 half shipped (#303):
-  `main/fos_ota.c` fetches the device-authed manifest and verifies the
-  minisign Ed25519 signature against a baked-in public key before writing a
-  slot, and the workspace has the Update button. The Nim runtime has no
-  equivalent — `upgrade.nim` still checks URL shape only — so a buildroot
-  frame cannot safely take an update from the cloud: release tarball swap via
-  the frameos binary, verified independently on-device. Must land before SD
-  images are widely distributed. Design: `cloud/docs/cloud-frames.md`
-  ("Signed OTA").
+- **Signed OTA, buildroot/Pi half** — `upgrade.nim` checks URL shape and
+  nothing else, so a buildroot frame cannot safely take an update from the
+  cloud. Needs a release tarball swap via the frameos binary with the
+  signature verified independently on-device, as `main/fos_ota.c` already
+  does on ESP32. Must land before SD images are widely distributed. Design:
+  `cloud/docs/cloud-frames.md` ("Signed OTA").
 - **JS-runtime capability audit** — enumerate every native binding exposed
   to scene JS; per-scene asset sandboxes; CPU/time/memory limits per scene;
   confirm RFC1918 fetch blocking and the local-presence elevation ceremony
@@ -73,45 +63,29 @@ against production):
 
 ## ESP32
 
-- **Large-image spill-to-storage: bench validation.** The wiring shipped
-  (`fos_nim_http_set_spill_dir` in main.c, SD `.cache` preferred with a
-  capped `/state` fallback, boot sweep of `http-spill-*.tmp`). What is left
-  is a forced-spill render on the bench 13.3E6 (`set spill_force <bytes>`,
-  ~3 MB gallery JPEG) confirming the PSRAM floor during spill+decode. Note
-  the original premise — a 12-scene workload eating the headroom — no longer
-  holds since scenes stopped being resident, so re-measure rather than
-  reusing the old numbers. Design: `cloud/docs/esp32-large-image-spill.md`.
+- **Large-image spill: bench validation** — a forced-spill render on the
+  13.3E6 (`set spill_force <bytes>`, ~3 MB gallery JPEG) confirming the PSRAM
+  floor during spill+decode. Measure fresh: the original premise, a 12-scene
+  workload eating the headroom, died when scenes stopped being resident.
+  Design: `cloud/docs/esp32-large-image-spill.md`.
 - Spill follow-ups (optional): proactive Content-Length trigger;
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.
 
-### Memory: what is left after the 2026-08-09 pass
+### Memory
 
-The Nim heap now allocates from PSRAM explicitly, and scenes are stored one
-file per scene and loaded one at a time (frame 02e05f35: 12.5 KB → ~109 KB
-free internal; every scene resident → exactly one, whatever the library
-size). What that pass did NOT do:
-
-- **QuickJS still allocates through libc malloc**, so with
-  `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` its many small allocations
-  come out of internal RAM. Only the Nim heap was moved. The active scene's
-  JS context is therefore still an internal-RAM cost — bounded to one scene
-  now, but the next thing to move if internal RAM gets tight again
-  (`JS_NewRuntime2` with PSRAM-backed `js_malloc_functions`).
-- **cJSON likewise**: the firmware parses WS frames and settings payloads
-  with it, all in internal RAM. `cJSON_InitHooks` with PSRAM allocators
-  would move the lot, but it is a broad change and wants its own
-  measurement — the scene splitter deliberately avoids cJSON on the large
-  payload for exactly this reason.
-- **The workspace low-memory advisory cannot fire for the frame that needs
-  it most.** It reads the device's metrics, and a frame too low on internal
-  RAM to open its link reports nothing. It is preventive (flagging a frame
-  at 60 KB before the next scene takes it offline); a frame already over the
-  edge is only visible over USB. Closing that needs memory surfaced over a
-  channel that survives the link being down.
-- Per-scene storage is **ESP32-only**. The Pi/buildroot runtime still loads
-  every scene from one scenes.json; it has RAM to spare today, so this is a
-  note rather than a task.
+- **Move QuickJS off internal RAM** — it allocates through libc malloc, and
+  `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
+  the internal pool, so the active scene's JS context is an internal-RAM cost
+  (`JS_NewRuntime2` with PSRAM-backed `js_malloc_functions`). Bounded to one
+  scene, so only worth doing if internal RAM gets tight again.
+- **Same for cJSON** — WS frames and settings payloads parse in internal
+  RAM. `cJSON_InitHooks` with PSRAM allocators moves the lot, but it is
+  broad enough to want its own measurement first.
+- **Surface memory over a channel that survives the link being down** — the
+  workspace advisory reads device metrics, so a frame too low on internal RAM
+  to connect reports nothing and cannot be flagged. Today it is preventive
+  only; a frame already over the edge is visible over USB and nowhere else.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
@@ -129,8 +103,8 @@ size). What that pass did NOT do:
 - **Direct frame login from the cloud** via that relay (`/admin` handoff).
 - **Observability for linked backends** (`telemetry:logs` /
   `telemetry:metrics`) — log shipping + retention, metrics dashboards,
-  uptime/offline alerts. (Cloud-managed frames already ship logs; this is
-  the backend-link side plus alerting.)
+  uptime/offline alerts. Backend-link side only; cloud-managed frames are
+  covered.
 
 ## Store
 
@@ -161,9 +135,7 @@ size). What that pass did NOT do:
 
 ## Canonical API gaps (matrix in docs/api-triality.md)
 
-- ESP32: fonts list/file routes, full web admin shell parity. (Asset
-  file/upload/mkdir/delete/rename routes DONE — device HTTP + cloud verbs +
-  usb_api + backend proxy, 2026-08.)
+- ESP32: fonts list/file routes, full web admin shell parity.
 - Pi: canonical asset upload/mkdir/delete/rename routes (exist via the
   admin asset API, not the canonical frame API).
 - Frame import/adoption: standalone export/source payloads; backend
