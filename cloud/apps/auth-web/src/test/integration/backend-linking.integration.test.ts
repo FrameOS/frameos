@@ -597,6 +597,32 @@ describe("backend linking flow", () => {
     expect(badBearer.status).toBe(401);
     expect((await readJson(badBearer)).error).toBe("invalid_link_token");
   });
+  it("caps device-code lookups per account, not just per IP", async () => {
+    await signIn();
+    // The per-IP budget is what an attacker dodges by cycling addresses, so
+    // vary the client IP on every request: only the account budget can stop
+    // this, and it is the one being asserted.
+    const lookup = (index: number) =>
+      lookupDeviceRequest(
+        getJson("/api/device/request?user_code=ABCD2345", {
+          "x-forwarded-for": `203.0.113.${index % 240}`,
+        }),
+      );
+
+    let sawLimit = false;
+    for (let index = 0; index < 40; index += 1) {
+      const response = await lookup(index);
+      if (response.status === 429) {
+        sawLimit = true;
+        break;
+      }
+      // Until the budget runs out the answer is an honest "no such code",
+      // never a leak about which codes exist.
+      expect(response.status).toBe(404);
+    }
+    expect(sawLimit).toBe(true);
+  });
+
 });
 
 async function expireDeviceRequest(deviceCode: string) {

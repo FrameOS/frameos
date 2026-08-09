@@ -7,7 +7,10 @@ import {
   normalizeUserCode,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../src/lib/rate-limit";
 import { hashUserCode } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
 
@@ -33,6 +36,23 @@ export async function GET(request: NextRequest) {
   const session = await readSession();
   if (!session?.accountId) {
     return jsonError("login_required", 401);
+  }
+
+  // Per-ACCOUNT budget on top of the per-IP one above. This route is the
+  // online oracle for user codes: it answers "is this code real, and what is
+  // it for" for any 8-character guess. The IP limit alone is dodged by
+  // cycling addresses, which is cheap; the session cannot be, because
+  // answering at all requires one. A human types one code and occasionally
+  // fumbles it, so a budget this size is invisible to real use while making
+  // enumeration pointless — the code space is far larger than anything
+  // reachable at this rate before the request expires.
+  const identityLimited = await identityRateLimitResponse(
+    session.accountId,
+    "device:request",
+    { limit: 30, windowMs: 15 * 60 * 1000 },
+  );
+  if (identityLimited) {
+    return identityLimited;
   }
 
   const userCode = normalizeUserCode(
